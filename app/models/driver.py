@@ -3,7 +3,7 @@ Driver database model.
 Stores driver/technician information including start/end locations and working hours.
 """
 
-from sqlalchemy import Column, String, Float, Time, DateTime, Boolean
+from sqlalchemy import Column, String, Float, Integer, Time, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime

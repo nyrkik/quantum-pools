@@ -16,7 +16,7 @@ body {
 header {
     background-color: #2c3e50;
     color: white;
-    padding: 1.5rem 2rem;
+    padding: 1.5rem 2rem 0;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
@@ -27,6 +27,35 @@ header h1 {
 header p {
     color: #ecf0f1;
     font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+/* Day Selector */
+.day-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding-top: 1rem;
+}
+
+.day-tab {
+    background-color: rgba(255,255,255,0.1);
+    color: #ecf0f1;
+    border: none;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    border-radius: 4px 4px 0 0;
+}
+
+.day-tab:hover {
+    background-color: rgba(255,255,255,0.2);
+}
+
+.day-tab.active {
+    background-color: #3498db;
+    color: white;
 }
 
 main {
@@ -34,18 +63,18 @@ main {
     margin: 2rem auto;
     padding: 0 2rem;
     display: grid;
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: 350px 1fr;
     grid-gap: 2rem;
 }
 
-section {
+aside, section {
     background: white;
     padding: 1.5rem;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-#controls {
+#sidebar {
     grid-column: 1;
     grid-row: 1 / 3;
 }
@@ -58,6 +87,45 @@ section {
 #routes-list {
     grid-column: 2;
     grid-row: 2;
+}
+
+/* Navigation Tabs */
+.nav-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.nav-tab {
+    background: none;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    color: #666;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.3s;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+}
+
+.nav-tab:hover {
+    color: #3498db;
+}
+
+.nav-tab.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+}
+
+/* Tab Content */
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
 }
 
 h2 {
@@ -269,16 +337,73 @@ button {
     border: 2px dashed #28a745;
 }
 
+/* Customer Management Styles */
+.customer-card {
+    background-color: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.customer-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.customer-info strong {
+    color: #2c3e50;
+    font-size: 0.95rem;
+}
+
+.customer-info small {
+    color: #666;
+    font-size: 0.8rem;
+}
+
+.customer-form {
+    background-color: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.customer-form h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #2c3e50;
+    font-size: 1rem;
+}
+
+.customer-form .control-group {
+    margin-bottom: 0.75rem;
+}
+
+.customer-form label {
+    font-size: 0.9rem;
+    margin-bottom: 0.3rem;
+}
+
+.customer-form input, .customer-form select {
+    font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
     main {
         grid-template-columns: 1fr;
     }
 
-    #controls, #map-container, #routes-list {
+    #sidebar, #map-container, #routes-list {
         grid-column: 1;
     }
 
-    #controls {
+    #sidebar {
         grid-row: 1;
     }
 
@@ -288,5 +413,14 @@ button {
 
     #routes-list {
         grid-row: 3;
+    }
+
+    .day-selector {
+        flex-wrap: wrap;
+    }
+
+    .day-tab {
+        flex: 1 1 auto;
+        min-width: 80px;
     }
 }

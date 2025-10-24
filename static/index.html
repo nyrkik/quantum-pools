@@ -11,47 +11,70 @@
     <header>
         <h1>RouteOptimizer</h1>
         <p>Pool Service Route Planning & Optimization</p>
+
+        <!-- Day Selector -->
+        <nav class="day-selector">
+            <button class="day-tab active" data-day="all">All Days</button>
+            <button class="day-tab" data-day="monday">Monday</button>
+            <button class="day-tab" data-day="tuesday">Tuesday</button>
+            <button class="day-tab" data-day="wednesday">Wednesday</button>
+            <button class="day-tab" data-day="thursday">Thursday</button>
+            <button class="day-tab" data-day="friday">Friday</button>
+            <button class="day-tab" data-day="saturday">Saturday</button>
+        </nav>
     </header>
 
     <main>
-        <section id="controls">
-            <h2>Drivers</h2>
-            <div id="drivers-list">
-                <p class="placeholder">Loading drivers...</p>
+        <aside id="sidebar">
+            <!-- Main Navigation Tabs -->
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="drivers">Drivers</button>
+                <button class="nav-tab" data-tab="customers">Customers</button>
+                <button class="nav-tab" data-tab="optimize">Optimize</button>
             </div>
-            <button id="add-driver-btn" class="btn-secondary">Add Driver</button>
 
-            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid #ddd;">
+            <!-- Drivers Tab Content -->
+            <div id="tab-drivers" class="tab-content active">
+                <div id="drivers-list">
+                    <p class="placeholder">Loading drivers...</p>
+                </div>
+                <button id="add-driver-btn" class="btn-primary">+ Add Driver</button>
+            </div>
 
-            <h2>Route Configuration</h2>
-            <div class="control-group">
-                <label for="num-drivers">Number of Drivers:</label>
-                <input type="number" id="num-drivers" min="1" max="10" value="2">
+            <!-- Customers Tab Content -->
+            <div id="tab-customers" class="tab-content">
+                <div id="customers-list">
+                    <p class="placeholder">Loading customers...</p>
+                </div>
+                <button id="add-customer-btn" class="btn-primary">+ Add Customer</button>
+                <button id="import-csv-btn" class="btn-secondary">Import CSV</button>
             </div>
-            <div class="control-group">
-                <label for="service-day">Service Day:</label>
-                <select id="service-day">
-                    <option value="all">All Days</option>
-                    <option value="monday">Monday</option>
-                    <option value="tuesday">Tuesday</option>
-                    <option value="wednesday">Wednesday</option>
-                    <option value="thursday">Thursday</option>
-                    <option value="friday">Friday</option>
-                </select>
+
+            <!-- Optimize Tab Content -->
+            <div id="tab-optimize" class="tab-content">
+                <div class="control-group">
+                    <label for="num-drivers">Number of Drivers:</label>
+                    <input type="number" id="num-drivers" min="1" max="10" value="2">
+                </div>
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="allow-reassignment">
+                        Allow day reassignment
+                    </label>
+                </div>
+                <button id="optimize-btn" class="btn-primary">Optimize Routes</button>
             </div>
-            <button id="optimize-btn" class="btn-primary">Optimize Routes</button>
-            <button id="import-btn" class="btn-secondary">Import CSV</button>
-        </section>
+        </aside>
 
         <section id="map-container">
-            <h2>Route Map</h2>
+            <h2>Map View</h2>
             <div id="map"></div>
         </section>
 
         <section id="routes-list">
-            <h2>Optimized Routes</h2>
+            <h2>Routes</h2>
             <div id="routes-content">
-                <p class="placeholder">Click "Optimize Routes" to generate routes</p>
+                <p class="placeholder">Select a day and click "Optimize Routes" to generate routes</p>
             </div>
         </section>
     </main>

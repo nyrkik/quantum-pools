@@ -9,11 +9,17 @@ const API_BASE = window.location.origin;
 let draggedStop = null;
 let draggedStopRoute = null;
 
+// Selected day
+let selectedDay = 'all';
+
 document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     attachEventListeners();
     loadCustomers();
     loadDrivers();
+    loadCustomersManagement();
+    initTabs();
+    initDaySelector();
 });
 
 function initializeMap() {
@@ -29,7 +35,12 @@ function initializeMap() {
 
 async function loadCustomers() {
     try {
-        const response = await fetch(`${API_BASE}/api/customers?page_size=100`);
+        let url = `${API_BASE}/api/customers?page_size=100`;
+        if (selectedDay !== 'all') {
+            url += `&service_day=${selectedDay}`;
+        }
+
+        const response = await fetch(url);
         if (!response.ok) return;
 
         const data = await response.json();
@@ -72,15 +83,48 @@ function displayCustomersOnMap(customers) {
     }
 }
 
+function initTabs() {
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            const tabName = this.dataset.tab;
+
+            // Update active tab
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+
+            // Show corresponding content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        });
+    });
+}
+
+function initDaySelector() {
+    document.querySelectorAll('.day-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            selectedDay = this.dataset.day;
+
+            // Update active day
+            document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+
+            // Reload customers for selected day
+            loadCustomers();
+            loadCustomersManagement();
+        });
+    });
+}
+
 function attachEventListeners() {
     document.getElementById('optimize-btn').addEventListener('click', optimizeRoutes);
-    document.getElementById('import-btn').addEventListener('click', importCSV);
+    document.getElementById('import-csv-btn').addEventListener('click', importCSV);
     document.getElementById('add-driver-btn').addEventListener('click', showAddDriverForm);
+    document.getElementById('add-customer-btn').addEventListener('click', showAddCustomerForm);
 }
 
 async function optimizeRoutes() {
     const numDrivers = parseInt(document.getElementById('num-drivers').value);
-    const serviceDay = document.getElementById('service-day').value;
+    const allowReassignment = document.getElementById('allow-reassignment').checked;
 
     const optimizeBtn = document.getElementById('optimize-btn');
     optimizeBtn.disabled = true;
@@ -89,8 +133,8 @@ async function optimizeRoutes() {
     try {
         const requestBody = {
             num_drivers: numDrivers || null,
-            service_day: serviceDay === 'all' ? null : serviceDay,
-            allow_day_reassignment: false
+            service_day: selectedDay === 'all' ? null : selectedDay,
+            allow_day_reassignment: allowReassignment
         };
 
         const response = await fetch(`${API_BASE}/api/routes/optimize`, {
@@ -417,8 +461,12 @@ function showAddDriverForm() {
                 <input type="text" id="driver-name" placeholder="Driver Name">
             </div>
             <div class="control-group">
-                <label>Start/End Location:</label>
-                <input type="text" id="driver-location" placeholder="123 Main St, City, State">
+                <label>Start Location:</label>
+                <input type="text" id="driver-start-location" placeholder="123 Home St, City, State">
+            </div>
+            <div class="control-group">
+                <label>End Location:</label>
+                <input type="text" id="driver-end-location" placeholder="123 Home St, City, State">
             </div>
             <div class="control-group">
                 <label>Working Hours Start:</label>
@@ -442,12 +490,13 @@ function showAddDriverForm() {
 
 async function saveDriver() {
     const name = document.getElementById('driver-name').value;
-    const location = document.getElementById('driver-location').value;
+    const startLocation = document.getElementById('driver-start-location').value;
+    const endLocation = document.getElementById('driver-end-location').value;
     const startTime = document.getElementById('driver-start-time').value;
     const endTime = document.getElementById('driver-end-time').value;
     const maxCustomers = parseInt(document.getElementById('driver-max-customers').value);
 
-    if (!name || !location) {
+    if (!name || !startLocation || !endLocation) {
         alert('Please fill in all required fields');
         return;
     }
@@ -460,8 +509,8 @@ async function saveDriver() {
             },
             body: JSON.stringify({
                 name: name,
-                start_location_address: location,
-                end_location_address: location,
+                start_location_address: startLocation,
+                end_location_address: endLocation,
                 working_hours_start: startTime + ':00',
                 working_hours_end: endTime + ':00',
                 max_customers_per_day: maxCustomers
@@ -498,6 +547,168 @@ async function deleteDriver(driverId) {
     } catch (error) {
         console.error('Error deleting driver:', error);
         alert('Failed to delete driver. Please try again.');
+    }
+}
+
+// Customer Management Functions
+
+async function loadCustomersManagement() {
+    try {
+        let url = `${API_BASE}/api/customers?page_size=100`;
+        if (selectedDay !== 'all') {
+            url += `&service_day=${selectedDay}`;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error('Failed to load customers');
+            return;
+        }
+
+        const data = await response.json();
+        displayCustomersManagement(data.customers);
+    } catch (error) {
+        console.error('Error loading customers:', error);
+        document.getElementById('customers-list').innerHTML = '<p class="placeholder">Failed to load customers</p>';
+    }
+}
+
+function displayCustomersManagement(customers) {
+    const container = document.getElementById('customers-list');
+
+    if (!customers || customers.length === 0) {
+        container.innerHTML = '<p class="placeholder">No customers found. Add a customer to get started.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+    customers.forEach(customer => {
+        const customerCard = document.createElement('div');
+        customerCard.className = 'customer-card';
+        customerCard.innerHTML = `
+            <div class="customer-info">
+                <strong>${customer.name}</strong>
+                <small>${customer.address}</small>
+                <small>${customer.service_day} | ${customer.service_type} | Difficulty: ${customer.difficulty}</small>
+            </div>
+            <button class="btn-delete" onclick="deleteCustomer('${customer.id}')">Delete</button>
+        `;
+        container.appendChild(customerCard);
+    });
+}
+
+function showAddCustomerForm() {
+    const container = document.getElementById('customers-list');
+
+    const formHtml = `
+        <div class="customer-form">
+            <h3>Add New Customer</h3>
+            <div class="control-group">
+                <label>Name:</label>
+                <input type="text" id="customer-name" placeholder="Customer Name">
+            </div>
+            <div class="control-group">
+                <label>Address:</label>
+                <input type="text" id="customer-address" placeholder="123 Main St, City, State">
+            </div>
+            <div class="control-group">
+                <label>Service Day:</label>
+                <select id="customer-service-day">
+                    <option value="monday">Monday</option>
+                    <option value="tuesday">Tuesday</option>
+                    <option value="wednesday">Wednesday</option>
+                    <option value="thursday">Thursday</option>
+                    <option value="friday">Friday</option>
+                    <option value="saturday">Saturday</option>
+                    <option value="sunday">Sunday</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Service Type:</label>
+                <select id="customer-service-type">
+                    <option value="residential">Residential (15 min)</option>
+                    <option value="commercial">Commercial (25 min)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Difficulty (1-5):</label>
+                <input type="number" id="customer-difficulty" min="1" max="5" value="1">
+            </div>
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="customer-locked">
+                    Lock service day (cannot be reassigned)
+                </label>
+            </div>
+            <button class="btn-primary" onclick="saveCustomer()">Save Customer</button>
+            <button class="btn-secondary" onclick="loadCustomersManagement()">Cancel</button>
+        </div>
+    `;
+
+    container.innerHTML = formHtml;
+}
+
+async function saveCustomer() {
+    const name = document.getElementById('customer-name').value;
+    const address = document.getElementById('customer-address').value;
+    const serviceDay = document.getElementById('customer-service-day').value;
+    const serviceType = document.getElementById('customer-service-type').value;
+    const difficulty = parseInt(document.getElementById('customer-difficulty').value);
+    const locked = document.getElementById('customer-locked').checked;
+
+    if (!name || !address) {
+        alert('Please fill in all required fields');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/customers/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: name,
+                address: address,
+                service_day: serviceDay,
+                service_type: serviceType,
+                difficulty: difficulty,
+                locked: locked
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to create customer');
+        }
+
+        alert('Customer created successfully!');
+        loadCustomersManagement();
+        loadCustomers(); // Reload map
+    } catch (error) {
+        console.error('Error creating customer:', error);
+        alert('Failed to create customer. Please try again.');
+    }
+}
+
+async function deleteCustomer(customerId) {
+    if (!confirm('Are you sure you want to delete this customer?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/customers/${customerId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to delete customer');
+        }
+
+        loadCustomersManagement();
+        loadCustomers(); // Reload map
+    } catch (error) {
+        console.error('Error deleting customer:', error);
+        alert('Failed to delete customer. Please try again.');
     }
 }
 

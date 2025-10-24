@@ -17,6 +17,7 @@ from app.schemas.customer import (
     CustomerResponse,
     CustomerListResponse
 )
+from app.services.geocoding import geocoding_service
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -44,6 +45,12 @@ async def create_customer(
     - **time_window_end**: Latest service time (optional)
     """
     db_customer = Customer(**customer.model_dump())
+
+    # Geocode address to lat/lng
+    coordinates = await geocoding_service.geocode_address(db_customer.address)
+    if coordinates:
+        db_customer.latitude, db_customer.longitude = coordinates
+
     db.add(db_customer)
     await db.commit()
     await db.refresh(db_customer)
@@ -160,6 +167,12 @@ async def update_customer(
     update_data = customer_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(customer, field, value)
+
+    # Re-geocode if address changed
+    if "address" in update_data:
+        coordinates = await geocoding_service.geocode_address(customer.address)
+        if coordinates:
+            customer.latitude, customer.longitude = coordinates
 
     await db.commit()
     await db.refresh(customer)

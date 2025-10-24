@@ -17,6 +17,7 @@ from app.schemas.driver import (
     DriverResponse,
     DriverListResponse
 )
+from app.services.geocoding import geocoding_service
 
 router = APIRouter(prefix="/api/drivers", tags=["drivers"])
 
@@ -44,6 +45,17 @@ async def create_driver(
     - **max_customers_per_day**: Maximum customers per day (default: 20)
     """
     db_driver = Driver(**driver.model_dump())
+
+    # Geocode start location
+    start_coords = await geocoding_service.geocode_address(db_driver.start_location_address)
+    if start_coords:
+        db_driver.start_latitude, db_driver.start_longitude = start_coords
+
+    # Geocode end location
+    end_coords = await geocoding_service.geocode_address(db_driver.end_location_address)
+    if end_coords:
+        db_driver.end_latitude, db_driver.end_longitude = end_coords
+
     db.add(db_driver)
     await db.commit()
     await db.refresh(db_driver)
@@ -174,6 +186,17 @@ async def update_driver(
     update_data = driver_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(driver, field, value)
+
+    # Re-geocode if locations changed
+    if "start_location_address" in update_data:
+        start_coords = await geocoding_service.geocode_address(driver.start_location_address)
+        if start_coords:
+            driver.start_latitude, driver.start_longitude = start_coords
+
+    if "end_location_address" in update_data:
+        end_coords = await geocoding_service.geocode_address(driver.end_location_address)
+        if end_coords:
+            driver.end_latitude, driver.end_longitude = end_coords
 
     await db.commit()
     await db.refresh(driver)

@@ -3,10 +3,12 @@
 // Initialize map
 let map;
 let routeLayers = [];
+const API_BASE = window.location.origin;
 
 document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     attachEventListeners();
+    loadCustomers();
 });
 
 function initializeMap() {
@@ -20,62 +22,143 @@ function initializeMap() {
     }).addTo(map);
 }
 
+async function loadCustomers() {
+    try {
+        const response = await fetch(`${API_BASE}/api/customers?page_size=100`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (data.customers && data.customers.length > 0) {
+            displayCustomersOnMap(data.customers);
+        }
+    } catch (error) {
+        console.error('Error loading customers:', error);
+    }
+}
+
+function displayCustomersOnMap(customers) {
+    const coordinates = [];
+
+    customers.forEach(customer => {
+        if (customer.latitude && customer.longitude) {
+            const latLng = [customer.latitude, customer.longitude];
+            coordinates.push(latLng);
+
+            const marker = L.circleMarker(latLng, {
+                radius: 6,
+                fillColor: '#3498db',
+                color: '#fff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).addTo(map);
+
+            marker.bindPopup(`
+                <b>${customer.name}</b><br>
+                ${customer.address}<br>
+                <em>${customer.service_type} - ${customer.service_day}</em>
+            `);
+        }
+    });
+
+    if (coordinates.length > 0) {
+        const bounds = L.latLngBounds(coordinates);
+        map.fitBounds(bounds, { padding: [50, 50] });
+    }
+}
+
 function attachEventListeners() {
     document.getElementById('optimize-btn').addEventListener('click', optimizeRoutes);
     document.getElementById('import-btn').addEventListener('click', importCSV);
 }
 
 async function optimizeRoutes() {
-    const numDrivers = document.getElementById('num-drivers').value;
+    const numDrivers = parseInt(document.getElementById('num-drivers').value);
     const serviceDay = document.getElementById('service-day').value;
 
+    const optimizeBtn = document.getElementById('optimize-btn');
+    optimizeBtn.disabled = true;
+    optimizeBtn.textContent = 'Optimizing...';
+
     try {
-        const response = await fetch('/api/routes/optimize', {
+        const requestBody = {
+            num_drivers: numDrivers || null,
+            service_day: serviceDay === 'all' ? null : serviceDay,
+            allow_day_reassignment: false
+        };
+
+        const response = await fetch(`${API_BASE}/api/routes/optimize`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                num_drivers: parseInt(numDrivers),
-                service_day: serviceDay === 'all' ? null : serviceDay
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
-            throw new Error('Optimization failed');
+            const error = await response.json();
+            throw new Error(error.detail || 'Optimization failed');
         }
 
-        const routes = await response.json();
-        displayRoutes(routes);
-        displayRoutesOnMap(routes);
+        const result = await response.json();
+
+        if (result.routes && result.routes.length > 0) {
+            displayRoutes(result);
+            displayRoutesOnMap(result.routes);
+        } else {
+            alert(result.message || 'No routes generated. Add customers and drivers first.');
+        }
     } catch (error) {
         console.error('Error optimizing routes:', error);
-        alert('Failed to optimize routes. Make sure the API is running and customers are added.');
+        alert(`Failed to optimize routes: ${error.message}`);
+    } finally {
+        optimizeBtn.disabled = false;
+        optimizeBtn.textContent = 'Optimize Routes';
     }
 }
 
-function displayRoutes(routes) {
+function displayRoutes(result) {
     const container = document.getElementById('routes-content');
     container.innerHTML = '';
 
-    routes.forEach((route, index) => {
+    if (!result.routes || result.routes.length === 0) {
+        container.innerHTML = '<p class="placeholder">No routes generated</p>';
+        return;
+    }
+
+    // Show summary
+    if (result.summary) {
+        const summary = document.createElement('div');
+        summary.className = 'route-summary';
+        summary.innerHTML = `
+            <h3>Route Summary</h3>
+            <p><strong>Total Routes:</strong> ${result.summary.total_routes}</p>
+            <p><strong>Total Customers:</strong> ${result.summary.total_customers}</p>
+            <p><strong>Total Distance:</strong> ${result.summary.total_distance_miles.toFixed(1)} miles</p>
+            <p><strong>Total Duration:</strong> ${result.summary.total_duration_minutes} minutes</p>
+        `;
+        container.appendChild(summary);
+    }
+
+    // Show routes
+    result.routes.forEach((route, index) => {
         const routeCard = document.createElement('div');
         routeCard.className = 'route-card';
 
         const title = document.createElement('h3');
-        title.textContent = `Driver ${index + 1} - ${route.service_day}`;
+        title.textContent = `${route.driver_name} - ${route.service_day}`;
         routeCard.appendChild(title);
 
         const info = document.createElement('p');
-        info.textContent = `${route.stops.length} stops, Est. ${route.total_duration} min`;
+        info.textContent = `${route.total_customers} stops, ${route.total_distance_miles.toFixed(1)} miles, ${route.total_duration_minutes} min`;
         routeCard.appendChild(info);
 
         const stopsList = document.createElement('ul');
         stopsList.className = 'route-stops';
 
-        route.stops.forEach((stop, stopIndex) => {
+        route.stops.forEach((stop) => {
             const stopItem = document.createElement('li');
-            stopItem.textContent = `${stopIndex + 1}. ${stop.customer_name} - ${stop.address}`;
+            stopItem.textContent = `${stop.sequence}. ${stop.customer_name} - ${stop.address} (${stop.service_duration} min)`;
             stopsList.appendChild(stopItem);
         });
 
@@ -137,6 +220,38 @@ function displayRoutesOnMap(routes) {
 }
 
 function importCSV() {
-    // TODO: Implement CSV import dialog
-    alert('CSV import feature coming soon! Use the API endpoint /api/imports/csv for now.');
+    // Create file input
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch(`${API_BASE}/api/imports/customers/csv?geocode=true`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error('Import failed');
+            }
+
+            const result = await response.json();
+            alert(`Import complete!\nImported: ${result.imported}\nSkipped: ${result.skipped}\nErrors: ${result.errors}`);
+
+            // Reload customers on map
+            loadCustomers();
+        } catch (error) {
+            console.error('Error importing CSV:', error);
+            alert('Failed to import CSV file.');
+        }
+    };
+
+    input.click();
 }

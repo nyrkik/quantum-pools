@@ -4,86 +4,106 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**[PROJECT_NAME]** is [brief description of what the project does].
+**RouteOptimizer** is a web application for optimizing pool service routes with support for multiple drivers, service constraints, and schedule generation. While built for pool service businesses, it's designed to work for any routing/scheduling use case.
 
-**Core Philosophy**: [Your project's guiding principle]
+**Core Philosophy**: Build enterprise-grade, production-ready routing software that's flexible enough to scale beyond pool services.
 
 **Tech Stack:**
-- **Language:** [Python/JavaScript/etc.] [version]
-- **Framework:** [FastAPI/Django/Flask/Express/etc.]
-- **Database:** [PostgreSQL/MongoDB/SQLite/etc.]
-- **Key Libraries:** [List main dependencies]
+- **Language:** Python 3.11+
+- **Framework:** FastAPI (async REST API)
+- **Database:** PostgreSQL (production) / SQLite (development)
+- **Key Libraries:**
+  - SQLAlchemy 2.0 (async ORM)
+  - Alembic (database migrations)
+  - Google OR-Tools (route optimization)
+  - Geopy (geocoding addresses to GPS coordinates)
+  - Pydantic (data validation)
+  - Leaflet.js (map visualization)
+  - ReportLab/WeasyPrint (PDF generation)
 
 ## Development Commands
 
 ### Setup & Installation
 ```bash
 # Initial project setup (one-time)
-[Your setup command]
+cd /mnt/Projects/RouteOptimizer
+python3 -m venv venv
 
-# Activate virtual environment (if applicable)
+# Activate virtual environment
 source venv/bin/activate
 
 # Install dependencies
-[Your install command]
+pip install -r requirements.txt
 
-# Initialize database (if applicable)
-[Your db init command]
+# Initialize database
+alembic upgrade head
+
+# Create .env file from template
+cp .env.example .env
+# Then edit .env with your database credentials
 ```
 
 ### Running the Development Server
 ```bash
-# Start server
-[Your dev server command]
+# Start FastAPI development server with auto-reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Common variations:
-# ./manage.sh dev
-# python app.py
-# npm run dev
-# uvicorn main:app --reload
+# Access the application:
+# - Web UI: http://localhost:8000
+# - API Docs (Swagger): http://localhost:8000/docs
+# - Alternative API Docs (ReDoc): http://localhost:8000/redoc
 ```
 
-### Database Migrations (if applicable)
+### Database Migrations
 ```bash
-# Create a new migration
-[Your migration create command]
+# Create a new migration (auto-generate from model changes)
+alembic revision --autogenerate -m "description of changes"
 
-# Apply migrations
-[Your migration apply command]
+# Apply all pending migrations
+alembic upgrade head
 
-# Rollback migration
-[Your migration rollback command]
+# Rollback one migration
+alembic downgrade -1
 
-# Example for Alembic:
-# alembic revision --autogenerate -m "description"
-# alembic upgrade head
-# alembic downgrade -1
+# View migration history
+alembic history
+
+# View current database version
+alembic current
 ```
 
 ### Testing
 ```bash
 # Run all tests
-[Your test command]
+pytest
+
+# Run with coverage report
+pytest --cov=app --cov-report=html
 
 # Run specific test suite
-[Your test suite commands]
+pytest tests/unit/           # Unit tests only
+pytest tests/integration/    # Integration tests only
 
-# Example:
-# pytest tests/
-# pytest tests/unit/
-# pytest tests/test_specific.py -v
+# Run specific test file
+pytest tests/unit/test_optimization.py -v
+
+# Run and watch for changes
+pytest-watch
 ```
 
 ### Maintenance
 ```bash
-# Check system status
-[Your status command]
+# Check database connection
+psql -h localhost -U routeoptimizer -d routeoptimizer
 
-# View logs
-[Your logs command]
+# View application logs (if running with supervisor/systemd)
+tail -f logs/app.log
 
 # Run health check
-[Your health check command]
+curl http://localhost:8000/health
+
+# Import sample customer data
+python -m app.scripts.import_customers data/sample_customers.csv
 ```
 
 ## Workflow Commands for AI-Assisted Development
@@ -281,118 +301,207 @@ Every implementation must have:
 
 ## Architecture Overview
 
-### [Your Architecture Pattern]
+### Monolithic Web Application with Service Layer Pattern
 
-[Describe your project's architecture. Examples:]
+**Architecture:**
+- FastAPI backend serving both REST API and static frontend
+- PostgreSQL database for persistent storage
+- Service layer for business logic separation
+- Background task queue for route optimization (async processing)
 
-**Monolithic Web App:**
-- Single application server
-- Direct database access
-- [Framework] with [pattern] structure
-
-**Microservices:**
-- Service A: [Purpose]
-- Service B: [Purpose]
-- Message queue: [Technology]
-
-**API + Frontend:**
-- Backend API: [Technology/Framework]
-- Frontend: [Technology/Framework]
-- Communication: REST/GraphQL/gRPC
+**Key Components:**
+- **API Layer**: FastAPI routers handling HTTP requests/responses
+- **Service Layer**: Business logic (optimization, geocoding, scheduling)
+- **Data Layer**: SQLAlchemy models and database operations
+- **Optimization Engine**: Google OR-Tools VRP solver
+- **Frontend**: Static HTML/JS with Leaflet.js for map visualization
 
 ### Project Structure
 ```
-[your-project]/
-├── [main-code-dir]/     # Source code
-│   ├── [subdir]/        # Description
-│   ├── [subdir]/        # Description
-│   └── [subdir]/        # Description
-├── tests/               # Test suite
-├── docs/                # Documentation
-├── scripts/             # Utility scripts
-├── [config-file]        # Main configuration
-└── requirements.txt     # Dependencies (or package.json, etc.)
+RouteOptimizer/
+├── app/                    # Main application code
+│   ├── api/               # FastAPI routers/endpoints
+│   │   ├── customers.py   # Customer CRUD endpoints
+│   │   ├── drivers.py     # Driver management endpoints
+│   │   ├── routes.py      # Route optimization endpoints
+│   │   └── imports.py     # CSV import endpoints
+│   ├── models/            # SQLAlchemy database models
+│   │   ├── customer.py
+│   │   ├── driver.py
+│   │   ├── route.py
+│   │   └── route_stop.py
+│   ├── schemas/           # Pydantic validation schemas
+│   │   ├── customer.py
+│   │   ├── driver.py
+│   │   └── route.py
+│   ├── services/          # Business logic layer
+│   │   ├── optimization.py   # Route optimization service
+│   │   ├── geocoding.py      # Address geocoding service
+│   │   └── pdf_export.py     # PDF generation service
+│   ├── database.py        # Database connection and session
+│   ├── config.py          # Configuration management
+│   └── main.py            # FastAPI application entry point
+├── migrations/            # Alembic database migrations
+├── tests/                 # Test suite
+│   ├── unit/             # Unit tests
+│   ├── integration/      # Integration tests
+│   └── conftest.py       # Pytest configuration
+├── static/               # Frontend static files
+│   ├── index.html        # Main web interface
+│   ├── css/
+│   └── js/
+├── docs/                 # Project documentation
+├── data/                 # Sample/import data files
+├── alembic.ini           # Alembic configuration
+├── requirements.txt      # Python dependencies
+├── .env.example          # Environment variable template
+├── .gitignore
+└── CLAUDE.md             # This file
 ```
 
-### Database Pattern (if applicable)
+### Database Pattern
 
-**[Your database approach]:**
+**Single PostgreSQL Database:**
+- All data in one database: `routeoptimizer`
+- Tables: customers, drivers, routes, route_stops
+- UUID primary keys for all tables
+- Proper foreign key relationships and cascading deletes
+- Indexes on frequently queried fields (service_day, customer addresses)
 
-**Single Database:**
-- All data in one database
-- [Schema organization approach]
+**Database Schema:**
+- **customers**: Customer data with address, service type, difficulty, time windows
+- **drivers**: Driver configuration with start/end locations and working hours
+- **routes**: Generated route assignments for each driver/day combination
+- **route_stops**: Ordered sequence of customer stops within each route
 
-**Multiple Databases:**
-- Database 1: [Purpose]
-- Database 2: [Purpose]
+**Session Management:**
+Always use dependency injection for database sessions in API endpoints.
 
-**Critical**: Always use the correct database session/connection:
-- [How to access database 1]
-- [How to access database 2]
+## Database Session Management
 
-## Database Session Management (if applicable)
-
-**[Your framework] Dependency Injection Pattern** (if using DI):
+**FastAPI Dependency Injection Pattern:**
 ```python
-# Example for FastAPI with SQLAlchemy
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from [your_project].database import get_session
+from app.database import get_db
 
-@router.get("/items")
-async def get_items(db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(Item))
+@router.get("/customers")
+async def get_customers(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Customer))
     return result.scalars().all()
+
+@router.post("/customers")
+async def create_customer(
+    customer: CustomerCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    db_customer = Customer(**customer.dict())
+    db.add(db_customer)
+    await db.commit()
+    await db.refresh(db_customer)
+    return db_customer
 ```
 
-**Manual Session Management** (if not using DI):
-```python
-# Your session management pattern
-async with get_session() as session:
-    # Your database operations
-    pass
-```
+**CRITICAL**:
+- Always use `Depends(get_db)` for database access in API endpoints
+- Never create sessions manually in endpoint functions
+- The session is automatically committed/rolled back by FastAPI
+- Use `await` for all database operations (async SQLAlchemy 2.0)
 
-## API Development Patterns (if applicable)
+## API Development Patterns
 
 ### Creating New Endpoints
 
-**1. Define Schema** (if using schemas):
+**1. Define Pydantic Schema** (`app/schemas/`):
 ```python
-# [path/to/schemas]
-class [Entity]Base(BaseModel):
-    field1: str
-    field2: int
+# app/schemas/customer.py
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import time
 
-class [Entity]Create([Entity]Base):
+class CustomerBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    address: str = Field(..., min_length=1)
+    service_type: str = Field(..., pattern="^(residential|commercial)$")
+    difficulty: int = Field(1, ge=1, le=5)
+    service_day: str
+    time_window_start: Optional[time] = None
+    time_window_end: Optional[time] = None
+
+class CustomerCreate(CustomerBase):
     pass
 
-class [Entity]Response([Entity]Base):
+class CustomerResponse(CustomerBase):
     id: str
+    latitude: Optional[float]
+    longitude: Optional[float]
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 ```
 
-**2. Create Service** (if using service layer):
+**2. Create Database Model** (`app/models/`):
 ```python
-# [path/to/services]
-class [Entity]Service:
-    def __init__(self, db: Session):
+# app/models/customer.py
+from sqlalchemy import Column, String, Float, Integer, Time, DateTime
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
+from app.database import Base
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(200), nullable=False)
+    address = Column(String(500), nullable=False)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    service_type = Column(String(20), nullable=False)
+    difficulty = Column(Integer, default=1)
+    service_day = Column(String(20), nullable=False)
+    time_window_start = Column(Time, nullable=True)
+    time_window_end = Column(Time, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+```
+
+**3. Create Service Layer** (`app/services/`):
+```python
+# app/services/customer_service.py
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.customer import Customer
+from app.schemas.customer import CustomerCreate
+
+class CustomerService:
+    def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_[entity](self, data: [Entity]Create):
-        # Business logic
-        pass
+    async def create_customer(self, data: CustomerCreate) -> Customer:
+        customer = Customer(**data.dict())
+        self.db.add(customer)
+        await self.db.commit()
+        await self.db.refresh(customer)
+        return customer
 ```
 
-**3. Add Endpoint**:
+**4. Add API Endpoint** (`app/api/`):
 ```python
-# [path/to/routes]
-@router.post("/[entities]")
-async def create_[entity](
-    data: [Entity]Create,
-    service: [Entity]Service = Depends()
+# app/api/customers.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_db
+from app.schemas.customer import CustomerCreate, CustomerResponse
+from app.services.customer_service import CustomerService
+
+router = APIRouter(prefix="/api/customers", tags=["customers"])
+
+@router.post("/", response_model=CustomerResponse, status_code=201)
+async def create_customer(
+    customer: CustomerCreate,
+    db: AsyncSession = Depends(get_db)
 ):
-    return await service.create_[entity](data)
+    service = CustomerService(db)
+    return await service.create_customer(customer)
 ```
 
 ## Testing Guidelines
@@ -486,33 +595,60 @@ async def test_[integration]():
 
 **Required:**
 ```bash
-[VAR_NAME]=[description]
-[VAR_NAME]=[description]
+DATABASE_URL=postgresql+asyncpg://user:password@localhost/routeoptimizer
+SECRET_KEY=your-secret-key-for-session-encryption
 ```
 
 **Optional:**
 ```bash
-[VAR_NAME]=[description]
-[VAR_NAME]=[description]
+# Geocoding service (defaults to OpenStreetMap/Nominatim - free)
+GOOGLE_MAPS_API_KEY=your-google-maps-api-key
+
+# Environment
+ENVIRONMENT=development  # development, staging, production
+
+# CORS settings for frontend
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+
+# Logging
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
 ```
 
 ## Common Issues & Solutions
 
-### Issue 1: [Problem Description]
-**Symptoms:** [What the user sees]
+### Issue 1: Database Connection Failed
+**Symptoms:** `sqlalchemy.exc.OperationalError: could not connect to server`
 
 **Solution:**
 ```bash
-[Commands to fix]
+# Check PostgreSQL is running
+sudo systemctl status postgresql
+
+# Start PostgreSQL if stopped
+sudo systemctl start postgresql
+
+# Verify DATABASE_URL in .env file is correct
+cat .env | grep DATABASE_URL
 ```
 
-### Issue 2: [Problem Description]
-**Symptoms:** [What the user sees]
+### Issue 2: Geocoding Not Working
+**Symptoms:** Customer addresses have null latitude/longitude
 
 **Solution:**
 ```bash
-[Commands to fix]
+# If using free OpenStreetMap Nominatim, respect rate limits (1 req/sec)
+# For production, set GOOGLE_MAPS_API_KEY in .env
+# Or run manual geocoding batch job:
+python -m app.scripts.geocode_customers
 ```
+
+### Issue 3: Route Optimization Takes Too Long
+**Symptoms:** Optimization endpoint times out
+
+**Solution:**
+- Reduce number of customers or split by service day
+- Adjust optimization time limit in config
+- Consider upgrading OR-Tools or using background tasks
 
 ## Git Workflow
 
@@ -545,9 +681,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - **Commands**: [docs/COMMANDS.md](docs/COMMANDS.md)
 
 ### External Documentation
-- **[Framework]**: [URL]
-- **[Database]**: [URL]
-- **[Key Library]**: [URL]
+- **FastAPI**: https://fastapi.tiangolo.com/
+- **SQLAlchemy**: https://docs.sqlalchemy.org/en/20/
+- **Google OR-Tools**: https://developers.google.com/optimization/routing
+- **Alembic**: https://alembic.sqlalchemy.org/
+- **Leaflet.js**: https://leafletjs.com/
 
 ---
 
@@ -568,5 +706,5 @@ When setting up a new project with this template:
 
 ---
 
-**Last Updated:** [DATE]
-**Project Version:** [VERSION]
+**Last Updated:** October 23, 2025
+**Project Version:** 0.1.0 (Initial Development)

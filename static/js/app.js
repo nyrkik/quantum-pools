@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     attachEventListeners();
     loadCustomers();
+    loadDrivers();
 });
 
 function initializeMap() {
@@ -74,6 +75,7 @@ function displayCustomersOnMap(customers) {
 function attachEventListeners() {
     document.getElementById('optimize-btn').addEventListener('click', optimizeRoutes);
     document.getElementById('import-btn').addEventListener('click', importCSV);
+    document.getElementById('add-driver-btn').addEventListener('click', showAddDriverForm);
 }
 
 async function optimizeRoutes() {
@@ -360,6 +362,143 @@ function importCSV() {
     };
 
     input.click();
+}
+
+// Driver Management Functions
+
+async function loadDrivers() {
+    try {
+        const response = await fetch(`${API_BASE}/api/drivers/`);
+        if (!response.ok) {
+            console.error('Failed to load drivers');
+            return;
+        }
+
+        const data = await response.json();
+        displayDrivers(data.drivers);
+    } catch (error) {
+        console.error('Error loading drivers:', error);
+        document.getElementById('drivers-list').innerHTML = '<p class="placeholder">Failed to load drivers</p>';
+    }
+}
+
+function displayDrivers(drivers) {
+    const container = document.getElementById('drivers-list');
+
+    if (!drivers || drivers.length === 0) {
+        container.innerHTML = '<p class="placeholder">No drivers configured. Add a driver to get started.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+    drivers.forEach(driver => {
+        const driverCard = document.createElement('div');
+        driverCard.className = 'driver-card';
+        driverCard.innerHTML = `
+            <div class="driver-info">
+                <strong>${driver.name}</strong>
+                <small>${driver.working_hours_start} - ${driver.working_hours_end}</small>
+                <small>Max: ${driver.max_customers_per_day} customers/day</small>
+            </div>
+            <button class="btn-delete" onclick="deleteDriver('${driver.id}')">Delete</button>
+        `;
+        container.appendChild(driverCard);
+    });
+}
+
+function showAddDriverForm() {
+    const container = document.getElementById('drivers-list');
+
+    const formHtml = `
+        <div class="driver-form">
+            <h3>Add New Driver</h3>
+            <div class="control-group">
+                <label>Name:</label>
+                <input type="text" id="driver-name" placeholder="Driver Name">
+            </div>
+            <div class="control-group">
+                <label>Start/End Location:</label>
+                <input type="text" id="driver-location" placeholder="123 Main St, City, State">
+            </div>
+            <div class="control-group">
+                <label>Working Hours Start:</label>
+                <input type="time" id="driver-start-time" value="08:00">
+            </div>
+            <div class="control-group">
+                <label>Working Hours End:</label>
+                <input type="time" id="driver-end-time" value="17:00">
+            </div>
+            <div class="control-group">
+                <label>Max Customers Per Day:</label>
+                <input type="number" id="driver-max-customers" min="1" max="50" value="20">
+            </div>
+            <button class="btn-primary" onclick="saveDriver()">Save Driver</button>
+            <button class="btn-secondary" onclick="loadDrivers()">Cancel</button>
+        </div>
+    `;
+
+    container.innerHTML = formHtml;
+}
+
+async function saveDriver() {
+    const name = document.getElementById('driver-name').value;
+    const location = document.getElementById('driver-location').value;
+    const startTime = document.getElementById('driver-start-time').value;
+    const endTime = document.getElementById('driver-end-time').value;
+    const maxCustomers = parseInt(document.getElementById('driver-max-customers').value);
+
+    if (!name || !location) {
+        alert('Please fill in all required fields');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/drivers/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: name,
+                start_location_address: location,
+                end_location_address: location,
+                working_hours_start: startTime + ':00',
+                working_hours_end: endTime + ':00',
+                max_customers_per_day: maxCustomers
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to create driver');
+        }
+
+        alert('Driver created successfully!');
+        loadDrivers();
+    } catch (error) {
+        console.error('Error creating driver:', error);
+        alert('Failed to create driver. Please try again.');
+    }
+}
+
+async function deleteDriver(driverId) {
+    if (!confirm('Are you sure you want to delete this driver?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/drivers/${driverId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to delete driver');
+        }
+
+        loadDrivers();
+    } catch (error) {
+        console.error('Error deleting driver:', error);
+        alert('Failed to delete driver. Please try again.');
+    }
 }
 
 // Drag and Drop Functions

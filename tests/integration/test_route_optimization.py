@@ -3,8 +3,6 @@ Integration tests for Route Optimization.
 """
 
 import pytest
-from httpx import AsyncClient
-from app.main import app
 
 
 @pytest.mark.integration
@@ -12,9 +10,8 @@ class TestRouteOptimization:
     """Test end-to-end route optimization workflows."""
 
     @pytest.mark.asyncio
-    async def test_complete_optimization_workflow(self):
+    async def test_complete_optimization_workflow(self, client):
         """Test complete workflow from creating data to optimizing routes."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
             # Step 1: Create a driver
             driver_data = {
                 "name": "Test Driver",
@@ -78,9 +75,9 @@ class TestRouteOptimization:
                     assert stop["sequence"] == i
 
     @pytest.mark.asyncio
-    async def test_save_and_retrieve_routes(self):
+    async def test_save_and_retrieve_routes(self, client):
         """Test saving optimized routes and retrieving them."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        
             # Create driver
             driver_data = {
                 "name": "Save Test Driver",
@@ -135,9 +132,9 @@ class TestRouteOptimization:
             assert routes[0]["service_day"] == "tuesday"
 
     @pytest.mark.asyncio
-    async def test_optimization_with_locked_customers(self):
+    async def test_optimization_with_locked_customers(self, client):
         """Test optimization respects locked service days."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        
             # Create driver
             driver_data = {
                 "name": "Lock Test Driver",
@@ -178,9 +175,9 @@ class TestRouteOptimization:
                 assert "Locked Customer" in wednesday_customers
 
     @pytest.mark.asyncio
-    async def test_optimization_with_no_customers(self):
+    async def test_optimization_with_no_customers(self, client):
         """Test optimization gracefully handles no customers."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        
             # Create driver
             driver_data = {
                 "name": "Empty Test Driver",
@@ -203,9 +200,9 @@ class TestRouteOptimization:
             assert optimize_response.status_code in [200, 400]
 
     @pytest.mark.asyncio
-    async def test_delete_routes_by_day(self):
+    async def test_delete_routes_by_day(self, client):
         """Test deleting all routes for a specific day."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        
             # Create driver and customers
             driver_data = {
                 "name": "Delete Test Driver",

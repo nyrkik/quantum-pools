@@ -61,12 +61,12 @@ async def root():
 
 
 # Import and include routers
-from app.api import customers
+from app.api import customers, drivers
 app.include_router(customers.router)
+app.include_router(drivers.router)
 
 # Additional routers (to be added)
-# from app.api import drivers, routes, imports
-# app.include_router(drivers.router)
+# from app.api import routes, imports
 # app.include_router(routes.router)
 # app.include_router(imports.router)
 

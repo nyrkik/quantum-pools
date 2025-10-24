@@ -137,6 +137,15 @@ function displayRoutes(result) {
             <p><strong>Total Distance:</strong> ${result.summary.total_distance_miles.toFixed(1)} miles</p>
             <p><strong>Total Duration:</strong> ${result.summary.total_duration_minutes} minutes</p>
         `;
+
+        // Add save button
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn-primary';
+        saveBtn.textContent = 'Save Routes';
+        saveBtn.style.marginTop = '1rem';
+        saveBtn.onclick = () => saveRoutes(result);
+        summary.appendChild(saveBtn);
+
         container.appendChild(summary);
     }
 
@@ -165,6 +174,91 @@ function displayRoutes(result) {
         routeCard.appendChild(stopsList);
         container.appendChild(routeCard);
     });
+}
+
+async function saveRoutes(result) {
+    if (!result.routes || result.routes.length === 0) {
+        alert('No routes to save');
+        return;
+    }
+
+    const serviceDay = result.routes[0].service_day;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/routes/save`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                service_day: serviceDay,
+                routes: result.routes
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to save routes');
+        }
+
+        const saveResult = await response.json();
+        alert(`Successfully saved ${saveResult.route_ids.length} routes for ${serviceDay}!`);
+
+        // Reload saved routes and show download options
+        await loadSavedRoutes(serviceDay);
+    } catch (error) {
+        console.error('Error saving routes:', error);
+        alert('Failed to save routes. Please try again.');
+    }
+}
+
+async function loadSavedRoutes(serviceDay) {
+    try {
+        const response = await fetch(`${API_BASE}/api/routes/day/${serviceDay}`);
+
+        if (!response.ok) {
+            console.error('No saved routes found');
+            return;
+        }
+
+        const routes = await response.json();
+
+        if (routes.length === 0) {
+            return;
+        }
+
+        // Add download section
+        const container = document.getElementById('routes-content');
+        const downloadSection = document.createElement('div');
+        downloadSection.className = 'route-summary';
+        downloadSection.style.marginTop = '1rem';
+        downloadSection.innerHTML = '<h3>Download Route Sheets</h3>';
+
+        // Add download all button
+        const downloadAllBtn = document.createElement('button');
+        downloadAllBtn.className = 'btn-primary';
+        downloadAllBtn.textContent = `Download All Routes for ${serviceDay} (PDF)`;
+        downloadAllBtn.style.marginTop = '0.5rem';
+        downloadAllBtn.onclick = () => {
+            window.location.href = `${API_BASE}/api/routes/day/${serviceDay}/pdf`;
+        };
+        downloadSection.appendChild(downloadAllBtn);
+
+        // Add individual route download buttons
+        routes.forEach(route => {
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'btn-secondary';
+            downloadBtn.textContent = `Download Route ${route.id.substring(0, 8)} (PDF)`;
+            downloadBtn.style.marginTop = '0.5rem';
+            downloadBtn.onclick = () => {
+                window.location.href = `${API_BASE}/api/routes/${route.id}/pdf`;
+            };
+            downloadSection.appendChild(downloadBtn);
+        });
+
+        container.appendChild(downloadSection);
+    } catch (error) {
+        console.error('Error loading saved routes:', error);
+    }
 }
 
 function displayRoutesOnMap(routes) {

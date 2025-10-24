@@ -4,6 +4,7 @@ Provides route generation and management operations.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from typing import Optional
@@ -20,6 +21,7 @@ from app.schemas.route import (
     SavedRouteResponse
 )
 from app.services.optimization import optimization_service
+from app.services.pdf_export import pdf_export_service
 
 router = APIRouter(prefix="/api/routes", tags=["routes"])
 
@@ -238,3 +240,175 @@ async def get_route_details(
         "created_at": route.created_at,
         "stops": stops
     }
+
+
+@router.get(
+    "/{route_id}/pdf",
+    summary="Download PDF route sheet for a single route"
+)
+async def download_route_pdf(
+    route_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate and download a printable PDF route sheet for a single route.
+
+    The PDF includes:
+    - Driver information
+    - Route summary (total stops, distance, time)
+    - Detailed stop list with addresses and service times
+    """
+    # Get route
+    route_result = await db.execute(
+        select(Route).where(Route.id == route_id)
+    )
+    route = route_result.scalar_one_or_none()
+
+    if not route:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Route with ID {route_id} not found"
+        )
+
+    # Get driver info
+    driver_result = await db.execute(
+        select(Driver).where(Driver.id == route.driver_id)
+    )
+    driver = driver_result.scalar_one_or_none()
+
+    if not driver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Driver not found for route {route_id}"
+        )
+
+    # Get stops with customer info
+    stops_result = await db.execute(
+        select(RouteStop, Customer)
+        .join(Customer)
+        .where(RouteStop.route_id == route_id)
+        .order_by(RouteStop.sequence)
+    )
+
+    stops = []
+    for stop, customer in stops_result:
+        stops.append({
+            "sequence": stop.sequence,
+            "customer_id": str(customer.id),
+            "customer_name": customer.name,
+            "address": customer.address,
+            "service_type": customer.service_type,
+            "service_duration": stop.estimated_service_duration,
+            "latitude": customer.latitude,
+            "longitude": customer.longitude
+        })
+
+    # Prepare data for PDF
+    route_data = {
+        "service_day": route.service_day,
+        "total_customers": route.total_customers,
+        "total_distance_miles": route.total_distance_miles,
+        "total_duration_minutes": route.total_duration_minutes,
+        "stops": stops
+    }
+
+    driver_info = {
+        "name": driver.name
+    }
+
+    # Generate PDF
+    pdf_buffer = pdf_export_service.generate_route_sheet(route_data, driver_info)
+
+    # Return as downloadable file
+    filename = f"route_{driver.name.replace(' ', '_')}_{route.service_day}.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
+@router.get(
+    "/day/{service_day}/pdf",
+    summary="Download PDF with all routes for a service day"
+)
+async def download_day_routes_pdf(
+    service_day: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate and download a multi-page PDF with all routes for a service day.
+
+    Each route gets its own page with complete route information.
+    """
+    # Get all routes for this day
+    routes_result = await db.execute(
+        select(Route)
+        .where(Route.service_day == service_day.lower())
+        .order_by(Route.created_at.desc())
+    )
+    routes = list(routes_result.scalars().all())
+
+    if not routes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No routes found for {service_day}"
+        )
+
+    # Get all drivers for these routes
+    driver_ids = [route.driver_id for route in routes]
+    drivers_result = await db.execute(
+        select(Driver).where(Driver.id.in_(driver_ids))
+    )
+    drivers_list = drivers_result.scalars().all()
+    drivers_dict = {str(driver.id): {"name": driver.name} for driver in drivers_list}
+
+    # Build route data for each route
+    routes_data = []
+    for route in routes:
+        # Get stops with customer info
+        stops_result = await db.execute(
+            select(RouteStop, Customer)
+            .join(Customer)
+            .where(RouteStop.route_id == route.id)
+            .order_by(RouteStop.sequence)
+        )
+
+        stops = []
+        for stop, customer in stops_result:
+            stops.append({
+                "sequence": stop.sequence,
+                "customer_id": str(customer.id),
+                "customer_name": customer.name,
+                "address": customer.address,
+                "service_type": customer.service_type,
+                "service_duration": stop.estimated_service_duration,
+                "latitude": customer.latitude,
+                "longitude": customer.longitude
+            })
+
+        routes_data.append({
+            "driver_id": str(route.driver_id),
+            "service_day": route.service_day,
+            "total_customers": route.total_customers,
+            "total_distance_miles": route.total_distance_miles,
+            "total_duration_minutes": route.total_duration_minutes,
+            "stops": stops
+        })
+
+    # Generate multi-route PDF
+    pdf_buffer = pdf_export_service.generate_multi_route_pdf(routes_data, drivers_dict)
+
+    # Return as downloadable file
+    filename = f"routes_{service_day}_{len(routes)}_drivers.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )

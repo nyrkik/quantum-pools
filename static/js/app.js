@@ -5,6 +5,10 @@ let map;
 let routeLayers = [];
 const API_BASE = window.location.origin;
 
+// Drag and drop state
+let draggedStop = null;
+let draggedStopRoute = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     attachEventListeners();
@@ -233,6 +237,14 @@ async function loadSavedRoutes(serviceDay) {
         downloadSection.style.marginTop = '1rem';
         downloadSection.innerHTML = '<h3>Download Route Sheets</h3>';
 
+        // Add edit routes button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-secondary';
+        editBtn.textContent = `Edit Routes (Drag & Drop)`;
+        editBtn.style.marginTop = '0.5rem';
+        editBtn.onclick = () => makeSavedRoutesEditable(routes);
+        downloadSection.appendChild(editBtn);
+
         // Add download all button
         const downloadAllBtn = document.createElement('button');
         downloadAllBtn.className = 'btn-primary';
@@ -348,4 +360,218 @@ function importCSV() {
     };
 
     input.click();
+}
+
+// Drag and Drop Functions
+
+function makeSavedRoutesEditable(routes) {
+    const container = document.getElementById('routes-content');
+    container.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'route-summary';
+    header.innerHTML = `
+        <h3>Edit Routes (Drag & Drop)</h3>
+        <p>Drag stops to reorder them or move them between routes</p>
+    `;
+    container.appendChild(header);
+
+    routes.forEach(async (route) => {
+        // Get route details with stops
+        const response = await fetch(`${API_BASE}/api/routes/${route.id}`);
+        const routeDetails = await response.json();
+
+        const routeCard = document.createElement('div');
+        routeCard.className = 'route-card';
+        routeCard.dataset.routeId = route.id;
+
+        const title = document.createElement('h3');
+        title.textContent = `Route: ${route.id.substring(0, 8)} - ${route.service_day}`;
+        routeCard.appendChild(title);
+
+        const info = document.createElement('p');
+        info.textContent = `${route.total_customers} stops, ${route.total_distance_miles?.toFixed(1) || 0} miles`;
+        routeCard.appendChild(info);
+
+        const stopsList = document.createElement('ul');
+        stopsList.className = 'route-stops editable-stops';
+        stopsList.dataset.routeId = route.id;
+
+        // Add drop zone handlers to the list
+        stopsList.addEventListener('dragover', handleDragOver);
+        stopsList.addEventListener('drop', handleDrop);
+        stopsList.addEventListener('dragleave', handleDragLeave);
+
+        routeDetails.stops.forEach((stop) => {
+            const stopItem = createDraggableStop(stop, route.id);
+            stopsList.appendChild(stopItem);
+        });
+
+        routeCard.appendChild(stopsList);
+        container.appendChild(routeCard);
+    });
+}
+
+function createDraggableStop(stop, routeId) {
+    const stopItem = document.createElement('li');
+    stopItem.className = 'draggable-stop';
+    stopItem.draggable = true;
+    stopItem.dataset.stopId = stop.stop_id || stop.id;
+    stopItem.dataset.routeId = routeId;
+    stopItem.dataset.sequence = stop.sequence;
+    stopItem.textContent = `${stop.sequence}. ${stop.customer_name} - ${stop.address}`;
+
+    stopItem.addEventListener('dragstart', handleDragStart);
+    stopItem.addEventListener('dragend', handleDragEnd);
+    stopItem.addEventListener('dragover', handleDragOver);
+    stopItem.addEventListener('drop', handleDrop);
+
+    return stopItem;
+}
+
+function handleDragStart(e) {
+    draggedStop = e.target;
+    draggedStopRoute = e.target.dataset.routeId;
+    e.target.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.target.innerHTML);
+}
+
+function handleDragEnd(e) {
+    e.target.style.opacity = '1';
+
+    // Remove all drag-over classes
+    document.querySelectorAll('.drag-over').forEach(el => {
+        el.classList.remove('drag-over');
+    });
+}
+
+function handleDragOver(e) {
+    if (e.preventDefault) {
+        e.preventDefault();
+    }
+    e.dataTransfer.dropEffect = 'move';
+
+    if (e.target.classList.contains('editable-stops')) {
+        e.target.classList.add('drag-over');
+    }
+
+    return false;
+}
+
+function handleDragLeave(e) {
+    if (e.target.classList.contains('editable-stops')) {
+        e.target.classList.remove('drag-over');
+    }
+}
+
+async function handleDrop(e) {
+    if (e.stopPropagation) {
+        e.stopPropagation();
+    }
+    e.preventDefault();
+
+    if (!draggedStop) return;
+
+    const dropTarget = e.target;
+
+    // Dropping on another stop item - reorder within same route or move to different route
+    if (dropTarget.classList.contains('draggable-stop')) {
+        const targetRouteId = dropTarget.dataset.routeId;
+        const sourceRouteId = draggedStop.dataset.routeId;
+
+        if (sourceRouteId === targetRouteId) {
+            // Reorder within same route
+            const parent = dropTarget.parentNode;
+            const allStops = Array.from(parent.querySelectorAll('.draggable-stop'));
+            const draggedIndex = allStops.indexOf(draggedStop);
+            const targetIndex = allStops.indexOf(dropTarget);
+
+            if (draggedIndex < targetIndex) {
+                parent.insertBefore(draggedStop, dropTarget.nextSibling);
+            } else {
+                parent.insertBefore(draggedStop, dropTarget);
+            }
+
+            // Update sequences
+            await updateStopSequences(sourceRouteId, parent);
+        } else {
+            // Move to different route
+            const targetSequence = parseInt(dropTarget.dataset.sequence);
+            await moveStopToRoute(draggedStop.dataset.stopId, sourceRouteId, targetRouteId, targetSequence);
+        }
+    }
+    // Dropping on the route list itself - add to end
+    else if (dropTarget.classList.contains('editable-stops')) {
+        const targetRouteId = dropTarget.dataset.routeId;
+        const sourceRouteId = draggedStop.dataset.routeId;
+
+        if (sourceRouteId !== targetRouteId) {
+            const newSequence = dropTarget.children.length + 1;
+            await moveStopToRoute(draggedStop.dataset.stopId, sourceRouteId, targetRouteId, newSequence);
+        } else {
+            dropTarget.appendChild(draggedStop);
+            await updateStopSequences(targetRouteId, dropTarget);
+        }
+    }
+
+    return false;
+}
+
+async function updateStopSequences(routeId, stopsList) {
+    const stops = Array.from(stopsList.querySelectorAll('.draggable-stop'));
+    const updates = stops.map((stop, index) => ({
+        stop_id: stop.dataset.stopId,
+        sequence: index + 1
+    }));
+
+    // Update sequence numbers in UI
+    stops.forEach((stop, index) => {
+        stop.dataset.sequence = index + 1;
+        const text = stop.textContent;
+        const nameAndAddress = text.substring(text.indexOf('.') + 2);
+        stop.textContent = `${index + 1}. ${nameAndAddress}`;
+    });
+
+    try {
+        const response = await fetch(`${API_BASE}/api/routes/${routeId}/stops`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ stops: updates })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to update stop sequence');
+        }
+    } catch (error) {
+        console.error('Error updating stop sequence:', error);
+        alert('Failed to update stop order. Please try again.');
+    }
+}
+
+async function moveStopToRoute(stopId, sourceRouteId, targetRouteId, sequence) {
+    try {
+        const response = await fetch(`${API_BASE}/api/routes/${sourceRouteId}/stops/${stopId}/move`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                target_route_id: targetRouteId,
+                sequence: sequence
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to move stop');
+        }
+
+        // Reload the editable view
+        location.reload();
+    } catch (error) {
+        console.error('Error moving stop:', error);
+        alert('Failed to move stop. Please try again.');
+    }
 }

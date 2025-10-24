@@ -412,3 +412,154 @@ async def download_day_routes_pdf(
             "Content-Disposition": f"attachment; filename={filename}"
         }
     )
+
+
+@router.patch(
+    "/{route_id}/stops",
+    summary="Update route stops order or reassign stops"
+)
+async def update_route_stops(
+    route_id: UUID,
+    stops_update: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update the sequence of stops in a route or move stops between routes.
+
+    Request body format:
+    {
+        "stops": [
+            {"stop_id": "uuid", "sequence": 1},
+            {"stop_id": "uuid", "sequence": 2},
+            ...
+        ]
+    }
+    """
+    # Get route
+    route_result = await db.execute(
+        select(Route).where(Route.id == route_id)
+    )
+    route = route_result.scalar_one_or_none()
+
+    if not route:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Route with ID {route_id} not found"
+        )
+
+    # Update stop sequences
+    stops_data = stops_update.get("stops", [])
+
+    for stop_data in stops_data:
+        stop_id = UUID(stop_data["stop_id"])
+        new_sequence = stop_data["sequence"]
+
+        # Update the stop
+        stop_result = await db.execute(
+            select(RouteStop).where(RouteStop.id == stop_id)
+        )
+        stop = stop_result.scalar_one_or_none()
+
+        if stop:
+            stop.sequence = new_sequence
+
+    # Update route customer count
+    stops_count_result = await db.execute(
+        select(RouteStop).where(RouteStop.route_id == route_id)
+    )
+    route.total_customers = len(list(stops_count_result.scalars().all()))
+
+    await db.commit()
+
+    return {
+        "message": "Route stops updated successfully",
+        "route_id": str(route_id),
+        "updated_stops": len(stops_data)
+    }
+
+
+@router.post(
+    "/{route_id}/stops/{stop_id}/move",
+    summary="Move a stop to a different route"
+)
+async def move_stop_to_route(
+    route_id: UUID,
+    stop_id: UUID,
+    move_data: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Move a stop from one route to another.
+
+    Request body format:
+    {
+        "target_route_id": "uuid",
+        "sequence": 1
+    }
+    """
+    target_route_id = UUID(move_data["target_route_id"])
+    new_sequence = move_data.get("sequence", 1)
+
+    # Get the stop
+    stop_result = await db.execute(
+        select(RouteStop).where(RouteStop.id == stop_id)
+    )
+    stop = stop_result.scalar_one_or_none()
+
+    if not stop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Stop with ID {stop_id} not found"
+        )
+
+    # Get target route
+    target_route_result = await db.execute(
+        select(Route).where(Route.id == target_route_id)
+    )
+    target_route = target_route_result.scalar_one_or_none()
+
+    if not target_route:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Target route with ID {target_route_id} not found"
+        )
+
+    # Get source route
+    source_route_result = await db.execute(
+        select(Route).where(Route.id == stop.route_id)
+    )
+    source_route = source_route_result.scalar_one_or_none()
+
+    # Update stop's route and sequence
+    old_route_id = stop.route_id
+    stop.route_id = target_route_id
+    stop.sequence = new_sequence
+
+    # Resequence remaining stops in source route
+    source_stops_result = await db.execute(
+        select(RouteStop)
+        .where(RouteStop.route_id == old_route_id)
+        .order_by(RouteStop.sequence)
+    )
+    source_stops = list(source_stops_result.scalars().all())
+    for idx, source_stop in enumerate(source_stops, start=1):
+        source_stop.sequence = idx
+
+    # Update customer counts
+    if source_route:
+        source_route.total_customers = len(source_stops)
+
+    target_stops_result = await db.execute(
+        select(RouteStop).where(RouteStop.route_id == target_route_id)
+    )
+    target_route.total_customers = len(list(target_stops_result.scalars().all()))
+
+    await db.commit()
+
+    return {
+        "message": "Stop moved successfully",
+        "stop_id": str(stop_id),
+        "from_route": str(old_route_id),
+        "to_route": str(target_route_id),
+        "new_sequence": new_sequence
+    }

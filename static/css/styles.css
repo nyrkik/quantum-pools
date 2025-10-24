@@ -172,6 +172,32 @@ button {
     background-color: white;
 }
 
+/* Drag and Drop Styles */
+.draggable-stop {
+    cursor: move;
+    transition: background-color 0.2s, transform 0.2s;
+    user-select: none;
+}
+
+.draggable-stop:hover {
+    background-color: #e8f4f8 !important;
+    transform: scale(1.02);
+}
+
+.draggable-stop.dragging {
+    opacity: 0.4;
+}
+
+.editable-stops {
+    min-height: 50px;
+    transition: background-color 0.2s;
+}
+
+.editable-stops.drag-over {
+    background-color: #d4edda;
+    border: 2px dashed #28a745;
+}
+
 @media (max-width: 900px) {
     main {
         grid-template-columns: 1fr;

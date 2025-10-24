@@ -46,12 +46,12 @@ cp .env.example .env
 ### Running the Development Server
 ```bash
 # Start FastAPI development server with auto-reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 7006
 
 # Access the application:
-# - Web UI: http://localhost:8000
-# - API Docs (Swagger): http://localhost:8000/docs
-# - Alternative API Docs (ReDoc): http://localhost:8000/redoc
+# - Web UI: http://localhost:7006
+# - API Docs (Swagger): http://localhost:7006/docs
+# - Alternative API Docs (ReDoc): http://localhost:7006/redoc
 ```
 
 ### Database Migrations

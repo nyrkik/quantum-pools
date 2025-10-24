@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # Environment
     environment: str = "development"
 
+    # Server
+    port: int = 7006
+
     # Geocoding
     google_maps_api_key: Optional[str] = None
 

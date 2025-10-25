@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**RouteOptimizer** is a web application for optimizing pool service routes with support for multiple drivers, service constraints, and schedule generation. While built for pool service businesses, it's designed to work for any routing/scheduling use case.
+**RouteOptimizer** is evolving into a comprehensive pool service management platform covering routing, invoicing, estimates, job tracking, billing, and more. While initially focused on route optimization, it's being architected to scale into a complete business management solution.
 
-**Core Philosophy**: Build enterprise-grade, production-ready routing software that's flexible enough to scale beyond pool services.
+**Core Philosophy**: Build enterprise-grade, production-ready, marketable software from day one. Every feature must be scalable (1 user or 1,000 users), accessible, performant, and professionally designed.
 
 **Tech Stack:**
 - **Language:** Python 3.11+
@@ -269,6 +269,63 @@ By default, `commit` and `commit-pause` push to GitHub immediately for cloud bac
 - Check database state after operations
 - Run tests before marking task complete
 
+### 11. Design for Scalability From Day One
+**Build as if the app will have 1,000 users tomorrow**
+- UI components must scale (e.g., tech selector works with 5 or 50 technicians)
+- Database queries optimized with proper indexes
+- Pagination for all list views
+- Consider performance with large datasets (1,000+ customers, 100+ routes)
+- No hard-coded limits that don't scale
+- Efficient data structures and algorithms
+- Cache frequently accessed data where appropriate
+
+### 12. Professional, Marketable UI/UX
+**This product may be sold - design accordingly**
+- Clean, modern interface following current design trends
+- Consistent spacing, colors, typography throughout
+- Responsive design that actually works on all devices
+- Intuitive navigation requiring minimal training
+- Professional color palette and visual hierarchy
+- Smooth transitions and interactions
+- No jarring UI changes or layout shifts
+- Loading states for async operations
+- Clear error messages that guide users to solutions
+
+### 13. Performance Optimization
+**Fast is a feature**
+- Page load < 2 seconds on standard broadband
+- API responses < 500ms for typical operations
+- Optimize expensive operations (route optimization can take longer but show progress)
+- Lazy load data where appropriate
+- Minimize API calls (batch requests when possible)
+- Efficient database queries (avoid N+1 problems)
+- Client-side caching for static/semi-static data
+- Monitor and log performance metrics
+
+### 14. Accessibility (WCAG 2.1 AA Compliance)
+**App must be usable by everyone**
+- Keyboard navigation for all interactive elements
+- Proper ARIA labels and roles
+- Sufficient color contrast (4.5:1 for text)
+- Focus indicators visible on all interactive elements
+- Screen reader compatible
+- No reliance on color alone to convey information
+- Form labels properly associated
+- Skip navigation links
+- Responsive text sizing
+- Error messages announced to screen readers
+
+### 15. Mobile-First Responsive Design
+**Optimize for mobile, enhance for desktop**
+- Touch-friendly tap targets (minimum 44px × 44px)
+- Thumb-friendly navigation placement
+- Readable text without zooming (minimum 16px)
+- Collapsible navigation for small screens
+- Test on actual mobile devices, not just browser DevTools
+- Consider mobile data usage (optimize asset sizes)
+- Horizontal scrolling only where intentional (maps, tables)
+- Mobile gestures where appropriate (swipe to delete, pull to refresh)
+
 ### Quality Checklist (Self-Check Before Completing Task)
 
 Every implementation must have:
@@ -283,6 +340,46 @@ Every implementation must have:
 - [ ] Tested and verified working
 - [ ] Documented in SESSION_LOG.md (if significant)
 
+### 16. Incremental JavaScript Refactoring (MANDATORY)
+
+**CRITICAL: app.js is currently 3,500+ lines and MUST be refactored incrementally**
+
+Before modifying ANY JavaScript code in `/static/js/app.js`:
+
+1. **Check file size**: Run `wc -l /mnt/Projects/RouteOptimizer/static/js/app.js`
+2. **If adding >50 lines of new code**, you MUST extract the relevant module FIRST
+3. **Read REFACTORING_PLAN.md** to see module boundaries
+4. **Extract the module** before making changes
+5. **Update REFACTORING_PLAN.md** to mark module as extracted
+
+**Target structure:**
+```
+static/js/
+├── app.js                 # Main entry point (<200 lines)
+├── modules/
+│   ├── navigation.js      # Module routing
+│   ├── map.js            # Map & markers
+│   ├── routes.js         # Route optimization
+│   ├── drivers.js        # Driver management
+│   ├── customers.js      # Customer management
+│   ├── bulk-edit.js      # Bulk editing
+│   └── modals.js         # Modal UI
+└── utils/
+    ├── api.js            # API calls
+    ├── forms.js          # Form helpers
+    └── helpers.js        # Utilities
+```
+
+**When extracting a module:**
+1. Create `modules/` and `utils/` directories if they don't exist
+2. Extract functions to separate file with clear JSDoc comments
+3. Keep functions in global scope (no ES6 modules yet for compatibility)
+4. Update `index.html` to load new script files in correct order
+5. Test that functionality still works
+6. Update REFACTORING_PLAN.md
+
+**Zero Tolerance:** Do NOT add substantial code to app.js without extracting modules first.
+
 ### Communication Style
 
 **✅ DO SAY:**
@@ -291,6 +388,7 @@ Every implementation must have:
 - "Found an issue, stopping to fix it now"
 - "Task completed, moving to next"
 - "Does this plan match your vision?"
+- "app.js is too large - extracting this module first"
 
 **❌ DON'T SAY:**
 - "Would you like to review this code?"
@@ -298,6 +396,7 @@ Every implementation must have:
 - "This is just a placeholder"
 - "Not blocking, we can skip it"
 - "We'll implement that in Phase 2"
+- "I'll just add this to app.js quickly"
 
 ## Architecture Overview
 

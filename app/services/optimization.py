@@ -110,12 +110,226 @@ class RouteOptimizationService:
 
         return time_matrix
 
+    def _customer_services_on_day(self, customer: Customer, service_day: str) -> bool:
+        """
+        Check if a customer needs service on a specific day.
+
+        Args:
+            customer: Customer to check
+            service_day: Day to check (e.g., 'monday')
+
+        Returns:
+            True if customer needs service on this day
+        """
+        # Single-day customers
+        if customer.service_days_per_week == 1:
+            return customer.service_day.lower() == service_day.lower()
+
+        # Multi-day customers - check if day is in their schedule
+        if customer.service_schedule:
+            # Map full day names to abbreviations
+            day_abbrev = {
+                'monday': 'Mo',
+                'tuesday': 'Tu',
+                'wednesday': 'We',
+                'thursday': 'Th',
+                'friday': 'Fr',
+                'saturday': 'Sa',
+                'sunday': 'Su'
+            }
+            day_code = day_abbrev.get(service_day.lower())
+            return day_code and day_code in customer.service_schedule
+
+        return False
+
+    async def _optimize_refine_mode(
+        self,
+        customers: List[Customer],
+        drivers: List[Driver],
+        service_day: Optional[str] = None
+    ) -> Dict:
+        """
+        Optimize routes in refine mode - keeps driver assignments, only optimizes order.
+
+        Args:
+            customers: List of customers (already filtered to have assigned drivers)
+            drivers: List of available drivers
+            service_day: Specific day to optimize
+
+        Returns:
+            Dict with optimized routes per driver
+        """
+        # Group customers by assigned driver
+        driver_customers_map = {}
+        for customer in customers:
+            if customer.assigned_driver_id:
+                if customer.assigned_driver_id not in driver_customers_map:
+                    driver_customers_map[customer.assigned_driver_id] = []
+                driver_customers_map[customer.assigned_driver_id].append(customer)
+
+        # Create driver lookup
+        driver_lookup = {driver.id: driver for driver in drivers}
+
+        # Optimize each driver's route separately
+        all_routes = []
+        total_distance = 0
+        total_duration = 0
+        total_customers = 0
+
+        for driver_id, driver_customers in driver_customers_map.items():
+            driver = driver_lookup.get(driver_id)
+            if not driver:
+                continue
+
+            # Filter customers by service day if needed
+            if service_day:
+                driver_customers = [
+                    c for c in driver_customers
+                    if self._customer_services_on_day(c, service_day)
+                ]
+
+            if not driver_customers:
+                continue
+
+            # Filter out customers without coordinates
+            valid_customers = [
+                c for c in driver_customers
+                if c.latitude and c.longitude
+            ]
+
+            if not valid_customers:
+                continue
+
+            # Build locations: [depot, customer1, customer2, ...]
+            depot_location = (driver.start_latitude, driver.start_longitude)
+            locations = [depot_location]
+
+            for customer in valid_customers:
+                locations.append((customer.latitude, customer.longitude))
+
+            # Create distance and time matrices
+            distance_matrix = self._create_distance_matrix(locations)
+            time_matrix = self._create_time_matrix(distance_matrix)
+
+            # Create routing model for single driver
+            manager = pywrapcp.RoutingIndexManager(
+                len(locations),
+                1,  # Single driver
+                0   # Depot index
+            )
+            routing = pywrapcp.RoutingModel(manager)
+
+            # Distance callback
+            def distance_callback(from_index, to_index):
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                return distance_matrix[from_node][to_node]
+
+            transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+            routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+            # Time callback
+            def time_callback(from_index, to_index):
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                travel_time = time_matrix[from_node][to_node]
+
+                service_time = 0
+                if to_node > 0:
+                    customer = valid_customers[to_node - 1]
+                    service_time = customer.base_service_duration
+
+                return travel_time + service_time
+
+            time_callback_index = routing.RegisterTransitCallback(time_callback)
+
+            # Add time dimension
+            routing.AddDimension(
+                time_callback_index,
+                60,   # Allow 60 minutes waiting time
+                480,  # Maximum 8 hours per route
+                False,
+                'Time'
+            )
+
+            # Set search parameters
+            search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+            search_parameters.first_solution_strategy = (
+                routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+            )
+            search_parameters.time_limit.seconds = self.time_limit_seconds
+
+            # Solve
+            solution = routing.SolveWithParameters(search_parameters)
+
+            if solution:
+                # Extract route
+                route_customers = []
+                route_distance = 0
+                index = routing.Start(0)
+
+                while not routing.IsEnd(index):
+                    node_index = manager.IndexToNode(index)
+
+                    if node_index > 0:  # Not depot
+                        customer = valid_customers[node_index - 1]
+                        route_customers.append({
+                            "customer_id": str(customer.id),
+                            "customer_name": customer.name,
+                            "address": customer.address,
+                            "latitude": customer.latitude,
+                            "longitude": customer.longitude,
+                            "service_duration": customer.base_service_duration,
+                            "sequence": len(route_customers) + 1
+                        })
+
+                    previous_index = index
+                    index = solution.Value(routing.NextVar(index))
+                    route_distance += routing.GetArcCostForVehicle(
+                        previous_index, index, 0
+                    )
+
+                # Calculate metrics
+                route_distance_miles = route_distance / 1609.34
+                time_dimension = routing.GetDimensionOrDie('Time')
+                time_var = time_dimension.CumulVar(routing.End(0))
+                route_duration = solution.Value(time_var)
+
+                if route_customers:
+                    all_routes.append({
+                        "driver_id": str(driver.id),
+                        "driver_name": driver.name,
+                        "driver_color": driver.color if hasattr(driver, 'color') else '#3498db',
+                        "service_day": service_day or "multiple",
+                        "stops": route_customers,
+                        "total_customers": len(route_customers),
+                        "total_distance_miles": round(route_distance_miles, 2),
+                        "total_duration_minutes": route_duration
+                    })
+
+                    total_distance += route_distance_miles
+                    total_duration += route_duration
+                    total_customers += len(route_customers)
+
+        return {
+            "routes": all_routes,
+            "summary": {
+                "total_routes": len(all_routes),
+                "total_customers": total_customers,
+                "total_distance_miles": round(total_distance, 2),
+                "total_duration_minutes": total_duration,
+                "optimization_time_seconds": self.time_limit_seconds,
+                "optimization_mode": "refine"
+            }
+        }
+
     async def optimize_routes(
         self,
         customers: List[Customer],
         drivers: List[Driver],
         service_day: Optional[str] = None,
-        allow_day_reassignment: bool = False
+        allow_day_reassignment: bool = False,
+        optimization_mode: str = "full"
     ) -> Dict:
         """
         Optimize routes for given customers and drivers.
@@ -125,6 +339,7 @@ class RouteOptimizationService:
             drivers: List of available drivers
             service_day: Specific day to optimize (or None for all)
             allow_day_reassignment: If True, can move customers to different days
+            optimization_mode: 'refine' keeps driver assignments, 'full' allows reassignment
 
         Returns:
             Dict with optimized routes per driver
@@ -135,9 +350,70 @@ class RouteOptimizationService:
         if not drivers:
             return {"routes": [], "message": "No drivers available"}
 
+        # Handle refine mode: optimize each driver's assigned customers separately
+        if optimization_mode == "refine":
+            return await self._optimize_refine_mode(
+                customers, drivers, service_day
+            )
+
+        # If no specific day selected, handle based on reassignment setting
+        if not service_day:
+            if allow_day_reassignment:
+                # TRUE FULL OPTIMIZATION: Optimize all customers across all days
+                # This is computationally expensive but provides best overall optimization
+                logger.info("Running full cross-day optimization - this may take several minutes")
+                # For now, return a message. Full cross-day optimization with day assignment
+                # is a complex problem that requires additional constraints.
+                return {
+                    "routes": [],
+                    "message": "Full cross-day optimization with day reassignment is not yet implemented. "
+                               "Please either select a specific day or uncheck 'Allow day reassignment' "
+                               "to optimize each day separately."
+                }
+            else:
+                # Optimize each day separately (maintains current day assignments)
+                logger.info("Optimizing all days separately")
+                all_routes = []
+                total_customers = 0
+                total_distance = 0
+                total_duration = 0
+
+                days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+                for day in days:
+                    day_customers = [c for c in customers if self._customer_services_on_day(c, day)]
+
+                    if not day_customers:
+                        continue
+
+                    logger.info(f"Optimizing {len(day_customers)} customers for {day}")
+
+                    day_result = await self._optimize_single_day(
+                        day_customers, drivers, day
+                    )
+
+                    if day_result and "routes" in day_result:
+                        all_routes.extend(day_result["routes"])
+                        if "summary" in day_result:
+                            total_customers += day_result["summary"].get("total_customers", 0)
+                            total_distance += day_result["summary"].get("total_distance_miles", 0)
+                            total_duration += day_result["summary"].get("total_duration_minutes", 0)
+
+                return {
+                    "routes": all_routes,
+                    "summary": {
+                        "total_routes": len(all_routes),
+                        "total_customers": total_customers,
+                        "total_distance_miles": round(total_distance, 2),
+                        "total_duration_minutes": total_duration,
+                        "optimization_time_seconds": self.time_limit_seconds,
+                        "optimization_mode": "full_per_day"
+                    }
+                }
+
         # Filter customers by service day if specified
         if service_day and not allow_day_reassignment:
-            customers = [c for c in customers if c.service_day.lower() == service_day.lower()]
+            customers = [c for c in customers if self._customer_services_on_day(c, service_day)]
 
         # Filter out customers without geocoded coordinates
         valid_customers = [c for c in customers if c.latitude and c.longitude]
@@ -152,6 +428,34 @@ class RouteOptimizationService:
             f"Optimizing routes for {len(valid_customers)} customers "
             f"and {len(drivers)} drivers"
         )
+
+        return await self._optimize_single_day(valid_customers, drivers, service_day)
+
+    async def _optimize_single_day(
+        self,
+        customers: List[Customer],
+        drivers: List[Driver],
+        service_day: Optional[str] = None
+    ) -> Dict:
+        """
+        Optimize routes for a single day.
+
+        Args:
+            customers: List of customers to route (already filtered)
+            drivers: List of available drivers
+            service_day: Day being optimized
+
+        Returns:
+            Dict with optimized routes
+        """
+        # Filter out customers without geocoded coordinates
+        valid_customers = [c for c in customers if c.latitude and c.longitude]
+
+        if not valid_customers:
+            return {
+                "routes": [],
+                "message": "No customers with valid GPS coordinates"
+            }
 
         # Build locations list: [depot, customer1, customer2, ..., customerN]
         # For simplicity, use first driver's start location as depot
@@ -276,6 +580,7 @@ class RouteOptimizationService:
                 routes.append({
                     "driver_id": str(driver.id),
                     "driver_name": driver.name,
+                    "driver_color": driver.color if hasattr(driver, 'color') else '#3498db',
                     "service_day": service_day or "multiple",
                     "stops": route_customers,
                     "total_customers": len(route_customers),

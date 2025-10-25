@@ -3,81 +3,368 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RouteOptimizer - Pool Service Route Planning</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <title>Pool Scout Pro - Pool Service Management</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=8">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <header>
-        <h1>RouteOptimizer</h1>
-        <p>Pool Service Route Planning & Optimization</p>
+    <!-- Mobile Hamburger Button -->
+    <button id="mobile-menu-toggle" class="mobile-menu-toggle">
+        <i class="fas fa-bars"></i>
+    </button>
 
-        <!-- Day Selector -->
-        <nav class="day-selector">
-            <button class="day-tab active" data-day="all">All Days</button>
-            <button class="day-tab" data-day="monday">Monday</button>
-            <button class="day-tab" data-day="tuesday">Tuesday</button>
-            <button class="day-tab" data-day="wednesday">Wednesday</button>
-            <button class="day-tab" data-day="thursday">Thursday</button>
-            <button class="day-tab" data-day="friday">Friday</button>
-            <button class="day-tab" data-day="saturday">Saturday</button>
-        </nav>
-    </header>
+    <!-- Icon Sidebar -->
+    <nav id="app-sidebar">
+        <div class="sidebar-header">
+            <div class="logo">PSP</div>
+        </div>
+        <ul class="sidebar-nav">
+            <li>
+                <a href="#dashboard" class="nav-item active" data-module="dashboard" title="Dashboard">
+                    <i class="fas fa-chart-line"></i>
+                    <span class="nav-label">Dashboard</span>
+                </a>
+            </li>
+            <li>
+                <a href="#team" class="nav-item" data-module="team" title="Team">
+                    <i class="fas fa-users"></i>
+                    <span class="nav-label">Team</span>
+                </a>
+            </li>
+            <li>
+                <a href="#clients" class="nav-item" data-module="clients" title="Clients">
+                    <i class="fas fa-address-book"></i>
+                    <span class="nav-label">Clients</span>
+                </a>
+            </li>
+            <li>
+                <a href="#routes" class="nav-item" data-module="routes" title="Routes">
+                    <i class="fas fa-route"></i>
+                    <span class="nav-label">Routes</span>
+                </a>
+            </li>
+            <li>
+                <a href="#jobs" class="nav-item" data-module="jobs" title="Jobs">
+                    <i class="fas fa-clipboard-list"></i>
+                    <span class="nav-label">Jobs</span>
+                </a>
+            </li>
+            <li>
+                <a href="#invoicing" class="nav-item" data-module="invoicing" title="Invoicing">
+                    <i class="fas fa-file-invoice-dollar"></i>
+                    <span class="nav-label">Invoicing</span>
+                </a>
+            </li>
+        </ul>
+        <ul class="sidebar-nav sidebar-bottom">
+            <li>
+                <a href="#settings" class="nav-item" data-module="settings" title="Settings">
+                    <i class="fas fa-cog"></i>
+                    <span class="nav-label">Settings</span>
+                </a>
+            </li>
+        </ul>
+        <button id="sidebar-toggle" class="sidebar-toggle" title="Toggle Sidebar">
+            <i class="fas fa-bars"></i>
+        </button>
+    </nav>
 
-    <main>
-        <aside id="sidebar">
-            <!-- Main Navigation Tabs -->
-            <div class="nav-tabs">
-                <button class="nav-tab active" data-tab="drivers">Drivers</button>
-                <button class="nav-tab" data-tab="customers">Customers</button>
-                <button class="nav-tab" data-tab="optimize">Optimize</button>
+    <!-- Main Content Area -->
+    <main id="app-content">
+
+        <!-- Dashboard Module -->
+        <div id="module-dashboard" class="module-content active">
+            <div class="page-header">
+                <h1>Dashboard</h1>
             </div>
+            <div class="dashboard-grid">
+                <div class="dashboard-card">
+                    <i class="fas fa-dollar-sign"></i>
+                    <h3>Revenue</h3>
+                    <p class="placeholder">Coming soon</p>
+                </div>
+                <div class="dashboard-card">
+                    <i class="fas fa-users"></i>
+                    <h3>Customers</h3>
+                    <p class="placeholder">Coming soon</p>
+                </div>
+                <div class="dashboard-card">
+                    <i class="fas fa-user-tie"></i>
+                    <h3>Team Members</h3>
+                    <p class="placeholder">Coming soon</p>
+                </div>
+                <div class="dashboard-card">
+                    <i class="fas fa-route"></i>
+                    <h3>Today's Routes</h3>
+                    <p class="placeholder">Coming soon</p>
+                </div>
+            </div>
+        </div>
 
-            <!-- Drivers Tab Content -->
-            <div id="tab-drivers" class="tab-content active">
+        <!-- Team Module -->
+        <div id="module-team" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Team Management</h1>
+            </div>
+            <div id="drivers-content">
                 <div id="drivers-list">
                     <p class="placeholder">Loading drivers...</p>
                 </div>
                 <button id="add-driver-btn" class="btn-primary">+ Add Driver</button>
             </div>
+        </div>
 
-            <!-- Customers Tab Content -->
-            <div id="tab-customers" class="tab-content">
-                <div id="customers-list">
-                    <p class="placeholder">Loading customers...</p>
+        <!-- Clients Module -->
+        <div id="module-clients" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Clients</h1>
+                <div class="header-actions">
+                    <button id="add-customer-btn" class="btn-primary">+ Add Customer</button>
+                    <button id="bulk-edit-btn" class="btn-primary">Bulk Edit</button>
                 </div>
-                <button id="add-customer-btn" class="btn-primary">+ Add Customer</button>
-                <button id="import-csv-btn" class="btn-secondary">Import CSV</button>
             </div>
+            <div class="clients-layout">
+                <div class="clients-sidebar">
+                    <div class="clients-sidebar-header">
+                        <input type="text" id="clients-search" class="clients-search" placeholder="Search clients...">
+                        <button id="clients-filter-btn" class="clients-filter-btn" title="Filter">
+                            <i class="fas fa-filter"></i>
+                        </button>
+                    </div>
+                    <div id="customers-list">
+                        <p class="placeholder">Loading clients...</p>
+                    </div>
+                </div>
+                <div class="clients-detail">
+                    <div class="clients-tabs">
+                        <button class="tab-btn active" data-tab="profile">Profile</button>
+                        <button class="tab-btn" data-tab="invoices">Invoices</button>
+                    </div>
+                    <div class="clients-tab-content">
+                        <div id="tab-profile" class="tab-pane active">
+                            <p class="placeholder">Select a client to view details</p>
+                        </div>
+                        <div id="tab-invoices" class="tab-pane">
+                            <p class="placeholder">Invoice history will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-            <!-- Optimize Tab Content -->
-            <div id="tab-optimize" class="tab-content">
-                <div class="control-group">
-                    <label for="num-drivers">Number of Drivers:</label>
-                    <input type="number" id="num-drivers" min="1" max="10" value="2">
-                </div>
-                <div class="control-group">
-                    <label>
-                        <input type="checkbox" id="allow-reassignment">
-                        Allow day reassignment
-                    </label>
-                </div>
+        <!-- Routes Module -->
+        <div id="module-routes" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Routes</h1>
                 <button id="optimize-btn" class="btn-primary">Optimize Routes</button>
             </div>
-        </aside>
 
-        <section id="map-container">
-            <h2>Map View</h2>
-            <div id="map"></div>
-        </section>
-
-        <section id="routes-list">
-            <h2>Routes</h2>
-            <div id="routes-content">
-                <p class="placeholder">Select a day and click "Optimize Routes" to generate routes</p>
+            <!-- Tech Selector -->
+            <div class="tech-selector-container">
+                <div class="tech-chips" id="tech-chips">
+                    <!-- Populated by JS -->
+                </div>
             </div>
-        </section>
+
+            <!-- Day Selector -->
+            <nav class="day-selector">
+                <button class="day-tab" data-day="monday">Monday</button>
+                <button class="day-tab" data-day="tuesday">Tuesday</button>
+                <button class="day-tab" data-day="wednesday">Wednesday</button>
+                <button class="day-tab" data-day="thursday">Thursday</button>
+                <button class="day-tab" data-day="friday">Friday</button>
+                <button class="day-tab" data-day="saturday">Saturday</button>
+                <button class="day-tab" data-day="sunday">Sunday</button>
+            </nav>
+
+            <!-- Map Container (Full Width) -->
+            <section id="map-container">
+                <div id="map"></div>
+            </section>
+
+            <!-- Routes List -->
+            <section id="routes-list">
+                <h2>Routes</h2>
+                <div id="routes-content">
+                    <p class="placeholder">Select a day and click "Optimize Routes" to generate routes</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- Jobs Module (Placeholder) -->
+        <div id="module-jobs" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Job Tracking</h1>
+            </div>
+            <div class="placeholder-content">
+                <i class="fas fa-clipboard-list"></i>
+                <p>Job tracking module coming soon</p>
+            </div>
+        </div>
+
+        <!-- Invoicing Module (Placeholder) -->
+        <div id="module-invoicing" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Invoicing & Billing</h1>
+            </div>
+            <div class="placeholder-content">
+                <i class="fas fa-file-invoice-dollar"></i>
+                <p>Invoicing module coming soon</p>
+            </div>
+        </div>
+
+        <!-- Settings Module (Placeholder) -->
+        <div id="module-settings" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Settings</h1>
+            </div>
+            <div class="placeholder-content">
+                <i class="fas fa-cog"></i>
+                <p>Settings module coming soon</p>
+            </div>
+        </div>
+
     </main>
+
+    <!-- Clients Filter Modal -->
+    <div id="clients-filter-modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Filter Clients</h2>
+
+            <div class="control-group">
+                <label>Service Day:</label>
+                <select id="filter-service-day">
+                    <option value="">All Days</option>
+                    <option value="monday">Monday</option>
+                    <option value="tuesday">Tuesday</option>
+                    <option value="wednesday">Wednesday</option>
+                    <option value="thursday">Thursday</option>
+                    <option value="friday">Friday</option>
+                    <option value="saturday">Saturday</option>
+                    <option value="sunday">Sunday</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Assigned Tech:</label>
+                <select id="filter-assigned-tech">
+                    <option value="">All Techs</option>
+                    <!-- Populated by JavaScript -->
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Service Type:</label>
+                <select id="filter-service-type">
+                    <option value="">All Types</option>
+                    <option value="residential">Residential</option>
+                    <option value="commercial">Commercial</option>
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 1.5rem;">
+                <button id="apply-filter-btn" class="btn-primary">Apply Filter</button>
+                <button id="clear-filter-btn" class="btn-secondary">Clear Filter</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Optimization Modal -->
+    <div id="optimize-modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Route Optimization Settings</h2>
+
+            <div class="control-group">
+                <label>Optimization Mode:</label>
+                <div style="margin-top: 0.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem;">
+                        <input type="radio" name="optimization-mode" value="refine" checked>
+                        Refine Existing Routes
+                    </label>
+                    <label style="display: block;">
+                        <input type="radio" name="optimization-mode" value="full">
+                        Full Re-optimization
+                    </label>
+                </div>
+                <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem; line-height: 1.4;">
+                    <strong>Refine:</strong> Optimizes route order while keeping customers assigned to their current drivers.<br>
+                    <strong>Full:</strong> Complete re-optimization allowing customers to be assigned to any driver.
+                </p>
+            </div>
+
+            <div class="control-group">
+                <label for="num-drivers">Number of Drivers:</label>
+                <input type="number" id="num-drivers" min="1" max="10" value="2">
+            </div>
+
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="allow-reassignment">
+                    Allow day reassignment
+                </label>
+            </div>
+
+            <button id="run-optimize-btn" class="btn-primary">Run Optimization</button>
+        </div>
+    </div>
+
+    <!-- Bulk Edit Modal -->
+    <div id="bulk-edit-modal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="modal-close">&times;</span>
+            <h2>Bulk Edit Clients</h2>
+
+            <div class="bulk-edit-toolbar">
+                <div class="bulk-edit-actions">
+                    <button id="save-bulk-changes-btn" class="btn-primary">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
+                    <button id="import-csv-btn" class="btn-secondary">
+                        <i class="fas fa-upload"></i> Import CSV
+                    </button>
+                    <button id="download-template-btn" class="btn-secondary">
+                        <i class="fas fa-download"></i> Download Template
+                    </button>
+                    <button id="export-csv-btn" class="btn-secondary">
+                        <i class="fas fa-file-csv"></i> Export CSV
+                    </button>
+                </div>
+                <div class="bulk-edit-info">
+                    <span id="bulk-edit-count">0 clients loaded</span>
+                </div>
+            </div>
+
+            <div class="bulk-edit-table-container">
+                <table id="bulk-edit-table" class="bulk-edit-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Street Address</th>
+                            <th>City</th>
+                            <th>State</th>
+                            <th>ZIP</th>
+                            <th>Assigned Tech</th>
+                            <th>Service Day</th>
+                            <th>Days/Week</th>
+                            <th>Service Type</th>
+                            <th>Duration (min)</th>
+                            <th>Difficulty</th>
+                            <th>Locked</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bulk-edit-tbody">
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file input for CSV import -->
+    <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="/static/js/app.js"></script>

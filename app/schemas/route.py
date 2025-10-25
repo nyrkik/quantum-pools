@@ -26,6 +26,11 @@ class RouteOptimizationRequest(BaseModel):
         default=False,
         description="Allow customers to be moved to different service days"
     )
+    optimization_mode: str = Field(
+        default="full",
+        pattern="^(refine|full)$",
+        description="Optimization mode: 'refine' keeps driver assignments, 'full' allows reassignment"
+    )
 
 
 class RouteStopResponse(BaseModel):
@@ -45,6 +50,7 @@ class RouteResponse(BaseModel):
 
     driver_id: str
     driver_name: str
+    driver_color: str = Field(default='#3498db', description="Driver's assigned color")
     service_day: str
     stops: List[RouteStopResponse]
     total_customers: int

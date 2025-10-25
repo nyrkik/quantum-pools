@@ -24,6 +24,12 @@ class Driver(Base):
     name = Column(String(200), nullable=False, index=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
+    color = Column(
+        String(7),
+        nullable=False,
+        default='#3498db',
+        comment="Hex color code for route visualization"
+    )
 
     # Start location (where driver begins their route)
     start_location_address = Column(String(500), nullable=False)

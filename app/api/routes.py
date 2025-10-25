@@ -6,7 +6,7 @@ Provides route generation and management operations.
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_
 from typing import Optional
 from uuid import UUID
 
@@ -41,6 +41,7 @@ async def optimize_routes(
     - **service_day**: Specific day to optimize (optional)
     - **num_drivers**: Number of drivers to use (optional, uses all active)
     - **allow_day_reassignment**: Allow moving customers to different days
+    - **optimization_mode**: 'refine' keeps driver assignments, 'full' allows reassignment
 
     The optimizer considers:
     - Distance between locations
@@ -51,10 +52,39 @@ async def optimize_routes(
     """
     # Get active customers
     customer_query = select(Customer).where(Customer.is_active == True)
+
+    # For refine mode, only include customers with assigned drivers
+    if request.optimization_mode == "refine":
+        customer_query = customer_query.where(Customer.assigned_driver_id.isnot(None))
+
     if request.service_day and not request.allow_day_reassignment:
-        customer_query = customer_query.where(
-            Customer.service_day == request.service_day.lower()
-        )
+        # Map day name to abbreviation for schedule checking
+        day_abbrev_map = {
+            'monday': 'Mo',
+            'tuesday': 'Tu',
+            'wednesday': 'We',
+            'thursday': 'Th',
+            'friday': 'Fr',
+            'saturday': 'Sa',
+            'sunday': 'Su'
+        }
+        day_lower = request.service_day.lower()
+        day_abbrev = day_abbrev_map.get(day_lower)
+
+        # Filter by either:
+        # 1. Primary service_day matches (for single-day customers)
+        # 2. Day abbreviation is in service_schedule (for multi-day customers)
+        if day_abbrev:
+            customer_query = customer_query.where(
+                or_(
+                    Customer.service_day == day_lower,
+                    Customer.service_schedule.like(f'%{day_abbrev}%')
+                )
+            )
+        else:
+            customer_query = customer_query.where(
+                Customer.service_day == day_lower
+            )
 
     customer_result = await db.execute(customer_query)
     customers = list(customer_result.scalars().all())
@@ -84,7 +114,8 @@ async def optimize_routes(
         customers=customers,
         drivers=drivers,
         service_day=request.service_day,
-        allow_day_reassignment=request.allow_day_reassignment
+        allow_day_reassignment=request.allow_day_reassignment,
+        optimization_mode=request.optimization_mode
     )
 
     return result

@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Optimization
-    optimization_time_limit_seconds: int = 30
+    optimization_time_limit_seconds: int = 120
     max_customers_per_route: int = 50
 
     model_config = SettingsConfigDict(

@@ -14,6 +14,11 @@ class DriverBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="Driver name")
     email: Optional[EmailStr] = Field(None, description="Driver email address")
     phone: Optional[str] = Field(None, max_length=20, description="Driver phone number")
+    color: str = Field(
+        default='#3498db',
+        pattern='^#[0-9A-Fa-f]{6}$',
+        description="Hex color code for route visualization"
+    )
 
     start_location_address: str = Field(
         ...,
@@ -63,6 +68,7 @@ class DriverUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=20)
+    color: Optional[str] = Field(None, pattern='^#[0-9A-Fa-f]{6}$')
     start_location_address: Optional[str] = Field(None, min_length=1, max_length=500)
     end_location_address: Optional[str] = Field(None, min_length=1, max_length=500)
     working_hours_start: Optional[time] = None

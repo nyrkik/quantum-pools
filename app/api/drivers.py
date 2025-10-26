@@ -10,6 +10,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.database import get_db
+from app.dependencies.auth import get_current_user, AuthContext
 from app.models.driver import Driver
 from app.schemas.driver import (
     DriverCreate,
@@ -30,6 +31,7 @@ router = APIRouter(prefix="/api/drivers", tags=["drivers"])
 )
 async def create_driver(
     driver: DriverCreate,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -44,7 +46,9 @@ async def create_driver(
     - **working_hours_end**: End of workday (default: 17:00)
     - **max_customers_per_day**: Maximum customers per day (default: 20)
     """
-    db_driver = Driver(**driver.model_dump())
+    driver_data = driver.model_dump()
+    driver_data['organization_id'] = auth.organization_id
+    db_driver = Driver(**driver_data)
 
     # Geocode start location
     start_coords = await geocoding_service.geocode_address(db_driver.start_location_address)
@@ -71,6 +75,7 @@ async def list_drivers(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -80,7 +85,7 @@ async def list_drivers(
     - **is_active**: Filter by active/inactive status
     """
     # Build base query
-    query = select(Driver)
+    query = select(Driver).where(Driver.organization_id == auth.organization_id)
 
     # Apply filters
     if is_active is not None:
@@ -113,6 +118,7 @@ async def list_drivers(
     summary="Get all active drivers"
 )
 async def get_active_drivers(
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -122,6 +128,7 @@ async def get_active_drivers(
     """
     result = await db.execute(
         select(Driver)
+        .where(Driver.organization_id == auth.organization_id)
         .where(Driver.is_active == True)
         .order_by(Driver.name)
     )
@@ -136,13 +143,16 @@ async def get_active_drivers(
 )
 async def get_driver(
     driver_id: UUID,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve a specific driver by ID.
     """
     result = await db.execute(
-        select(Driver).where(Driver.id == driver_id)
+        select(Driver)
+        .where(Driver.id == driver_id)
+        .where(Driver.organization_id == auth.organization_id)
     )
     driver = result.scalar_one_or_none()
 
@@ -163,6 +173,7 @@ async def get_driver(
 async def update_driver(
     driver_id: UUID,
     driver_update: DriverUpdate,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -172,7 +183,9 @@ async def update_driver(
     """
     # Fetch existing driver
     result = await db.execute(
-        select(Driver).where(Driver.id == driver_id)
+        select(Driver)
+        .where(Driver.id == driver_id)
+        .where(Driver.organization_id == auth.organization_id)
     )
     driver = result.scalar_one_or_none()
 
@@ -210,6 +223,7 @@ async def update_driver(
 )
 async def delete_driver(
     driver_id: UUID,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -218,7 +232,9 @@ async def delete_driver(
     This will also delete all associated routes.
     """
     result = await db.execute(
-        select(Driver).where(Driver.id == driver_id)
+        select(Driver)
+        .where(Driver.id == driver_id)
+        .where(Driver.organization_id == auth.organization_id)
     )
     driver = result.scalar_one_or_none()
 

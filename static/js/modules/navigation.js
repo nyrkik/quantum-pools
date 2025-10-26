@@ -1,7 +1,7 @@
 // RouteOptimizer - Navigation Module
 //
 // Handles module switching, sidebar navigation, and hash-based routing
-// Dependencies: map global, loadCustomersManagement(), loadDrivers() from app.js
+// Dependencies: map global, loadCustomersManagement(), loadTechs() from app.js
 
 /**
  * Initializes module navigation system
@@ -91,9 +91,9 @@ function switchModule(moduleName) {
         }
 
         // Load module-specific data
-        if (moduleName === 'team' && !document.getElementById('drivers-list').dataset.loaded) {
-            loadDrivers();
-            document.getElementById('drivers-list').dataset.loaded = 'true';
+        if (moduleName === 'team' && !document.getElementById('techs-list').dataset.loaded) {
+            loadTechs();
+            document.getElementById('techs-list').dataset.loaded = 'true';
         }
 
         if (moduleName === 'clients' && !document.getElementById('customers-list').dataset.loaded) {

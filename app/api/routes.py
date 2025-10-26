@@ -11,8 +11,9 @@ from typing import Optional
 from uuid import UUID
 
 from app.database import get_db
+from app.dependencies.auth import get_current_user, AuthContext
 from app.models.customer import Customer
-from app.models.driver import Driver
+from app.models.tech import Tech
 from app.models.route import Route, RouteStop
 from app.schemas.route import (
     RouteOptimizationRequest,
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/api/routes", tags=["routes"])
 )
 async def optimize_routes(
     request: RouteOptimizationRequest,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -46,16 +48,18 @@ async def optimize_routes(
     The optimizer considers:
     - Distance between locations
     - Service duration (based on type and difficulty)
-    - Driver working hours
+    - Tech working hours
     - Time windows (if specified)
     - Locked service days
     """
-    # Get active customers
-    customer_query = select(Customer).where(Customer.is_active == True)
+    # Get active customers for this organization
+    customer_query = select(Customer)\
+        .where(Customer.organization_id == auth.organization_id)\
+        .where(Customer.is_active == True)
 
     # For refine mode, only include customers with assigned drivers
     if request.optimization_mode == "refine":
-        customer_query = customer_query.where(Customer.assigned_driver_id.isnot(None))
+        customer_query = customer_query.where(Customer.assigned_tech_id.isnot(None))
 
     if request.service_day and not request.allow_day_reassignment:
         # Map day name to abbreviation for schedule checking
@@ -89,8 +93,10 @@ async def optimize_routes(
     customer_result = await db.execute(customer_query)
     customers = list(customer_result.scalars().all())
 
-    # Get active drivers
-    driver_query = select(Driver).where(Driver.is_active == True)
+    # Get active drivers for this organization
+    driver_query = select(Tech)\
+        .where(Tech.organization_id == auth.organization_id)\
+        .where(Tech.is_active == True)
     if request.num_drivers:
         driver_query = driver_query.limit(request.num_drivers)
 
@@ -128,6 +134,7 @@ async def optimize_routes(
 )
 async def save_routes(
     request: RouteSaveRequest,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -137,17 +144,40 @@ async def save_routes(
     - Delete existing routes for the service day
     - Create new routes with stops in optimized order
     """
-    # Delete existing routes for this service day
-    await db.execute(
-        delete(Route).where(Route.service_day == request.service_day.lower())
+    # Verify all drivers belong to this organization
+    tech_ids = [UUID(route["tech_id"]) for route in request.routes]
+    if tech_ids:
+        driver_check = await db.execute(
+            select(Tech)
+            .where(Tech.id.in_(tech_ids))
+            .where(Tech.organization_id == auth.organization_id)
+        )
+        valid_drivers = {str(d.id) for d in driver_check.scalars().all()}
+
+        for route in request.routes:
+            if route["tech_id"] not in valid_drivers:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Tech {route['tech_id']} not found or does not belong to your organization"
+                )
+
+    # Delete existing routes for this service day and organization
+    # Must filter through driver's organization
+    existing_routes = await db.execute(
+        select(Route)
+        .join(Tech)
+        .where(Route.service_day == request.service_day.lower())
+        .where(Tech.organization_id == auth.organization_id)
     )
+    for route in existing_routes.scalars().all():
+        await db.delete(route)
 
     saved_routes = []
 
     for route_data in request.routes:
         # Create route
         route = Route(
-            driver_id=UUID(route_data["driver_id"]),
+            tech_id=UUID(route_data["tech_id"]),
             service_day=request.service_day.lower(),
             total_duration_minutes=route_data.get("total_duration_minutes"),
             total_distance_miles=route_data.get("total_distance_miles"),
@@ -185,6 +215,7 @@ async def save_routes(
 )
 async def get_routes_by_day(
     service_day: str,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -192,7 +223,9 @@ async def get_routes_by_day(
     """
     result = await db.execute(
         select(Route)
+        .join(Tech)
         .where(Route.service_day == service_day.lower())
+        .where(Tech.organization_id == auth.organization_id)
         .order_by(Route.created_at.desc())
     )
     routes = result.scalars().all()
@@ -207,14 +240,24 @@ async def get_routes_by_day(
 )
 async def delete_routes_by_day(
     service_day: str,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Delete all routes for a specific service day.
     """
-    await db.execute(
-        delete(Route).where(Route.service_day == service_day.lower())
+    # Get routes for this day that belong to this organization's drivers
+    routes_to_delete = await db.execute(
+        select(Route)
+        .join(Tech)
+        .where(Route.service_day == service_day.lower())
+        .where(Tech.organization_id == auth.organization_id)
     )
+
+    # Delete each route
+    for route in routes_to_delete.scalars().all():
+        await db.delete(route)
+
     await db.commit()
 
 
@@ -224,14 +267,18 @@ async def delete_routes_by_day(
 )
 async def get_route_details(
     route_id: UUID,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get detailed information about a route including all stops.
     """
-    # Get route
+    # Get route and verify organization ownership through driver
     route_result = await db.execute(
-        select(Route).where(Route.id == route_id)
+        select(Route)
+        .join(Tech)
+        .where(Route.id == route_id)
+        .where(Tech.organization_id == auth.organization_id)
     )
     route = route_result.scalar_one_or_none()
 
@@ -263,7 +310,7 @@ async def get_route_details(
 
     return {
         "route_id": str(route.id),
-        "driver_id": str(route.driver_id),
+        "tech_id": str(route.tech_id),
         "service_day": route.service_day,
         "total_customers": route.total_customers,
         "total_distance_miles": route.total_distance_miles,
@@ -279,19 +326,23 @@ async def get_route_details(
 )
 async def download_route_pdf(
     route_id: UUID,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Generate and download a printable PDF route sheet for a single route.
 
     The PDF includes:
-    - Driver information
+    - Tech information
     - Route summary (total stops, distance, time)
     - Detailed stop list with addresses and service times
     """
-    # Get route
+    # Get route and verify organization ownership through driver
     route_result = await db.execute(
-        select(Route).where(Route.id == route_id)
+        select(Route)
+        .join(Tech)
+        .where(Route.id == route_id)
+        .where(Tech.organization_id == auth.organization_id)
     )
     route = route_result.scalar_one_or_none()
 
@@ -303,14 +354,14 @@ async def download_route_pdf(
 
     # Get driver info
     driver_result = await db.execute(
-        select(Driver).where(Driver.id == route.driver_id)
+        select(Tech).where(Tech.id == route.tech_id)
     )
     driver = driver_result.scalar_one_or_none()
 
     if not driver:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Driver not found for route {route_id}"
+            detail=f"Tech not found for route {route_id}"
         )
 
     # Get stops with customer info
@@ -344,14 +395,14 @@ async def download_route_pdf(
     }
 
     driver_info = {
-        "name": driver.name
+        "name": tech.name
     }
 
     # Generate PDF
     pdf_buffer = pdf_export_service.generate_route_sheet(route_data, driver_info)
 
     # Return as downloadable file
-    filename = f"route_{driver.name.replace(' ', '_')}_{route.service_day}.pdf"
+    filename = f"route_{tech.name.replace(' ', '_')}_{route.service_day}.pdf"
 
     return StreamingResponse(
         pdf_buffer,
@@ -368,6 +419,7 @@ async def download_route_pdf(
 )
 async def download_day_routes_pdf(
     service_day: str,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -375,10 +427,12 @@ async def download_day_routes_pdf(
 
     Each route gets its own page with complete route information.
     """
-    # Get all routes for this day
+    # Get all routes for this day that belong to this organization's drivers
     routes_result = await db.execute(
         select(Route)
+        .join(Tech)
         .where(Route.service_day == service_day.lower())
+        .where(Tech.organization_id == auth.organization_id)
         .order_by(Route.created_at.desc())
     )
     routes = list(routes_result.scalars().all())
@@ -390,12 +444,12 @@ async def download_day_routes_pdf(
         )
 
     # Get all drivers for these routes
-    driver_ids = [route.driver_id for route in routes]
+    tech_ids = [route.tech_id for route in routes]
     drivers_result = await db.execute(
-        select(Driver).where(Driver.id.in_(driver_ids))
+        select(Tech).where(Tech.id.in_(tech_ids))
     )
     drivers_list = drivers_result.scalars().all()
-    drivers_dict = {str(driver.id): {"name": driver.name} for driver in drivers_list}
+    drivers_dict = {str(tech.id): {"name": tech.name} for driver in drivers_list}
 
     # Build route data for each route
     routes_data = []
@@ -422,7 +476,7 @@ async def download_day_routes_pdf(
             })
 
         routes_data.append({
-            "driver_id": str(route.driver_id),
+            "tech_id": str(route.tech_id),
             "service_day": route.service_day,
             "total_customers": route.total_customers,
             "total_distance_miles": route.total_distance_miles,
@@ -452,6 +506,7 @@ async def download_day_routes_pdf(
 async def update_route_stops(
     route_id: UUID,
     stops_update: dict,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -466,9 +521,12 @@ async def update_route_stops(
         ]
     }
     """
-    # Get route
+    # Get route and verify organization ownership through driver
     route_result = await db.execute(
-        select(Route).where(Route.id == route_id)
+        select(Route)
+        .join(Tech)
+        .where(Route.id == route_id)
+        .where(Tech.organization_id == auth.organization_id)
     )
     route = route_result.scalar_one_or_none()
 
@@ -517,6 +575,7 @@ async def move_stop_to_route(
     route_id: UUID,
     stop_id: UUID,
     move_data: dict,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -543,9 +602,12 @@ async def move_stop_to_route(
             detail=f"Stop with ID {stop_id} not found"
         )
 
-    # Get target route
+    # Get target route and verify organization ownership
     target_route_result = await db.execute(
-        select(Route).where(Route.id == target_route_id)
+        select(Route)
+        .join(Tech)
+        .where(Route.id == target_route_id)
+        .where(Tech.organization_id == auth.organization_id)
     )
     target_route = target_route_result.scalar_one_or_none()
 
@@ -555,11 +617,20 @@ async def move_stop_to_route(
             detail=f"Target route with ID {target_route_id} not found"
         )
 
-    # Get source route
+    # Get source route and verify organization ownership
     source_route_result = await db.execute(
-        select(Route).where(Route.id == stop.route_id)
+        select(Route)
+        .join(Tech)
+        .where(Route.id == stop.route_id)
+        .where(Tech.organization_id == auth.organization_id)
     )
     source_route = source_route_result.scalar_one_or_none()
+
+    if not source_route:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Source route does not belong to your organization"
+        )
 
     # Update stop's route and sequence
     old_route_id = stop.route_id

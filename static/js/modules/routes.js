@@ -1,7 +1,7 @@
 // RouteOptimizer - Routes Module
 //
 // Handles route optimization, display, saving, and drag-and-drop editing
-// Dependencies: API_BASE, selectedDay, currentRouteResult, draggedStop, draggedStopRoute, selectedDriverIds, map global, displayRoutesOnMap() from map.js, loadCustomers(), loadCustomersManagement()
+// Dependencies: API_BASE, selectedDay, currentRouteResult, draggedStop, draggedStopRoute, selectedTechIds, map global, displayRoutesOnMap() from map.js, loadCustomers(), loadCustomersManagement()
 
 function initDaySelector() {
     // Get current day of week
@@ -31,7 +31,7 @@ function initDaySelector() {
 }
 
 async function optimizeRoutes() {
-    const numDrivers = parseInt(document.getElementById('num-drivers').value);
+    const numTechs = parseInt(document.getElementById('num-techs').value);
     const allowReassignment = document.getElementById('allow-reassignment').checked;
     const optimizationMode = document.querySelector('input[name="optimization-mode"]:checked').value;
 
@@ -41,13 +41,13 @@ async function optimizeRoutes() {
 
     try {
         const requestBody = {
-            num_drivers: numDrivers || null,
+            num_drivers: numTechs || null,
             service_day: selectedDay === 'all' ? null : selectedDay,
             allow_day_reassignment: allowReassignment,
             optimization_mode: optimizationMode
         };
 
-        const response = await fetch(`${API_BASE}/api/routes/optimize`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/optimize`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -68,7 +68,7 @@ async function optimizeRoutes() {
             displayRoutesOnMap(result.routes);
         } else {
             currentRouteResult = null;
-            alert(result.message || 'No routes generated. Add customers and drivers first.');
+            alert(result.message || 'No routes generated. Add customers and techs first.');
         }
     } catch (error) {
         console.error('Error optimizing routes:', error);
@@ -111,15 +111,15 @@ function displayRoutes(result) {
         container.appendChild(summary);
     }
 
-    // Filter and show routes based on selected drivers
+    // Filter and show routes based on selected techs
     const filteredRoutes = result.routes.filter(route => {
-        if (selectedDriverIds.size === 0) return false;
-        if (route.driver_id && !selectedDriverIds.has(route.driver_id)) return false;
+        if (selectedTechIds.size === 0) return false;
+        if (route.tech_id && !selectedTechIds.has(route.tech_id)) return false;
         return true;
     });
 
     if (filteredRoutes.length === 0) {
-        container.innerHTML += '<p class="placeholder">No routes for selected drivers</p>';
+        container.innerHTML += '<p class="placeholder">No routes for selected techs</p>';
         return;
     }
 
@@ -164,7 +164,7 @@ async function saveRoutes(result) {
     const serviceDay = result.routes[0].service_day;
 
     try {
-        const response = await fetch(`${API_BASE}/api/routes/save`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/save`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -192,7 +192,7 @@ async function saveRoutes(result) {
 
 async function loadSavedRoutes(serviceDay) {
     try {
-        const response = await fetch(`${API_BASE}/api/routes/day/${serviceDay}`);
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/day/${serviceDay}`);
 
         if (!response.ok) {
             console.error('No saved routes found');
@@ -268,7 +268,7 @@ function makeSavedRoutesEditable(routes) {
 
     routes.forEach(async (route) => {
         // Get route details with stops
-        const response = await fetch(`${API_BASE}/api/routes/${route.id}`);
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/${route.id}`);
         const routeDetails = await response.json();
 
         const routeCard = document.createElement('div');
@@ -424,7 +424,7 @@ async function updateStopSequences(routeId, stopsList) {
     });
 
     try {
-        const response = await fetch(`${API_BASE}/api/routes/${routeId}/stops`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/${routeId}/stops`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json'
@@ -443,7 +443,7 @@ async function updateStopSequences(routeId, stopsList) {
 
 async function moveStopToRoute(stopId, sourceRouteId, targetRouteId, sequence) {
     try {
-        const response = await fetch(`${API_BASE}/api/routes/${sourceRouteId}/stops/${stopId}/move`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/${sourceRouteId}/stops/${stopId}/move`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

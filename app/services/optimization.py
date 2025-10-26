@@ -11,7 +11,7 @@ import logging
 import math
 
 from app.models.customer import Customer
-from app.models.driver import Driver
+from app.models.tech import Tech
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -145,55 +145,55 @@ class RouteOptimizationService:
     async def _optimize_refine_mode(
         self,
         customers: List[Customer],
-        drivers: List[Driver],
+        techs: List[Tech],
         service_day: Optional[str] = None
     ) -> Dict:
         """
-        Optimize routes in refine mode - keeps driver assignments, only optimizes order.
+        Optimize routes in refine mode - keeps tech assignments, only optimizes order.
 
         Args:
-            customers: List of customers (already filtered to have assigned drivers)
-            drivers: List of available drivers
+            customers: List of customers (already filtered to have assigned techs)
+            techs: List of available techs
             service_day: Specific day to optimize
 
         Returns:
-            Dict with optimized routes per driver
+            Dict with optimized routes per tech
         """
-        # Group customers by assigned driver
-        driver_customers_map = {}
+        # Group customers by assigned tech
+        tech_customers_map = {}
         for customer in customers:
-            if customer.assigned_driver_id:
-                if customer.assigned_driver_id not in driver_customers_map:
-                    driver_customers_map[customer.assigned_driver_id] = []
-                driver_customers_map[customer.assigned_driver_id].append(customer)
+            if customer.assigned_tech_id:
+                if customer.assigned_tech_id not in tech_customers_map:
+                    tech_customers_map[customer.assigned_tech_id] = []
+                tech_customers_map[customer.assigned_tech_id].append(customer)
 
-        # Create driver lookup
-        driver_lookup = {driver.id: driver for driver in drivers}
+        # Create tech lookup
+        tech_lookup = {tech.id: tech for tech in techs}
 
-        # Optimize each driver's route separately
+        # Optimize each tech's route separately
         all_routes = []
         total_distance = 0
         total_duration = 0
         total_customers = 0
 
-        for driver_id, driver_customers in driver_customers_map.items():
-            driver = driver_lookup.get(driver_id)
-            if not driver:
+        for tech_id, tech_customers in tech_customers_map.items():
+            tech = tech_lookup.get(tech_id)
+            if not tech:
                 continue
 
             # Filter customers by service day if needed
             if service_day:
-                driver_customers = [
-                    c for c in driver_customers
+                tech_customers = [
+                    c for c in tech_customers
                     if self._customer_services_on_day(c, service_day)
                 ]
 
-            if not driver_customers:
+            if not tech_customers:
                 continue
 
             # Filter out customers without coordinates
             valid_customers = [
-                c for c in driver_customers
+                c for c in tech_customers
                 if c.latitude and c.longitude
             ]
 
@@ -201,7 +201,7 @@ class RouteOptimizationService:
                 continue
 
             # Build locations: [depot, customer1, customer2, ...]
-            depot_location = (driver.start_latitude, driver.start_longitude)
+            depot_location = (tech.start_latitude, tech.start_longitude)
             locations = [depot_location]
 
             for customer in valid_customers:
@@ -211,10 +211,10 @@ class RouteOptimizationService:
             distance_matrix = self._create_distance_matrix(locations)
             time_matrix = self._create_time_matrix(distance_matrix)
 
-            # Create routing model for single driver
+            # Create routing model for single tech
             manager = pywrapcp.RoutingIndexManager(
                 len(locations),
-                1,  # Single driver
+                1,  # Single tech
                 0   # Depot index
             )
             routing = pywrapcp.RoutingModel(manager)
@@ -297,9 +297,9 @@ class RouteOptimizationService:
 
                 if route_customers:
                     all_routes.append({
-                        "driver_id": str(driver.id),
-                        "driver_name": driver.name,
-                        "driver_color": driver.color if hasattr(driver, 'color') else '#3498db',
+                        "tech_id": str(tech.id),
+                        "tech_name": tech.name,
+                        "tech_color": tech.color if hasattr(tech, 'color') else '#3498db',
                         "service_day": service_day or "multiple",
                         "stops": route_customers,
                         "total_customers": len(route_customers),
@@ -326,34 +326,34 @@ class RouteOptimizationService:
     async def optimize_routes(
         self,
         customers: List[Customer],
-        drivers: List[Driver],
+        techs: List[Tech],
         service_day: Optional[str] = None,
         allow_day_reassignment: bool = False,
         optimization_mode: str = "full"
     ) -> Dict:
         """
-        Optimize routes for given customers and drivers.
+        Optimize routes for given customers and techs.
 
         Args:
             customers: List of customers to route
-            drivers: List of available drivers
+            techs: List of available techs
             service_day: Specific day to optimize (or None for all)
             allow_day_reassignment: If True, can move customers to different days
-            optimization_mode: 'refine' keeps driver assignments, 'full' allows reassignment
+            optimization_mode: 'refine' keeps tech assignments, 'full' allows reassignment
 
         Returns:
-            Dict with optimized routes per driver
+            Dict with optimized routes per tech
         """
         if not customers:
             return {"routes": [], "message": "No customers to optimize"}
 
-        if not drivers:
-            return {"routes": [], "message": "No drivers available"}
+        if not techs:
+            return {"routes": [], "message": "No techs available"}
 
-        # Handle refine mode: optimize each driver's assigned customers separately
+        # Handle refine mode: optimize each tech's assigned customers separately
         if optimization_mode == "refine":
             return await self._optimize_refine_mode(
-                customers, drivers, service_day
+                customers, techs, service_day
             )
 
         # If no specific day selected, handle based on reassignment setting
@@ -389,7 +389,7 @@ class RouteOptimizationService:
                     logger.info(f"Optimizing {len(day_customers)} customers for {day}")
 
                     day_result = await self._optimize_single_day(
-                        day_customers, drivers, day
+                        day_customers, techs, day
                     )
 
                     if day_result and "routes" in day_result:
@@ -426,15 +426,15 @@ class RouteOptimizationService:
 
         logger.info(
             f"Optimizing routes for {len(valid_customers)} customers "
-            f"and {len(drivers)} drivers"
+            f"and {len(techs)} techs"
         )
 
-        return await self._optimize_single_day(valid_customers, drivers, service_day)
+        return await self._optimize_single_day(valid_customers, techs, service_day)
 
     async def _optimize_single_day(
         self,
         customers: List[Customer],
-        drivers: List[Driver],
+        techs: List[Tech],
         service_day: Optional[str] = None
     ) -> Dict:
         """
@@ -442,7 +442,7 @@ class RouteOptimizationService:
 
         Args:
             customers: List of customers to route (already filtered)
-            drivers: List of available drivers
+            techs: List of available techs
             service_day: Day being optimized
 
         Returns:
@@ -458,8 +458,8 @@ class RouteOptimizationService:
             }
 
         # Build locations list: [depot, customer1, customer2, ..., customerN]
-        # For simplicity, use first driver's start location as depot
-        depot_location = (drivers[0].start_latitude, drivers[0].start_longitude)
+        # For simplicity, use first tech's start location as depot
+        depot_location = (techs[0].start_latitude, techs[0].start_longitude)
 
         locations = [depot_location]  # Index 0 = depot
         customer_indices = {}  # Map customer to location index
@@ -475,7 +475,7 @@ class RouteOptimizationService:
         # Create routing model
         manager = pywrapcp.RoutingIndexManager(
             len(locations),
-            len(drivers),
+            len(techs),
             0  # Depot index
         )
         routing = pywrapcp.RoutingModel(manager)
@@ -535,8 +535,8 @@ class RouteOptimizationService:
         total_distance = 0
         total_duration = 0
 
-        for vehicle_id in range(len(drivers)):
-            driver = drivers[vehicle_id]
+        for vehicle_id in range(len(techs)):
+            tech = techs[vehicle_id]
             route_customers = []
             route_distance = 0
             route_duration = 0
@@ -578,9 +578,9 @@ class RouteOptimizationService:
 
             if route_customers:  # Only include routes with customers
                 routes.append({
-                    "driver_id": str(driver.id),
-                    "driver_name": driver.name,
-                    "driver_color": driver.color if hasattr(driver, 'color') else '#3498db',
+                    "tech_id": str(tech.id),
+                    "tech_name": tech.name,
+                    "tech_color": tech.color if hasattr(tech, 'color') else '#3498db',
                     "service_day": service_day or "multiple",
                     "stops": route_customers,
                     "total_customers": len(route_customers),

@@ -3,7 +3,7 @@ Customer database model.
 Stores customer information including address, service preferences, and constraints.
 """
 
-from sqlalchemy import Column, String, Float, Integer, Time, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, String, Float, Integer, Time, DateTime, Boolean, ForeignKey, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -19,6 +19,15 @@ class Customer(Base):
 
     # Primary key
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+    # Multi-tenancy
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('organizations.id'),
+        nullable=False,
+        index=True,
+        comment="Organization this customer belongs to"
+    )
 
     # Basic information
     name = Column(String(200), nullable=True, comment="Business name (for commercial) or full name (legacy)")
@@ -40,13 +49,16 @@ class Customer(Base):
     # Geocoded location (populated by geocoding service)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
+    geocoding_provider = Column(String(50), nullable=True, comment="Provider used for geocoding")
+    geocoded_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True, comment="User who geocoded")
+    geocoded_at = Column(DateTime, nullable=True, comment="When geocoding occurred")
 
-    # Assigned driver/technician
-    assigned_driver_id = Column(
+    # Assigned tech/technician
+    assigned_tech_id = Column(
         UUID(as_uuid=True),
-        ForeignKey('drivers.id'),
+        ForeignKey('techs.id'),
         nullable=True,
-        comment="Driver assigned to service this customer"
+        comment="Tech assigned to service this customer"
     )
 
     # Service configuration
@@ -106,8 +118,55 @@ class Customer(Base):
         comment="Latest time customer can be serviced"
     )
 
+    # Billing and payment information
+    service_rate = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Service rate amount (e.g., 125.00 for $125)"
+    )
+    billing_frequency = Column(
+        String(20),
+        nullable=True,
+        comment="Billing frequency: weekly, monthly, per-visit"
+    )
+    rate_notes = Column(
+        String(500),
+        nullable=True,
+        comment="Special pricing notes or agreements"
+    )
+
+    # Payment method information
+    # IMPORTANT: Never store raw credit card or ACH data for PCI compliance
+    # Use Stripe for secure payment processing and storage
+    payment_method_type = Column(
+        String(20),
+        nullable=True,
+        comment="Payment method: credit_card, ach, check, cash"
+    )
+    stripe_customer_id = Column(
+        String(100),
+        nullable=True,
+        comment="Stripe customer ID for payment processing"
+    )
+    stripe_payment_method_id = Column(
+        String(100),
+        nullable=True,
+        comment="Stripe payment method ID"
+    )
+    payment_last_four = Column(
+        String(4),
+        nullable=True,
+        comment="Last 4 digits of card/account for display only"
+    )
+    payment_brand = Column(
+        String(50),
+        nullable=True,
+        comment="Card brand (Visa, Mastercard, etc.) or bank name"
+    )
+
     # Metadata
     notes = Column(String(1000), nullable=True)
+    status = Column(String(20), nullable=False, default='active', comment="Customer status: pending, active, inactive")
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
@@ -118,9 +177,10 @@ class Customer(Base):
     )
 
     # Relationships
-    assigned_driver = relationship(
-        "Driver",
-        foreign_keys=[assigned_driver_id]
+    organization = relationship("Organization", back_populates="customers")
+    assigned_tech = relationship(
+        "Tech",
+        foreign_keys=[assigned_tech_id]
     )
     route_stops = relationship(
         "RouteStop",

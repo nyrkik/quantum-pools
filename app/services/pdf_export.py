@@ -1,6 +1,6 @@
 """
 PDF export service for generating printable route sheets.
-Uses ReportLab to create professional route documents for drivers.
+Uses ReportLab to create professional route documents for techs.
 """
 
 from reportlab.lib import colors
@@ -54,14 +54,14 @@ class PDFExportService:
     def generate_route_sheet(
         self,
         route_data: Dict,
-        driver_info: Dict
+        tech_info: Dict
     ) -> BytesIO:
         """
         Generate a PDF route sheet for a single route.
 
         Args:
             route_data: Route information with stops
-            driver_info: Driver information
+            tech_info: Tech information
 
         Returns:
             BytesIO buffer containing the PDF
@@ -83,9 +83,9 @@ class PDFExportService:
         story.append(title)
         story.append(Spacer(1, 0.2*inch))
 
-        # Driver and route information
+        # Tech and route information
         info_data = [
-            ['Driver:', driver_info.get('name', 'N/A')],
+            ['Tech:', tech_info.get('name', 'N/A')],
             ['Service Day:', route_data.get('service_day', 'N/A').title()],
             ['Date:', datetime.now().strftime('%B %d, %Y')],
             ['Total Stops:', str(route_data.get('total_customers', 0))],
@@ -178,14 +178,14 @@ class PDFExportService:
     def generate_multi_route_pdf(
         self,
         routes: List[Dict],
-        drivers: Dict[str, Dict]
+        techs: Dict[str, Dict]
     ) -> BytesIO:
         """
         Generate a PDF with multiple routes (one page per route).
 
         Args:
             routes: List of route data
-            drivers: Dictionary mapping driver_id to driver info
+            techs: Dictionary mapping tech_id to tech info
 
         Returns:
             BytesIO buffer containing the PDF
@@ -203,11 +203,11 @@ class PDFExportService:
         story = []
 
         for idx, route in enumerate(routes):
-            driver_id = route.get('driver_id', '')
-            driver_info = drivers.get(driver_id, {'name': 'Unknown Driver'})
+            tech_id = route.get('tech_id', '')
+            tech_info = techs.get(tech_id, {'name': 'Unknown Tech'})
 
             # Generate route page
-            route_story = self._build_route_page(route, driver_info)
+            route_story = self._build_route_page(route, tech_info)
             story.extend(route_story)
 
             # Add page break between routes (except last one)
@@ -219,7 +219,7 @@ class PDFExportService:
         buffer.seek(0)
         return buffer
 
-    def _build_route_page(self, route_data: Dict, driver_info: Dict) -> List:
+    def _build_route_page(self, route_data: Dict, tech_info: Dict) -> List:
         """Build story elements for a single route page."""
         story = []
 
@@ -228,9 +228,9 @@ class PDFExportService:
         story.append(title)
         story.append(Spacer(1, 0.2*inch))
 
-        # Driver and route information
+        # Tech and route information
         info_data = [
-            ['Driver:', driver_info.get('name', 'N/A')],
+            ['Tech:', tech_info.get('name', 'N/A')],
             ['Service Day:', route_data.get('service_day', 'N/A').title()],
             ['Date:', datetime.now().strftime('%B %d, %Y')],
             ['Total Stops:', str(route_data.get('total_customers', 0))],

@@ -16,7 +16,7 @@ async function loadCustomersManagement() {
         // Load ALL customers for the Clients page (no day filtering)
         const url = `${API_BASE}/api/customers?page_size=1000`;
 
-        const response = await fetch(url);
+        const response = await Auth.apiRequest(url);
         if (!response.ok) {
             console.error('Failed to load customers:', response.status);
             displayCustomersManagement([]);
@@ -33,9 +33,11 @@ async function loadCustomersManagement() {
 
 function displayCustomersManagement(customers) {
     const container = document.getElementById('customers-list');
+    const profilePane = document.getElementById('tab-profile');
 
     if (!customers || customers.length === 0) {
         container.innerHTML = '<p class="placeholder">No customers found. Add a customer to get started.</p>';
+        profilePane.innerHTML = '<div class="empty-state"><p>Add a client to view details</p></div>';
         return;
     }
 
@@ -44,6 +46,7 @@ function displayCustomersManagement(customers) {
         const listItem = document.createElement('div');
         listItem.className = 'client-list-item';
         listItem.dataset.customerId = customer.id;
+        listItem.dataset.serviceType = customer.service_type;
 
         // Use display_name if available, fallback to name
         const displayName = customer.display_name || customer.name;
@@ -72,6 +75,23 @@ function displayCustomersManagement(customers) {
 
         container.appendChild(listItem);
     });
+
+    // Auto-select first customer
+    const firstItem = container.querySelector('.client-list-item');
+    if (firstItem) {
+        firstItem.click();
+    }
+}
+
+function formatAddress(address) {
+    if (!address) return 'N/A';
+    const parts = address.split(',').map(p => p.trim());
+    if (parts.length >= 3) {
+        const street = parts[0];
+        const cityStateZip = parts.slice(1).join(', ');
+        return `${street}<br>${cityStateZip}`;
+    }
+    return address;
 }
 
 function displayClientProfile(customer) {
@@ -106,7 +126,7 @@ function displayClientProfile(customer) {
                     </div>
                     <div class="profile-field">
                         <label>Address</label>
-                        <p>${customer.address || 'N/A'}</p>
+                        <p>${formatAddress(customer.address)}</p>
                     </div>
                     <div class="profile-field">
                         <label>Email</label>
@@ -140,7 +160,7 @@ function displayClientProfile(customer) {
                     </div>
                     <div class="profile-field">
                         <label>Assigned Tech</label>
-                        <p>${customer.assigned_driver_name || 'Unassigned'}</p>
+                        <p>${customer.assigned_tech_name || 'Unassigned'}</p>
                     </div>
                     <div class="profile-field">
                         <label>Service Day Locked</label>
@@ -155,7 +175,7 @@ function displayClientProfile(customer) {
 async function editCustomer(customerId) {
     // Fetch customer data first
     try {
-        const response = await fetch(`${API_BASE}/api/customers/${customerId}`);
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/${customerId}`);
         if (!response.ok) {
             throw new Error('Failed to fetch customer');
         }
@@ -238,7 +258,7 @@ async function saveCustomer() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/api/customers/`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -274,7 +294,7 @@ async function deleteCustomer(customerId) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/api/customers/${customerId}`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/${customerId}`, {
             method: 'DELETE'
         });
 
@@ -301,24 +321,24 @@ async function showEditCustomerForm(customer) {
         console.log('showEditCustomerForm called with:', customer);
         const container = document.getElementById('tab-profile');
 
-        // Fetch drivers for the dropdown
+        // Fetch techs for the dropdown
         let driversOptions = '<option value="">None</option>';
         try {
-            const driversResponse = await fetch(`${API_BASE}/api/drivers/`);
+            const driversResponse = await Auth.apiRequest(`${API_BASE}/api/techs/`);
             if (driversResponse.ok) {
                 const driversData = await driversResponse.json();
-                driversOptions += driversData.drivers.map(driver =>
-                    `<option value="${escapeHtml(driver.id)}" ${customer.assigned_driver_id === driver.id ? 'selected' : ''}>${escapeHtml(driver.name)}</option>`
+                driversOptions += driversData.techs.map(tech =>
+                    `<option value="${escapeHtml(tech.id)}" ${customer.assigned_tech_id === tech.id ? 'selected' : ''}>${escapeHtml(tech.name)}</option>`
                 ).join('');
             }
         } catch (error) {
-            console.error('Error loading drivers:', error);
+            console.error('Error loading techs:', error);
         }
 
         // Fetch management companies for the datalist
         let managementCompaniesOptions = '';
         try {
-            const companiesResponse = await fetch(`${API_BASE}/api/customers/management-companies`);
+            const companiesResponse = await Auth.apiRequest(`${API_BASE}/api/customers/management-companies`);
             if (companiesResponse.ok) {
                 const companies = await companiesResponse.json();
                 managementCompaniesOptions = companies.map(company =>
@@ -343,12 +363,6 @@ async function showEditCustomerForm(customer) {
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <i class="fas ${serviceIcon} profile-icon"></i>
                 <h3>${displayName}</h3>
-                <div class="control-group" style="margin-bottom: 0;">
-                    <select id="edit-customer-service-type" onchange="toggleNameFields(); detectFormChanges();">
-                        <option value="residential" ${customer.service_type === 'residential' ? 'selected' : ''}>Residential</option>
-                        <option value="commercial" ${customer.service_type === 'commercial' ? 'selected' : ''}>Commercial</option>
-                    </select>
-                </div>
             </div>
             <div class="form-actions">
                 <button id="update-customer-btn" class="btn-icon btn-icon-primary" onclick="updateCustomer('${customer.id}')" disabled title="Save Changes">
@@ -454,8 +468,23 @@ async function showEditCustomerForm(customer) {
                 <h4>Service</h4>
                 <div class="form-row">
                     <div class="control-group control-group-medium">
+                        <label>Type:</label>
+                        <select id="edit-customer-service-type" onchange="toggleNameFields(); detectFormChanges();">
+                            <option value="residential" ${customer.service_type === 'residential' ? 'selected' : ''}>Residential</option>
+                            <option value="commercial" ${customer.service_type === 'commercial' ? 'selected' : ''}>Commercial</option>
+                        </select>
+                    </div>
+                    <div class="control-group control-group-medium">
+                        <label>Status:</label>
+                        <select id="edit-customer-status" onchange="detectFormChanges();">
+                            <option value="pending" ${customer.status === 'pending' ? 'selected' : ''}>Pending</option>
+                            <option value="active" ${customer.status === 'active' ? 'selected' : ''}>Active</option>
+                            <option value="inactive" ${customer.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+                        </select>
+                    </div>
+                    <div class="control-group control-group-medium">
                         <label>Days Per Week:</label>
-                        <select id="edit-customer-days-per-week" onchange="updateServiceDayOptions(); detectFormChanges();">
+                        <select id="edit-customer-days-per-week" onchange="updateCustomerServiceDayOptions(); detectFormChanges();">
                             <option value="1" ${customer.service_days_per_week === 1 ? 'selected' : ''}>1 day</option>
                             <option value="2" ${customer.service_days_per_week === 2 ? 'selected' : ''}>2 days</option>
                             <option value="3" ${customer.service_days_per_week === 3 ? 'selected' : ''}>3 days</option>
@@ -476,7 +505,7 @@ async function showEditCustomerForm(customer) {
                 <div class="form-row" style="margin-top: 1rem;">
                     <div class="control-group" style="flex: 1;">
                         <label>Assigned Tech:</label>
-                        <select id="edit-customer-assigned-driver" onchange="detectFormChanges()">
+                        <select id="edit-customer-assigned-tech" onchange="detectFormChanges()">
                             ${driversOptions}
                         </select>
                     </div>
@@ -506,8 +535,8 @@ async function showEditCustomerForm(customer) {
                 }
 
                 // Initialize service day options based on current days per week
-                console.log('Calling updateServiceDayOptions with:', customer.service_day, customer.service_schedule);
-                updateServiceDayOptions(customer.service_day, customer.service_schedule);
+                console.log('Calling updateCustomerServiceDayOptions with:', customer.service_day, customer.service_schedule);
+                updateCustomerServiceDayOptions(customer.service_day, customer.service_schedule);
 
                 // Store original form values for change detection
                 console.log('Storing original form values');
@@ -529,6 +558,7 @@ async function showEditCustomerForm(customer) {
 function storeOriginalFormValues() {
     originalFormValues = {
         serviceType: document.getElementById('edit-customer-service-type')?.value,
+        status: document.getElementById('edit-customer-status')?.value,
         lastName: document.getElementById('edit-customer-last-name')?.value,
         firstName: document.getElementById('edit-customer-first-name')?.value,
         name: document.getElementById('edit-customer-name')?.value,
@@ -546,7 +576,7 @@ function storeOriginalFormValues() {
         daysPerWeek: document.getElementById('edit-customer-days-per-week')?.value,
         serviceDay: document.getElementById('edit-customer-service-day')?.value,
         locked: document.getElementById('edit-customer-locked')?.checked,
-        assignedDriver: document.getElementById('edit-customer-assigned-driver')?.value,
+        assignedTech: document.getElementById('edit-customer-assigned-tech')?.value,
         visitDuration: document.getElementById('edit-customer-visit-duration')?.value,
         difficulty: document.getElementById('edit-customer-difficulty')?.value
     };
@@ -555,6 +585,7 @@ function storeOriginalFormValues() {
 function detectFormChanges() {
     const currentValues = {
         serviceType: document.getElementById('edit-customer-service-type')?.value,
+        status: document.getElementById('edit-customer-status')?.value,
         lastName: document.getElementById('edit-customer-last-name')?.value,
         firstName: document.getElementById('edit-customer-first-name')?.value,
         name: document.getElementById('edit-customer-name')?.value,
@@ -572,7 +603,7 @@ function detectFormChanges() {
         daysPerWeek: document.getElementById('edit-customer-days-per-week')?.value,
         serviceDay: document.getElementById('edit-customer-service-day')?.value,
         locked: document.getElementById('edit-customer-locked')?.checked,
-        assignedDriver: document.getElementById('edit-customer-assigned-driver')?.value,
+        assignedTech: document.getElementById('edit-customer-assigned-tech')?.value,
         visitDuration: document.getElementById('edit-customer-visit-duration')?.value,
         difficulty: document.getElementById('edit-customer-difficulty')?.value
     };
@@ -596,7 +627,7 @@ function detectFormChanges() {
 async function cancelEditCustomer(customerId) {
     // Fetch the customer again and show their profile
     try {
-        const response = await fetch(`${API_BASE}/api/customers/${customerId}`);
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/${customerId}`);
         if (response.ok) {
             const customer = await response.json();
             displayClientProfile(customer);
@@ -606,8 +637,8 @@ async function cancelEditCustomer(customerId) {
     }
 }
 
-function updateServiceDayOptions(currentServiceDay = null, currentSchedule = null) {
-    console.log('updateServiceDayOptions called with:', {currentServiceDay, currentSchedule});
+function updateCustomerServiceDayOptions(currentServiceDay = null, currentSchedule = null) {
+    console.log('updateCustomerServiceDayOptions called with:', {currentServiceDay, currentSchedule});
 
     const daysPerWeekSelect = document.getElementById('edit-customer-days-per-week');
     const serviceDaySelect = document.getElementById('edit-customer-service-day');
@@ -678,6 +709,7 @@ function toggleNameFields() {
 
 async function updateCustomer(customerId) {
     const serviceType = document.getElementById('edit-customer-service-type').value;
+    const status = document.getElementById('edit-customer-status').value;
 
     // Get name fields based on service type
     let name = null;
@@ -705,7 +737,7 @@ async function updateCustomer(customerId) {
     const zip = document.getElementById('edit-customer-zip').value;
     const address = combineAddressFields(street, city, state, zip);
 
-    const assignedDriverId = document.getElementById('edit-customer-assigned-driver').value || null;
+    const assignedTechId = document.getElementById('edit-customer-assigned-tech').value || null;
     const serviceDayValue = document.getElementById('edit-customer-service-day').value;
     const daysPerWeek = parseInt(document.getElementById('edit-customer-days-per-week').value);
     const difficulty = parseInt(document.getElementById('edit-customer-difficulty').value);
@@ -750,7 +782,7 @@ async function updateCustomer(customerId) {
     const displayName = document.getElementById('edit-customer-display-name').value || null;
 
     try {
-        const response = await fetch(`${API_BASE}/api/customers/${customerId}`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/${customerId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
@@ -767,14 +799,15 @@ async function updateCustomer(customerId) {
                 alt_phone: altPhone,
                 invoice_email: invoiceEmail,
                 management_company: managementCompany,
-                assigned_driver_id: assignedDriverId,
+                assigned_tech_id: assignedTechId,
                 service_day: serviceDay,
                 service_type: serviceType,
                 service_days_per_week: daysPerWeek,
                 service_schedule: schedule,
                 difficulty: difficulty,
                 visit_duration: visitDuration,
-                locked: locked
+                locked: locked,
+                status: status
             })
         });
 
@@ -805,7 +838,7 @@ async function updateCustomer(customerId) {
 
 function attachEventListeners() {
     document.getElementById('optimize-btn').addEventListener('click', optimizeRoutes);
-    document.getElementById('add-driver-btn').addEventListener('click', showAddDriverForm);
+    document.getElementById('add-tech-btn').addEventListener('click', showAddTechForm);
     document.getElementById('add-customer-btn').addEventListener('click', showAddCustomerForm);
 
     // Bulk edit button
@@ -832,16 +865,28 @@ function initClientSearch() {
 
     searchInput.addEventListener('input', function(e) {
         const searchTerm = e.target.value.toLowerCase();
-        const customerCards = document.querySelectorAll('.customer-card');
+        const customerItems = document.querySelectorAll('.client-list-item');
 
-        customerCards.forEach(card => {
-            const text = card.textContent.toLowerCase();
+        customerItems.forEach(item => {
+            const text = item.textContent.toLowerCase();
             if (text.includes(searchTerm)) {
-                card.style.display = '';
+                item.style.display = '';
             } else {
-                card.style.display = 'none';
+                item.style.display = 'none';
             }
         });
+
+        // Auto-select first visible item after search
+        const firstVisibleItem = Array.from(customerItems).find(item => item.style.display !== 'none');
+        if (firstVisibleItem) {
+            firstVisibleItem.click();
+        } else {
+            // No visible items - show empty state
+            const profilePane = document.getElementById('tab-profile');
+            if (profilePane) {
+                profilePane.innerHTML = '<div class="empty-state"><p>No clients match your search</p></div>';
+            }
+        }
     });
 }
 
@@ -888,13 +933,13 @@ async function applyClientFilters() {
             url += `&service_day=${serviceDay}`;
         }
         if (assignedTech) {
-            url += `&assigned_driver_id=${assignedTech}`;
+            url += `&assigned_tech_id=${assignedTech}`;
         }
         if (serviceType) {
             url += `&service_type=${serviceType}`;
         }
 
-        const response = await fetch(url);
+        const response = await Auth.apiRequest(url);
         if (!response.ok) return;
 
         const data = await response.json();
@@ -906,4 +951,53 @@ async function applyClientFilters() {
     } catch (error) {
         console.error('Error applying filters:', error);
     }
+}
+
+function initQuickFilter() {
+    const filterButtons = document.querySelectorAll('.quick-filter-btn');
+    if (!filterButtons.length) return;
+
+    filterButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const filterType = this.dataset.filter;
+
+            // Update active state
+            filterButtons.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+
+            // Filter customer list items
+            const customerItems = document.querySelectorAll('.client-list-item');
+            customerItems.forEach(item => {
+                const customerId = item.dataset.customerId;
+                // Find the customer data from the stored dataset
+                const customerData = item.querySelector('.client-list-item-name');
+                if (!customerData) return;
+
+                // Show/hide based on filter
+                if (filterType === 'all') {
+                    item.style.display = '';
+                } else {
+                    // Get service type from customer data attribute (we'll need to add this)
+                    const serviceType = item.dataset.serviceType;
+                    if (serviceType === filterType) {
+                        item.style.display = '';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                }
+            });
+
+            // Auto-select first visible item
+            const firstVisibleItem = Array.from(customerItems).find(item => item.style.display !== 'none');
+            if (firstVisibleItem) {
+                firstVisibleItem.click();
+            } else {
+                // No visible items - show empty state
+                const profilePane = document.getElementById('tab-profile');
+                if (profilePane) {
+                    profilePane.innerHTML = '<div class="empty-state"><p>No clients match this filter</p></div>';
+                }
+            }
+        });
+    });
 }

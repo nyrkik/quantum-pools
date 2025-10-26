@@ -11,6 +11,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.database import get_db
+from app.dependencies.auth import get_current_user, AuthContext
 from app.models.customer import Customer
 from app.schemas.customer import (
     CustomerCreate,
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/api/customers", tags=["customers"])
 )
 async def create_customer(
     customer: CustomerCreate,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -49,6 +51,9 @@ async def create_customer(
     - **time_window_end**: Latest service time (optional)
     """
     customer_data = customer.model_dump()
+
+    # Set organization_id from authenticated user
+    customer_data['organization_id'] = auth.organization_id
 
     # Auto-generate display_name if not provided
     if not customer_data.get('display_name'):
@@ -85,6 +90,7 @@ async def list_customers(
     service_day: Optional[str] = Query(None, description="Filter by service day"),
     service_type: Optional[str] = Query(None, description="Filter by service type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -95,8 +101,11 @@ async def list_customers(
     - **service_type**: Filter by residential or commercial
     - **is_active**: Filter by active/inactive status
     """
-    # Build base query with eager loading of assigned_driver
-    query = select(Customer).options(selectinload(Customer.assigned_driver))
+    # Build base query with eager loading of assigned_tech
+    query = select(Customer).options(selectinload(Customer.assigned_tech))
+
+    # Filter by organization
+    query = query.where(Customer.organization_id == auth.organization_id)
 
     # Apply filters
     if service_day:
@@ -158,6 +167,7 @@ async def list_customers(
     summary="Get all management companies"
 )
 async def get_management_companies(
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -167,6 +177,7 @@ async def get_management_companies(
     """
     result = await db.execute(
         select(Customer.management_company)
+        .where(Customer.organization_id == auth.organization_id)
         .where(Customer.management_company.isnot(None))
         .where(Customer.management_company != '')
         .distinct()
@@ -183,6 +194,7 @@ async def get_management_companies(
 )
 async def get_customer(
     customer_id: UUID,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -192,8 +204,9 @@ async def get_customer(
 
     result = await db.execute(
         select(Customer)
-        .options(selectinload(Customer.assigned_driver))
+        .options(selectinload(Customer.assigned_tech))
         .where(Customer.id == customer_id)
+        .where(Customer.organization_id == auth.organization_id)
     )
     customer = result.scalar_one_or_none()
 
@@ -214,6 +227,7 @@ async def get_customer(
 async def update_customer_put(
     customer_id: UUID,
     customer_update: CustomerUpdate,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -221,7 +235,7 @@ async def update_customer_put(
 
     Only provided fields will be updated. All fields are optional.
     """
-    return await update_customer(customer_id, customer_update, db)
+    return await update_customer(customer_id, customer_update, auth, db)
 
 
 @router.patch(
@@ -232,6 +246,7 @@ async def update_customer_put(
 async def update_customer_patch(
     customer_id: UUID,
     customer_update: CustomerUpdate,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -239,12 +254,13 @@ async def update_customer_patch(
 
     Only provided fields will be updated. All fields are optional.
     """
-    return await update_customer(customer_id, customer_update, db)
+    return await update_customer(customer_id, customer_update, auth, db)
 
 
 async def update_customer(
     customer_id: UUID,
     customer_update: CustomerUpdate,
+    auth: AuthContext,
     db: AsyncSession
 ):
     """
@@ -254,7 +270,9 @@ async def update_customer(
     """
     # Fetch existing customer
     result = await db.execute(
-        select(Customer).where(Customer.id == customer_id)
+        select(Customer)
+        .where(Customer.id == customer_id)
+        .where(Customer.organization_id == auth.organization_id)
     )
     customer = result.scalar_one_or_none()
 
@@ -299,6 +317,7 @@ async def update_customer(
 )
 async def delete_customer(
     customer_id: UUID,
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -307,7 +326,9 @@ async def delete_customer(
     This will also delete all associated route stops.
     """
     result = await db.execute(
-        select(Customer).where(Customer.id == customer_id)
+        select(Customer)
+        .where(Customer.id == customer_id)
+        .where(Customer.organization_id == auth.organization_id)
     )
     customer = result.scalar_one_or_none()
 
@@ -329,6 +350,7 @@ async def delete_customer(
 async def get_customers_by_day(
     day: str,
     is_active: bool = Query(True, description="Filter by active status"),
+    auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -351,7 +373,9 @@ async def get_customers_by_day(
     day_abbrev = day_abbrev_map.get(day_lower)
 
     # Build query with day filter
-    query = select(Customer).where(Customer.is_active == is_active)
+    query = select(Customer)\
+        .where(Customer.organization_id == auth.organization_id)\
+        .where(Customer.is_active == is_active)
 
     if day_abbrev:
         query = query.where(

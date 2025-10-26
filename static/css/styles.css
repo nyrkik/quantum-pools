@@ -605,7 +605,7 @@ body {
 }
 
 /* ===== LISTS ===== */
-#drivers-list,
+#techs-list,
 #customers-sidebar-list,
 #drivers-sidebar-list {
     overflow-y: auto;
@@ -613,7 +613,7 @@ body {
     width: 100%;
 }
 
-#drivers-content,
+#techs-content,
 #customers-content {
     width: 100%;
 }
@@ -925,7 +925,7 @@ body {
 }
 
 /* ===== DRIVER FORM ===== */
-.driver-form-header,
+.tech-form-header,
 .customer-form-header {
     display: flex;
     justify-content: space-between;
@@ -941,7 +941,7 @@ body {
     z-index: 10;
 }
 
-.driver-form-header h3,
+.tech-form-header h3,
 .customer-form-header h3 {
     margin: 0;
     color: var(--primary-dark);
@@ -953,7 +953,7 @@ body {
     gap: 0.5rem;
 }
 
-.driver-form,
+.tech-form,
 .customer-form {
     width: 100%;
     max-width: 100%;

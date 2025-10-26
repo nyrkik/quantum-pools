@@ -17,9 +17,9 @@ let customerMarkersById = {}; // Map customer IDs to marker objects
 let highlightedMarker = null; // Currently highlighted marker
 const API_BASE = window.location.origin;
 const HOME_BASE = { lat: 38.4088, lng: -121.3716 }; // Elk Grove, CA
-// Driver constants moved to /static/js/modules/drivers.js
+// Tech constants moved to /static/js/modules/techs.js
 
-// Current route result (for filtering when driver selection changes)
+// Current route result (for filtering when tech selection changes)
 let currentRouteResult = null;
 
 // Drag and drop state
@@ -44,13 +44,14 @@ document.addEventListener('DOMContentLoaded', function() {
     attachEventListeners();
     initOptimizationModal();
     loadCustomers();
-    loadDrivers();
+    loadTechs();
     loadCustomersManagement();
     initTabs();
     initDaySelector();
     loadGooglePlacesAPI();
     initClientSearch();
     initClientFilter();
+    initQuickFilter();
     initBulkEditModal();
 
     // Close context menus when clicking outside
@@ -67,7 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // - Navigation & tabs → /static/js/modules/navigation.js
 // - Map & markers → /static/js/modules/map.js
 // - Modals & context menus → /static/js/modules/modals.js
-// - Drivers management → /static/js/modules/drivers.js
+// - Techs management → /static/js/modules/techs.js
 // - Routes optimization → /static/js/modules/routes.js
 // - Customer management → /static/js/modules/customers.js
 // - Bulk editing → /static/js/modules/bulk-edit.js

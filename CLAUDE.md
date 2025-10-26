@@ -21,6 +21,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Leaflet.js (map visualization)
   - ReportLab/WeasyPrint (PDF generation)
 
+## Response Length Rules (ENFORCED - READ FIRST)
+
+**NEVER write more than 3 lines unless the user asks for detail or explanation.**
+
+- Default: Maximum 2-3 sentences per response
+- NO bullet points unless listing 5+ items
+- NO celebratory language ("Excellent!", "Perfect!", "Great!")
+- NO status summaries unless explicitly asked
+- NO checkmarks or emoji
+- NO explaining what you found during debugging - just fix it
+- Code changes: Just say what changed, not why it's good
+
+**Examples of correct responses:**
+- "Done"
+- "Fixed - dropdown now populates correctly"
+- "Added status field to edit form, change tracking, and API call"
+
+**Examples of WRONG responses (too verbose):**
+- "Perfect! I've successfully added the status field..."
+- "Excellent! The status field is now fully integrated..."
+- Lists with checkmarks, summaries, or celebrations
+
+## On Session Start/Resume - Acknowledgment Protocol
+
+**FIRST THING after context compacting or new session: Repeat back core rules**
+
+When resuming after context compacting, you MUST start with:
+```
+Understood - core rules:
+1. Max 3 lines per response unless asked for detail
+2. NEVER use background bash (no & or run_in_background: true)
+3. NEVER manually start uvicorn - only use restart_server.sh
+4. Always kill background processes immediately with KillShell if created
+5. Use Read with offset/limit for large files
+6. No verbose summaries or celebrations
+```
+
+Then proceed with work silently.
+
 ## Development Commands
 
 ### Setup & Installation
@@ -147,6 +186,20 @@ python -m app.scripts.import_customers data/sample_customers.csv
 - After using any background bash processes, kill them immediately with `KillShell`
 - Don't let processes accumulate with "new output available"
 
+### 7. Be Concise - No Summaries or Unnecessary Explanations
+- ❌ **NEVER** provide lengthy summaries of what you did after completing a task
+- ✅ Simply say "Done" or provide a single line confirmation
+- ❌ Don't list out all the changes you made unless explicitly asked
+- ❌ **Don't explain what you found during debugging** - just fix it
+- ✅ Save the detailed explanations for when something goes wrong or user asks
+- **Example**:
+  - Bad: "I've successfully updated the file with the following changes: 1) Added X, 2) Modified Y, 3) Fixed Z. The changes are now live."
+  - Good: "Done"
+  - Acceptable: "Fixed - service day dropdown now populates correctly"
+- **Debugging Example**:
+  - Bad: "Found it! The error is: TypeError: selectElement.closest is not a function. The updateServiceDayOptions function exists in BOTH customers.js AND bulk-edit.js, and the wrong one is being called."
+  - Good: [Just make the Edit calls to rename the function, then say] "Done. Refresh page (Ctrl+R) and test."
+
 **Why This Matters**:
 - Multiple background processes with accumulating logs can consume 40K+ tokens
 - Large file reads (600+ lines) repeated multiple times consume 20K+ tokens
@@ -186,6 +239,7 @@ When working with Claude Code, the user can use special shorthand commands for c
 - `status` - Show PROJECT_STATUS.md summary
 - `roadmap` - Show LAUNCH_PLAN.md timeline (if applicable)
 - `list` or `help` - Show all commands
+- `rules` - Trigger acknowledgment protocol (core rules reminder)
 
 **Development:**
 - `test` - Run tests for current feature
@@ -214,6 +268,16 @@ User: backlog: Add [feature idea]
 
 User: where
 → Claude shows: "Phase [X] - [Name], [X]% complete, working on [current task]"
+
+User: rules
+→ Claude outputs acknowledgment protocol (same as after compacting):
+   "Understood - core rules:
+   1. Max 3 lines per response unless asked for detail
+   2. NEVER use background bash (no & or run_in_background: true)
+   3. NEVER manually start uvicorn - only use restart_server.sh
+   4. Always kill background processes immediately with KillShell if created
+   5. Use Read with offset/limit for large files
+   6. No verbose summaries or celebrations"
 ```
 
 **Note on Auto-Push:**

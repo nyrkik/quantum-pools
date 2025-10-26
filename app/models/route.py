@@ -1,6 +1,6 @@
 """
 Route and RouteStop database models.
-Represents optimized routes assigned to drivers.
+Represents optimized routes assigned to techs (technicians).
 """
 
 from sqlalchemy import Column, String, Integer, Float, Time, DateTime, ForeignKey
@@ -13,17 +13,26 @@ from app.database import Base
 
 
 class Route(Base):
-    """Route model representing a driver's route for a specific day."""
+    """Route model representing a tech's route for a specific day."""
 
     __tablename__ = "routes"
 
     # Primary key
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
-    # Foreign keys
-    driver_id = Column(
+    # Multi-tenancy
+    organization_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("drivers.id", ondelete="CASCADE"),
+        ForeignKey('organizations.id'),
+        nullable=False,
+        index=True,
+        comment="Organization this route belongs to"
+    )
+
+    # Foreign keys
+    tech_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("techs.id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
@@ -76,7 +85,8 @@ class Route(Base):
     )
 
     # Relationships
-    driver = relationship("Driver", back_populates="routes")
+    organization = relationship("Organization", back_populates="routes")
+    tech = relationship("Tech", back_populates="routes")
     stops = relationship(
         "RouteStop",
         back_populates="route",
@@ -86,7 +96,7 @@ class Route(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<Route(id={self.id}, driver_id={self.driver_id}, "
+            f"<Route(id={self.id}, tech_id={self.tech_id}, "
             f"service_day='{self.service_day}', customers={self.total_customers})>"
         )
 

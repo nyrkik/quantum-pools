@@ -1,7 +1,7 @@
 // RouteOptimizer - Map Module
 //
 // Handles Leaflet map initialization, Google Places autocomplete, and customer markers
-// Dependencies: map, customerMarkers, customerMarkersById, highlightedMarker, selectedDriverIds, selectedDay, API_BASE, HOME_BASE globals
+// Dependencies: map, customerMarkers, customerMarkersById, highlightedMarker, selectedTechIds, selectedDay, API_BASE, HOME_BASE globals
 
 function initializeMap() {
     // Initialize Leaflet map centered on US (will be updated based on data)
@@ -16,7 +16,7 @@ function initializeMap() {
 
 async function loadGooglePlacesAPI() {
     try {
-        const response = await fetch(`${API_BASE}/api/config`);
+        const response = await Auth.apiRequest(`${API_BASE}/api/config`);
         const config = await response.json();
 
         hasGoogleMapsKey = config.has_google_maps;
@@ -71,7 +71,7 @@ async function loadCustomers() {
             url += `&service_day=${selectedDay}`;
         }
 
-        const response = await fetch(url);
+        const response = await Auth.apiRequest(url);
         if (!response.ok) return;
 
         const data = await response.json();
@@ -96,16 +96,16 @@ function displayCustomersOnMap(customers) {
     customers.forEach(customer => {
         if (customer.latitude && customer.longitude) {
             // Determine if we should show this customer
-            const isUnassigned = !customer.assigned_driver_id;
-            const isSelectedDriver = customer.assigned_driver_id && selectedDriverIds.has(customer.assigned_driver_id);
+            const isUnassigned = !customer.assigned_tech_id;
+            const isSelectedTech = customer.assigned_tech_id && selectedTechIds.has(customer.assigned_tech_id);
 
-            // Show if: unassigned (always) OR assigned to selected driver
-            if (!isUnassigned && selectedDriverIds.size > 0 && !isSelectedDriver) {
-                return; // Skip if not in our selected drivers
+            // Show if: unassigned (always) OR assigned to selected tech
+            if (!isUnassigned && selectedTechIds.size > 0 && !isSelectedTech) {
+                return; // Skip if not in our selected techs
             }
 
-            if (!isUnassigned && selectedDriverIds.size === 0) {
-                return; // No drivers selected, don't show assigned customers
+            if (!isUnassigned && selectedTechIds.size === 0) {
+                return; // No techs selected, don't show assigned customers
             }
             // Create coordinate key
             const coordKey = `${customer.latitude},${customer.longitude}`;
@@ -235,16 +235,16 @@ function displayRoutesOnMap(routes) {
     const allCoordinates = [];
 
     routes.forEach((route) => {
-        // Filter by selected drivers
-        if (selectedDriverIds.size === 0) {
-            return; // No drivers selected, don't show route
+        // Filter by selected techs
+        if (selectedTechIds.size === 0) {
+            return; // No techs selected, don't show route
         }
 
-        if (route.driver_id && !selectedDriverIds.has(route.driver_id)) {
-            return; // Skip routes for drivers not in selection
+        if (route.tech_id && !selectedTechIds.has(route.tech_id)) {
+            return; // Skip routes for techs not in selection
         }
 
-        // Use driver's color, or fall back to default
+        // Use tech's color, or fall back to default
         const color = route.driver_color || '#3498db';
         const coordinates = [];
 

@@ -218,9 +218,10 @@ async def validate_customer_coordinates():
 
 
 # Import and include routers
-from app.api import customers, drivers, routes, imports
+from app.api import auth, customers, techs, routes, imports
+app.include_router(auth.router)
 app.include_router(customers.router)
-app.include_router(drivers.router)
+app.include_router(techs.router)
 app.include_router(routes.router)
 app.include_router(imports.router)
 

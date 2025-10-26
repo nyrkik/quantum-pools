@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field, ConfigDict, computed_field, field_validat
 from typing import Optional
 from datetime import datetime, time
 from uuid import UUID
+from decimal import Decimal
 
 
-class AssignedDriverInfo(BaseModel):
+class AssignedTechInfo(BaseModel):
     """Minimal driver information for customer responses."""
     id: UUID
     name: str
@@ -31,7 +32,7 @@ class CustomerBase(BaseModel):
     alt_phone: Optional[str] = Field(None, min_length=0, max_length=20, description="Alternate phone number")
     invoice_email: Optional[str] = Field(None, min_length=0, max_length=255, description="Invoice email (for commercial)")
     management_company: Optional[str] = Field(None, min_length=0, max_length=200, description="Management company name (for commercial)")
-    assigned_driver_id: Optional[UUID] = Field(
+    assigned_tech_id: Optional[UUID] = Field(
         default=None,
         description="Driver assigned to service this customer"
     )
@@ -86,7 +87,54 @@ class CustomerBase(BaseModel):
         max_length=1000,
         description="Additional notes about customer"
     )
+    status: str = Field(
+        default='active',
+        pattern="^(pending|active|inactive)$",
+        description="Customer status: pending, active, or inactive"
+    )
     is_active: bool = Field(default=True, description="Whether customer is active")
+
+    # Billing and payment
+    service_rate: Optional[Decimal] = Field(
+        default=None,
+        ge=0,
+        description="Service rate amount (e.g., 125.00)"
+    )
+    billing_frequency: Optional[str] = Field(
+        default=None,
+        pattern="^(weekly|monthly|per-visit)$",
+        description="Billing frequency: weekly, monthly, per-visit"
+    )
+    rate_notes: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Special pricing notes or agreements"
+    )
+    payment_method_type: Optional[str] = Field(
+        default=None,
+        pattern="^(credit_card|ach|check|cash)$",
+        description="Payment method: credit_card, ach, check, cash"
+    )
+    stripe_customer_id: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Stripe customer ID for payment processing"
+    )
+    stripe_payment_method_id: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Stripe payment method ID"
+    )
+    payment_last_four: Optional[str] = Field(
+        default=None,
+        max_length=4,
+        description="Last 4 digits of card/account for display only"
+    )
+    payment_brand: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="Card brand (Visa, Mastercard, etc.) or bank name"
+    )
 
 
 class CustomerCreate(CustomerBase):
@@ -110,7 +158,7 @@ class CustomerUpdate(BaseModel):
     management_company: Optional[str] = Field(None, min_length=0, max_length=200)
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
-    assigned_driver_id: Optional[UUID] = None
+    assigned_tech_id: Optional[UUID] = None
     service_type: Optional[str] = Field(None, pattern="^(residential|commercial)$")
     visit_duration: Optional[int] = Field(None, ge=5, le=120)
     difficulty: Optional[int] = Field(None, ge=1, le=5)
@@ -124,7 +172,18 @@ class CustomerUpdate(BaseModel):
     time_window_start: Optional[time] = None
     time_window_end: Optional[time] = None
     notes: Optional[str] = Field(None, min_length=0, max_length=1000)
+    status: Optional[str] = Field(None, pattern="^(pending|active|inactive)$")
     is_active: Optional[bool] = None
+
+    # Billing and payment
+    service_rate: Optional[Decimal] = Field(None, ge=0)
+    billing_frequency: Optional[str] = Field(None, pattern="^(weekly|monthly|per-visit)$")
+    rate_notes: Optional[str] = Field(None, max_length=500)
+    payment_method_type: Optional[str] = Field(None, pattern="^(credit_card|ach|check|cash)$")
+    stripe_customer_id: Optional[str] = Field(None, max_length=100)
+    stripe_payment_method_id: Optional[str] = Field(None, max_length=100)
+    payment_last_four: Optional[str] = Field(None, max_length=4)
+    payment_brand: Optional[str] = Field(None, max_length=50)
 
 
 class CustomerResponse(CustomerBase):
@@ -134,13 +193,13 @@ class CustomerResponse(CustomerBase):
     display_name: str  # Override to make required
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    assigned_driver: Optional[AssignedDriverInfo] = None
+    assigned_tech: Optional[AssignedTechInfo] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator('first_name', 'last_name', 'name', 'email', 'phone', 'alt_email', 'alt_phone', 'invoice_email', 'management_company', 'notes', mode='before')
+    @field_validator('first_name', 'last_name', 'name', 'email', 'phone', 'alt_email', 'alt_phone', 'invoice_email', 'management_company', 'notes', 'billing_frequency', 'rate_notes', 'payment_method_type', 'stripe_customer_id', 'stripe_payment_method_id', 'payment_last_four', 'payment_brand', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
         """Convert empty strings to None for optional string fields."""

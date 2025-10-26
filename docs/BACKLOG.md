@@ -82,7 +82,30 @@ This is where feature ideas go when they pop into your head during development. 
 
 ### High Priority ⭐
 
-*No items yet*
+#### Complete Product Rebrand
+**Priority:** ⭐ High
+**Effort:** Large
+**Value:** High
+**Added:** 2025-10-26
+
+**Description:**
+Rebrand from "RouteOptimizer" to new name that reflects comprehensive pool service management platform with scouting/AI differentiators.
+
+**Why:**
+Current name is too narrow - doesn't capture scouting (lead generation) and AI features that set us apart. Need name that reflects full platform scope.
+
+**What Needs to Happen:**
+1. Finalize new product name (naming research paused - needs fresh brainstorming)
+2. Rename project directory: `/mnt/Projects/RouteOptimizer` → `/mnt/Projects/[NewName]`
+3. Update all documentation files to use new name
+4. Update code references (imports, class names, etc.)
+5. Update git repository name
+6. **Note:** Will require starting new Claude chat after directory rename for proper file access
+
+**Timing:**
+- Must happen before public launch
+- Can proceed with Phase 0 implementation under current name
+- Recommend: Complete before Phase 1 (UI) to avoid UI rework
 
 ### Medium Priority 📌
 

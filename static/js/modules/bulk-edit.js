@@ -5,7 +5,7 @@
  * CSV import/export functionality, and change tracking.
  *
  * Dependencies:
- * - Global variables: API_BASE, window.allDrivers
+ * - Global variables: API_BASE, window.allTechs
  * - Functions: escapeHtml() (from app.js), combineAddressFields() (from app.js),
  *              loadCustomersManagement() (from customers.js), loadCustomers() (from map.js)
  *
@@ -104,7 +104,7 @@ async function handleCSVImport(event) {
     formData.append('file', file);
 
     try {
-        const response = await fetch(`${API_BASE}/api/customers/import-csv`, {
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/import-csv`, {
             method: 'POST',
             body: formData
         });
@@ -133,7 +133,7 @@ async function handleCSVImport(event) {
  * Generates a template CSV with headers for customer import
  */
 function downloadCSVTemplate() {
-    const headers = ['display_name', 'address', 'assigned_driver_name', 'service_day', 'service_days_per_week', 'service_type', 'visit_duration', 'difficulty', 'locked'];
+    const headers = ['display_name', 'address', 'assigned_tech_name', 'service_day', 'service_days_per_week', 'service_type', 'visit_duration', 'difficulty', 'locked'];
     const csvContent = headers.join(',') + '\n' +
                       'John Smith,"123 Main St, Springfield, IL 62701",Tech Name,monday,1,residential,15,2,false';
 
@@ -152,7 +152,7 @@ function downloadCSVTemplate() {
  */
 async function exportCustomersCSV() {
     try {
-        const response = await fetch(`${API_BASE}/api/customers/export-csv`);
+        const response = await Auth.apiRequest(`${API_BASE}/api/customers/export-csv`);
         if (!response.ok) {
             throw new Error('Failed to export CSV');
         }
@@ -176,19 +176,19 @@ async function exportCustomersCSV() {
  */
 async function showBulkEditCustomers() {
     try {
-        // Fetch drivers first if not already loaded
-        if (!window.allDrivers || window.allDrivers.length === 0) {
-            const driversResponse = await fetch(`${API_BASE}/api/drivers`);
+        // Fetch techs first if not already loaded
+        if (!window.allTechs || window.allTechs.length === 0) {
+            const driversResponse = await Auth.apiRequest(`${API_BASE}/api/techs`);
             if (driversResponse.ok) {
                 const driversData = await driversResponse.json();
-                window.allDrivers = driversData.drivers;  // Extract drivers array from response
+                window.allTechs = driversData.techs;  // Extract techs array from response
             }
         }
 
         // Load ALL customers (no day filtering for bulk edit)
         const url = `${API_BASE}/api/customers?page_size=1000`;
 
-        const response = await fetch(url);
+        const response = await Auth.apiRequest(url);
         if (!response.ok) {
             throw new Error('Failed to load customers');
         }
@@ -234,11 +234,11 @@ function renderBulkEditTable() {
         countElement.textContent = `${bulkEditCustomers.length} client${bulkEditCustomers.length !== 1 ? 's' : ''} loaded`;
     }
 
-    // Build driver options
+    // Build tech options
     let driversOptions = '<option value="">Unassigned</option>';
-    if (Array.isArray(window.allDrivers)) {
-        window.allDrivers.forEach(driver => {
-            driversOptions += `<option value="${driver.id}">${escapeHtml(driver.name)}</option>`;
+    if (Array.isArray(window.allTechs)) {
+        window.allTechs.forEach(tech => {
+            driversOptions += `<option value="${tech.id}">${escapeHtml(tech.name)}</option>`;
         });
     }
 
@@ -344,7 +344,7 @@ function renderBulkEditTable() {
                     </select>
                 </td>
                 <td class="x-wide">
-                    <select data-field="assigned_driver_id" onchange="markCustomerModified('${customer.id}')">
+                    <select data-field="assigned_tech_id" onchange="markCustomerModified('${customer.id}')">
                         ${driversOptions}
                     </select>
                 </td>
@@ -381,15 +381,15 @@ function renderBulkEditTable() {
 
     tbody.innerHTML = tableHtml;
 
-    // Set selected driver and management company for each row
+    // Set selected tech and management company for each row
     bulkEditCustomers.forEach(customer => {
         const row = document.querySelector(`tr[data-customer-id="${customer.id}"]`);
         if (row) {
-            // Set driver
-            if (customer.assigned_driver_id) {
-                const driverSelect = row.querySelector('[data-field="assigned_driver_id"]');
+            // Set tech
+            if (customer.assigned_tech_id) {
+                const driverSelect = row.querySelector('[data-field="assigned_tech_id"]');
                 if (driverSelect) {
-                    driverSelect.value = customer.assigned_driver_id;
+                    driverSelect.value = customer.assigned_tech_id;
                 }
             }
             // Set management company
@@ -520,8 +520,8 @@ async function saveBulkEditChanges() {
             const invoiceEmail = row.querySelector('[data-field="invoice_email"]').value.trim();
             const managementCompany = row.querySelector('[data-field="management_company"]').value.trim();
 
-            const assignedDriverValue = row.querySelector('[data-field="assigned_driver_id"]').value;
-            const assignedDriverId = assignedDriverValue ? assignedDriverValue : null;
+            const assignedTechValue = row.querySelector('[data-field="assigned_tech_id"]').value;
+            const assignedTechId = assignedTechValue ? assignedTechValue : null;
 
             // Handle service_day based on days per week
             const serviceDaysPerWeek = parseInt(row.querySelector('[data-field="service_days_per_week"]').value);
@@ -555,7 +555,7 @@ async function saveBulkEditChanges() {
                 alt_phone: altPhone || null,
                 invoice_email: invoiceEmail || null,
                 management_company: managementCompany || null,
-                assigned_driver_id: assignedDriverId,
+                assigned_tech_id: assignedTechId,
                 service_day: serviceDay,
                 service_days_per_week: serviceDaysPerWeek,
                 service_schedule: serviceSchedule,
@@ -565,7 +565,7 @@ async function saveBulkEditChanges() {
             };
 
             try {
-                const response = await fetch(`${API_BASE}/api/customers/${customerId}`, {
+                const response = await Auth.apiRequest(`${API_BASE}/api/customers/${customerId}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json'

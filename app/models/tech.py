@@ -1,6 +1,6 @@
 """
-Driver database model.
-Stores driver/technician information including start/end locations and working hours.
+Tech (Technician) database model.
+Stores technician information including start/end locations and working hours.
 """
 
 from sqlalchemy import Column, String, Float, Integer, Time, DateTime, Boolean, ForeignKey
@@ -12,10 +12,10 @@ import uuid
 from app.database import Base
 
 
-class Driver(Base):
-    """Driver/Technician model for route planning."""
+class Tech(Base):
+    """Tech/Technician model for route planning."""
 
-    __tablename__ = "drivers"
+    __tablename__ = "techs"
 
     # Primary key
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -26,7 +26,7 @@ class Driver(Base):
         ForeignKey('organizations.id'),
         nullable=False,
         index=True,
-        comment="Organization this driver belongs to"
+        comment="Organization this tech belongs to"
     )
 
     # Basic information
@@ -40,12 +40,25 @@ class Driver(Base):
         comment="Hex color code for route visualization"
     )
 
-    # Start location (where driver begins their route)
+    # Geocoding metadata
+    geocoding_provider = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Provider used for geocoding (google, mapbox, etc.)"
+    )
+    geocoded_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When geocoding was last performed"
+    )
+
+    # Start location (where tech begins their route)
     start_location_address = Column(String(500), nullable=False)
     start_latitude = Column(Float, nullable=True)
     start_longitude = Column(Float, nullable=True)
 
-    # End location (where driver ends their route - can be same as start)
+    # End location (where tech ends their route - can be same as start)
     end_location_address = Column(String(500), nullable=False)
     end_latitude = Column(Float, nullable=True)
     end_longitude = Column(Float, nullable=True)
@@ -69,7 +82,7 @@ class Driver(Base):
         Integer,
         nullable=False,
         default=20,
-        comment="Maximum number of customers this driver can service in one day"
+        comment="Maximum number of customers this tech can service in one day"
     )
 
     # Status
@@ -77,7 +90,7 @@ class Driver(Base):
         Boolean,
         nullable=False,
         default=True,
-        comment="Whether this driver is currently active/available"
+        comment="Whether this tech is currently active/available"
     )
 
     # Metadata
@@ -91,15 +104,15 @@ class Driver(Base):
     )
 
     # Relationships
-    organization = relationship("Organization", back_populates="drivers")
+    organization = relationship("Organization", back_populates="techs")
     routes = relationship(
         "Route",
-        back_populates="driver",
+        back_populates="tech",
         cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
-        return f"<Driver(id={self.id}, name='{self.name}', is_active={self.is_active})>"
+        return f"<Tech(id={self.id}, name='{self.name}', is_active={self.is_active})>"
 
     @property
     def working_hours_duration(self) -> int:

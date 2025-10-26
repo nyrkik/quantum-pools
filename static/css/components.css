@@ -79,7 +79,7 @@
 }
 
 /* ===== LISTS ===== */
-#drivers-list,
+#techs-list,
 #customers-sidebar-list,
 #drivers-sidebar-list {
     overflow-y: auto;
@@ -87,7 +87,7 @@
     width: 100%;
 }
 
-#drivers-content,
+#techs-content,
 #customers-content {
     width: 100%;
 }

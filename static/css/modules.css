@@ -1,194 +1,4 @@
-/* RouteOptimizer Styles - Multi-Module App */
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-:root {
-    --sidebar-width: 60px;
-    --sidebar-expanded-width: 220px;
-    --primary-color: #3498db;
-    --primary-dark: #2c3e50;
-    --secondary-color: #2ecc71;
-    --danger-color: #e74c3c;
-    --text-color: #333;
-    --text-light: #666;
-    --bg-light: #f5f5f5;
-    --border-color: #ddd;
-    --transition-speed: 0.3s;
-}
-
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    line-height: 1.6;
-    color: var(--text-color);
-    background-color: var(--bg-light);
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-}
-
-/* ===== APP SIDEBAR ===== */
-#app-sidebar {
-    width: var(--sidebar-width);
-    background-color: var(--primary-dark);
-    color: white;
-    display: flex;
-    flex-direction: column;
-    position: fixed;
-    left: 0;
-    top: 0;
-    height: 100vh;
-    z-index: 1000;
-    overflow-x: hidden;
-}
-
-.sidebar-header {
-    padding: 1rem;
-    text-align: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.logo {
-    width: 40px;
-    height: 40px;
-    background-color: var(--primary-color);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 1.2rem;
-    margin: 0 auto;
-}
-
-.sidebar-nav {
-    list-style: none;
-    padding: 1rem 0;
-    flex: 1;
-}
-
-.sidebar-bottom {
-    flex: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.sidebar-nav li {
-    margin: 0;
-}
-
-.nav-item {
-    display: flex;
-    align-items: center;
-    padding: 1rem;
-    color: #ecf0f1;
-    text-decoration: none;
-    transition: background-color var(--transition-speed);
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.nav-item:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.nav-item.active {
-    background-color: var(--primary-color);
-    color: white;
-}
-
-.nav-item i {
-    font-size: 1.5rem;
-    width: 28px;
-    text-align: center;
-    flex-shrink: 0;
-}
-
-.nav-label {
-    display: none;
-}
-
-.sidebar-toggle {
-    display: none;
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    background-color: var(--primary-color);
-    border: none;
-    color: white;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 1.2rem;
-}
-
-.mobile-menu-toggle {
-    display: none;
-    position: fixed;
-    top: 1rem;
-    left: 1rem;
-    z-index: 999;
-    background-color: var(--primary-color);
-    border: none;
-    color: white;
-    width: 50px;
-    height: 50px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-}
-
-/* ===== MAIN CONTENT AREA ===== */
-#app-content {
-    margin-left: var(--sidebar-width);
-    flex: 1 !important;
-    min-height: 0 !important;
-    padding: 2rem;
-    transition: margin-left var(--transition-speed) ease;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-}
-
-/* ===== MODULE CONTENT ===== */
-.module-content {
-    display: none;
-    animation: fadeIn 0.3s ease;
-    flex: 1;
-    min-height: 0;
-}
-
-.module-content.active {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 1 !important;
-    min-height: 0 !important;
-    overflow: hidden !important;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.module-header {
-    margin-bottom: 2rem;
-}
-
-.module-header h1 {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-    color: var(--primary-dark);
-}
-
-.module-header p {
-    color: var(--text-light);
-    font-size: 1rem;
-}
+/* RouteOptimizer Styles - Modules (Dashboard, Routes, Clients, Team, Bulk Edit) */
 
 /* ===== DASHBOARD ===== */
 .dashboard-grid {
@@ -524,252 +334,6 @@ body {
 
 #routes-content {
     overflow-y: auto;
-}
-
-/* ===== BUTTONS ===== */
-.btn-primary, .btn-secondary {
-    padding: 0.6rem 1.2rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: all 0.3s;
-    margin: 0.25rem;
-}
-
-.btn-primary {
-    background-color: var(--primary-color);
-    color: white;
-}
-
-.btn-primary:hover {
-    background-color: #2980b9;
-}
-
-.btn-secondary {
-    background-color: #95a5a6;
-    color: white;
-}
-
-.btn-secondary:hover {
-    background-color: #7f8c8d;
-}
-
-.button-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 1rem;
-}
-
-/* ===== CONTROL GROUPS ===== */
-.control-group {
-    margin-bottom: 1.5rem;
-}
-
-.form-grid-2col .control-group {
-    margin-bottom: 0;
-}
-
-.control-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: var(--text-color);
-    font-weight: 500;
-}
-
-.control-group input[type="number"],
-.control-group input[type="text"],
-.control-group input[type="time"],
-.control-group select {
-    width: 100%;
-    padding: 0.6rem 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.95rem;
-    transition: border-color 0.2s;
-    box-sizing: border-box;
-}
-
-.control-group input[type="number"]:focus,
-.control-group input[type="text"]:focus,
-.control-group input[type="time"]:focus,
-.control-group select:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
-}
-
-.control-group input[type="checkbox"] {
-    margin-right: 0.5rem;
-}
-
-/* ===== LISTS ===== */
-#drivers-list,
-#customers-sidebar-list,
-#drivers-sidebar-list {
-    overflow-y: auto;
-    max-height: 400px;
-    width: 100%;
-}
-
-#drivers-content,
-#customers-content {
-    width: 100%;
-}
-
-.placeholder {
-    color: var(--text-light);
-    font-style: italic;
-    padding: 1rem;
-    text-align: center;
-}
-
-/* ===== RESPONSIVE DESIGN ===== */
-
-/* Hide bulk edit button when clients layout switches to vertical (profile drops under client list) */
-@media (max-width: 1024px) {
-    #bulk-edit-btn {
-        display: none !important;
-    }
-}
-
-@media (max-width: 768px) {
-    #app-sidebar {
-        width: 0;
-        transform: translateX(-100%);
-    }
-
-    #app-sidebar.mobile-open {
-        width: var(--sidebar-expanded-width);
-        transform: translateX(0);
-    }
-
-    #app-sidebar.mobile-open .nav-label {
-        display: inline;
-        margin-left: 1rem;
-    }
-
-    #app-content {
-        margin-left: 0;
-        padding-top: 5rem;
-    }
-
-    .mobile-menu-toggle {
-        display: block;
-    }
-
-    .dashboard-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .routes-controls-bar {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
-    }
-
-    .routes-controls-bar .control-inline:last-child {
-        margin-left: 0;
-        width: 100%;
-    }
-
-    .tech-selector-container {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .tech-chips {
-        justify-content: center;
-    }
-
-    #module-routes #map-container {
-        height: 400px;
-    }
-}
-
-@media (max-width: 480px) {
-    .day-selector {
-        flex-direction: column;
-    }
-
-    .day-tab {
-        width: 100%;
-        text-align: center;
-    }
-}
-
-/* ===== MODAL ===== */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 2000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    animation: fadeIn 0.3s ease;
-}
-
-.modal.active {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-content {
-    background-color: white;
-    padding: 2rem;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    max-width: 500px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
-    position: relative;
-    animation: slideIn 0.3s ease;
-}
-
-@keyframes slideIn {
-    from {
-        transform: translateY(-50px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
-
-.modal-close {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    font-size: 2rem;
-    font-weight: bold;
-    color: var(--text-light);
-    cursor: pointer;
-    line-height: 1;
-    transition: color 0.3s;
-}
-
-.modal-close:hover {
-    color: var(--danger-color);
-}
-
-.modal-content h2 {
-    margin-bottom: 1.5rem;
-    color: var(--primary-dark);
-    font-size: 1.5rem;
-}
-
-/* Large modal for bulk edit */
-.modal-large {
-    max-width: 95%;
-    width: 95%;
-    max-height: 90vh;
-    padding: 1.5rem;
 }
 
 /* ===== BULK EDIT STYLES ===== */
@@ -1282,6 +846,172 @@ body {
 .tab-pane.active {
     display: block;
     padding: 2rem;
+}
+
+/* Client Profile Display */
+.client-profile {
+    max-width: 900px;
+}
+
+.profile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.profile-header-name {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.profile-icon {
+    font-size: 2rem;
+    color: var(--primary-color);
+    opacity: 0.8;
+}
+
+.profile-header h2 {
+    margin: 0;
+    color: var(--primary-dark);
+    font-size: 1.8rem;
+}
+
+.profile-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Icon Buttons */
+.btn-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    border: 2px solid;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-icon::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.3s, height 0.3s;
+}
+
+.btn-icon:hover:not(:disabled)::before {
+    width: 100%;
+    height: 100%;
+}
+
+.btn-icon:hover:not(:disabled) {
+    transform: translateY(-3px) scale(1.05);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn-icon:active:not(:disabled) {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.12);
+}
+
+.btn-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.btn-icon i {
+    position: relative;
+    z-index: 1;
+}
+
+.btn-icon-primary {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #2980b9 100%);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.btn-icon-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #2980b9 0%, var(--primary-color) 100%);
+    border-color: #2980b9;
+}
+
+.btn-icon-secondary {
+    background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+    border-color: #6c757d;
+    color: white;
+}
+
+.btn-icon-secondary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #5a6268 0%, #495057 100%);
+    border-color: #5a6268;
+}
+
+.btn-icon-danger {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    border-color: #dc3545;
+    color: white;
+}
+
+.btn-icon-danger:hover:not(:disabled) {
+    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
+    border-color: #c82333;
+}
+
+.profile-section {
+    margin-bottom: 2rem;
+}
+
+.profile-section h3 {
+    color: var(--primary-dark);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.profile-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.profile-field label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+}
+
+.profile-field p {
+    margin: 0;
+    color: var(--text-color);
+    font-size: 1rem;
+    padding: 0.5rem 0;
 }
 
 /* Responsive Design for Clients Module */

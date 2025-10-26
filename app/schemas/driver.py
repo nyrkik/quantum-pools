@@ -12,8 +12,8 @@ class DriverBase(BaseModel):
     """Base driver schema with common fields."""
 
     name: str = Field(..., min_length=1, max_length=200, description="Driver name")
-    email: Optional[EmailStr] = Field(None, description="Driver email address")
-    phone: Optional[str] = Field(None, max_length=20, description="Driver phone number")
+    email: Optional[str] = Field(None, min_length=0, max_length=255, description="Driver email address")
+    phone: Optional[str] = Field(None, min_length=0, max_length=20, description="Driver phone number")
     color: str = Field(
         default='#3498db',
         pattern='^#[0-9A-Fa-f]{6}$',
@@ -51,6 +51,7 @@ class DriverBase(BaseModel):
 
     notes: Optional[str] = Field(
         default=None,
+        min_length=0,
         max_length=1000,
         description="Additional notes about driver"
     )
@@ -66,8 +67,8 @@ class DriverUpdate(BaseModel):
     """Schema for updating an existing driver (all fields optional)."""
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, min_length=0, max_length=255)
+    phone: Optional[str] = Field(None, min_length=0, max_length=20)
     color: Optional[str] = Field(None, pattern='^#[0-9A-Fa-f]{6}$')
     start_location_address: Optional[str] = Field(None, min_length=1, max_length=500)
     end_location_address: Optional[str] = Field(None, min_length=1, max_length=500)

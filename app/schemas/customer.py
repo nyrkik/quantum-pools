@@ -2,7 +2,7 @@
 Customer Pydantic schemas for request/response validation.
 """
 
-from pydantic import BaseModel, Field, ConfigDict, computed_field
+from pydantic import BaseModel, Field, ConfigDict, computed_field, field_validator
 from typing import Optional
 from datetime import datetime, time
 from uuid import UUID
@@ -20,17 +20,17 @@ class AssignedDriverInfo(BaseModel):
 class CustomerBase(BaseModel):
     """Base customer schema with common fields."""
 
-    name: Optional[str] = Field(None, max_length=200, description="Business name (for commercial)")
-    first_name: Optional[str] = Field(None, max_length=100, description="First name (for residential)")
-    last_name: Optional[str] = Field(None, max_length=100, description="Last name (for residential)")
-    display_name: Optional[str] = Field(None, max_length=200, description="Display name (auto-generated if not provided)")
+    name: Optional[str] = Field(None, min_length=0, max_length=200, description="Business name (for commercial)")
+    first_name: Optional[str] = Field(None, min_length=0, max_length=100, description="First name (for residential)")
+    last_name: Optional[str] = Field(None, min_length=0, max_length=100, description="Last name (for residential)")
+    display_name: Optional[str] = Field(None, min_length=0, max_length=200, description="Display name (auto-generated if not provided)")
     address: str = Field(..., min_length=1, max_length=500, description="Street address")
-    email: Optional[str] = Field(None, max_length=255, description="Primary email address")
-    phone: Optional[str] = Field(None, max_length=20, description="Primary phone number")
-    alt_email: Optional[str] = Field(None, max_length=255, description="Alternate email address")
-    alt_phone: Optional[str] = Field(None, max_length=20, description="Alternate phone number")
-    invoice_email: Optional[str] = Field(None, max_length=255, description="Invoice email (for commercial)")
-    management_company: Optional[str] = Field(None, max_length=200, description="Management company name (for commercial)")
+    email: Optional[str] = Field(None, min_length=0, max_length=255, description="Primary email address")
+    phone: Optional[str] = Field(None, min_length=0, max_length=20, description="Primary phone number")
+    alt_email: Optional[str] = Field(None, min_length=0, max_length=255, description="Alternate email address")
+    alt_phone: Optional[str] = Field(None, min_length=0, max_length=20, description="Alternate phone number")
+    invoice_email: Optional[str] = Field(None, min_length=0, max_length=255, description="Invoice email (for commercial)")
+    management_company: Optional[str] = Field(None, min_length=0, max_length=200, description="Management company name (for commercial)")
     assigned_driver_id: Optional[UUID] = Field(
         default=None,
         description="Driver assigned to service this customer"
@@ -82,6 +82,7 @@ class CustomerBase(BaseModel):
     )
     notes: Optional[str] = Field(
         default=None,
+        min_length=0,
         max_length=1000,
         description="Additional notes about customer"
     )
@@ -96,17 +97,17 @@ class CustomerCreate(CustomerBase):
 class CustomerUpdate(BaseModel):
     """Schema for updating an existing customer (all fields optional)."""
 
-    name: Optional[str] = Field(None, max_length=200)
-    first_name: Optional[str] = Field(None, max_length=100)
-    last_name: Optional[str] = Field(None, max_length=100)
-    display_name: Optional[str] = Field(None, max_length=200)
+    name: Optional[str] = Field(None, min_length=0, max_length=200)
+    first_name: Optional[str] = Field(None, min_length=0, max_length=100)
+    last_name: Optional[str] = Field(None, min_length=0, max_length=100)
+    display_name: Optional[str] = Field(None, min_length=0, max_length=200)
     address: Optional[str] = Field(None, min_length=1, max_length=500)
-    email: Optional[str] = Field(None, max_length=255)
-    phone: Optional[str] = Field(None, max_length=20)
-    alt_email: Optional[str] = Field(None, max_length=255)
-    alt_phone: Optional[str] = Field(None, max_length=20)
-    invoice_email: Optional[str] = Field(None, max_length=255)
-    management_company: Optional[str] = Field(None, max_length=200)
+    email: Optional[str] = Field(None, min_length=0, max_length=255)
+    phone: Optional[str] = Field(None, min_length=0, max_length=20)
+    alt_email: Optional[str] = Field(None, min_length=0, max_length=255)
+    alt_phone: Optional[str] = Field(None, min_length=0, max_length=20)
+    invoice_email: Optional[str] = Field(None, min_length=0, max_length=255)
+    management_company: Optional[str] = Field(None, min_length=0, max_length=200)
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     assigned_driver_id: Optional[UUID] = None
@@ -122,7 +123,7 @@ class CustomerUpdate(BaseModel):
     locked: Optional[bool] = None
     time_window_start: Optional[time] = None
     time_window_end: Optional[time] = None
-    notes: Optional[str] = Field(None, max_length=1000)
+    notes: Optional[str] = Field(None, min_length=0, max_length=1000)
     is_active: Optional[bool] = None
 
 
@@ -138,6 +139,14 @@ class CustomerResponse(CustomerBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator('first_name', 'last_name', 'name', 'email', 'phone', 'alt_email', 'alt_phone', 'invoice_email', 'management_company', 'notes', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        """Convert empty strings to None for optional string fields."""
+        if v == '':
+            return None
+        return v
 
 
 class CustomerListResponse(BaseModel):

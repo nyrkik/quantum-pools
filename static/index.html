@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pool Scout Pro - Pool Service Management</title>
-    <link rel="stylesheet" href="/static/css/styles.css?v=8">
+    <link rel="stylesheet" href="/static/css/base.css?v=9">
+    <link rel="stylesheet" href="/static/css/layout.css?v=9">
+    <link rel="stylesheet" href="/static/css/components.css?v=9">
+    <link rel="stylesheet" href="/static/css/modules.css?v=9">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -341,18 +344,26 @@
                 <table id="bulk-edit-table" class="bulk-edit-table">
                     <thead>
                         <tr>
-                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Display Name</th>
+                            <th>First Name</th>
+                            <th>Last Name</th>
                             <th>Street Address</th>
                             <th>City</th>
                             <th>State</th>
                             <th>ZIP</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Alt Email</th>
+                            <th>Alt Phone</th>
+                            <th>Invoice Email</th>
+                            <th>Mgmt</th>
                             <th>Assigned Tech</th>
                             <th>Service Day</th>
-                            <th>Days/Week</th>
-                            <th>Service Type</th>
-                            <th>Duration (min)</th>
-                            <th>Difficulty</th>
-                            <th>Locked</th>
+                            <th>Dys/Wk</th>
+                            <th>Mins</th>
+                            <th>Diff</th>
+                            <th>Lock</th>
                         </tr>
                     </thead>
                     <tbody id="bulk-edit-tbody">
@@ -367,6 +378,17 @@
     <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Utilities (no dependencies - load first) -->
+    <script src="/static/js/utils/helpers.js"></script>
+    <!-- Feature modules (must load before app.js) -->
+    <script src="/static/js/modules/navigation.js"></script>
+    <script src="/static/js/modules/map.js"></script>
+    <script src="/static/js/modules/modals.js"></script>
+    <script src="/static/js/modules/drivers.js"></script>
+    <script src="/static/js/modules/routes.js"></script>
+    <script src="/static/js/modules/customers.js"></script>
+    <script src="/static/js/modules/bulk-edit.js"></script>
+    <!-- Main application -->
     <script src="/static/js/app.js"></script>
 </body>
 </html>

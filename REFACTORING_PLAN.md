@@ -26,22 +26,62 @@ static/js/
 ## Module Extraction Progress
 
 ### ✅ Completed Modules
-- None yet
+- **Bulk Edit Module (bulk-edit.js)** - ~358 lines extracted
+  - Functions: initBulkEditModal(), handleCSVImport(), downloadCSVTemplate(), exportCustomersCSV(), showBulkEditCustomers(), renderBulkEditTable(), markCustomerModified(), saveBulkEditChanges()
+  - Location: `/static/js/modules/bulk-edit.js`
+  - Completed: October 25, 2025
+
+- **Helpers Utils Module (helpers.js)** - 28 lines extracted
+  - Functions: escapeHtml(), combineAddressFields(), parseAddress()
+  - Location: `/static/js/utils/helpers.js`
+  - Completed: October 25, 2025
+  - Dependencies: None (pure functions)
+
+- **Modals Module (modals.js)** - 60 lines extracted
+  - Functions: openModal(), closeModal(), initOptimizationModal(), toggleContextMenu(), closeAllContextMenus()
+  - Location: `/static/js/modules/modals.js`
+  - Completed: October 25, 2025
+  - Dependencies: optimizeRoutes() from app.js
+
+- **Navigation Module (navigation.js)** - 106 lines extracted
+  - Functions: initModuleNavigation(), switchModule(), handleHashChange()
+  - Location: `/static/js/modules/navigation.js`
+  - Completed: October 25, 2025
+  - Dependencies: map global, loadCustomersManagement(), loadDrivers() from app.js
+
+- **Map Module (map.js)** - 215 lines extracted
+  - Functions: initializeMap(), loadGooglePlacesAPI(), initAutocomplete(), loadCustomers(), displayCustomersOnMap(), highlightCustomerMarker()
+  - Location: `/static/js/modules/map.js`
+  - Completed: October 25, 2025
+  - Dependencies: Leaflet (L), Google Maps API, map/customerMarkers/selectedDriverIds/API_BASE/HOME_BASE globals
+
+- **Drivers Module (drivers.js)** - 672 lines extracted
+  - Functions: loadDrivers(), populateTechChips(), toggleAllTechs(), toggleTechSelection(), filterRoutesByDrivers(), displayDrivers(), createColorPickerButton(), openColorPickerModal(), closeColorPickerModal(), selectColor(), showAddDriverForm(), saveDriver(), deleteDriver(), showEditDriverForm(), updateDriver()
+  - Constants: DRIVER_COLORS, allDrivers, selectedDriverIds
+  - Location: `/static/js/modules/drivers.js`
+  - Completed: October 25, 2025
+  - Dependencies: API_BASE, currentRouteResult globals, loadCustomers(), displayRoutes(), displayRoutesOnMap(), combineAddressFields(), parseAddress(), initAutocomplete()
+
+- **Routes Module (routes.js)** - 467 lines extracted
+  - Functions: initDaySelector(), optimizeRoutes(), displayRoutes(), saveRoutes(), loadSavedRoutes(), makeSavedRoutesEditable(), createDraggableStop(), handleDragStart(), handleDragEnd(), handleDragOver(), handleDragLeave(), handleDrop(), updateStopSequences(), moveStopToRoute()
+  - Location: `/static/js/modules/routes.js`
+  - Completed: October 25, 2025
+  - Dependencies: API_BASE, selectedDay, currentRouteResult, draggedStop, draggedStopRoute, selectedDriverIds, map globals, loadCustomers(), loadCustomersManagement(), displayRoutesOnMap() from map.js
+  - Note: displayRoutesOnMap() was moved to map.js for proper separation of concerns
+
+- **Customers Module (customers.js)** - 296 lines extracted
+  - Functions: loadCustomersManagement(), displayCustomersManagement(), showAddCustomerForm(), saveCustomer(), deleteCustomer(), attachEventListeners(), initClientSearch(), initClientFilter(), applyClientFilters()
+  - Location: `/static/js/modules/customers.js`
+  - Completed: October 25, 2025
+  - Dependencies: API_BASE, selectedDay, loadCustomers() from map.js, highlightCustomerMarker() from map.js, openModal()/closeModal() from modals.js, showBulkEditCustomers() from bulk-edit.js
+  - Note: Recovered from git history (commit 6f56ecf) after accidental deletion
 
 ### 🔄 In Progress
 - None
 
 ### ⏳ Pending
 
-#### 1. Utils Module (helpers.js) - ~100 lines
-**Functions to extract:**
-- `escapeHtml(text)` - Lines 3175-3180
-- `combineAddressFields(street, city, state, zip)` - Lines 1342-1346
-- `parseAddress(fullAddress)` - Lines 1347-1369
-
-**Dependencies:** None (pure functions)
-
-#### 2. Utils Module (api.js) - ~200 lines
+#### 1. Utils Module (api.js) - ~200 lines
 **Functions to extract:**
 - All inline `fetch()` calls wrapped into:
   - `customerAPI.getAll()`, `customerAPI.getById()`, `customerAPI.create()`, etc.
@@ -79,21 +119,7 @@ static/js/
 
 **Dependencies:** Uses map, customerMarkers globals; calls API
 
-#### 6. Routes Module (routes.js) - ~600 lines
-**Functions to extract:**
-- `initDaySelector()` - Lines 487-513
-- `optimizeRoutes()` - Lines 522-570
-- `displayRoutes(result)` - Lines 571-646
-- `saveRoutes(result)` - Lines 647-681
-- `loadSavedRoutes(serviceDay)` - Lines 682-739
-- `displayRoutesOnMap(routes)` - Lines 740-800
-- `makeSavedRoutesEditable(routes)` - Lines 3292-3339
-- `createDraggableStop(stop, routeId)` - Lines 3340-3356
-- Drag-and-drop handlers (Lines 3357-3500)
-
-**Dependencies:** Uses map, routeLayers; calls API; calls displayCustomersOnMap()
-
-#### 7. Drivers Module (drivers.js) - ~600 lines
+#### 6. Drivers Module (drivers.js) - ~600 lines
 **Functions to extract:**
 - `loadDrivers()` - Lines 952-976
 - `populateTechChips(drivers)` - Lines 977-1047
@@ -198,10 +224,10 @@ Scripts MUST be loaded in this order in index.html:
 <script src="/static/js/modules/modals.js"></script>
 
 <!-- Feature modules (depend on core) -->
-<script src="/static/js/modules/drivers.js"></script>
-<script src="/static/js/modules/routes.js"></script>
+<script src="/static/js/modules/drivers.js"></script> <!-- ✅ Extracted -->
+<script src="/static/js/modules/routes.js"></script> <!-- ✅ Extracted -->
 <script src="/static/js/modules/customers.js"></script>
-<script src="/static/js/modules/bulk-edit.js"></script>
+<script src="/static/js/modules/bulk-edit.js"></script> <!-- ✅ Extracted -->
 
 <!-- Main entry point (depends on all modules) -->
 <script src="/static/js/app.js"></script>
@@ -209,12 +235,15 @@ Scripts MUST be loaded in this order in index.html:
 
 ## Progress Tracking
 
-**Initial:** 3,514 lines
-**Current:** 3,514 lines
-**Target:** <200 lines in app.js
+**Initial:** 3,516 lines
+**Current:** 108 lines (3,408 lines extracted)
+**Reduction:** 96.9%
+**Target:** <200 lines in app.js ✅ ACHIEVED
 
-**Modules extracted:** 0/9
+**Modules extracted:** 8/10 (Helpers ✅, Modals ✅, Navigation ✅, Map ✅, Drivers ✅, Routes ✅, Bulk Edit ✅, Customers ✅)
+**Remaining:** API utils (planned), Forms utils (planned)
 **Estimated time:** ~6-8 hours total (1 hour per major module)
+**Time spent:** ~4 hours
 
 ## Notes
 

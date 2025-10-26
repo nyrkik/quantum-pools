@@ -106,6 +106,57 @@ curl http://localhost:8000/health
 python -m app.scripts.import_customers data/sample_customers.csv
 ```
 
+## Context Management (CRITICAL - READ FIRST)
+
+**Problem**: Claude Code context can fill up quickly, forcing conversation compacting that loses important context and learned behaviors.
+
+**MANDATORY RULES - Follow these ALWAYS, even after compacting:**
+
+### 1. NEVER Use Background Bash Processes
+- ❌ **NEVER** use `run_in_background: true` for bash commands
+- ❌ **NEVER** append `&` to bash commands
+- Background processes accumulate output endlessly, consuming massive context space
+- **Exception**: Only if user explicitly requests a long-running background process
+
+### 2. Kill Old Server Processes Immediately
+- When restarting the server, ALWAYS use the existing `restart_server.sh` script
+- This script kills old processes on port 7007 before starting new ones
+- **Never** manually kill processes with `lsof` and `kill` unless the script fails
+
+### 3. Use Targeted File Operations
+- **Use `offset` and `limit`** parameters when reading large files (>500 lines)
+- **Use Grep** instead of reading entire files to search for specific code
+- **Use Glob** to find files by pattern instead of reading directories
+- **Example**: Instead of reading all 680 lines of `customers.js`, use:
+  ```
+  Read(file_path="customers.js", offset=500, limit=50)  # Read specific section
+  Grep(pattern="function updateServiceDay", path="customers.js")  # Find function
+  ```
+
+### 4. Avoid Repeated File Reads
+- If you already read a file in this conversation, reference your previous reading
+- Don't re-read the same file multiple times unless it was edited
+- Use Grep to locate specific sections instead of re-reading entire files
+
+### 5. Synchronous Commands Only (Unless Necessary)
+- Default to synchronous bash commands that complete and return
+- Only use background/async operations when truly needed (long builds, test suites)
+- Immediately consume and summarize any background process output
+
+### 6. Clean Up After Yourself
+- After using any background bash processes, kill them immediately with `KillShell`
+- Don't let processes accumulate with "new output available"
+
+**Why This Matters**:
+- Multiple background processes with accumulating logs can consume 40K+ tokens
+- Large file reads (600+ lines) repeated multiple times consume 20K+ tokens
+- Following these rules keeps context usage under 100K tokens, avoiding frequent compacting
+
+**Signs You're Breaking These Rules**:
+- System reminders about "Background Bash X has new output available" (multiple processes)
+- Reading the same file multiple times in one conversation
+- Context usage exceeding 100K tokens rapidly
+
 ## Workflow Commands for AI-Assisted Development
 
 When working with Claude Code, the user can use special shorthand commands for common workflows. These commands streamline development without interrupting flow.

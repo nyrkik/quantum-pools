@@ -138,7 +138,7 @@ async def list_customers(
 
     # Apply pagination
     offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size).order_by(Customer.name)
+    query = query.offset(offset).limit(page_size).order_by(Customer.display_name)
 
     # Execute query
     result = await db.execute(query)
@@ -188,8 +188,12 @@ async def get_customer(
     """
     Retrieve a specific customer by ID.
     """
+    from sqlalchemy.orm import selectinload
+
     result = await db.execute(
-        select(Customer).where(Customer.id == customer_id)
+        select(Customer)
+        .options(selectinload(Customer.assigned_driver))
+        .where(Customer.id == customer_id)
     )
     customer = result.scalar_one_or_none()
 
@@ -359,7 +363,7 @@ async def get_customers_by_day(
     else:
         query = query.where(Customer.service_day == day_lower)
 
-    query = query.order_by(Customer.name)
+    query = query.order_by(Customer.display_name)
 
     result = await db.execute(query)
     customers = result.scalars().all()

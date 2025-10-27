@@ -1,6 +1,6 @@
 # Code Standards & Best Practices
 
-**Enterprise-grade development rules for RouteOptimizer.**
+**Enterprise-grade development rules for Quantum Pool Solutions.**
 
 ## Core Principles
 
@@ -145,7 +145,7 @@ class CustomerCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     email: str = Field(..., regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
     service_day: str = Field(..., pattern='^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$')
-    
+
     @validator('name')
     def name_must_not_be_empty(cls, v):
         if not v.strip():
@@ -236,13 +236,13 @@ async def require_org_context(request: Request) -> str:
     token = request.headers.get("Authorization")
     if not token:
         raise HTTPException(401, "Not authenticated")
-    
+
     payload = decode_jwt(token)
     org_id = payload.get("org_id")
-    
+
     if not org_id:
         raise HTTPException(403, "No organization context")
-    
+
     return org_id
 ```
 
@@ -253,10 +253,10 @@ async def require_org_context(request: Request) -> str:
 **Use indexes:**
 ```sql
 -- ✅ CORRECT - Index frequently queried columns
-CREATE INDEX idx_customers_org_service_day 
+CREATE INDEX idx_customers_org_service_day
 ON customers(organization_id, service_day);
 
-CREATE INDEX idx_customers_location 
+CREATE INDEX idx_customers_location
 ON customers(latitude, longitude);
 ```
 
@@ -342,11 +342,11 @@ async def test_create_customer(db_session):
         address="123 Main St",
         service_day="monday"
     )
-    
+
     # Act
     service = CustomerService(db_session)
     customer = await service.create_customer(org_id, data)
-    
+
     # Assert
     assert customer.name == "Test Customer"
     assert customer.organization_id == org_id
@@ -366,7 +366,7 @@ async def test_customer_api_endpoint(client, auth_token):
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 201
-    
+
     # Verify in database
     customer_id = response.json()["id"]
     customer = await db.get(Customer, customer_id)

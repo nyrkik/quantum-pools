@@ -19,6 +19,9 @@ function initDaySelector() {
         tab.addEventListener('click', function() {
             selectedDay = this.dataset.day;
 
+            // Clear route result when switching days
+            currentRouteResult = null;
+
             // Update active day
             document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
             this.classList.add('active');
@@ -26,6 +29,11 @@ function initDaySelector() {
             // Reload customers for selected day
             loadCustomers();
             loadCustomersManagement();
+
+            // Repopulate tech chips to clear stop counts
+            if (allTechs && allTechs.length > 0) {
+                populateTechChips(allTechs);
+            }
         });
     });
 }
@@ -66,6 +74,11 @@ async function optimizeRoutes() {
             currentRouteResult = result; // Store for filtering
             displayRoutes(result);
             displayRoutesOnMap(result.routes);
+
+            // Update tech chips with stop counts
+            if (allTechs && allTechs.length > 0) {
+                populateTechChips(allTechs);
+            }
         } else {
             currentRouteResult = null;
             alert(result.message || 'No routes generated. Add customers and techs first.');
@@ -114,7 +127,7 @@ function displayRoutes(result) {
     // Filter and show routes based on selected techs
     const filteredRoutes = result.routes.filter(route => {
         if (selectedTechIds.size === 0) return false;
-        if (route.tech_id && !selectedTechIds.has(route.tech_id)) return false;
+        if (route.driver_id && !selectedTechIds.has(route.driver_id)) return false;
         return true;
     });
 

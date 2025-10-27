@@ -131,8 +131,11 @@ function displayCustomersOnMap(customers) {
             const latLng = [lat, lng];
             coordinates.push(latLng);
 
-            // Red for unassigned, blue for assigned
-            const markerColor = isUnassigned ? '#e74c3c' : '#3498db';
+            // Red for unassigned, use assigned tech's color for assigned customers
+            let markerColor = '#e74c3c'; // Default red for unassigned
+            if (!isUnassigned && customer.assigned_tech && customer.assigned_tech.color) {
+                markerColor = customer.assigned_tech.color;
+            }
 
             const marker = L.circleMarker(latLng, {
                 radius: 6,
@@ -142,6 +145,10 @@ function displayCustomersOnMap(customers) {
                 opacity: 1,
                 fillOpacity: isUnassigned ? 0.9 : 0.7
             }).addTo(map);
+
+            // Store original color for later use (when unhighlighting)
+            marker.originalColor = markerColor;
+            marker.originalFillOpacity = isUnassigned ? 0.9 : 0.7;
 
             // Display schedule or single day - abbreviated format
             let scheduleDisplay;
@@ -188,15 +195,15 @@ function displayCustomersOnMap(customers) {
 }
 
 function highlightCustomerMarker(customerId) {
-    // Reset previously highlighted marker
+    // Reset previously highlighted marker to its original color
     if (highlightedMarker) {
         highlightedMarker.setStyle({
             radius: 6,
-            fillColor: '#3498db',
+            fillColor: highlightedMarker.originalColor || '#3498db',
             color: '#fff',
             weight: 2,
             opacity: 1,
-            fillOpacity: 0.7
+            fillOpacity: highlightedMarker.originalFillOpacity || 0.7
         });
     }
 

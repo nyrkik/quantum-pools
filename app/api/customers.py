@@ -90,6 +90,7 @@ async def list_customers(
     service_day: Optional[str] = Query(None, description="Filter by service day"),
     service_type: Optional[str] = Query(None, description="Filter by service type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    status: Optional[str] = Query(None, description="Filter by status (active, inactive, pending)"),
     auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -139,6 +140,13 @@ async def list_customers(
         query = query.where(Customer.service_type == service_type.lower())
     if is_active is not None:
         query = query.where(Customer.is_active == is_active)
+    if status:
+        # Check if status contains multiple values (comma-separated)
+        if ',' in status:
+            status_list = [s.strip().lower() for s in status.split(',')]
+            query = query.where(Customer.status.in_(status_list))
+        else:
+            query = query.where(Customer.status == status.lower())
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -271,6 +279,7 @@ async def update_customer(
     # Fetch existing customer
     result = await db.execute(
         select(Customer)
+        .options(selectinload(Customer.assigned_tech))
         .where(Customer.id == customer_id)
         .where(Customer.organization_id == auth.organization_id)
     )
@@ -286,6 +295,10 @@ async def update_customer(
     update_data = customer_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(customer, field, value)
+
+    # Sync is_active with status field
+    if 'status' in update_data:
+        customer.is_active = (customer.status == 'active')
 
     # Auto-generate display_name if name fields changed but display_name not explicitly provided
     name_fields_changed = any(f in update_data for f in ['name', 'first_name', 'last_name'])

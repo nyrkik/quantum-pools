@@ -118,7 +118,7 @@ async def optimize_routes(
     # Run optimization
     result = await optimization_service.optimize_routes(
         customers=customers,
-        drivers=drivers,
+        techs=drivers,
         service_day=request.service_day,
         allow_day_reassignment=request.allow_day_reassignment,
         optimization_mode=request.optimization_mode

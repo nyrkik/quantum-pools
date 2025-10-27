@@ -112,11 +112,22 @@
     font-size: 0.85rem;
     transition: all 0.3s;
     background: white;
-    min-width: 80px;
+    min-width: 140px;
     height: 36px;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.tech-chip-name {
+    font-size: 0.85rem;
+}
+
+.tech-chip-count {
+    font-size: 0.7rem;
+    opacity: 0.8;
+    font-weight: 600;
 }
 
 .tech-chip:hover {
@@ -358,17 +369,18 @@
 }
 
 .bulk-edit-table-container {
-    overflow-x: auto;
-    overflow-y: auto;
     max-height: calc(90vh - 200px);
     border: 1px solid var(--border-color);
     border-radius: 4px;
+    position: relative;
+    overflow: auto;
 }
 
 .bulk-edit-table {
     width: 100%;
     min-width: 2200px; /* Optimized widths for all fields */
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     background: white;
     font-size: 0.85rem;
 }
@@ -406,9 +418,41 @@
     background-color: #fff3cd;
 }
 
+.bulk-edit-table tbody tr:focus-within {
+    background-color: #e3f2fd;
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+}
+
 .bulk-edit-table td {
     padding: 0.25rem;
     border-right: 1px solid var(--border-color);
+}
+
+/* Frozen first column */
+.bulk-edit-table .frozen-col {
+    position: sticky;
+    left: 0;
+    background: white;
+    z-index: 5;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+}
+
+.bulk-edit-table thead .frozen-col {
+    z-index: 15;
+    background: var(--primary-dark);
+}
+
+.bulk-edit-table tbody tr:hover .frozen-col {
+    background-color: #f8f9fa;
+}
+
+.bulk-edit-table tbody tr.modified .frozen-col {
+    background-color: #fff3cd;
+}
+
+.bulk-edit-table tbody tr:focus-within .frozen-col {
+    background-color: #e3f2fd;
 }
 
 .bulk-edit-table td:last-child {
@@ -818,11 +862,25 @@
     border-left: 3px solid var(--primary-color);
 }
 
+.client-list-item.pending {
+    background-color: #fffbea;
+}
+
 .client-list-item-name {
     font-weight: 600;
     font-size: 1rem;
     color: var(--primary-dark);
     margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pending-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #dc3545;
+    letter-spacing: 0.5px;
 }
 
 .client-list-item-address {

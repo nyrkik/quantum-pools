@@ -7,14 +7,45 @@
 // Global variable for form change detection
 let originalFormValues = {};
 
+// Global variable for current filter state
+let currentFilters = {
+    serviceDay: '',
+    assignedTech: '',
+    serviceType: '',
+    status: 'active_pending'
+};
+
 // ========================================
 // Customer Management & Display
 // ========================================
 
 async function loadCustomersManagement() {
     try {
-        // Load ALL customers for the Clients page (no day filtering)
-        const url = `${API_BASE}/api/customers?page_size=1000`;
+        // Build URL with current filters
+        let url = `${API_BASE}/api/customers?page_size=1000`;
+
+        if (currentFilters.serviceDay) {
+            url += `&service_day=${currentFilters.serviceDay}`;
+        }
+        if (currentFilters.assignedTech) {
+            url += `&assigned_tech_id=${currentFilters.assignedTech}`;
+        }
+        if (currentFilters.serviceType) {
+            url += `&service_type=${currentFilters.serviceType}`;
+        }
+
+        // Status filtering
+        if (currentFilters.status === 'active_pending') {
+            // Show active and pending (comma-separated for OR logic)
+            url += `&status=active,pending`;
+        } else if (currentFilters.status === 'active') {
+            url += `&status=active`;
+        } else if (currentFilters.status === 'pending') {
+            url += `&status=pending`;
+        } else if (currentFilters.status === 'inactive') {
+            url += `&status=inactive`;
+        }
+        // If status is 'all', don't add any status filter
 
         const response = await Auth.apiRequest(url);
         if (!response.ok) {
@@ -48,14 +79,22 @@ function displayCustomersManagement(customers) {
         listItem.dataset.customerId = customer.id;
         listItem.dataset.serviceType = customer.service_type;
 
+        // Add pending class if status is pending
+        if (customer.status === 'pending') {
+            listItem.classList.add('pending');
+        }
+
         // Use display_name if available, fallback to name
         const displayName = customer.display_name || customer.name;
 
         // Parse street address from full address
         const streetAddress = customer.address ? customer.address.split(',')[0] : '';
 
+        // Add pending badge if status is pending
+        const pendingBadge = customer.status === 'pending' ? '<span class="pending-badge">PENDING</span>' : '';
+
         listItem.innerHTML = `
-            <div class="client-list-item-name">${displayName}</div>
+            <div class="client-list-item-name">${displayName}${pendingBadge}</div>
             <div class="client-list-item-address">${streetAddress}</div>
         `;
 
@@ -194,21 +233,91 @@ async function editCustomer(customerId) {
 // ========================================
 
 function showAddCustomerForm() {
-    const container = document.getElementById('customers-list');
+    const container = document.getElementById('tab-profile');
 
     const formHtml = `
         <div class="customer-form">
             <h3>Add New Customer</h3>
+
             <div class="control-group">
-                <label>Name:</label>
-                <input type="text" id="customer-name" placeholder="Customer Name">
+                <label>Service Type: <span class="required">*</span></label>
+                <select id="customer-service-type" onchange="toggleCustomerTypeFields()">
+                    <option value="residential">Residential</option>
+                    <option value="commercial">Commercial</option>
+                </select>
+            </div>
+
+            <div id="residential-fields">
+                <div class="control-group">
+                    <label>First Name:</label>
+                    <input type="text" id="customer-first-name" placeholder="John">
+                </div>
+                <div class="control-group">
+                    <label>Last Name:</label>
+                    <input type="text" id="customer-last-name" placeholder="Smith">
+                </div>
+            </div>
+
+            <div id="commercial-fields" style="display: none;">
+                <div class="control-group">
+                    <label>Name:</label>
+                    <input type="text" id="customer-business-name" placeholder="ABC Pool Service">
+                </div>
+                <div class="control-group">
+                    <label>Management Company:</label>
+                    <input type="text" id="customer-mgmt-company" placeholder="Optional">
+                </div>
+                <div class="control-group">
+                    <label>Invoice Email:</label>
+                    <input type="email" id="customer-invoice-email" placeholder="billing@example.com">
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Street Address: <span class="required">*</span></label>
+                <input type="text" id="customer-street" placeholder="123 Main St">
             </div>
             <div class="control-group">
-                <label>Address:</label>
-                <input type="text" id="customer-address" placeholder="123 Main St, City, State">
+                <label>City: <span class="required">*</span></label>
+                <input type="text" id="customer-city" placeholder="Phoenix">
             </div>
             <div class="control-group">
-                <label>Service Day:</label>
+                <label>State: <span class="required">*</span></label>
+                <input type="text" id="customer-state" placeholder="AZ" maxlength="2">
+            </div>
+            <div class="control-group">
+                <label>ZIP: <span class="required">*</span></label>
+                <input type="text" id="customer-zip" placeholder="85001">
+            </div>
+
+            <div class="control-group">
+                <label>Email:</label>
+                <input type="email" id="customer-email" placeholder="customer@example.com">
+            </div>
+            <div class="control-group">
+                <label>Phone:</label>
+                <input type="tel" id="customer-phone" placeholder="555-1234">
+            </div>
+            <div class="control-group">
+                <label>Alt Email:</label>
+                <input type="email" id="customer-alt-email" placeholder="Optional">
+            </div>
+            <div class="control-group">
+                <label>Alt Phone:</label>
+                <input type="tel" id="customer-alt-phone" placeholder="Optional">
+            </div>
+
+            <div class="control-group">
+                <label>Service Days Per Week:</label>
+                <select id="customer-days-per-week" onchange="toggleDaySelection()">
+                    <option value="1">1 day/week</option>
+                    <option value="2">2 days/week</option>
+                    <option value="3">3 days/week</option>
+                </select>
+            </div>
+
+            <div id="single-day-selector" class="control-group">
+                <label>Service Day: <span class="required">*</span></label>
                 <select id="customer-service-day">
                     <option value="monday">Monday</option>
                     <option value="tuesday">Tuesday</option>
@@ -219,23 +328,51 @@ function showAddCustomerForm() {
                     <option value="sunday">Sunday</option>
                 </select>
             </div>
-            <div class="control-group">
-                <label>Service Type:</label>
-                <select id="customer-service-type">
-                    <option value="residential">Residential (15 min)</option>
-                    <option value="commercial">Commercial (25 min)</option>
+
+            <div id="multi-day-selector" class="control-group" style="display: none;">
+                <label>Service Days: <span class="required">*</span></label>
+                <select id="customer-service-schedule">
+                    <!-- Populated by toggleDaySelection() -->
                 </select>
             </div>
+
+            <div class="control-group">
+                <label>Visit Duration (minutes):</label>
+                <input type="number" id="customer-visit-duration" min="5" max="120" value="15">
+            </div>
+
             <div class="control-group">
                 <label>Difficulty (1-5):</label>
                 <input type="number" id="customer-difficulty" min="1" max="5" value="1">
             </div>
+
+            <div class="control-group">
+                <label>Service Rate ($):</label>
+                <input type="number" id="customer-service-rate" step="0.01" min="0" placeholder="125.00">
+            </div>
+
+            <div class="control-group">
+                <label>Billing Frequency:</label>
+                <select id="customer-billing-frequency">
+                    <option value="">-- Select --</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="per-visit">Per Visit</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Notes:</label>
+                <textarea id="customer-notes" rows="3" placeholder="Optional notes"></textarea>
+            </div>
+
             <div class="control-group">
                 <label>
                     <input type="checkbox" id="customer-locked">
-                    Lock service day (cannot be reassigned)
+                    Lock service day (cannot be reassigned during optimization)
                 </label>
             </div>
+
             <button class="btn-primary" onclick="saveCustomer()">Save Customer</button>
             <button class="btn-secondary" onclick="loadCustomersManagement()">Cancel</button>
         </div>
@@ -244,18 +381,143 @@ function showAddCustomerForm() {
     container.innerHTML = formHtml;
 }
 
-async function saveCustomer() {
-    const name = document.getElementById('customer-name').value;
-    const address = document.getElementById('customer-address').value;
-    const serviceDay = document.getElementById('customer-service-day').value;
+function toggleCustomerTypeFields() {
     const serviceType = document.getElementById('customer-service-type').value;
-    const difficulty = parseInt(document.getElementById('customer-difficulty').value);
-    const locked = document.getElementById('customer-locked').checked;
+    const residentialFields = document.getElementById('residential-fields');
+    const commercialFields = document.getElementById('commercial-fields');
+    const daysPerWeekSelect = document.getElementById('customer-days-per-week');
 
-    if (!name || !address) {
-        alert('Please fill in all required fields');
+    if (serviceType === 'residential') {
+        residentialFields.style.display = 'block';
+        commercialFields.style.display = 'none';
+        // Residential can have 1, 2, or 3 days
+        daysPerWeekSelect.innerHTML = `
+            <option value="1">1 day/week</option>
+            <option value="2">2 days/week</option>
+            <option value="3">3 days/week</option>
+        `;
+    } else {
+        residentialFields.style.display = 'none';
+        commercialFields.style.display = 'block';
+        // Commercial can only have 2 or 3 days
+        daysPerWeekSelect.innerHTML = `
+            <option value="2">2 days/week</option>
+            <option value="3">3 days/week</option>
+        `;
+    }
+    // Trigger day selection update
+    toggleDaySelection();
+}
+
+function toggleDaySelection() {
+    const daysPerWeek = parseInt(document.getElementById('customer-days-per-week').value);
+    const singleDaySelector = document.getElementById('single-day-selector');
+    const multiDaySelector = document.getElementById('multi-day-selector');
+    const scheduleSelect = document.getElementById('customer-service-schedule');
+
+    if (daysPerWeek === 1) {
+        singleDaySelector.style.display = 'block';
+        multiDaySelector.style.display = 'none';
+    } else {
+        singleDaySelector.style.display = 'none';
+        multiDaySelector.style.display = 'block';
+
+        if (daysPerWeek === 2) {
+            scheduleSelect.innerHTML = `
+                <option value="Mo/Th">Mo/Th</option>
+                <option value="Tu/Fr">Tu/Fr</option>
+            `;
+            scheduleSelect.disabled = false;
+        } else if (daysPerWeek === 3) {
+            scheduleSelect.innerHTML = `
+                <option value="Mo/We/Fr">Mo/We/Fr</option>
+            `;
+            scheduleSelect.disabled = true;
+        }
+    }
+}
+
+async function saveCustomer() {
+    const serviceType = document.getElementById('customer-service-type').value;
+
+    // Get address fields
+    const street = document.getElementById('customer-street').value;
+    const city = document.getElementById('customer-city').value;
+    const state = document.getElementById('customer-state').value;
+    const zip = document.getElementById('customer-zip').value;
+
+    if (!street || !city || !state || !zip) {
+        alert('Please fill in all required address fields');
         return;
     }
+
+    const address = `${street}, ${city}, ${state} ${zip}`;
+
+    // Get service days
+    const daysPerWeek = parseInt(document.getElementById('customer-days-per-week').value);
+    let serviceDay;
+    let serviceSchedule = null;
+
+    if (daysPerWeek === 1) {
+        // Single day - get from dropdown
+        serviceDay = document.getElementById('customer-service-day').value;
+    } else {
+        // Multi-day - get from schedule dropdown
+        serviceSchedule = document.getElementById('customer-service-schedule').value;
+
+        // Map schedule to primary service day
+        if (serviceSchedule === 'Mo/Th' || serviceSchedule === 'Mo/We/Fr') {
+            serviceDay = 'monday';
+        } else if (serviceSchedule === 'Tu/Fr') {
+            serviceDay = 'tuesday';
+        }
+    }
+
+    const data = {
+        service_type: serviceType,
+        address: address,
+        service_day: serviceDay,
+        service_days_per_week: daysPerWeek,
+        visit_duration: parseInt(document.getElementById('customer-visit-duration').value),
+        difficulty: parseInt(document.getElementById('customer-difficulty').value),
+        locked: document.getElementById('customer-locked').checked
+    };
+
+    if (serviceSchedule) {
+        data.service_schedule = serviceSchedule;
+    }
+
+    // Residential or Commercial specific fields
+    if (serviceType === 'residential') {
+        data.first_name = document.getElementById('customer-first-name').value;
+        data.last_name = document.getElementById('customer-last-name').value;
+    } else {
+        data.name = document.getElementById('customer-business-name').value;
+        const mgmtCompany = document.getElementById('customer-mgmt-company').value;
+        const invoiceEmail = document.getElementById('customer-invoice-email').value;
+        if (mgmtCompany) data.management_company = mgmtCompany;
+        if (invoiceEmail) data.invoice_email = invoiceEmail;
+    }
+
+    // Contact info
+    const email = document.getElementById('customer-email').value;
+    const phone = document.getElementById('customer-phone').value;
+    const altEmail = document.getElementById('customer-alt-email').value;
+    const altPhone = document.getElementById('customer-alt-phone').value;
+    if (email) data.email = email;
+    if (phone) data.phone = phone;
+    if (altEmail) data.alt_email = altEmail;
+    if (altPhone) data.alt_phone = altPhone;
+
+    // Billing
+    const serviceRate = document.getElementById('customer-service-rate').value;
+    const billingFreq = document.getElementById('customer-billing-frequency').value;
+    if (serviceRate) data.service_rate = parseFloat(serviceRate);
+    if (billingFreq) data.billing_frequency = billingFreq;
+
+    // Notes
+    const notes = document.getElementById('customer-notes').value;
+    if (notes) data.notes = notes;
 
     try {
         const response = await Auth.apiRequest(`${API_BASE}/api/customers/`, {
@@ -263,14 +525,7 @@ async function saveCustomer() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                name: name,
-                address: address,
-                service_day: serviceDay,
-                service_type: serviceType,
-                difficulty: difficulty,
-                locked: locked
-            })
+            body: JSON.stringify(data)
         });
 
         if (!response.ok) {
@@ -280,7 +535,10 @@ async function saveCustomer() {
         alert('Customer created successfully!');
         loadCustomersManagement();
         if (typeof loadCustomers === 'function') {
-            loadCustomers(); // Reload map
+            loadCustomers();
+        }
+        if (typeof showBulkEditCustomers === 'function' && document.getElementById('bulk-edit-modal').classList.contains('active')) {
+            showBulkEditCustomers();
         }
     } catch (error) {
         console.error('Error creating customer:', error);
@@ -824,6 +1082,10 @@ async function updateCustomer(customerId) {
         if (typeof loadCustomers === 'function') {
             loadCustomers();
         }
+        // Reload bulk edit if open
+        if (typeof showBulkEditCustomers === 'function' && document.getElementById('bulk-edit-modal').classList.contains('active')) {
+            showBulkEditCustomers();
+        }
         // Show updated profile in detail panel
         displayClientProfile(updatedCustomer);
     } catch (error) {
@@ -892,11 +1154,29 @@ function initClientSearch() {
 
 function initClientFilter() {
     const filterBtn = document.getElementById('clients-filter-btn');
-    if (!filterBtn) return;
+    const modal = document.getElementById('clients-filter-modal');
+    if (!filterBtn || !modal) return;
 
     filterBtn.addEventListener('click', function() {
         if (typeof openModal === 'function') {
             openModal('clients-filter-modal');
+        }
+    });
+
+    // Close modal when clicking X
+    const closeBtn = modal.querySelector('.modal-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+            if (typeof closeModal === 'function') {
+                closeModal('clients-filter-modal');
+            }
+        });
+    }
+
+    // Close modal when clicking outside
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal && typeof closeModal === 'function') {
+            closeModal('clients-filter-modal');
         }
     });
 
@@ -913,6 +1193,16 @@ function initClientFilter() {
             document.getElementById('filter-service-day').value = '';
             document.getElementById('filter-assigned-tech').value = '';
             document.getElementById('filter-service-type').value = '';
+            document.getElementById('filter-status').value = 'active';
+
+            // Reset filter state
+            currentFilters = {
+                serviceDay: '',
+                assignedTech: '',
+                serviceType: '',
+                status: 'active'
+            };
+
             loadCustomersManagement();
             if (typeof closeModal === 'function') {
                 closeModal('clients-filter-modal');
@@ -925,31 +1215,21 @@ async function applyClientFilters() {
     const serviceDay = document.getElementById('filter-service-day').value;
     const assignedTech = document.getElementById('filter-assigned-tech').value;
     const serviceType = document.getElementById('filter-service-type').value;
+    const status = document.getElementById('filter-status').value;
 
-    try {
-        let url = `${API_BASE}/api/customers?page_size=100`;
+    // Save filter state
+    currentFilters = {
+        serviceDay: serviceDay,
+        assignedTech: assignedTech,
+        serviceType: serviceType,
+        status: status
+    };
 
-        if (serviceDay) {
-            url += `&service_day=${serviceDay}`;
-        }
-        if (assignedTech) {
-            url += `&assigned_tech_id=${assignedTech}`;
-        }
-        if (serviceType) {
-            url += `&service_type=${serviceType}`;
-        }
+    // Reload with new filters
+    await loadCustomersManagement();
 
-        const response = await Auth.apiRequest(url);
-        if (!response.ok) return;
-
-        const data = await response.json();
-        displayCustomersManagement(data.customers || []);
-
-        if (typeof closeModal === 'function') {
-            closeModal('clients-filter-modal');
-        }
-    } catch (error) {
-        console.error('Error applying filters:', error);
+    if (typeof closeModal === 'function') {
+        closeModal('clients-filter-modal');
     }
 }
 

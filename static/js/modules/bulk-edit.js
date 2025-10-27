@@ -296,14 +296,14 @@ function renderBulkEditTable() {
 
         tableHtml += `
             <tr data-customer-id="${customer.id}" data-index="${index}">
+                <td class="xx-wide frozen-col">
+                    <input type="text" data-field="display_name" value="${escapeHtml(customer.display_name || '')}" onchange="markCustomerModified('${customer.id}')">
+                </td>
                 <td class="wide">
                     <select data-field="service_type" onchange="markCustomerModified('${customer.id}')">
                         <option value="residential" ${customer.service_type === 'residential' ? 'selected' : ''}>Res</option>
                         <option value="commercial" ${customer.service_type === 'commercial' ? 'selected' : ''}>Com</option>
                     </select>
-                </td>
-                <td class="xx-wide">
-                    <input type="text" data-field="display_name" value="${escapeHtml(customer.display_name || '')}" onchange="markCustomerModified('${customer.id}')">
                 </td>
                 <td class="x-wide">
                     <input type="text" data-field="first_name" value="${escapeHtml(customer.first_name || '')}" onchange="markCustomerModified('${customer.id}')">

@@ -43,11 +43,11 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     attachEventListeners();
     initOptimizationModal();
+    initDaySelector();  // Must run before loadCustomers to set selectedDay
     loadCustomers();
     loadTechs();
     loadCustomersManagement();
     initTabs();
-    initDaySelector();
     loadGooglePlacesAPI();
     initClientSearch();
     initClientFilter();

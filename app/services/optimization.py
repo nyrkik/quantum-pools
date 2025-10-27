@@ -297,9 +297,9 @@ class RouteOptimizationService:
 
                 if route_customers:
                     all_routes.append({
-                        "tech_id": str(tech.id),
-                        "tech_name": tech.name,
-                        "tech_color": tech.color if hasattr(tech, 'color') else '#3498db',
+                        "driver_id": str(tech.id),
+                        "driver_name": tech.name,
+                        "driver_color": tech.color if hasattr(tech, 'color') else '#3498db',
                         "service_day": service_day or "multiple",
                         "stops": route_customers,
                         "total_customers": len(route_customers),
@@ -578,9 +578,9 @@ class RouteOptimizationService:
 
             if route_customers:  # Only include routes with customers
                 routes.append({
-                    "tech_id": str(tech.id),
-                    "tech_name": tech.name,
-                    "tech_color": tech.color if hasattr(tech, 'color') else '#3498db',
+                    "driver_id": str(tech.id),
+                    "driver_name": tech.name,
+                    "driver_color": tech.color if hasattr(tech, 'color') else '#3498db',
                     "service_day": service_day or "multiple",
                     "stops": route_customers,
                     "total_customers": len(route_customers),

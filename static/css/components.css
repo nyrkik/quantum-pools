@@ -48,8 +48,11 @@
 .control-group label {
     display: block;
     margin-bottom: 0.5rem;
-    color: var(--text-color);
-    font-weight: 500;
+}
+
+.required {
+    color: #e74c3c;
+    font-weight: bold;
 }
 
 .control-group input[type="number"],

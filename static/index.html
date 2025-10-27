@@ -259,6 +259,17 @@
             <h2>Filter Clients</h2>
 
             <div class="control-group">
+                <label>Status:</label>
+                <select id="filter-status">
+                    <option value="active_pending">Active & Pending</option>
+                    <option value="active">Active Only</option>
+                    <option value="pending">Pending Only</option>
+                    <option value="inactive">Inactive Only</option>
+                    <option value="all">All Clients</option>
+                </select>
+            </div>
+
+            <div class="control-group">
                 <label>Service Day:</label>
                 <select id="filter-service-day">
                     <option value="">All Days</option>
@@ -366,8 +377,8 @@
                 <table id="bulk-edit-table" class="bulk-edit-table">
                     <thead>
                         <tr>
+                            <th class="frozen-col">Display Name</th>
                             <th>Type</th>
-                            <th>Display Name</th>
                             <th>First Name</th>
                             <th>Last Name</th>
                             <th>Street Address</th>

@@ -93,7 +93,27 @@ function populateTechChips(techs) {
         chip.style.borderColor = tech.color || '#3498db';
         chip.style.backgroundColor = tech.color || '#3498db';
         chip.style.color = 'white';
-        chip.textContent = tech.name;
+
+        // Calculate stop count for this tech if routes exist
+        let stopCount = 0;
+        if (currentRouteResult && currentRouteResult.routes) {
+            const techRoute = currentRouteResult.routes.find(r => r.driver_id === tech.id);
+            if (techRoute && techRoute.stops) {
+                stopCount = techRoute.stops.length;
+            }
+        }
+
+        // Create name and count elements
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'tech-chip-name';
+        nameSpan.textContent = tech.name;
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'tech-chip-count';
+        countSpan.textContent = stopCount > 0 ? stopCount : '';
+
+        chip.appendChild(nameSpan);
+        chip.appendChild(countSpan);
 
         selectedTechIds.add(tech.id);
 
@@ -136,6 +156,11 @@ function toggleAllTechs() {
                 chip.classList.add('selected');
                 chip.style.backgroundColor = tech.color || '#3498db';
                 chip.style.color = 'white';
+                // Update count color for selected state
+                const countSpan = chip.querySelector('.tech-chip-count');
+                if (countSpan) {
+                    countSpan.style.color = 'white';
+                }
             }
         });
     } else {
@@ -149,6 +174,11 @@ function toggleAllTechs() {
                 chip.classList.add('unselected');
                 chip.style.backgroundColor = '#f5f5f5';
                 chip.style.color = '#999';
+                // Update count color for unselected state
+                const countSpan = chip.querySelector('.tech-chip-count');
+                if (countSpan) {
+                    countSpan.style.color = '#999';
+                }
             }
         });
     }
@@ -170,6 +200,11 @@ function toggleTechSelection(techId, multiSelect = false) {
             chip.classList.add('unselected');
             chip.style.backgroundColor = '#f5f5f5';
             chip.style.color = '#999';
+            // Update count color for unselected state
+            const countSpan = chip.querySelector('.tech-chip-count');
+            if (countSpan) {
+                countSpan.style.color = '#999';
+            }
         } else {
             selectedTechIds.add(techId);
             chip.classList.remove('unselected');
@@ -178,6 +213,11 @@ function toggleTechSelection(techId, multiSelect = false) {
             if (tech) {
                 chip.style.backgroundColor = tech.color || '#3498db';
                 chip.style.color = 'white';
+                // Update count color for selected state
+                const countSpan = chip.querySelector('.tech-chip-count');
+                if (countSpan) {
+                    countSpan.style.color = 'white';
+                }
             }
         }
     } else {
@@ -192,6 +232,11 @@ function toggleTechSelection(techId, multiSelect = false) {
                 otherChip.classList.add('unselected');
                 otherChip.style.backgroundColor = '#f5f5f5';
                 otherChip.style.color = '#999';
+                // Update count color for unselected state
+                const countSpan = otherChip.querySelector('.tech-chip-count');
+                if (countSpan) {
+                    countSpan.style.color = '#999';
+                }
             }
         });
 
@@ -203,6 +248,11 @@ function toggleTechSelection(techId, multiSelect = false) {
         if (tech) {
             chip.style.backgroundColor = tech.color || '#3498db';
             chip.style.color = 'white';
+            // Update count color for selected state
+            const countSpan = chip.querySelector('.tech-chip-count');
+            if (countSpan) {
+                countSpan.style.color = 'white';
+            }
         }
     }
 

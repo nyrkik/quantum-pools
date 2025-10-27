@@ -1,12 +1,12 @@
 # Development Guide
 
-**Quick reference for setup, commands, and running RouteOptimizer.**
+**Quick reference for setup, commands, and running Quantum Pool Solutions.**
 
 ## Setup
 
 ### Initial Installation
 ```bash
-cd /mnt/Projects/RouteOptimizer
+cd /mnt/Projects/quantum-pools
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -178,7 +178,7 @@ black app/
 
 ## Project Structure
 ```
-RouteOptimizer/
+quantum-pools/
 ├── app/
 │   ├── api/              # FastAPI routers
 │   ├── models/           # SQLAlchemy models

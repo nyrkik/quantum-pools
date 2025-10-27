@@ -1,6 +1,6 @@
 # Project Status
 
-**Current development phase and progress tracking for RouteOptimizer.**
+**Current development phase and progress tracking for Quantum Pool Solutions.**
 
 ## Current Phase: MVP Development
 

@@ -1,6 +1,37 @@
 # Architecture Reference
 
-**Complete system design for RouteOptimizer SaaS platform.**
+**Complete system design for Quantum Pool Solutions SaaS platform.**
+
+## Market Position
+
+### Our Differentiation
+
+Quantum Pool Solutions is positioned as the **AI-powered pool service operating system** - not just another scheduling tool. While competitors like Skimmer, ServiceTitan, and Pool Brain focus on digitizing existing workflows, we're transforming them with automation and intelligence.
+
+**Key Differentiators:**
+- **AI-powered inspection processing** - Automated data extraction from inspection reports
+- **Predictive maintenance** - ML models predict issues before they occur
+- **Intelligent routing** - Weather-aware, traffic-optimized route planning
+- **Computer vision** - Analyze pool photos for condition assessment
+- **Business intelligence** - True analytics, not just reporting
+
+### Competitive Landscape
+
+**Market Leaders:**
+- **Skimmer** - Market leader, strong route optimization, manual data entry
+- **ServiceTitan** - Enterprise-grade but generic field service (not pool-specific)
+- **Pool Brain** - Excellent custom workflows, limited AI/automation
+- **Pool Office Manager** - Seasonal focus, basic chemistry calculators
+
+**Market Gap We Fill:**
+- Competitors digitize paper → We automate intelligence
+- They're reactive → We're predictive
+- They track data → We generate insights
+- Manual chemical calculations → AI-powered recommendations
+
+**Target Market:** Small to mid-market pool service companies (5-50 technicians) who want competitive advantage through technology, not just digital forms.
+
+---
 
 ## Tech Stack
 
@@ -344,7 +375,7 @@ async def create_customer(
 class CustomerService:
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def create_customer(self, org_id: str, data: CustomerCreate):
         # Validate data
         # Geocode address
@@ -406,22 +437,22 @@ class Customer(Base):
 class GeocodingService:
     def __init__(self, provider: str):
         self.provider = provider  # openstreetmap | google
-    
+
     async def geocode(self, address: str) -> Tuple[float, float]:
         # Check cache first
         cached = await self.get_from_cache(address)
         if cached:
             return cached
-        
+
         # Make API call based on provider
         result = await self._geocode_with_provider(address)
-        
+
         # Cache result
         await self.cache_result(address, result)
-        
+
         # Track usage
         await self.increment_usage_count()
-        
+
         return result
 ```
 

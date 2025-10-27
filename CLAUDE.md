@@ -56,17 +56,17 @@ Understood - core rules:
 
 ---
 
-## Project: RouteOptimizer
+## Project: Quantum Pool Solutions (Quantum Pools)
 
-**Pool service management platform**
+**AI-powered pool service management SaaS platform**
 - Python 3.11 + FastAPI (async)
 - PostgreSQL + SQLAlchemy 2.0
 - Server: `localhost:7006`
-- Path: `/mnt/Projects/RouteOptimizer`
+- Path: `/mnt/Projects/quantum-pools`
 
 **Quick Start:**
 ```bash
-cd /mnt/Projects/RouteOptimizer
+cd /mnt/Projects/quantum-pools
 source venv/bin/activate
 ./restart_server.sh  # Kills old processes, starts new server
 ```

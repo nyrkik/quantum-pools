@@ -1,162 +1,174 @@
-# [PROJECT_NAME] - Feature Backlog
+# Feature Backlog
 
-**Last Updated:** [DATE]
+**Future features and enhancements for RouteOptimizer, organized by priority.**
 
-This is where feature ideas go when they pop into your head during development. Don't work on them immediately—just capture them here for later prioritization.
+## High Priority (Next 3-6 Months)
 
----
+### Service Visit Tracking
+**Why:** Core business value - track what was done at each visit
+- Mark visits as complete, skipped, or issue
+- Record chemicals added (pH, chlorine, alkalinity)
+- Photo uploads of pool conditions
+- Technician notes and recommendations
+- Customer signature capture
+- Historical visit records
 
-## How to Use This File
+### Customer Service Agreements
+**Why:** Enable billing and revenue tracking
+- Define service plans (weekly, bi-weekly, monthly)
+- Track agreement start/end dates
+- Link to visit records for billing
+- Calculate monthly recurring revenue
+- Generate invoices from service history
 
-**During Development:**
-- Idea pops up → Say `backlog: [your idea]` to Claude
-- Claude adds it here automatically
-- You keep working on current task
+### Mobile App for Technicians
+**Why:** Techs need route info in the field
+- View assigned route for the day
+- Navigate to next stop (Maps integration)
+- Mark visits complete from phone
+- Add chemicals and notes
+- Take photos of pool conditions
+- Offline mode for areas with poor signal
 
-**During Planning:**
-- Review this file
-- Move high-priority items to TodoWrite when ready
-- Delete/archive completed or rejected ideas
+### Advanced Route Optimization
+**Why:** Improve efficiency and customer satisfaction
+- Break windows (preferred but not required time windows)
+- Variable service durations based on pool size
+- Traffic-aware routing (Google Maps API)
+- Multi-day route planning
+- Route templates for recurring customers
 
----
+### Reporting & Analytics
+**Why:** Business insights for decision-making
+- Revenue by customer, tech, route
+- Efficiency metrics (time per stop, miles per customer)
+- Chemical usage trends
+- Customer retention analysis
+- Custom date range reports
+- Export to PDF/Excel
 
-## Priority System
+## Medium Priority (6-12 Months)
 
-- 🔥 **Critical** - Blocking issue or essential for launch
-- ⭐ **High** - Significant user value or competitive advantage
-- 📌 **Medium** - Nice to have, clear value proposition
-- 💡 **Low** - Interesting idea, needs validation
-- 🧪 **Experiment** - Worth exploring, uncertain value
+### Billing & Payments (Stripe Integration)
+- Automated invoice generation from service agreements
+- Customer payment portal
+- Credit card storage (PCI compliant via Stripe)
+- Recurring billing automation
+- Payment reminders and overdue notices
+- Revenue dashboards
 
----
+### Customer Portal
+**Why:** Self-service reduces admin overhead
+- View service history and upcoming visits
+- See photos and notes from technicians
+- Update contact information
+- Request service changes or cancellations
+- Make payments online
+- Download invoices
 
-## Core Features
+### Inventory Management
+**Why:** Track chemical costs and usage
+- Chemical inventory tracking
+- Automatic depletion from visits
+- Reorder alerts when low
+- Cost per visit calculations
+- Purchase order generation
+- Vendor management
 
-### High Priority ⭐
+### Equipment Maintenance Tracking
+**Why:** Prevent equipment failures, proactive service
+- Track pool equipment (pumps, filters, heaters)
+- Maintenance schedules and reminders
+- Repair history
+- Warranty tracking
+- Replacement recommendations
 
-*No items yet*
+### Work Order System
+**Why:** Handle one-time jobs beyond regular service
+- Create work orders for repairs, installations
+- Quote generation and approval workflow
+- Parts and labor tracking
+- Job costing and profitability
+- Integration with regular service routes
 
-### Medium Priority 📌
+## Low Priority (12+ Months)
 
-*No items yet*
+### Multi-Location Support
+- Companies with multiple service areas/branches
+- Territory management
+- Branch-level reporting
+- Inter-branch transfers
 
-### Low Priority 💡
+### API for Third-Party Integrations
+- RESTful API with rate limiting
+- Webhook support for events
+- Integration with QuickBooks, Xero
+- Zapier integration
+- Public API documentation
 
-*No items yet*
+### AI-Powered Recommendations
+- Predict chemical needs based on weather
+- Recommend service frequency adjustments
+- Identify at-risk customers (churn prediction)
+- Optimize pricing based on market
+- Auto-generate service notes from photos
 
----
+### White-Label Options
+- Custom branding (logo, colors)
+- Custom domain names
+- Remove "Powered by RouteOptimizer"
+- Email templates with customer branding
 
-## User Experience & UI
+### Advanced Scheduling
+- Recurring work orders (monthly repairs)
+- Seasonal schedule adjustments
+- Vacation holds and resumptions
+- Customer-requested date changes
+- Automated schedule conflict resolution
 
-### High Priority ⭐
+### Fleet Management
+- Vehicle maintenance tracking
+- Fuel cost tracking
+- GPS tracking of technician vehicles
+- Mileage reports for tax purposes
 
-*No items yet*
+## Feature Ideas (Unpriced/Unvalidated)
 
-### Medium Priority 📌
+**These need customer validation before prioritizing:**
 
-*No items yet*
+- SMS notifications to customers (visit complete, tech on way)
+- Customer referral program with tracking
+- Weather integration (skip visits on rain days)
+- Pool chemical supplier marketplace
+- Equipment vendor partnerships
+- Franchise management tools
+- Compliance tracking for health department
+- Automated marketing campaigns
+- Customer satisfaction surveys
+- Social media integration for reviews
+- IoT sensor integration (smart pool monitors)
 
-### Low Priority 💡
+## Won't Do (Out of Scope)
 
-*No items yet*
+- Residential pool equipment sales (e-commerce)
+- Pool construction project management
+- Landscape/hardscape design tools
+- HVAC or other non-pool services
+- Become a marketplace (connecting customers to service providers)
 
----
+## How to Add to Backlog
 
-## Integrations & Partnerships
+Use the `backlog: [idea]` command in Claude Code:
 
-### High Priority ⭐
-
-*No items yet*
-
-### Medium Priority 📌
-
-*No items yet*
-
-### Low Priority 💡
-
-*No items yet*
-
----
-
-## Technical Debt & Infrastructure
-
-### High Priority ⭐
-
-#### Complete Product Rebrand
-**Priority:** ⭐ High
-**Effort:** Large
-**Value:** High
-**Added:** 2025-10-26
-
-**Description:**
-Rebrand from "RouteOptimizer" to new name that reflects comprehensive pool service management platform with scouting/AI differentiators.
-
-**Why:**
-Current name is too narrow - doesn't capture scouting (lead generation) and AI features that set us apart. Need name that reflects full platform scope.
-
-**What Needs to Happen:**
-1. Finalize new product name (naming research paused - needs fresh brainstorming)
-2. Rename project directory: `/mnt/Projects/RouteOptimizer` → `/mnt/Projects/[NewName]`
-3. Update all documentation files to use new name
-4. Update code references (imports, class names, etc.)
-5. Update git repository name
-6. **Note:** Will require starting new Claude chat after directory rename for proper file access
-
-**Timing:**
-- Must happen before public launch
-- Can proceed with Phase 0 implementation under current name
-- Recommend: Complete before Phase 1 (UI) to avoid UI rework
-
-### Medium Priority 📌
-
-*No items yet*
-
-### Low Priority 💡
-
-*No items yet*
-
----
-
-## Experiments 🧪
-
-*No items yet*
-
----
-
-## Ideas Archive
-
-**Completed or Rejected Ideas** (keep for reference)
-
-*None yet*
-
----
-
-## Quick Add Template
-
-When manually adding ideas, use this format:
-
-```markdown
-### Title
-**Priority:** 🔥/⭐/📌/💡/🧪
-**Effort:** Small / Medium / Large
-**Value:** High / Medium / Low
-**Added:** YYYY-MM-DD
-
-**Description:**
-Brief explanation of the idea.
-
-**Why:**
-Business value or user benefit.
-
-**Notes:**
-Technical considerations, dependencies, etc.
+```bash
+User: backlog: Add weather API to skip routes on heavy rain days
+→ Claude adds to appropriate priority section with brief description
 ```
 
+Or edit this file directly in priority order.
+
 ---
 
-**Instructions for Claude:**
-When user says `backlog: [idea]`, add it to the appropriate category with:
-- Auto-detect priority based on keywords (critical, important, nice, experiment)
-- Add timestamp
-- Suggest category
-- Keep it concise - just enough to remember the idea
+**See Also:**
+- [PROJECT_STATUS.md](PROJECT_STATUS.md) - What's currently being built
+- [ARCHITECTURE.md](ARCHITECTURE.md) - How features fit into system design

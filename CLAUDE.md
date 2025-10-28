@@ -33,30 +33,18 @@ Use bash ONLY for: git, pip/npm, tests, migrations, service restarts
 - Production-ready code from day one
 - Complete error handling and validation
 
-### 6. Session Start Protocol
-After context compacting, start with:
-```
-Understood - core rules:
-1. Max 3 lines per response unless asked
-2. NEVER background bash
-3. NEVER manually start uvicorn
-4. Sequential work with TodoWrite
-5. Use Claude Code tools for files
-6. No placeholders, production-ready only
-7. Check existing docs before creating new ones
-```
+### 6. BASH COMMAND RESTRICTIONS (CRITICAL)
+- Do NOT use bash_tool for any reason
+- Do NOT execute terminal commands
+- ONLY provide commands for human to run
+- No exceptions - not for "quick checks" or "verifying"
 
-### 7. Documentation Discipline (CRITICAL)
-- **Check existing docs BEFORE creating new ones**
-- Update existing docs, never duplicate content
-- Max 500 lines per doc (split if larger, archive old content)
-- Delete outdated docs immediately, don't let them rot
-- Use git commits for change history (not SESSION_LOG.md)
-- One topic = one location (use links for cross-references)
+### 7. Session Start Protocol
+After context compacting, acknowledge core rules (see end of doc)
 
 ---
 
-## Project: Quantum Pool Solutions (Quantum Pools)
+## Project: Quantum Pool Solutions
 
 **AI-powered pool service management SaaS platform**
 - Python 3.11 + FastAPI (async)
@@ -68,65 +56,104 @@ Understood - core rules:
 ```bash
 cd /mnt/Projects/quantum-pools
 source venv/bin/activate
-./restart_server.sh  # Kills old processes, starts new server
+./restart_server.sh
 ```
 
 ---
 
-## Documentation Structure
+## Project Structure (ENFORCED)
+```
+quantum-pools/                    (project root)
+├── app/                          (deployable code ONLY)
+│   ├── api/
+│   ├── models/
+│   ├── services/
+│   └── static/
+│
+├── docs/                         (developer documentation at ROOT)
+│   ├── ARCHITECTURE.md
+│   ├── DEVELOPMENT.md
+│   ├── STANDARDS.md
+│   ├── PROJECT_STATUS.md
+│   └── BACKLOG.md
+│
+├── business/                     (business files - NOT deployed)
+│   ├── financials/
+│   ├── legal/
+│   └── contracts/
+│
+├── venv/                         (dependencies at ROOT level)
+├── scripts/                      (operational scripts)
+├── tests/                        (test suite)
+└── CLAUDE.md                     (this file)
+```
 
-**All detailed docs are in `/docs` directory:**
-- `DEVELOPMENT.md` - Setup, commands, running the app
-- `ARCHITECTURE.md` - Tech stack, multi-tenancy, auth, database
-- `STANDARDS.md` - Code quality rules, enterprise standards
-- `PROJECT_STATUS.md` - Current phase, progress, next steps
-- `BACKLOG.md` - Future features by priority
+**CRITICAL Rules:**
+- ❌ NEVER create `app/docs/` - docs live at ROOT
+- ❌ NEVER create `app/venv/` - venv lives at ROOT
+- ✅ `app/` contains ONLY deployable application code
+- ✅ Root-level docs are for developers, not deployment
 
-**Documentation Rules:**
+**Exception:** Deployment docs (README for ops) can live in `app/docs/` if needed for production
 
-### Single Source of Truth
-- Before creating ANY new doc, check if topic exists elsewhere
-- If exists: update existing doc, don't create new one
-- Cross-reference with links, never duplicate content
+---
+
+## Documentation Discipline (CRITICAL)
+
+### Before Creating ANY Doc:
+1. Check if topic exists elsewhere → Update existing doc
+2. Is this temporary? → Don't document, use git/TodoWrite
+3. Will this be >500 lines? → Split into focused sub-docs
+4. Should code be self-documenting? → Improve code instead
 
 ### Doc Size Limits
-- Individual docs: 500 lines maximum
-- CLAUDE.md: 75 lines maximum (this file)
-- If exceeding: split into focused sub-docs OR archive old content
+- Individual docs: 500 lines max (split if larger)
+- CLAUDE.md: 150 lines max (this file)
+- Check with: `./project-health-check.sh`
+
+### Single Source of Truth
+- One topic = one location
+- Cross-reference with links, never duplicate
+- Update existing docs, don't create new ones
+- Delete outdated docs immediately
 
 ### What NOT to Document
-- ❌ Individual commit decisions (use git messages)
-- ❌ Session-by-session logs (use git history)
-- ❌ Temporary debugging notes (delete after fixed)
-- ❌ "Work in progress" status (use TodoWrite)
+- ❌ Session logs (use git history)
+- ❌ Temporary debugging notes
+- ❌ Individual commit decisions
+- ❌ "Work in progress" status
 
-### What TO Document
-- ✅ Architecture decisions (why we chose X over Y)
-- ✅ Non-obvious patterns (not self-evident from code)
-- ✅ External dependencies and their quirks
-- ✅ Multi-step setup procedures
+---
 
-### Before Creating a New Doc - Ask:
-1. Does this exist in another doc? → Update that doc instead
-2. Is this temporary? → Don't document, use git/TodoWrite
-3. Will this be >500 lines? → Plan to split it now
-4. Should code be self-documenting instead? → Improve code
+## Health Monitoring (AUTOMATED)
 
-### Doc Lifecycle
-- **Create:** Only if no existing doc covers the topic
-- **Update:** Modify existing doc instead of creating new
-- **Delete:** When doc is outdated, remove it immediately
-- **Archive:** Move to `docs/archive/` if history needed
+**Pre-commit hook runs automatically** - Shows warnings before each commit
+
+**Manual check:**
+```bash
+./project-health-check.sh
+```
+
+**Thresholds (warnings trigger at):**
+- Source files: >500 files
+- Python files: >500 lines each
+- Docs: >500 lines each
+- Venv: >600MB
+- Git repo: >100MB
+- Dependencies: >25 packages
+
+**When warnings appear:**
+- Red = Critical, fix immediately
+- Yellow = Warning, address soon
+- Green = Healthy
 
 ---
 
 ## Workflow Commands
 
-Quick shortcuts for common tasks:
-
 **Commit & Progress:**
 - `commit` - Commit, push, update docs, continue
-- `commit-pause` - Commit, push, update docs, pause for review
+- `commit-pause` - Commit, push, update docs, pause
 
 **Doc Management:**
 - `docs-check` - List docs >400 lines, flag duplicates
@@ -137,37 +164,25 @@ Quick shortcuts for common tasks:
 - `where` - Quick status (phase, task, progress)
 
 **Navigation:**
-- `rules` - Trigger acknowledgment protocol (repeat core rules)
+- `rules` - Trigger acknowledgment protocol
 
 ---
 
-**Last Updated:** October 27, 2025
+## Session Start Acknowledgment
 
-## BASH COMMAND RESTRICTIONS (CRITICAL)
+After context compacting, respond with:
+```
+Understood - core rules:
+1. Max 3 lines per response
+2. NEVER run bash commands
+3. NEVER background processes
+4. Sequential work with TodoWrite
+5. Production-ready code only
+6. Check existing docs before creating
+7. docs/ at ROOT, never in app/
+8. Run health check before major work
+```
 
-### DO NOT RUN BASH COMMANDS
-- Do NOT use bash_tool for any reason
-- Do NOT execute terminal commands
-- Do NOT check files, processes, or system state
-- ONLY provide code and instructions for the human to run
+---
 
-### CORRECT BEHAVIOR
-**Wrong:** Running `ls -la` to check directory
-**Right:** "Please run: `ls -la`"
-
-**Wrong:** Running `cat file.py` to view code  
-**Right:** "Please run: `cat file.py` and paste the output"
-
-**Wrong:** Running `git status` to check git state
-**Right:** "Please run: `git status`"
-
-### WHEN YOU MUST CHECK SOMETHING
-1. Ask the human to run the command
-2. Wait for their output
-3. Proceed based on their response
-
-### NO EXCEPTIONS
-- Not for "quick checks"
-- Not for "just looking"
-- Not for "verifying"
-- NEVER run bash commands
+**Last Updated:** October 28, 2025

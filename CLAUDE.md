@@ -142,3 +142,32 @@ Quick shortcuts for common tasks:
 ---
 
 **Last Updated:** October 27, 2025
+
+## BASH COMMAND RESTRICTIONS (CRITICAL)
+
+### DO NOT RUN BASH COMMANDS
+- Do NOT use bash_tool for any reason
+- Do NOT execute terminal commands
+- Do NOT check files, processes, or system state
+- ONLY provide code and instructions for the human to run
+
+### CORRECT BEHAVIOR
+**Wrong:** Running `ls -la` to check directory
+**Right:** "Please run: `ls -la`"
+
+**Wrong:** Running `cat file.py` to view code  
+**Right:** "Please run: `cat file.py` and paste the output"
+
+**Wrong:** Running `git status` to check git state
+**Right:** "Please run: `git status`"
+
+### WHEN YOU MUST CHECK SOMETHING
+1. Ask the human to run the command
+2. Wait for their output
+3. Proceed based on their response
+
+### NO EXCEPTIONS
+- Not for "quick checks"
+- Not for "just looking"
+- Not for "verifying"
+- NEVER run bash commands

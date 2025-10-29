@@ -99,13 +99,9 @@ function displayCustomersOnMap(customers) {
             const isUnassigned = !customer.assigned_tech_id;
             const isSelectedTech = customer.assigned_tech_id && selectedTechIds.has(customer.assigned_tech_id);
 
-            // Show if: unassigned (always) OR assigned to selected tech
+            // Show if: unassigned (always) OR assigned to selected tech OR no techs loaded yet
             if (!isUnassigned && selectedTechIds.size > 0 && !isSelectedTech) {
                 return; // Skip if not in our selected techs
-            }
-
-            if (!isUnassigned && selectedTechIds.size === 0) {
-                return; // No techs selected, don't show assigned customers
             }
             // Create coordinate key
             const coordKey = `${customer.latitude},${customer.longitude}`;

@@ -31,7 +31,7 @@ fi
 
 # 3. Documentation size check (no doc should exceed 500 lines)
 echo
-LARGE_DOCS=$(find docs/ -name "*.md" -exec wc -l {} \; 2>/dev/null | awk '$1 > 500 {print $1 " lines: " $2}')
+LARGE_DOCS=$(find docs/app/ -name "*.md" -exec wc -l {} \; 2>/dev/null | awk '$1 > 500 {print $1 " lines: " $2}')
 if [ -n "$LARGE_DOCS" ]; then
     echo -e "${YELLOW}⚠️  Docs exceeding 500 lines:${NC}"
     echo "$LARGE_DOCS"

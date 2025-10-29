@@ -78,10 +78,11 @@ function switchModule(moduleName) {
         targetModule.classList.add('active');
         targetModule.style.display = 'block';
 
-        // If switching to routes, reinitialize map
+        // If switching to routes, reinitialize map and load customers
         if (moduleName === 'routes' && map) {
             setTimeout(() => {
                 map.invalidateSize();
+                loadCustomers();
             }, 100);
         }
 

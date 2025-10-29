@@ -151,6 +151,15 @@ quantum-pools/                    (project root)
 
 ## Workflow Commands
 
+### where Command Implementation
+When user says "where":
+1. Read docs/app/PROJECT_STATUS.md
+2. Extract and show:
+   - Current Phase (from "## Current Phase:" section)
+   - In Progress (from "### In Progress" section)  
+   - Next Steps (first 3 unchecked [ ] items from "### Next Steps")
+3. Format concisely: "Phase: X | In Progress: Y | Next: [task 1], [task 2], [task 3]"
+
 **Commit & Progress:**
 - `commit` - Commit, push, update docs, continue
 - `commit-pause` - Commit, push, update docs, pause

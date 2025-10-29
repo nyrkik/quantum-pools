@@ -61,6 +61,10 @@ source venv/bin/activate
 
 ---
 
+
+---
+
+## Documentation Discipline (CRITICAL)
 ## Project Structure (ENFORCED)
 ```
 quantum-pools/                    (project root)
@@ -70,17 +74,17 @@ quantum-pools/                    (project root)
 │   ├── services/
 │   └── static/
 │
-├── docs/                         (developer documentation at ROOT)
-│   ├── ARCHITECTURE.md
-│   ├── DEVELOPMENT.md
-│   ├── STANDARDS.md
-│   ├── PROJECT_STATUS.md
-│   └── BACKLOG.md
-│
-├── business/                     (business files - NOT deployed)
-│   ├── financials/
-│   ├── legal/
-│   └── contracts/
+├── docs/                         (documentation at ROOT)
+│   ├── app/                      (technical/developer docs)
+│   │   ├── ARCHITECTURE.md
+│   │   ├── DEVELOPMENT.md
+│   │   ├── STANDARDS.md
+│   │   ├── PROJECT_STATUS.md
+│   │   └── BACKLOG.md
+│   └── business/                 (business files - NOT deployed)
+│       ├── financials/
+│       ├── legal/
+│       └── contracts/
 │
 ├── venv/                         (dependencies at ROOT level)
 ├── scripts/                      (operational scripts)
@@ -89,16 +93,12 @@ quantum-pools/                    (project root)
 ```
 
 **CRITICAL Rules:**
-- ❌ NEVER create `app/docs/` - docs live at ROOT
+- ❌ NEVER create `app/docs/` - docs live at ROOT in `docs/app/`
 - ❌ NEVER create `app/venv/` - venv lives at ROOT
 - ✅ `app/` contains ONLY deployable application code
-- ✅ Root-level docs are for developers, not deployment
+- ✅ Technical docs in `docs/app/`, business docs in `docs/business/`
 
 **Exception:** Deployment docs (README for ops) can live in `app/docs/` if needed for production
-
----
-
-## Documentation Discipline (CRITICAL)
 
 ### Before Creating ANY Doc:
 1. Check if topic exists elsewhere → Update existing doc

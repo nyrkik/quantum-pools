@@ -3,6 +3,7 @@ Route optimization API endpoints.
 Provides route generation and management operations.
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,8 @@ from app.schemas.route import (
 from app.services.optimization import optimization_service
 from app.services.pdf_export import pdf_export_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/routes", tags=["routes"])
 
 
@@ -43,6 +46,7 @@ async def optimize_routes(
     - **service_day**: Specific day to optimize (optional)
     - **num_drivers**: Number of drivers to use (optional, uses all active)
     - **allow_day_reassignment**: Allow moving customers to different days
+    - **include_unassigned**: Include customers without assigned techs
     - **optimization_mode**: 'refine' keeps driver assignments, 'full' allows reassignment
 
     The optimizer considers:
@@ -52,13 +56,34 @@ async def optimize_routes(
     - Time windows (if specified)
     - Locked service days
     """
-    # Get active customers for this organization
-    customer_query = select(Customer)\
-        .where(Customer.organization_id == auth.organization_id)\
-        .where(Customer.is_active == True)
+    # Debug logging
+    logger.info(
+        f"Optimization request: include_unassigned={request.include_unassigned}, "
+        f"include_pending={request.include_pending}, "
+        f"optimization_mode={request.optimization_mode}, "
+        f"optimization_speed={request.optimization_speed}, "
+        f"service_day={request.service_day}, "
+        f"num_drivers={request.num_drivers}"
+    )
 
-    # For refine mode, only include customers with assigned drivers
-    if request.optimization_mode == "refine":
+    # Get customers for this organization (active or pending based on include_pending)
+    customer_query = select(Customer)\
+        .where(Customer.organization_id == auth.organization_id)
+
+    if request.include_pending:
+        # Include both active and pending status customers
+        customer_query = customer_query.where(
+            or_(
+                Customer.status == 'active',
+                Customer.status == 'pending'
+            )
+        )
+    else:
+        # Only active customers
+        customer_query = customer_query.where(Customer.is_active == True)
+
+    # Exclude unassigned customers unless include_unassigned is True
+    if not request.include_unassigned:
         customer_query = customer_query.where(Customer.assigned_tech_id.isnot(None))
 
     if request.service_day and not request.allow_day_reassignment:
@@ -121,7 +146,8 @@ async def optimize_routes(
         techs=drivers,
         service_day=request.service_day,
         allow_day_reassignment=request.allow_day_reassignment,
-        optimization_mode=request.optimization_mode
+        optimization_mode=request.optimization_mode,
+        optimization_speed=request.optimization_speed
     )
 
     return result

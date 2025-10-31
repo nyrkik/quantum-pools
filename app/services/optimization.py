@@ -147,7 +147,8 @@ class RouteOptimizationService:
         self,
         customers: List[Customer],
         techs: List[Tech],
-        service_day: Optional[str] = None
+        service_day: Optional[str] = None,
+        optimization_speed: str = "quick"
     ) -> Dict:
         """
         Optimize routes in refine mode - keeps tech assignments, only optimizes order.
@@ -156,6 +157,7 @@ class RouteOptimizationService:
             customers: List of customers (already filtered to have assigned techs)
             techs: List of available techs
             service_day: Specific day to optimize
+            optimization_speed: 'quick' (30s) or 'thorough' (120s)
 
         Returns:
             Dict with optimized routes per tech
@@ -209,10 +211,7 @@ class RouteOptimizationService:
                 locations.append((customer.latitude, customer.longitude))
 
             # Get distance and time matrices from routing service
-            import asyncio
-            distance_matrix, time_matrix = asyncio.run(
-                routing_service.get_distance_matrix(locations)
-            )
+            distance_matrix, time_matrix = await routing_service.get_distance_matrix(locations)
 
             # Create routing model for single tech
             manager = pywrapcp.RoutingIndexManager(
@@ -255,12 +254,25 @@ class RouteOptimizationService:
                 'Time'
             )
 
-            # Set search parameters
+            # Set search parameters based on optimization_speed
             search_parameters = pywrapcp.DefaultRoutingSearchParameters()
             search_parameters.first_solution_strategy = (
                 routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
             )
-            search_parameters.time_limit.seconds = self.time_limit_seconds
+
+            # Configure metaheuristic and time limit based on speed setting
+            if optimization_speed == "thorough":
+                search_parameters.local_search_metaheuristic = (
+                    routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+                )
+                time_limit_seconds = 120
+            else:  # quick
+                search_parameters.local_search_metaheuristic = (
+                    routing_enums_pb2.LocalSearchMetaheuristic.AUTOMATIC
+                )
+                time_limit_seconds = 30
+
+            search_parameters.time_limit.seconds = time_limit_seconds
 
             # Solve
             solution = routing.SolveWithParameters(search_parameters)
@@ -342,7 +354,8 @@ class RouteOptimizationService:
         techs: List[Tech],
         service_day: Optional[str] = None,
         allow_day_reassignment: bool = False,
-        optimization_mode: str = "full"
+        optimization_mode: str = "full",
+        optimization_speed: str = "quick"
     ) -> Dict:
         """
         Optimize routes for given customers and techs.
@@ -353,6 +366,7 @@ class RouteOptimizationService:
             service_day: Specific day to optimize (or None for all)
             allow_day_reassignment: If True, can move customers to different days
             optimization_mode: 'refine' keeps tech assignments, 'full' allows reassignment
+            optimization_speed: 'quick' (30s) or 'thorough' (120s)
 
         Returns:
             Dict with optimized routes per tech
@@ -366,7 +380,7 @@ class RouteOptimizationService:
         # Handle refine mode: optimize each tech's assigned customers separately
         if optimization_mode == "refine":
             return await self._optimize_refine_mode(
-                customers, techs, service_day
+                customers, techs, service_day, optimization_speed
             )
 
         # If no specific day selected, handle based on reassignment setting
@@ -402,7 +416,7 @@ class RouteOptimizationService:
                     logger.info(f"Optimizing {len(day_customers)} customers for {day}")
 
                     day_result = await self._optimize_single_day(
-                        day_customers, techs, day
+                        day_customers, techs, day, optimization_speed
                     )
 
                     if day_result and "routes" in day_result:
@@ -442,13 +456,14 @@ class RouteOptimizationService:
             f"and {len(techs)} techs"
         )
 
-        return await self._optimize_single_day(valid_customers, techs, service_day)
+        return await self._optimize_single_day(valid_customers, techs, service_day, optimization_speed)
 
     async def _optimize_single_day(
         self,
         customers: List[Customer],
         techs: List[Tech],
-        service_day: Optional[str] = None
+        service_day: Optional[str] = None,
+        optimization_speed: str = "quick"
     ) -> Dict:
         """
         Optimize routes for a single day.
@@ -457,6 +472,7 @@ class RouteOptimizationService:
             customers: List of customers to route (already filtered)
             techs: List of available techs
             service_day: Day being optimized
+            optimization_speed: 'quick' (30s) or 'thorough' (120s)
 
         Returns:
             Dict with optimized routes
@@ -480,7 +496,8 @@ class RouteOptimizationService:
         for tech_idx, tech in enumerate(techs):
             # Add start depot
             locations.append((tech.start_latitude, tech.start_longitude))
-            start_indices.append(tech_idx)
+            start_location_idx = len(locations) - 1
+            start_indices.append(start_location_idx)
 
             # Check if end location is different from start
             if (tech.end_latitude != tech.start_latitude or
@@ -490,7 +507,7 @@ class RouteOptimizationService:
                 end_indices.append(len(locations) - 1)
             else:
                 # End at same location as start
-                end_indices.append(tech_idx)
+                end_indices.append(start_location_idx)
 
         # Add customers after depots
         customer_start_idx = len(locations)
@@ -500,11 +517,21 @@ class RouteOptimizationService:
             locations.append((customer.latitude, customer.longitude))
             customer_indices[customer.id] = len(locations) - 1
 
-        # Get distance and time matrices from routing service
-        import asyncio
-        distance_matrix, time_matrix = asyncio.run(
-            routing_service.get_distance_matrix(locations)
+        # Log location setup for debugging
+        logger.info(
+            f"Multi-depot setup: {len(techs)} techs, {len(valid_customers)} customers, "
+            f"{len(locations)} total locations"
         )
+        logger.info(f"Start indices: {start_indices}, End indices: {end_indices}, Customer start: {customer_start_idx}")
+
+        # Get distance and time matrices from routing service
+        distance_matrix, time_matrix = await routing_service.get_distance_matrix(locations)
+
+        # Debug: Log sample distances to verify units
+        if len(distance_matrix) > 2:
+            logger.info(f"Sample distances: depot0->depot1={distance_matrix[0][1]}m, depot0->customer0={distance_matrix[0][customer_start_idx]}m")
+            if len(distance_matrix) > customer_start_idx + 1:
+                logger.info(f"customer0->customer1={distance_matrix[customer_start_idx][customer_start_idx+1]}m")
 
         # Create routing model with per-vehicle start/end depots
         manager = pywrapcp.RoutingIndexManager(
@@ -550,12 +577,51 @@ class RouteOptimizationService:
             'Time'
         )
 
-        # Set search parameters
+        # Add distance dimension for tracking only (no span cost)
+        routing.AddDimension(
+            transit_callback_index,
+            0,  # No slack
+            200000,  # Maximum 200km per route (approx 124 miles)
+            True,  # Force start cumul to zero
+            'Distance'
+        )
+
+        # Add time span cost to balance workload across techs
+        # Higher coefficient for quick mode since it has less time to optimize
+        # Quick: 500 (very strong balance), Thorough: 300 (strong balance)
+        time_dimension = routing.GetDimensionOrDie('Time')
+        time_coeff = 500 if optimization_speed == "quick" else 300
+        for vehicle_id in range(len(techs)):
+            time_dimension.SetSpanCostCoefficientForVehicle(time_coeff, vehicle_id)
+
+        # Set search parameters based on optimization_speed
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+        # Use PATH_CHEAPEST_ARC - good for distance minimization
         search_parameters.first_solution_strategy = (
             routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
         )
-        search_parameters.time_limit.seconds = self.time_limit_seconds
+
+        # Configure metaheuristic and time limit based on speed setting
+        if optimization_speed == "thorough":
+            # Thorough mode: Use guided local search for better results (slower)
+            search_parameters.local_search_metaheuristic = (
+                routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+            )
+            time_limit_seconds = 120
+        else:  # quick
+            # Quick mode: Use automatic metaheuristic for faster results
+            search_parameters.local_search_metaheuristic = (
+                routing_enums_pb2.LocalSearchMetaheuristic.AUTOMATIC
+            )
+            time_limit_seconds = 30
+
+        search_parameters.time_limit.seconds = time_limit_seconds
+
+        # Log optimization parameters
+        logger.info(
+            f"Optimization: {optimization_speed} mode, minimize distance (arc cost), "
+            f"max time=480min/route, time_limit={time_limit_seconds}s"
+        )
 
         # Solve
         solution = routing.SolveWithParameters(search_parameters)
@@ -598,12 +664,18 @@ class RouteOptimizationService:
 
                 previous_index = index
                 index = solution.Value(routing.NextVar(index))
-                route_distance += routing.GetArcCostForVehicle(
+                arc_distance = routing.GetArcCostForVehicle(
                     previous_index, index, vehicle_id
                 )
+                route_distance += arc_distance
 
             # Calculate route metrics
             route_distance_miles = route_distance / 1609.34
+
+            logger.info(
+                f"Route for {tech.name}: {len(route_customers)} stops, "
+                f"total_distance={route_distance}m ({route_distance_miles:.1f}mi)"
+            )
 
             # Sum up service times for duration
             for stop in route_customers:

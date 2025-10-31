@@ -1099,7 +1099,7 @@ async function updateCustomer(customerId) {
 // ========================================
 
 function attachEventListeners() {
-    document.getElementById('optimize-btn').addEventListener('click', optimizeRoutes);
+    // Note: optimize-btn listener is in modals.js (initOptimizationModal)
     document.getElementById('add-tech-btn').addEventListener('click', showAddTechForm);
     document.getElementById('add-customer-btn').addEventListener('click', showAddCustomerForm);
 

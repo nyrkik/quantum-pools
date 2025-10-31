@@ -39,18 +39,23 @@ function initDaySelector() {
 async function optimizeRoutes() {
     const numTechs = parseInt(document.getElementById('num-techs').value);
     const allowReassignment = document.getElementById('allow-reassignment').checked;
+    const includeUnassigned = document.getElementById('include-unassigned').checked;
+    const includePending = document.getElementById('include-pending').checked;
     const optimizationMode = document.querySelector('input[name="optimization-mode"]:checked').value;
+    const optimizationSpeed = document.querySelector('input[name="optimization-speed"]:checked').value;
 
-    const optimizeBtn = document.getElementById('optimize-btn');
-    optimizeBtn.disabled = true;
-    optimizeBtn.textContent = 'Optimizing...';
+    // Show loading overlay
+    showLoadingOverlay('Calculating optimal routes...');
 
     try {
         const requestBody = {
             num_drivers: numTechs || null,
             service_day: selectedDay === 'all' ? null : selectedDay,
             allow_day_reassignment: allowReassignment,
-            optimization_mode: optimizationMode
+            include_unassigned: includeUnassigned,
+            include_pending: includePending,
+            optimization_mode: optimizationMode,
+            optimization_speed: optimizationSpeed
         };
 
         const response = await Auth.apiRequest(`${API_BASE}/api/routes/optimize`, {
@@ -101,8 +106,7 @@ async function optimizeRoutes() {
         console.error('Error optimizing routes:', error);
         alert(`Failed to optimize routes: ${error.message}`);
     } finally {
-        optimizeBtn.disabled = false;
-        optimizeBtn.textContent = 'Optimize Routes';
+        hideLoadingOverlay();
     }
 }
 

@@ -292,6 +292,38 @@ function resetCustomerMarker(customerId) {
 // Route layers for map display
 let routeLayers = [];
 
+async function drawActualRoute(coordinates, color) {
+    // Convert Leaflet [lat, lon] to OSRM [lon, lat] format
+    const osrmCoords = coordinates.map(c => `${c[1]},${c[0]}`).join(';');
+    const url = `http://router.project-osrm.org/route/v1/driving/${osrmCoords}?overview=full&geometries=geojson`;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`OSRM API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+            throw new Error('No route found');
+        }
+
+        // Extract GeoJSON coordinates and convert to Leaflet [lat, lon] format
+        const routeCoords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+
+        const polyline = L.polyline(routeCoords, {
+            color: color,
+            weight: 3,
+            opacity: 0.7
+        }).addTo(map);
+
+        routeLayers.push(polyline);
+    } catch (error) {
+        console.error('OSRM routing error:', error);
+        throw error; // Re-throw to trigger fallback
+    }
+}
+
 function displayRoutesOnMap(routes) {
     // Clear existing route layers
     routeLayers.forEach(layer => map.removeLayer(layer));
@@ -333,24 +365,24 @@ function displayRoutesOnMap(routes) {
             routeLayers.push(startMarker);
         }
 
-        // Add stop markers
-        route.stops.forEach(stop => {
+        // Add stop markers with sequence numbers
+        route.stops.forEach((stop, index) => {
             if (stop.latitude && stop.longitude) {
                 const latLng = [stop.latitude, stop.longitude];
                 coordinates.push(latLng);
                 allCoordinates.push(latLng);
 
-                // Add marker
-                const marker = L.circleMarker(latLng, {
-                    radius: 8,
-                    fillColor: color,
-                    color: '#fff',
-                    weight: 2,
-                    opacity: 1,
-                    fillOpacity: 0.8
-                }).addTo(map);
+                // Create numbered marker icon
+                const numberIcon = L.divIcon({
+                    html: `<div style="background-color: ${color}; color: white; border: 2px solid white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${index + 1}</div>`,
+                    className: 'numbered-marker',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
 
-                marker.bindPopup(`<b>${stop.customer_name}</b><br>${stop.address}<br><em>${route.driver_name}</em>`);
+                const marker = L.marker(latLng, { icon: numberIcon }).addTo(map);
+
+                marker.bindPopup(`<b>#${index + 1}: ${stop.customer_name}</b><br>${stop.address}<br><em>${route.driver_name}</em>`);
                 routeLayers.push(marker);
             }
         });
@@ -374,15 +406,18 @@ function displayRoutesOnMap(routes) {
             routeLayers.push(endMarker);
         }
 
-        // Draw route line
+        // Draw actual driving route using OSRM
         if (coordinates.length > 1) {
-            const polyline = L.polyline(coordinates, {
-                color: color,
-                weight: 3,
-                opacity: 0.7
-            }).addTo(map);
-
-            routeLayers.push(polyline);
+            drawActualRoute(coordinates, color).catch(err => {
+                console.error('Failed to draw OSRM route, using straight line:', err);
+                // Fallback to straight line
+                const polyline = L.polyline(coordinates, {
+                    color: color,
+                    weight: 3,
+                    opacity: 0.7
+                }).addTo(map);
+                routeLayers.push(polyline);
+            });
         }
     });
 

@@ -156,8 +156,8 @@ class OSRMProvider(RoutingProvider):
                         logger.error(f"OSRM response error: {data.get('message')}")
                         return self._create_fallback_matrices(locations)
 
-                    # Extract distance matrix (in meters)
-                    distance_matrix = data["distances"]
+                    # Extract distance matrix (in meters), convert to integers for OR-Tools
+                    distance_matrix = [[int(d) for d in row] for row in data["distances"]]
 
                     # Extract duration matrix (in seconds), convert to minutes
                     durations = data["durations"]

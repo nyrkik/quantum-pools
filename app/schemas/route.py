@@ -26,10 +26,23 @@ class RouteOptimizationRequest(BaseModel):
         default=False,
         description="Allow customers to be moved to different service days"
     )
+    include_unassigned: bool = Field(
+        default=False,
+        description="Include customers without assigned techs in optimization"
+    )
+    include_pending: bool = Field(
+        default=False,
+        description="Include customers with pending status in optimization"
+    )
     optimization_mode: str = Field(
         default="full",
         pattern="^(refine|full)$",
         description="Optimization mode: 'refine' keeps driver assignments, 'full' allows reassignment"
+    )
+    optimization_speed: str = Field(
+        default="quick",
+        pattern="^(quick|thorough)$",
+        description="Optimization speed: 'quick' (30s), 'thorough' (120s)"
     )
 
 

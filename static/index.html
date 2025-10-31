@@ -318,12 +318,12 @@
             <div class="control-group">
                 <label>Optimization Mode:</label>
                 <div style="margin-top: 0.5rem;">
-                    <label style="display: block; margin-bottom: 0.5rem;">
-                        <input type="radio" name="optimization-mode" value="refine" checked>
+                    <label for="mode-refine" style="display: block; margin-bottom: 0.5rem; cursor: pointer;">
+                        <input type="radio" id="mode-refine" name="optimization-mode" value="refine" checked>
                         Refine Existing Routes
                     </label>
-                    <label style="display: block;">
-                        <input type="radio" name="optimization-mode" value="full">
+                    <label for="mode-full" style="display: block; cursor: pointer;">
+                        <input type="radio" id="mode-full" name="optimization-mode" value="full">
                         Full Re-optimization
                     </label>
                 </div>
@@ -343,6 +343,34 @@
                     <input type="checkbox" id="allow-reassignment">
                     Allow day reassignment
                 </label>
+            </div>
+
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="include-unassigned">
+                    Include unassigned customers
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="include-pending">
+                    Include pending customers
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Optimization Speed:</label>
+                <div style="margin-top: 0.5rem;">
+                    <label for="speed-quick" style="display: block; margin-bottom: 0.5rem; cursor: pointer;">
+                        <input type="radio" id="speed-quick" name="optimization-speed" value="quick" checked>
+                        Quick (30s, faster results)
+                    </label>
+                    <label for="speed-thorough" style="display: block; cursor: pointer;">
+                        <input type="radio" id="speed-thorough" name="optimization-speed" value="thorough">
+                        Thorough (120s, better optimization)
+                    </label>
+                </div>
             </div>
 
             <button id="run-optimize-btn" class="btn-primary">Run Optimization</button>

@@ -13,6 +13,7 @@ import math
 from app.models.customer import Customer
 from app.models.tech import Tech
 from app.config import settings
+from app.services.routing import routing_service
 
 logger = logging.getLogger(__name__)
 
@@ -207,9 +208,11 @@ class RouteOptimizationService:
             for customer in valid_customers:
                 locations.append((customer.latitude, customer.longitude))
 
-            # Create distance and time matrices
-            distance_matrix = self._create_distance_matrix(locations)
-            time_matrix = self._create_time_matrix(distance_matrix)
+            # Get distance and time matrices from routing service
+            import asyncio
+            distance_matrix, time_matrix = asyncio.run(
+                routing_service.get_distance_matrix(locations)
+            )
 
             # Create routing model for single tech
             manager = pywrapcp.RoutingIndexManager(
@@ -301,6 +304,16 @@ class RouteOptimizationService:
                         "driver_name": tech.name,
                         "driver_color": tech.color if hasattr(tech, 'color') else '#3498db',
                         "service_day": service_day or "multiple",
+                        "start_location": {
+                            "address": tech.start_location_address,
+                            "latitude": tech.start_latitude,
+                            "longitude": tech.start_longitude
+                        },
+                        "end_location": {
+                            "address": tech.end_location_address,
+                            "latitude": tech.end_latitude,
+                            "longitude": tech.end_longitude
+                        },
                         "stops": route_customers,
                         "total_customers": len(route_customers),
                         "total_distance_miles": round(route_distance_miles, 2),
@@ -457,26 +470,48 @@ class RouteOptimizationService:
                 "message": "No customers with valid GPS coordinates"
             }
 
-        # Build locations list: [depot, customer1, customer2, ..., customerN]
-        # For simplicity, use first tech's start location as depot
-        depot_location = (techs[0].start_latitude, techs[0].start_longitude)
+        # Build locations list with multi-depot support:
+        # [tech0_start, tech1_start, ..., customer1, customer2, ...]
+        locations = []
+        start_indices = []
+        end_indices = []
 
-        locations = [depot_location]  # Index 0 = depot
+        # Add tech depots first
+        for tech_idx, tech in enumerate(techs):
+            # Add start depot
+            locations.append((tech.start_latitude, tech.start_longitude))
+            start_indices.append(tech_idx)
+
+            # Check if end location is different from start
+            if (tech.end_latitude != tech.start_latitude or
+                tech.end_longitude != tech.start_longitude):
+                # Add separate end depot
+                locations.append((tech.end_latitude, tech.end_longitude))
+                end_indices.append(len(locations) - 1)
+            else:
+                # End at same location as start
+                end_indices.append(tech_idx)
+
+        # Add customers after depots
+        customer_start_idx = len(locations)
         customer_indices = {}  # Map customer to location index
 
-        for idx, customer in enumerate(valid_customers, start=1):
+        for customer in valid_customers:
             locations.append((customer.latitude, customer.longitude))
-            customer_indices[customer.id] = idx
+            customer_indices[customer.id] = len(locations) - 1
 
-        # Create distance and time matrices
-        distance_matrix = self._create_distance_matrix(locations)
-        time_matrix = self._create_time_matrix(distance_matrix)
+        # Get distance and time matrices from routing service
+        import asyncio
+        distance_matrix, time_matrix = asyncio.run(
+            routing_service.get_distance_matrix(locations)
+        )
 
-        # Create routing model
+        # Create routing model with per-vehicle start/end depots
         manager = pywrapcp.RoutingIndexManager(
             len(locations),
             len(techs),
-            0  # Depot index
+            start_indices,
+            end_indices
         )
         routing = pywrapcp.RoutingModel(manager)
 
@@ -495,10 +530,11 @@ class RouteOptimizationService:
             to_node = manager.IndexToNode(to_index)
             travel_time = time_matrix[from_node][to_node]
 
-            # Add service time if not depot
+            # Add service time if this is a customer node (not depot)
             service_time = 0
-            if to_node > 0:  # Not depot
-                customer = valid_customers[to_node - 1]
+            if to_node >= customer_start_idx:  # Customer node
+                customer_idx = to_node - customer_start_idx
+                customer = valid_customers[customer_idx]
                 service_time = customer.base_service_duration
 
             return travel_time + service_time
@@ -546,8 +582,10 @@ class RouteOptimizationService:
             while not routing.IsEnd(index):
                 node_index = manager.IndexToNode(index)
 
-                if node_index > 0:  # Not depot
-                    customer = valid_customers[node_index - 1]
+                # Only process customer nodes, skip depot nodes
+                if node_index >= customer_start_idx:
+                    customer_idx = node_index - customer_start_idx
+                    customer = valid_customers[customer_idx]
                     route_customers.append({
                         "customer_id": str(customer.id),
                         "customer_name": customer.name,
@@ -582,6 +620,16 @@ class RouteOptimizationService:
                     "driver_name": tech.name,
                     "driver_color": tech.color if hasattr(tech, 'color') else '#3498db',
                     "service_day": service_day or "multiple",
+                    "start_location": {
+                        "address": tech.start_location_address,
+                        "latitude": tech.start_latitude,
+                        "longitude": tech.start_longitude
+                    },
+                    "end_location": {
+                        "address": tech.end_location_address,
+                        "latitude": tech.end_latitude,
+                        "longitude": tech.end_longitude
+                    },
                     "stops": route_customers,
                     "total_customers": len(route_customers),
                     "total_distance_miles": round(route_distance_miles, 2),

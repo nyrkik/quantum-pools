@@ -7,10 +7,10 @@
 - No bullets, celebrations, or summaries
 - Just: "Done" or "Fixed X"
 
-### 2. Process Management (CRITICAL)
-- NEVER use background bash (no `&`, no `run_in_background: true`)
-- NEVER manually start uvicorn - use `restart_server.sh`
-- Kill processes immediately with KillShell if accidentally created
+### 2. Bash Usage (CRITICAL)
+- USE synchronous bash for all commands
+- NEVER background bash (no `&`, no `run_in_background: true`)
+- NEVER manually start uvicorn - use `./restart_server.sh` (synchronous only, never background)
 - Use Read with `offset`/`limit` for large files (>500 lines)
 
 ### 3. Sequential Work (TodoWrite)
@@ -33,13 +33,7 @@ Use bash ONLY for: git, pip/npm, tests, migrations, service restarts
 - Production-ready code from day one
 - Complete error handling and validation
 
-### 6. BASH COMMAND RESTRICTIONS (CRITICAL)
-- Do NOT use bash_tool for any reason
-- Do NOT execute terminal commands
-- ONLY provide commands for human to run
-- No exceptions - not for "quick checks" or "verifying"
-
-### 7. Session Start Protocol
+### 6. Session Start Protocol
 After context compacting, acknowledge core rules (see end of doc)
 
 ---
@@ -49,7 +43,7 @@ After context compacting, acknowledge core rules (see end of doc)
 **AI-powered pool service management SaaS platform**
 - Python 3.11 + FastAPI (async)
 - PostgreSQL + SQLAlchemy 2.0
-- Server: `localhost:7006`
+- Server: `localhost:7007`
 - Path: `/mnt/Projects/quantum-pools`
 
 **Quick Start:**
@@ -183,13 +177,12 @@ After context compacting, respond with:
 ```
 Understood - core rules:
 1. Max 3 lines per response
-2. NEVER run bash commands
-3. NEVER background processes
-4. Sequential work with TodoWrite
-5. Production-ready code only
-6. Check existing docs before creating
-7. docs/ at ROOT, never in app/
-8. Run health check before major work
+2. Use synchronous bash only (never background)
+3. Sequential work with TodoWrite
+4. Production-ready code only
+5. Check existing docs before creating
+6. docs/ at ROOT, never in app/
+7. Run health check before major work
 ```
 
 ---

@@ -20,6 +20,9 @@ ortools==9.8.3296
 # Geocoding
 geopy==2.4.1
 
+# HTTP Client (for OSRM, Google Maps APIs)
+aiohttp==3.9.1
+
 # PDF Generation
 reportlab==4.0.9
 weasyprint==60.2

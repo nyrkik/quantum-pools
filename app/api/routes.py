@@ -395,14 +395,14 @@ async def download_route_pdf(
     }
 
     driver_info = {
-        "name": tech.name
+        "name": driver.name
     }
 
     # Generate PDF
     pdf_buffer = pdf_export_service.generate_route_sheet(route_data, driver_info)
 
     # Return as downloadable file
-    filename = f"route_{tech.name.replace(' ', '_')}_{route.service_day}.pdf"
+    filename = f"route_{driver.name.replace(' ', '_')}_{route.service_day}.pdf"
 
     return StreamingResponse(
         pdf_buffer,
@@ -449,7 +449,7 @@ async def download_day_routes_pdf(
         select(Tech).where(Tech.id.in_(tech_ids))
     )
     drivers_list = drivers_result.scalars().all()
-    drivers_dict = {str(tech.id): {"name": tech.name} for driver in drivers_list}
+    drivers_dict = {str(driver.id): {"name": driver.name} for driver in drivers_list}
 
     # Build route data for each route
     routes_data = []

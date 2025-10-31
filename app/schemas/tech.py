@@ -89,6 +89,7 @@ class TechResponse(TechBase):
     end_longitude: Optional[float] = None
     created_at: datetime
     updated_at: datetime
+    customer_count: Optional[int] = None  # Number of customers assigned for a given day
 
     model_config = ConfigDict(from_attributes=True)
 

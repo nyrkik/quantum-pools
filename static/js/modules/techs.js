@@ -23,10 +23,17 @@ const TECH_COLORS = [
 
 let allTechs = [];
 let selectedTechIds = new Set();
+let savedRoutesData = null; // Store saved routes from database
 
 async function loadTechs() {
     try {
-        const response = await Auth.apiRequest(`${API_BASE}/api/techs/`);
+        // Include service_day parameter to get customer counts
+        let url = `${API_BASE}/api/techs/`;
+        if (selectedDay && selectedDay !== 'all') {
+            url += `?service_day=${selectedDay}`;
+        }
+
+        const response = await Auth.apiRequest(url);
         if (!response.ok) {
             console.error('Failed to load techs');
             return;
@@ -49,12 +56,47 @@ async function loadTechs() {
     }
 }
 
-function populateTechChips(techs) {
+async function loadSavedRoutesForDay(serviceDay) {
+    console.log('Loading saved routes for:', serviceDay);
+    if (!serviceDay || serviceDay === 'all') {
+        savedRoutesData = null;
+        console.log('No service day selected, clearing saved routes');
+        return;
+    }
+
+    try {
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/day/${serviceDay}`);
+        console.log('Routes API response status:', response.status);
+        if (!response.ok) {
+            savedRoutesData = null;
+            return;
+        }
+
+        const routes = await response.json();
+        console.log('Loaded routes from database:', routes);
+        if (routes && routes.length > 0) {
+            savedRoutesData = { routes: routes };
+            console.log('Set savedRoutesData:', savedRoutesData);
+        } else {
+            savedRoutesData = null;
+            console.log('No saved routes found for', serviceDay);
+        }
+    } catch (error) {
+        console.error('Error loading saved routes:', error);
+        savedRoutesData = null;
+    }
+}
+
+function populateTechChips(techs, resetSelection = true) {
     const container = document.getElementById('tech-chips');
     if (!container) return;
 
     container.innerHTML = '';
-    selectedTechIds.clear();
+
+    // Only clear and select all by default if resetSelection is true
+    if (resetSelection) {
+        selectedTechIds.clear();
+    }
 
     // Add "All" toggle switch first
     const toggleContainer = document.createElement('div');
@@ -70,7 +112,7 @@ function populateTechChips(techs) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.id = 'all-toggle';
-    checkbox.checked = true;
+    checkbox.checked = resetSelection; // Only checked if we're resetting (selecting all)
     checkbox.addEventListener('change', toggleAllTechs);
 
     const slider = document.createElement('span');
@@ -87,57 +129,110 @@ function populateTechChips(techs) {
     }
 
     techs.forEach(tech => {
-        const chip = document.createElement('button');
-        chip.className = 'tech-chip selected';
-        chip.dataset.techId = tech.id;
-        chip.style.borderColor = tech.color || '#3498db';
-        chip.style.backgroundColor = tech.color || '#3498db';
-        chip.style.color = 'white';
+        // Create wrapper for label + badge button
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tech-chip-wrapper';
 
-        // Calculate stop count for this tech if routes exist
+        // Calculate stop count
         let stopCount = 0;
-        if (currentRouteResult && currentRouteResult.routes) {
+
+        // First check if customer_count is available from API (assigned customers)
+        if (tech.customer_count !== undefined && tech.customer_count !== null) {
+            stopCount = tech.customer_count;
+        }
+        // Otherwise check current optimization result
+        else if (currentRouteResult && currentRouteResult.routes) {
             const techRoute = currentRouteResult.routes.find(r => r.driver_id === tech.id);
             if (techRoute && techRoute.stops) {
                 stopCount = techRoute.stops.length;
             }
         }
 
-        // Create name and count elements
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'tech-chip-name';
-        nameSpan.textContent = tech.name;
+        // Check if this tech is currently selected
+        const isSelected = resetSelection ? true : selectedTechIds.has(tech.id);
 
-        const countSpan = document.createElement('span');
-        countSpan.className = 'tech-chip-count';
-        countSpan.textContent = stopCount > 0 ? stopCount : '';
+        // Add to selectedTechIds if resetting selection
+        if (resetSelection) {
+            selectedTechIds.add(tech.id);
+        }
 
-        chip.appendChild(nameSpan);
-        chip.appendChild(countSpan);
+        // Create name label (clickable)
+        const nameLabel = document.createElement('span');
+        nameLabel.className = isSelected ? 'tech-chip-label selected' : 'tech-chip-label';
+        nameLabel.dataset.techId = tech.id;
+        nameLabel.style.color = tech.color || '#3498db';
+        nameLabel.textContent = tech.name;
 
-        selectedTechIds.add(tech.id);
+        // Create count badge button (clickable)
+        const badge = document.createElement('button');
+        badge.className = isSelected ? 'tech-chip-badge selected' : 'tech-chip-badge unselected';
+        badge.dataset.techId = tech.id;
+        badge.style.backgroundColor = tech.color || '#3498db';
+        badge.style.opacity = isSelected ? '1' : '0.3';
+        badge.textContent = stopCount > 0 ? stopCount : '0';
 
-        // Click handler with Ctrl detection
-        chip.addEventListener('click', function(e) {
+        wrapper.appendChild(nameLabel);
+        wrapper.appendChild(badge);
+
+        // Click handler with Ctrl detection for both label and badge
+        const clickHandler = function(e) {
             toggleTechSelection(tech.id, e.ctrlKey || e.metaKey);
-        });
+        };
+        nameLabel.addEventListener('click', clickHandler);
+        badge.addEventListener('click', clickHandler);
 
         // Long-press handler for mobile multi-select
         let pressTimer;
-        chip.addEventListener('touchstart', function(e) {
+        badge.addEventListener('touchstart', function(e) {
             pressTimer = setTimeout(function() {
                 toggleTechSelection(tech.id, true); // true = multi-select mode
             }, 500); // 500ms for long-press
         });
-        chip.addEventListener('touchend', function() {
+        badge.addEventListener('touchend', function() {
             clearTimeout(pressTimer);
         });
-        chip.addEventListener('touchmove', function() {
+        badge.addEventListener('touchmove', function() {
             clearTimeout(pressTimer);
         });
 
-        container.appendChild(chip);
+        container.appendChild(wrapper);
     });
+
+    // Add unassigned chip if there are unassigned customers
+    if (window.unassignedCustomerCount && window.unassignedCustomerCount > 0) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tech-chip-wrapper';
+
+        const isUnassignedSelected = resetSelection ? true : selectedTechIds.has('unassigned');
+
+        if (resetSelection) {
+            selectedTechIds.add('unassigned');
+        }
+
+        const nameLabel = document.createElement('span');
+        nameLabel.className = isUnassignedSelected ? 'tech-chip-label selected' : 'tech-chip-label';
+        nameLabel.dataset.techId = 'unassigned';
+        nameLabel.style.color = '#e74c3c';
+        nameLabel.textContent = 'Unassigned';
+
+        const badge = document.createElement('button');
+        badge.className = isUnassignedSelected ? 'tech-chip-badge selected unassigned-badge' : 'tech-chip-badge unselected unassigned-badge';
+        badge.dataset.techId = 'unassigned';
+        badge.style.backgroundColor = '#e74c3c';
+        badge.style.opacity = isUnassignedSelected ? '1' : '0.3';
+        badge.textContent = window.unassignedCustomerCount;
+
+        wrapper.appendChild(nameLabel);
+        wrapper.appendChild(badge);
+
+        const clickHandler = function(e) {
+            toggleTechSelection('unassigned', e.ctrlKey || e.metaKey);
+        };
+        nameLabel.addEventListener('click', clickHandler);
+        badge.addEventListener('click', clickHandler);
+
+        container.appendChild(wrapper);
+    }
 }
 
 function toggleAllTechs() {
@@ -150,45 +245,67 @@ function toggleAllTechs() {
 
         allTechs.forEach(tech => {
             selectedTechIds.add(tech.id);
-            const chip = document.querySelector(`.tech-chip[data-tech-id="${tech.id}"]`);
-            if (chip) {
-                chip.classList.remove('unselected');
-                chip.classList.add('selected');
-                chip.style.backgroundColor = tech.color || '#3498db';
-                chip.style.color = 'white';
-                // Update count color for selected state
-                const countSpan = chip.querySelector('.tech-chip-count');
-                if (countSpan) {
-                    countSpan.style.color = 'white';
-                }
+            const badge = document.querySelector(`.tech-chip-badge[data-tech-id="${tech.id}"]`);
+            const label = document.querySelector(`.tech-chip-label[data-tech-id="${tech.id}"]`);
+            if (badge) {
+                badge.classList.remove('unselected');
+                badge.classList.add('selected');
+                badge.style.opacity = '1';
+            }
+            if (label) {
+                label.classList.add('selected');
             }
         });
+
+        // Select unassigned if exists
+        selectedTechIds.add('unassigned');
+        const unassignedBadge = document.querySelector(`.tech-chip-badge[data-tech-id="unassigned"]`);
+        const unassignedLabel = document.querySelector(`.tech-chip-label[data-tech-id="unassigned"]`);
+        if (unassignedBadge) {
+            unassignedBadge.classList.remove('unselected');
+            unassignedBadge.classList.add('selected');
+            unassignedBadge.style.opacity = '1';
+        }
+        if (unassignedLabel) {
+            unassignedLabel.classList.add('selected');
+        }
     } else {
         // Deselect all
         selectedTechIds.clear();
 
         allTechs.forEach(tech => {
-            const chip = document.querySelector(`.tech-chip[data-tech-id="${tech.id}"]`);
-            if (chip) {
-                chip.classList.remove('selected');
-                chip.classList.add('unselected');
-                chip.style.backgroundColor = '#f5f5f5';
-                chip.style.color = '#999';
-                // Update count color for unselected state
-                const countSpan = chip.querySelector('.tech-chip-count');
-                if (countSpan) {
-                    countSpan.style.color = '#999';
-                }
+            const badge = document.querySelector(`.tech-chip-badge[data-tech-id="${tech.id}"]`);
+            const label = document.querySelector(`.tech-chip-label[data-tech-id="${tech.id}"]`);
+            if (badge) {
+                badge.classList.remove('selected');
+                badge.classList.add('unselected');
+                badge.style.opacity = '0.3';
+            }
+            if (label) {
+                label.classList.remove('selected');
             }
         });
+
+        // Deselect unassigned if exists
+        const unassignedBadge = document.querySelector(`.tech-chip-badge[data-tech-id="unassigned"]`);
+        const unassignedLabel = document.querySelector(`.tech-chip-label[data-tech-id="unassigned"]`);
+        if (unassignedBadge) {
+            unassignedBadge.classList.remove('selected');
+            unassignedBadge.classList.add('unselected');
+            unassignedBadge.style.opacity = '0.3';
+        }
+        if (unassignedLabel) {
+            unassignedLabel.classList.remove('selected');
+        }
     }
 
     filterRoutesByTechs();
 }
 
 function toggleTechSelection(techId, multiSelect = false) {
-    const chip = document.querySelector(`.tech-chip[data-tech-id="${techId}"]`);
-    if (!chip) return;
+    const badge = document.querySelector(`.tech-chip-badge[data-tech-id="${techId}"]`);
+    const label = document.querySelector(`.tech-chip-label[data-tech-id="${techId}"]`);
+    if (!badge) return;
 
     const allToggle = document.getElementById('all-toggle');
 
@@ -196,64 +313,53 @@ function toggleTechSelection(techId, multiSelect = false) {
         // Multi-select mode: toggle this tech only
         if (selectedTechIds.has(techId)) {
             selectedTechIds.delete(techId);
-            chip.classList.remove('selected');
-            chip.classList.add('unselected');
-            chip.style.backgroundColor = '#f5f5f5';
-            chip.style.color = '#999';
-            // Update count color for unselected state
-            const countSpan = chip.querySelector('.tech-chip-count');
-            if (countSpan) {
-                countSpan.style.color = '#999';
-            }
+            badge.classList.remove('selected');
+            badge.classList.add('unselected');
+            badge.style.opacity = '0.3';
+            if (label) label.classList.remove('selected');
         } else {
             selectedTechIds.add(techId);
-            chip.classList.remove('unselected');
-            chip.classList.add('selected');
-            const tech = allTechs.find(d => d.id === techId);
-            if (tech) {
-                chip.style.backgroundColor = tech.color || '#3498db';
-                chip.style.color = 'white';
-                // Update count color for selected state
-                const countSpan = chip.querySelector('.tech-chip-count');
-                if (countSpan) {
-                    countSpan.style.color = 'white';
-                }
-            }
+            badge.classList.remove('unselected');
+            badge.classList.add('selected');
+            badge.style.opacity = '1';
+            if (label) label.classList.add('selected');
         }
     } else {
         // Single-select mode: deselect all others, select only this one
         selectedTechIds.clear();
 
-        // Deselect all chips
+        // Deselect all badges and labels
         allTechs.forEach(tech => {
-            const otherChip = document.querySelector(`.tech-chip[data-tech-id="${tech.id}"]`);
-            if (otherChip) {
-                otherChip.classList.remove('selected');
-                otherChip.classList.add('unselected');
-                otherChip.style.backgroundColor = '#f5f5f5';
-                otherChip.style.color = '#999';
-                // Update count color for unselected state
-                const countSpan = otherChip.querySelector('.tech-chip-count');
-                if (countSpan) {
-                    countSpan.style.color = '#999';
-                }
+            const otherBadge = document.querySelector(`.tech-chip-badge[data-tech-id="${tech.id}"]`);
+            const otherLabel = document.querySelector(`.tech-chip-label[data-tech-id="${tech.id}"]`);
+            if (otherBadge) {
+                otherBadge.classList.remove('selected');
+                otherBadge.classList.add('unselected');
+                otherBadge.style.opacity = '0.3';
+            }
+            if (otherLabel) {
+                otherLabel.classList.remove('selected');
             }
         });
 
+        // Deselect unassigned if exists
+        const unassignedBadge = document.querySelector(`.tech-chip-badge[data-tech-id="unassigned"]`);
+        const unassignedLabel = document.querySelector(`.tech-chip-label[data-tech-id="unassigned"]`);
+        if (unassignedBadge) {
+            unassignedBadge.classList.remove('selected');
+            unassignedBadge.classList.add('unselected');
+            unassignedBadge.style.opacity = '0.3';
+        }
+        if (unassignedLabel) {
+            unassignedLabel.classList.remove('selected');
+        }
+
         // Select only this tech
         selectedTechIds.add(techId);
-        chip.classList.remove('unselected');
-        chip.classList.add('selected');
-        const tech = allTechs.find(d => d.id === techId);
-        if (tech) {
-            chip.style.backgroundColor = tech.color || '#3498db';
-            chip.style.color = 'white';
-            // Update count color for selected state
-            const countSpan = chip.querySelector('.tech-chip-count');
-            if (countSpan) {
-                countSpan.style.color = 'white';
-            }
-        }
+        badge.classList.remove('unselected');
+        badge.classList.add('selected');
+        badge.style.opacity = '1';
+        if (label) label.classList.add('selected');
     }
 
     // Update All toggle state

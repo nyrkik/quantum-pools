@@ -1,12 +1,6 @@
 #!/bin/bash
 # Restart the development server cleanly
 
-echo "Killing old restart_server.sh processes..."
-for pid in $(pgrep -f "restart_server.sh" | grep -v $$); do
-    kill -9 $pid 2>/dev/null || true
-done
-sleep 1
-
 echo "Killing zombie uvicorn processes..."
 pkill -9 -f "uvicorn app.main:app" 2>/dev/null
 sleep 1

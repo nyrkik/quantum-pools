@@ -38,14 +38,14 @@ let hasGoogleMapsKey = false;
 // ===== MODAL FUNCTIONS =====
 // Modal functions moved to /static/js/modules/modals.js
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     initModuleNavigation();
     initializeMap();
     attachEventListeners();
     initOptimizationModal();
     initDaySelector();  // Must run before loadCustomers to set selectedDay
-    loadCustomers();
-    loadTechs();
+    await loadCustomers();  // Load customers first to count unassigned
+    loadTechs();  // Then load techs with unassigned count
     loadCustomersManagement();
     initTabs();
     loadGooglePlacesAPI();

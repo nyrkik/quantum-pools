@@ -39,13 +39,13 @@ cp .env.example .env
 ### Start Development Server
 ```bash
 source venv/bin/activate
-./restart_server.sh  # Kills old processes on port 7006, starts new server
+./restart_server.sh  # Kills old processes on port 7007, starts new server
 ```
 
 **Access:**
-- Web UI: http://localhost:7006
-- API Docs: http://localhost:7006/docs
-- ReDoc: http://localhost:7006/redoc
+- Web UI: http://localhost:7007
+- API Docs: http://localhost:7007/docs
+- ReDoc: http://localhost:7007/redoc
 
 ### Manual Start (if restart_server.sh fails)
 ```bash
@@ -108,7 +108,7 @@ python -m app.scripts.geocode_customers
 
 ### Check Health
 ```bash
-curl http://localhost:7006/health
+curl http://localhost:7007/health
 ```
 
 ### View Logs
@@ -130,8 +130,8 @@ cat .env | grep DATABASE_URL
 
 ### Port Already in Use
 ```bash
-# Kill process on port 7006
-lsof -ti:7006 | xargs kill -9
+# Kill process on port 7007
+lsof -ti:7007 | xargs kill -9
 
 # Or use restart script
 ./restart_server.sh
@@ -217,7 +217,7 @@ GOOGLE_MAPS_API_KEY=your-api-key
 ENVIRONMENT=development  # development|staging|production
 
 # CORS
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:7006
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:7007
 
 # Logging
 LOG_LEVEL=INFO  # DEBUG|INFO|WARNING|ERROR

@@ -12,6 +12,7 @@ from uuid import UUID
 from app.database import get_db
 from app.dependencies.auth import get_current_user, AuthContext
 from app.models.tech import Tech
+from app.models.customer import Customer
 from app.schemas.tech import (
     TechCreate,
     TechUpdate,
@@ -75,6 +76,7 @@ async def list_techs(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    service_day: Optional[str] = Query(None, description="Service day to count customers for"),
     auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -83,6 +85,7 @@ async def list_techs(
 
     Filters:
     - **is_active**: Filter by active/inactive status
+    - **service_day**: If provided, includes customer_count for that day
     """
     # Build base query
     query = select(Tech).where(Tech.organization_id == auth.organization_id)
@@ -104,8 +107,40 @@ async def list_techs(
     result = await db.execute(query)
     techs = result.scalars().all()
 
+    # If no service_day, return techs as-is
+    if not service_day:
+        return TechListResponse(
+            techs=techs,
+            total=total,
+            page=page,
+            page_size=page_size
+        )
+
+    # If service_day provided, compute customer counts
+    tech_responses = []
+    for tech in techs:
+        # Count customers assigned to this tech for the service day
+        # Match the customer list query - include both service_day and service_schedule
+        from sqlalchemy import or_
+        day_abbrev = service_day[:2].capitalize()  # "Th" for thursday
+        count_query = select(func.count()).select_from(Customer).where(
+            Customer.organization_id == auth.organization_id,
+            Customer.assigned_tech_id == tech.id,
+            or_(
+                Customer.service_day == service_day,
+                Customer.service_schedule.like(f'%{day_abbrev}%')
+            )
+        )
+        count_result = await db.execute(count_query)
+        customer_count = count_result.scalar() or 0
+
+        # Create response dict with customer_count
+        tech_dict = tech.__dict__.copy()
+        tech_dict['customer_count'] = customer_count
+        tech_responses.append(TechResponse(**tech_dict))
+
     return TechListResponse(
-        techs=techs,
+        techs=tech_responses,
         total=total,
         page=page,
         page_size=page_size

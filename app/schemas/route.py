@@ -52,6 +52,8 @@ class RouteResponse(BaseModel):
     driver_name: str
     driver_color: str = Field(default='#3498db', description="Driver's assigned color")
     service_day: str
+    start_location: Optional[dict] = Field(default=None, description="Starting depot location {address, latitude, longitude}")
+    end_location: Optional[dict] = Field(default=None, description="Ending depot location {address, latitude, longitude}")
     stops: List[RouteStopResponse]
     total_customers: int
     total_distance_miles: float

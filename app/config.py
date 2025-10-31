@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     optimization_time_limit_seconds: int = 120
     max_customers_per_route: int = 50
 
+    # Routing (distance/time calculations)
+    routing_provider: str = "osrm"  # Options: "osrm" (free), "google" (paid)
+    osrm_server_url: str = "http://router.project-osrm.org"  # Public OSRM server
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

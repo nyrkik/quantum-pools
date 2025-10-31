@@ -75,10 +75,20 @@ async function loadCustomers() {
         if (!response.ok) return;
 
         const data = await response.json();
-        displayCustomersOnMap(data.customers || []);
+
+        // Count unassigned customers
+        const customers = data.customers || [];
+        window.unassignedCustomerCount = customers.filter(c => !c.assigned_tech_id).length;
+        window.currentCustomers = customers;
+
+        displayCustomersOnMap(customers);
+        displayCurrentAssignments(customers);
     } catch (error) {
         console.error('Error loading customers:', error);
+        window.unassignedCustomerCount = 0;
+        window.currentCustomers = [];
         displayCustomersOnMap([]);
+        displayCurrentAssignments([]);
     }
 }
 
@@ -98,10 +108,16 @@ function displayCustomersOnMap(customers) {
             // Determine if we should show this customer
             const isUnassigned = !customer.assigned_tech_id;
             const isSelectedTech = customer.assigned_tech_id && selectedTechIds.has(customer.assigned_tech_id);
+            const showUnassigned = selectedTechIds.has('unassigned');
 
-            // Show if: unassigned (always) OR assigned to selected tech OR no techs loaded yet
-            if (!isUnassigned && selectedTechIds.size > 0 && !isSelectedTech) {
-                return; // Skip if not in our selected techs
+            // Show if: unassigned (and unassigned is selected) OR assigned to selected tech OR no techs loaded yet
+            if (selectedTechIds.size > 0) {
+                if (isUnassigned && !showUnassigned) {
+                    return; // Skip unassigned if unassigned chip not selected
+                }
+                if (!isUnassigned && !isSelectedTech) {
+                    return; // Skip if not in our selected techs
+                }
             }
             // Create coordinate key
             const coordKey = `${customer.latitude},${customer.longitude}`;
@@ -165,11 +181,38 @@ function displayCustomersOnMap(customers) {
                 scheduleDisplay = dayAbbrev[customer.service_day] || customer.service_day;
             }
 
+            // Parse address to show only street and city
+            const addressParts = customer.address.split(',').map(p => p.trim());
+            const streetAndCity = addressParts.length >= 2
+                ? `${addressParts[0]}, ${addressParts[1]}`
+                : customer.address;
+
             marker.bindPopup(`
                 <b>${customer.display_name}</b><br>
-                ${customer.address}<br>
-                <em>${scheduleDisplay}</em>
+                ${streetAndCity}
             `);
+
+            // Add tooltip for property name on hover
+            marker.bindTooltip(customer.display_name, {
+                permanent: false,
+                direction: 'top',
+                offset: [0, -10]
+            });
+
+            // Add hover effect - red border
+            marker.on('mouseover', function() {
+                this.setStyle({
+                    color: '#e74c3c',
+                    weight: 3
+                });
+            });
+
+            marker.on('mouseout', function() {
+                this.setStyle({
+                    color: '#fff',
+                    weight: 2
+                });
+            });
 
             // Store customer ID with marker for later reference
             marker.customerId = customer.id;
@@ -190,9 +233,9 @@ function displayCustomersOnMap(customers) {
     }
 }
 
-function highlightCustomerMarker(customerId) {
+function highlightCustomerMarker(customerId, openPopup = false) {
     // Reset previously highlighted marker to its original color
-    if (highlightedMarker) {
+    if (highlightedMarker && highlightedMarker.customerId !== customerId) {
         highlightedMarker.setStyle({
             radius: 6,
             fillColor: highlightedMarker.originalColor || '#3498db',
@@ -201,25 +244,44 @@ function highlightCustomerMarker(customerId) {
             opacity: 1,
             fillOpacity: highlightedMarker.originalFillOpacity || 0.7
         });
+        highlightedMarker.closePopup();
     }
 
     // Highlight the selected marker
     const marker = customerMarkersById[customerId];
     if (marker) {
         marker.setStyle({
-            radius: 10,
-            fillColor: '#e74c3c',
-            color: '#fff',
+            radius: 8,
+            fillColor: marker.originalColor || '#3498db',
+            color: '#e74c3c',
             weight: 3,
             opacity: 1,
-            fillOpacity: 0.9
+            fillOpacity: marker.originalFillOpacity || 0.7
         });
 
-        // Pan to marker and open popup
-        map.panTo(marker.getLatLng());
-        marker.openPopup();
+        if (openPopup) {
+            marker.openPopup();
+        }
 
         highlightedMarker = marker;
+    }
+}
+
+function resetCustomerMarker(customerId) {
+    const marker = customerMarkersById[customerId];
+    if (marker) {
+        marker.setStyle({
+            radius: 6,
+            fillColor: marker.originalColor || '#3498db',
+            color: '#fff',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: marker.originalFillOpacity || 0.7
+        });
+        marker.closePopup();
+    }
+    if (highlightedMarker && highlightedMarker.customerId === customerId) {
+        highlightedMarker = null;
     }
 }
 
@@ -243,7 +305,8 @@ function displayRoutesOnMap(routes) {
             return; // No techs selected, don't show route
         }
 
-        if (route.tech_id && !selectedTechIds.has(route.tech_id)) {
+        const routeTechId = route.tech_id || route.driver_id;
+        if (routeTechId && !selectedTechIds.has(routeTechId)) {
             return; // Skip routes for techs not in selection
         }
 
@@ -251,6 +314,26 @@ function displayRoutesOnMap(routes) {
         const color = route.driver_color || '#3498db';
         const coordinates = [];
 
+        // Add start depot marker if available
+        if (route.start_location && route.start_location.latitude && route.start_location.longitude) {
+            const startLatLng = [route.start_location.latitude, route.start_location.longitude];
+            coordinates.push(startLatLng);
+            allCoordinates.push(startLatLng);
+
+            // Create house icon for depot
+            const startIcon = L.divIcon({
+                html: `<div style="color: ${color}; font-size: 20px;">🏠</div>`,
+                className: 'depot-marker',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+
+            const startMarker = L.marker(startLatLng, { icon: startIcon }).addTo(map);
+            startMarker.bindPopup(`<b>Start: ${route.driver_name}</b><br>${route.start_location.address}`);
+            routeLayers.push(startMarker);
+        }
+
+        // Add stop markers
         route.stops.forEach(stop => {
             if (stop.latitude && stop.longitude) {
                 const latLng = [stop.latitude, stop.longitude];
@@ -272,6 +355,25 @@ function displayRoutesOnMap(routes) {
             }
         });
 
+        // Add end depot marker if available
+        if (route.end_location && route.end_location.latitude && route.end_location.longitude) {
+            const endLatLng = [route.end_location.latitude, route.end_location.longitude];
+            coordinates.push(endLatLng);
+            allCoordinates.push(endLatLng);
+
+            // Create house icon for depot
+            const endIcon = L.divIcon({
+                html: `<div style="color: ${color}; font-size: 20px;">🏠</div>`,
+                className: 'depot-marker',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+
+            const endMarker = L.marker(endLatLng, { icon: endIcon }).addTo(map);
+            endMarker.bindPopup(`<b>End: ${route.driver_name}</b><br>${route.end_location.address}`);
+            routeLayers.push(endMarker);
+        }
+
         // Draw route line
         if (coordinates.length > 1) {
             const polyline = L.polyline(coordinates, {
@@ -288,5 +390,140 @@ function displayRoutesOnMap(routes) {
     if (allCoordinates.length > 0) {
         const bounds = L.latLngBounds(allCoordinates);
         map.fitBounds(bounds, { padding: [50, 50] });
+    }
+}
+
+function displayCurrentAssignments(customers) {
+    // Skip if there's an optimization result being displayed
+    if (currentRouteResult) {
+        return;
+    }
+
+    const container = document.getElementById('routes-content');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    // Group customers by tech
+    const techGroups = {};
+    const unassigned = [];
+
+    customers.forEach(customer => {
+        if (!customer.assigned_tech_id) {
+            unassigned.push(customer);
+        } else {
+            if (!techGroups[customer.assigned_tech_id]) {
+                techGroups[customer.assigned_tech_id] = {
+                    tech: customer.assigned_tech,
+                    customers: []
+                };
+            }
+            techGroups[customer.assigned_tech_id].customers.push(customer);
+        }
+    });
+
+    // Display tech groups
+    let hasDisplayedRoutes = false;
+
+    Object.entries(techGroups).forEach(([techId, group]) => {
+        // Filter by selected techs
+        if (selectedTechIds.size > 0 && !selectedTechIds.has(techId)) {
+            return;
+        }
+
+        hasDisplayedRoutes = true;
+
+        const routeCard = document.createElement('div');
+        routeCard.className = 'route-card';
+
+        // Add color indicator
+        const colorIndicator = document.createElement('div');
+        colorIndicator.className = 'route-color-indicator';
+        colorIndicator.style.backgroundColor = group.tech.color || '#3498db';
+        routeCard.appendChild(colorIndicator);
+
+        const title = document.createElement('h3');
+        title.innerHTML = `<strong>${group.tech.name}</strong> <span class="stop-count">- ${group.customers.length} stops</span>`;
+        routeCard.appendChild(title);
+
+        const stopsList = document.createElement('ul');
+        stopsList.className = 'route-stops';
+
+        group.customers.forEach(customer => {
+            const stopItem = document.createElement('li');
+            stopItem.dataset.customerId = customer.id;
+            // Extract just the street address (before city/state)
+            const addressParts = customer.address.split(',');
+            const streetAddress = addressParts[0] || customer.address;
+            stopItem.innerHTML = `<span class="customer-name">${customer.display_name}</span> - ${streetAddress}`;
+
+            // Add hover handlers to highlight marker and show popup
+            stopItem.addEventListener('mouseenter', () => {
+                if (customer.id) {
+                    highlightCustomerMarker(customer.id, true);
+                }
+            });
+            stopItem.addEventListener('mouseleave', () => {
+                if (customer.id) {
+                    resetCustomerMarker(customer.id);
+                }
+            });
+
+            stopsList.appendChild(stopItem);
+        });
+
+        routeCard.appendChild(stopsList);
+        container.appendChild(routeCard);
+    });
+
+    // Display unassigned if selected
+    if (unassigned.length > 0 && selectedTechIds.has('unassigned')) {
+        hasDisplayedRoutes = true;
+
+        const routeCard = document.createElement('div');
+        routeCard.className = 'route-card';
+
+        // Add color indicator
+        const colorIndicator = document.createElement('div');
+        colorIndicator.className = 'route-color-indicator';
+        colorIndicator.style.backgroundColor = '#e74c3c';
+        routeCard.appendChild(colorIndicator);
+
+        const title = document.createElement('h3');
+        title.innerHTML = `<strong>Unassigned</strong> <span class="stop-count">- ${unassigned.length} stops</span>`;
+        routeCard.appendChild(title);
+
+        const stopsList = document.createElement('ul');
+        stopsList.className = 'route-stops';
+
+        unassigned.forEach(customer => {
+            const stopItem = document.createElement('li');
+            stopItem.dataset.customerId = customer.id;
+            // Extract just the street address (before city/state)
+            const addressParts = customer.address.split(',');
+            const streetAddress = addressParts[0] || customer.address;
+            stopItem.innerHTML = `<span class="customer-name">${customer.display_name}</span> - ${streetAddress}`;
+
+            // Add hover handlers to highlight marker and show popup
+            stopItem.addEventListener('mouseenter', () => {
+                if (customer.id) {
+                    highlightCustomerMarker(customer.id, true);
+                }
+            });
+            stopItem.addEventListener('mouseleave', () => {
+                if (customer.id) {
+                    resetCustomerMarker(customer.id);
+                }
+            });
+
+            stopsList.appendChild(stopItem);
+        });
+
+        routeCard.appendChild(stopsList);
+        container.appendChild(routeCard);
+    }
+
+    if (!hasDisplayedRoutes) {
+        container.innerHTML = '<p class="placeholder">No stops for selected techs</p>';
     }
 }

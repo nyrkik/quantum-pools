@@ -16,7 +16,7 @@ function initDaySelector() {
             tab.classList.add('active');
         }
 
-        tab.addEventListener('click', function() {
+        tab.addEventListener('click', async function() {
             selectedDay = this.dataset.day;
 
             // Clear route result when switching days
@@ -27,13 +27,11 @@ function initDaySelector() {
             this.classList.add('active');
 
             // Reload customers for selected day
-            loadCustomers();
+            await loadCustomers();
             loadCustomersManagement();
 
-            // Repopulate tech chips to clear stop counts
-            if (allTechs && allTechs.length > 0) {
-                populateTechChips(allTechs);
-            }
+            // Reload techs to get updated customer counts for selected day
+            loadTechs();
         });
     });
 }
@@ -72,12 +70,28 @@ async function optimizeRoutes() {
 
         if (result.routes && result.routes.length > 0) {
             currentRouteResult = result; // Store for filtering
+
+            // Auto-select techs that are in the optimization result
+            selectedTechIds.clear();
+            result.routes.forEach(route => {
+                if (route.driver_id) {
+                    selectedTechIds.add(route.driver_id);
+                }
+            });
+
+            // Uncheck "All" toggle
+            const allToggle = document.getElementById('all-toggle');
+            if (allToggle) {
+                allToggle.checked = false;
+            }
+
             displayRoutes(result);
             displayRoutesOnMap(result.routes);
 
-            // Update tech chips with stop counts
+            // Update tech chips with stop counts and selection state
+            // Pass false to preserve the selectedTechIds we just set
             if (allTechs && allTechs.length > 0) {
-                populateTechChips(allTechs);
+                populateTechChips(allTechs, false);
             }
         } else {
             currentRouteResult = null;
@@ -105,21 +119,73 @@ function displayRoutes(result) {
     if (result.summary) {
         const summary = document.createElement('div');
         summary.className = 'route-summary';
-        summary.innerHTML = `
+        summary.style.position = 'relative';
+
+        // Add close button
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '&times;';
+        closeBtn.style.position = 'absolute';
+        closeBtn.style.top = '0.5rem';
+        closeBtn.style.right = '0.5rem';
+        closeBtn.style.background = 'none';
+        closeBtn.style.border = 'none';
+        closeBtn.style.fontSize = '1.5rem';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.style.color = '#7f8c8d';
+        closeBtn.style.transition = 'color 0.2s';
+        closeBtn.onmouseover = () => closeBtn.style.color = '#e74c3c';
+        closeBtn.onmouseout = () => closeBtn.style.color = '#7f8c8d';
+        closeBtn.onclick = () => {
+            currentRouteResult = null;
+            container.innerHTML = '<p class="placeholder">No routes generated</p>';
+            displayRoutesOnMap([]);
+            loadCustomers();
+            loadTechs();
+        };
+        summary.appendChild(closeBtn);
+
+        const content = document.createElement('div');
+        content.innerHTML = `
             <h3>Route Summary</h3>
             <p><strong>Total Routes:</strong> ${result.summary.total_routes}</p>
             <p><strong>Total Customers:</strong> ${result.summary.total_customers}</p>
             <p><strong>Total Distance:</strong> ${result.summary.total_distance_miles.toFixed(1)} miles</p>
             <p><strong>Total Duration:</strong> ${result.summary.total_duration_minutes} minutes</p>
         `;
+        summary.appendChild(content);
 
-        // Add save button
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn-primary';
-        saveBtn.textContent = 'Save Routes';
-        saveBtn.style.marginTop = '1rem';
-        saveBtn.onclick = () => saveRoutes(result);
-        summary.appendChild(saveBtn);
+        // Add action buttons
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '1rem';
+        buttonContainer.style.marginTop = '1rem';
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'btn-primary';
+        acceptBtn.textContent = 'Accept Changes';
+        acceptBtn.onclick = async () => {
+            await saveRoutes(result);
+            currentRouteResult = null;
+            await loadCustomers();
+            loadTechs();
+        };
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn-secondary';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.onclick = () => {
+            currentRouteResult = null;
+            container.innerHTML = '<p class="placeholder">No routes generated</p>';
+            // Clear map routes
+            displayRoutesOnMap([]);
+            // Reload customers to show original markers
+            loadCustomers();
+            loadTechs();
+        };
+
+        buttonContainer.appendChild(acceptBtn);
+        buttonContainer.appendChild(cancelBtn);
+        content.appendChild(buttonContainer);
 
         container.appendChild(summary);
     }
@@ -147,19 +213,41 @@ function displayRoutes(result) {
         routeCard.appendChild(colorIndicator);
 
         const title = document.createElement('h3');
-        title.textContent = `${route.driver_name} - ${route.service_day}`;
-        routeCard.appendChild(title);
 
-        const info = document.createElement('p');
-        info.textContent = `${route.total_customers} stops, ${route.total_distance_miles.toFixed(1)} miles, ${route.total_duration_minutes} min`;
-        routeCard.appendChild(info);
+        // Format duration as "Xhr Ymin"
+        const hours = Math.floor(route.total_duration_minutes / 60);
+        const mins = route.total_duration_minutes % 60;
+        const durationStr = hours > 0 ? `${hours}hr ${mins}min` : `${mins}min`;
+
+        // Format distance
+        const distanceStr = `${route.total_distance_miles.toFixed(0)} mi`;
+
+        title.innerHTML = `<strong>${route.driver_name}</strong> <span class="stop-count">- ${route.total_customers} stops - ${durationStr} - ${distanceStr}</span>`;
+        routeCard.appendChild(title);
 
         const stopsList = document.createElement('ul');
         stopsList.className = 'route-stops';
 
         route.stops.forEach((stop) => {
             const stopItem = document.createElement('li');
-            stopItem.textContent = `${stop.sequence}. ${stop.customer_name} - ${stop.address} (${stop.service_duration} min)`;
+            stopItem.dataset.customerId = stop.customer_id;
+            // Extract just the street address (before city/state)
+            const addressParts = stop.address.split(',');
+            const streetAddress = addressParts[0] || stop.address;
+            stopItem.innerHTML = `<span class="customer-name">${stop.customer_name}</span> - ${streetAddress}`;
+
+            // Add hover handlers to highlight marker and show popup
+            stopItem.addEventListener('mouseenter', () => {
+                if (stop.customer_id) {
+                    highlightCustomerMarker(stop.customer_id, true);
+                }
+            });
+            stopItem.addEventListener('mouseleave', () => {
+                if (stop.customer_id) {
+                    resetCustomerMarker(stop.customer_id);
+                }
+            });
+
             stopsList.appendChild(stopItem);
         });
 
@@ -194,6 +282,9 @@ async function saveRoutes(result) {
 
         const saveResult = await response.json();
         alert(`Successfully saved ${saveResult.route_ids.length} routes for ${serviceDay}!`);
+
+        // Reload saved routes data for tech chips
+        await loadSavedRoutesForDay(serviceDay);
 
         // Reload saved routes and show download options
         await loadSavedRoutes(serviceDay);

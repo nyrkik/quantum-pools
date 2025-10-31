@@ -13,8 +13,12 @@
 - Multi-driver route assignment
 - Time window constraints
 - Service day filtering
+- Include unassigned customers toggle
+- Include pending customers toggle
+- Optimization speed settings (quick 30s / thorough 120s)
 - Drag-and-drop route editing
 - Distance/duration calculations
+- Refactored optimization service (263→75 line main method)
 
 **✅ Customer Management**
 - Full CRUD operations

@@ -155,8 +155,8 @@ When user says "where":
 3. Format concisely: "Phase: X | In Progress: Y | Next: [task 1], [task 2], [task 3]"
 
 **Commit & Progress:**
-- `commit` - Commit, push, update docs, continue
-- `commit-pause` - Commit, push, update docs, pause
+- `update` - Update docs, commit, push, continue
+- `update-pause` - Update docs, commit, push, pause
 
 **Doc Management:**
 - `docs-check` - List docs >400 lines, flag duplicates

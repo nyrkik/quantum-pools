@@ -458,36 +458,21 @@ class RouteOptimizationService:
 
         return await self._optimize_single_day(valid_customers, techs, service_day, optimization_speed)
 
-    async def _optimize_single_day(
+    def _setup_multi_depot_locations(
         self,
         customers: List[Customer],
-        techs: List[Tech],
-        service_day: Optional[str] = None,
-        optimization_speed: str = "quick"
-    ) -> Dict:
+        techs: List[Tech]
+    ) -> Tuple[List[Tuple[float, float]], List[int], List[int], Dict, int]:
         """
-        Optimize routes for a single day.
+        Setup locations list with multi-depot support.
 
         Args:
-            customers: List of customers to route (already filtered)
-            techs: List of available techs
-            service_day: Day being optimized
-            optimization_speed: 'quick' (30s) or 'thorough' (120s)
+            customers: List of customers with valid coordinates
+            techs: List of techs
 
         Returns:
-            Dict with optimized routes
+            Tuple of (locations, start_indices, end_indices, customer_indices, customer_start_idx)
         """
-        # Filter out customers without geocoded coordinates
-        valid_customers = [c for c in customers if c.latitude and c.longitude]
-
-        if not valid_customers:
-            return {
-                "routes": [],
-                "message": "No customers with valid GPS coordinates"
-            }
-
-        # Build locations list with multi-depot support:
-        # [tech0_start, tech1_start, ..., customer1, customer2, ...]
         locations = []
         start_indices = []
         end_indices = []
@@ -513,33 +498,44 @@ class RouteOptimizationService:
         customer_start_idx = len(locations)
         customer_indices = {}  # Map customer to location index
 
-        for customer in valid_customers:
+        for customer in customers:
             locations.append((customer.latitude, customer.longitude))
             customer_indices[customer.id] = len(locations) - 1
 
         # Log location setup for debugging
         logger.info(
-            f"Multi-depot setup: {len(techs)} techs, {len(valid_customers)} customers, "
+            f"Multi-depot setup: {len(techs)} techs, {len(customers)} customers, "
             f"{len(locations)} total locations"
         )
         logger.info(f"Start indices: {start_indices}, End indices: {end_indices}, Customer start: {customer_start_idx}")
 
-        # Get distance and time matrices from routing service
-        distance_matrix, time_matrix = await routing_service.get_distance_matrix(locations)
+        return locations, start_indices, end_indices, customer_indices, customer_start_idx
 
-        # Debug: Log sample distances to verify units
-        if len(distance_matrix) > 2:
-            logger.info(f"Sample distances: depot0->depot1={distance_matrix[0][1]}m, depot0->customer0={distance_matrix[0][customer_start_idx]}m")
-            if len(distance_matrix) > customer_start_idx + 1:
-                logger.info(f"customer0->customer1={distance_matrix[customer_start_idx][customer_start_idx+1]}m")
+    def _create_routing_model(
+        self,
+        manager: pywrapcp.RoutingIndexManager,
+        distance_matrix: List[List[int]],
+        time_matrix: List[List[int]],
+        customers: List[Customer],
+        techs: List[Tech],
+        customer_start_idx: int,
+        optimization_speed: str
+    ) -> pywrapcp.RoutingModel:
+        """
+        Create and configure OR-Tools routing model.
 
-        # Create routing model with per-vehicle start/end depots
-        manager = pywrapcp.RoutingIndexManager(
-            len(locations),
-            len(techs),
-            start_indices,
-            end_indices
-        )
+        Args:
+            manager: Routing index manager
+            distance_matrix: Distance matrix in meters
+            time_matrix: Time matrix in minutes
+            customers: List of customers
+            techs: List of techs
+            customer_start_idx: Index where customer locations start
+            optimization_speed: 'quick' or 'thorough'
+
+        Returns:
+            Configured routing model
+        """
         routing = pywrapcp.RoutingModel(manager)
 
         # Create distance callback
@@ -561,7 +557,7 @@ class RouteOptimizationService:
             service_time = 0
             if to_node >= customer_start_idx:  # Customer node
                 customer_idx = to_node - customer_start_idx
-                customer = valid_customers[customer_idx]
+                customer = customers[customer_idx]
                 service_time = customer.base_service_duration
 
             return travel_time + service_time
@@ -594,7 +590,21 @@ class RouteOptimizationService:
         for vehicle_id in range(len(techs)):
             time_dimension.SetSpanCostCoefficientForVehicle(time_coeff, vehicle_id)
 
-        # Set search parameters based on optimization_speed
+        return routing
+
+    def _configure_search_parameters(
+        self,
+        optimization_speed: str
+    ) -> pywrapcp.RoutingSearchParameters:
+        """
+        Configure OR-Tools search parameters based on speed setting.
+
+        Args:
+            optimization_speed: 'quick' or 'thorough'
+
+        Returns:
+            Configured search parameters
+        """
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         # Use PATH_CHEAPEST_ARC - good for distance minimization
         search_parameters.first_solution_strategy = (
@@ -623,16 +633,33 @@ class RouteOptimizationService:
             f"max time=480min/route, time_limit={time_limit_seconds}s"
         )
 
-        # Solve
-        solution = routing.SolveWithParameters(search_parameters)
+        return search_parameters
 
-        if not solution:
-            return {
-                "routes": [],
-                "message": "No solution found within time limit"
-            }
+    def _extract_solution(
+        self,
+        solution: pywrapcp.Assignment,
+        routing: pywrapcp.RoutingModel,
+        manager: pywrapcp.RoutingIndexManager,
+        techs: List[Tech],
+        customers: List[Customer],
+        customer_start_idx: int,
+        service_day: Optional[str]
+    ) -> Tuple[List[Dict], float, int]:
+        """
+        Extract routes from OR-Tools solution.
 
-        # Extract solution
+        Args:
+            solution: OR-Tools solution
+            routing: Routing model
+            manager: Routing index manager
+            techs: List of techs
+            customers: List of customers
+            customer_start_idx: Index where customer locations start
+            service_day: Service day being optimized
+
+        Returns:
+            Tuple of (routes, total_distance, total_duration)
+        """
         routes = []
         total_distance = 0
         total_duration = 0
@@ -651,7 +678,7 @@ class RouteOptimizationService:
                 # Only process customer nodes, skip depot nodes
                 if node_index >= customer_start_idx:
                     customer_idx = node_index - customer_start_idx
-                    customer = valid_customers[customer_idx]
+                    customer = customers[customer_idx]
                     route_customers.append({
                         "customer_id": str(customer.id),
                         "customer_name": customer.name,
@@ -710,6 +737,91 @@ class RouteOptimizationService:
 
                 total_distance += route_distance_miles
                 total_duration += route_duration
+
+        return routes, total_distance, total_duration
+
+    async def _optimize_single_day(
+        self,
+        customers: List[Customer],
+        techs: List[Tech],
+        service_day: Optional[str] = None,
+        optimization_speed: str = "quick"
+    ) -> Dict:
+        """
+        Optimize routes for a single day.
+
+        Args:
+            customers: List of customers to route (already filtered)
+            techs: List of available techs
+            service_day: Day being optimized
+            optimization_speed: 'quick' (30s) or 'thorough' (120s)
+
+        Returns:
+            Dict with optimized routes
+        """
+        # Filter out customers without geocoded coordinates
+        valid_customers = [c for c in customers if c.latitude and c.longitude]
+
+        if not valid_customers:
+            return {
+                "routes": [],
+                "message": "No customers with valid GPS coordinates"
+            }
+
+        # Setup multi-depot locations
+        locations, start_indices, end_indices, customer_indices, customer_start_idx = \
+            self._setup_multi_depot_locations(valid_customers, techs)
+
+        # Get distance and time matrices from routing service
+        distance_matrix, time_matrix = await routing_service.get_distance_matrix(locations)
+
+        # Debug: Log sample distances to verify units
+        if len(distance_matrix) > 2:
+            logger.info(f"Sample distances: depot0->depot1={distance_matrix[0][1]}m, depot0->customer0={distance_matrix[0][customer_start_idx]}m")
+            if len(distance_matrix) > customer_start_idx + 1:
+                logger.info(f"customer0->customer1={distance_matrix[customer_start_idx][customer_start_idx+1]}m")
+
+        # Create routing model with per-vehicle start/end depots
+        manager = pywrapcp.RoutingIndexManager(
+            len(locations),
+            len(techs),
+            start_indices,
+            end_indices
+        )
+
+        # Create and configure routing model
+        routing = self._create_routing_model(
+            manager,
+            distance_matrix,
+            time_matrix,
+            valid_customers,
+            techs,
+            customer_start_idx,
+            optimization_speed
+        )
+
+        # Configure search parameters
+        search_parameters = self._configure_search_parameters(optimization_speed)
+
+        # Solve
+        solution = routing.SolveWithParameters(search_parameters)
+
+        if not solution:
+            return {
+                "routes": [],
+                "message": "No solution found within time limit"
+            }
+
+        # Extract solution
+        routes, total_distance, total_duration = self._extract_solution(
+            solution,
+            routing,
+            manager,
+            techs,
+            valid_customers,
+            customer_start_idx,
+            service_day
+        )
 
         return {
             "routes": routes,

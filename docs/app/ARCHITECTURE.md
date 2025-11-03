@@ -540,7 +540,62 @@ function displayRoutesOnMap() { ... }
 
 ---
 
-**See Also:**
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Setup and commands
-- [STANDARDS.md](STANDARDS.md) - Code quality rules
-- [DATABASE.md](DATABASE.md) - Complete schema reference (if split from this file)
+## Development Setup
+
+### Quick Start
+```bash
+cd /mnt/Projects/quantum-pools
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Database setup
+createdb routeoptimizer
+alembic upgrade head
+
+# Run server
+./restart_server.sh  # http://localhost:7008
+```
+
+### Common Commands
+```bash
+# Migrations
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+
+# Testing
+pytest
+pytest --cov=app
+
+# Code quality
+mypy app/
+flake8 app/
+black app/
+```
+
+## Code Standards
+
+### Core Principles
+1. **Production-ready from day one** - No TODOs or placeholders
+2. **Industry best practices** - Follow GitHub, Stripe, AWS patterns for auth, rate limits, validation
+3. **Complete error handling** - Specific exceptions, never bare `except:`
+4. **Type hints required** - All Python functions must have type annotations
+5. **Security by default** - Parameterized queries, input validation, bcrypt passwords
+6. **Multi-tenancy aware** - Always filter by `organization_id`
+
+### Security Checklist
+- ✅ Validate all input (Pydantic schemas)
+- ✅ Parameterized queries (SQLAlchemy ORM)
+- ✅ Hash passwords (bcrypt via passlib)
+- ✅ JWT with expiration
+- ✅ HTTPS in production
+- ✅ CORS configured
+- ✅ Never commit .env
+
+### Git Standards
+```
+<type>: <description>
+
+Types: feat, fix, docs, refactor, test, chore
+Branches: feature/name, fix/name
+```

@@ -33,7 +33,14 @@ Use bash ONLY for: git, pip/npm, tests, migrations, service restarts
 - Production-ready code from day one
 - Complete error handling and validation
 
-### 6. Session Start Protocol
+### 6. Industry Best Practices (CRITICAL)
+- ALWAYS use established industry standards for security, performance, and architecture
+- Research standard practices before implementing auth, rate limiting, validation, etc.
+- Do NOT guess or use arbitrary values (e.g., rate limits, password requirements)
+- When in doubt, check what GitHub, Stripe, AWS, or other reputable services do
+- Document deviations from standards with clear justification
+
+### 7. Session Start Protocol
 After context compacting, acknowledge core rules (see end of doc)
 
 ---
@@ -43,7 +50,7 @@ After context compacting, acknowledge core rules (see end of doc)
 **AI-powered pool service management SaaS platform**
 - Python 3.11 + FastAPI (async)
 - PostgreSQL + SQLAlchemy 2.0
-- Server: `localhost:7007`
+- Server: `localhost:7008`
 - Path: `/mnt/Projects/quantum-pools`
 
 **Quick Start:**
@@ -58,7 +65,6 @@ source venv/bin/activate
 
 ---
 
-## Documentation Discipline (CRITICAL)
 ## Project Structure (ENFORCED)
 ```
 quantum-pools/                    (project root)
@@ -70,11 +76,10 @@ quantum-pools/                    (project root)
 │
 ├── docs/                         (documentation at ROOT)
 │   ├── app/                      (technical/developer docs)
-│   │   ├── ARCHITECTURE.md
-│   │   ├── DEVELOPMENT.md
-│   │   ├── STANDARDS.md
-│   │   ├── PROJECT_STATUS.md
-│   │   └── BACKLOG.md
+│   │   ├── README.md            (doc navigation)
+│   │   ├── ARCHITECTURE.md      (system design)
+│   │   ├── PROJECT_STATUS.md    (progress tracking)
+│   │   └── BACKLOG.md           (future ideas)
 │   └── business/                 (business files - NOT deployed)
 │       ├── financials/
 │       ├── legal/
@@ -92,13 +97,21 @@ quantum-pools/                    (project root)
 - ✅ `app/` contains ONLY deployable application code
 - ✅ Technical docs in `docs/app/`, business docs in `docs/business/`
 
-**Exception:** Deployment docs (README for ops) can live in `app/docs/` if needed for production
+---
 
-### Before Creating ANY Doc:
-1. Check if topic exists elsewhere → Update existing doc
-2. Is this temporary? → Don't document, use git/TodoWrite
-3. Will this be >500 lines? → Split into focused sub-docs
-4. Should code be self-documenting? → Improve code instead
+## Documentation Discipline (CRITICAL)
+
+### NEVER Create New Docs
+- **Fixed doc list**: README, ARCHITECTURE, PROJECT_STATUS, BACKLOG
+- **Rule**: ALWAYS update existing doc, NEVER create new ones
+- **Exception**: Only if user explicitly requests new doc
+
+### Before Adding Content:
+1. Check if topic exists elsewhere → Update that section
+2. Is this temporary? → Use git commit message, not docs
+3. Architecture topic? → Update ARCHITECTURE.md
+4. Current work? → Update PROJECT_STATUS.md
+5. Future idea? → Add to BACKLOG.md
 
 ### Doc Size Limits
 - Individual docs: 500 lines max (split if larger)
@@ -180,11 +193,12 @@ Understood - core rules:
 2. Use synchronous bash only (never background)
 3. Sequential work with TodoWrite
 4. Production-ready code only
-5. Check existing docs before creating
-6. docs/ at ROOT, never in app/
-7. Run health check before major work
+5. Industry best practices ALWAYS (security, limits, standards)
+6. NEVER create new docs - only update existing 4
+7. docs/ at ROOT, never in app/
+8. Run health check before major work
 ```
 
 ---
 
-**Last Updated:** October 28, 2025
+**Last Updated:** November 2, 2025

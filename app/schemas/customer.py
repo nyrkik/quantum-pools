@@ -194,6 +194,7 @@ class CustomerResponse(CustomerBase):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     assigned_tech: Optional[AssignedTechInfo] = None
+    has_temp_assignment: bool = False
     created_at: datetime
     updated_at: datetime
 

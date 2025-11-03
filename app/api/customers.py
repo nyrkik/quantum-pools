@@ -13,6 +13,7 @@ from uuid import UUID
 from app.database import get_db
 from app.dependencies.auth import get_current_user, AuthContext
 from app.models.customer import Customer
+from app.models.tech import Tech
 from app.schemas.customer import (
     CustomerCreate,
     CustomerUpdate,
@@ -159,7 +160,40 @@ async def list_customers(
 
     # Execute query
     result = await db.execute(query)
-    customers = result.scalars().all()
+    customers = list(result.scalars().all())
+
+    # Initialize has_temp_assignment flag for all customers
+    for customer in customers:
+        customer.has_temp_assignment = False
+
+    # Check for temporary tech assignments and override if exists
+    if service_day and customers:
+        from app.models.temp_assignment import TempTechAssignment
+        from datetime import date
+
+        customer_ids = [c.id for c in customers]
+        temp_assignments_query = select(TempTechAssignment).where(
+            TempTechAssignment.organization_id == auth.organization_id,
+            TempTechAssignment.service_day == service_day.lower(),
+            TempTechAssignment.assignment_date == date.today(),
+            TempTechAssignment.customer_id.in_(customer_ids)
+        )
+        temp_result = await db.execute(temp_assignments_query)
+        temp_assignments = {ta.customer_id: ta for ta in temp_result.scalars().all()}
+
+        # Override assigned_tech for customers with temp assignments
+        for customer in customers:
+            if customer.id in temp_assignments:
+                temp_assignment = temp_assignments[customer.id]
+                # Load the tech for the temp assignment
+                tech_query = select(Tech).where(Tech.id == temp_assignment.tech_id)
+                tech_result = await db.execute(tech_query)
+                temp_tech = tech_result.scalar_one_or_none()
+                if temp_tech:
+                    customer.assigned_tech = temp_tech
+                    customer.assigned_tech_id = temp_tech.id
+                    # Mark customer as having a temp assignment
+                    customer.has_temp_assignment = True
 
     return CustomerListResponse(
         customers=customers,

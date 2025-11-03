@@ -11,20 +11,23 @@ from uuid import UUID
 class RouteOptimizationRequest(BaseModel):
     """Schema for route optimization request."""
 
+    optimization_scope: str = Field(
+        default="selected_day",
+        pattern="^(selected_day|entire_week|complete_rerouting)$",
+        description="Optimization scope: 'selected_day', 'entire_week', or 'complete_rerouting'"
+    )
+    selected_tech_ids: Optional[List[str]] = Field(
+        None,
+        description="List of tech IDs to optimize (null for complete_rerouting)"
+    )
     service_day: Optional[str] = Field(
         None,
         pattern="^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$",
-        description="Specific day to optimize (or null for all days)"
+        description="Specific day to optimize (used for selected_day scope)"
     )
-    num_drivers: Optional[int] = Field(
+    unlocked_customer_ids: Optional[List[str]] = Field(
         None,
-        ge=1,
-        le=20,
-        description="Number of drivers to use (uses all active if not specified)"
-    )
-    allow_day_reassignment: bool = Field(
-        default=False,
-        description="Allow customers to be moved to different service days"
+        description="List of customer IDs that can be reassigned to different days (for complete_rerouting)"
     )
     include_unassigned: bool = Field(
         default=False,
@@ -33,6 +36,14 @@ class RouteOptimizationRequest(BaseModel):
     include_pending: bool = Field(
         default=False,
         description="Include customers with pending status in optimization"
+    )
+    include_saturday: bool = Field(
+        default=False,
+        description="Include Saturday in complete rerouting optimization"
+    )
+    include_sunday: bool = Field(
+        default=False,
+        description="Include Sunday in complete rerouting optimization"
     )
     optimization_mode: str = Field(
         default="full",

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Create FastAPI application
 app = FastAPI(
-    title="RouteOptimizer",
+    title="QuantumPools",
     description="Pool service route optimization and scheduling system",
     version="0.1.0",
     docs_url="/docs",
@@ -54,7 +54,7 @@ async def health_check():
 async def root():
     """Root endpoint - redirect to docs or serve frontend."""
     return {
-        "message": "RouteOptimizer API",
+        "message": "QuantumPools API",
         "docs": "/docs",
         "frontend": "/static/index.html"
     }
@@ -229,11 +229,11 @@ app.include_router(imports.router)
 @app.on_event("startup")
 async def startup_event():
     """Run on application startup."""
-    logger.info(f"Starting RouteOptimizer in {settings.environment} mode")
+    logger.info(f"Starting QuantumPools in {settings.environment} mode")
     logger.info(f"Database: {settings.database_url.split('@')[-1]}")  # Don't log password
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run on application shutdown."""
-    logger.info("Shutting down RouteOptimizer")
+    logger.info("Shutting down QuantumPools")

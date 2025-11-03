@@ -4,18 +4,23 @@ Provides route generation and management operations.
 """
 
 import logging
+import traceback
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, or_
+from sqlalchemy.orm import selectinload
 from typing import Optional
 from uuid import UUID
+from datetime import date, timedelta
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user, AuthContext
 from app.models.customer import Customer
 from app.models.tech import Tech
 from app.models.route import Route, RouteStop
+from app.models.temp_assignment import TempTechAssignment
+from app.models.tech_route import TechRoute
 from app.schemas.route import (
     RouteOptimizationRequest,
     RouteOptimizationResponse,
@@ -24,6 +29,7 @@ from app.schemas.route import (
 )
 from app.services.optimization import optimization_service
 from app.services.pdf_export import pdf_export_service
+from app.services.tech_routing import tech_routing_service
 
 logger = logging.getLogger(__name__)
 
@@ -43,114 +49,374 @@ async def optimize_routes(
     """
     Generate optimized routes using Google OR-Tools VRP solver.
 
-    - **service_day**: Specific day to optimize (optional)
-    - **num_drivers**: Number of drivers to use (optional, uses all active)
-    - **allow_day_reassignment**: Allow moving customers to different days
-    - **include_unassigned**: Include customers without assigned techs
-    - **optimization_mode**: 'refine' keeps driver assignments, 'full' allows reassignment
+    Supports three optimization scopes:
+    - **selected_day**: Optimize selected techs for a specific day
+    - **entire_week**: Optimize selected techs for all days Mon-Sat (no day changes)
+    - **complete_rerouting**: Optimize all techs, all days with optional day reassignment
 
     The optimizer considers:
     - Distance between locations
     - Service duration (based on type and difficulty)
-    - Tech working hours
+    - Tech working hours and efficiency multipliers
     - Time windows (if specified)
-    - Locked service days
+    - Day assignment locks
     """
-    # Debug logging
     logger.info(
-        f"Optimization request: include_unassigned={request.include_unassigned}, "
-        f"include_pending={request.include_pending}, "
-        f"optimization_mode={request.optimization_mode}, "
-        f"optimization_speed={request.optimization_speed}, "
+        f"Optimization request: scope={request.optimization_scope}, "
+        f"selected_techs={request.selected_tech_ids}, "
         f"service_day={request.service_day}, "
-        f"num_drivers={request.num_drivers}"
+        f"mode={request.optimization_mode}, "
+        f"speed={request.optimization_speed}"
     )
 
-    # Get customers for this organization (active or pending based on include_pending)
-    customer_query = select(Customer)\
-        .where(Customer.organization_id == auth.organization_id)
+    # Base customer query
+    customer_query = select(Customer).where(Customer.organization_id == auth.organization_id)
 
     if request.include_pending:
-        # Include both active and pending status customers
         customer_query = customer_query.where(
-            or_(
-                Customer.status == 'active',
-                Customer.status == 'pending'
-            )
+            or_(Customer.status == 'active', Customer.status == 'pending')
         )
     else:
-        # Only active customers
         customer_query = customer_query.where(Customer.is_active == True)
 
-    # Exclude unassigned customers unless include_unassigned is True
     if not request.include_unassigned:
         customer_query = customer_query.where(Customer.assigned_tech_id.isnot(None))
 
-    if request.service_day and not request.allow_day_reassignment:
-        # Map day name to abbreviation for schedule checking
-        day_abbrev_map = {
-            'monday': 'Mo',
-            'tuesday': 'Tu',
-            'wednesday': 'We',
-            'thursday': 'Th',
-            'friday': 'Fr',
-            'saturday': 'Sa',
-            'sunday': 'Su'
-        }
-        day_lower = request.service_day.lower()
-        day_abbrev = day_abbrev_map.get(day_lower)
-
-        # Filter by either:
-        # 1. Primary service_day matches (for single-day customers)
-        # 2. Day abbreviation is in service_schedule (for multi-day customers)
-        if day_abbrev:
-            customer_query = customer_query.where(
-                or_(
-                    Customer.service_day == day_lower,
-                    Customer.service_schedule.like(f'%{day_abbrev}%')
-                )
-            )
-        else:
-            customer_query = customer_query.where(
-                Customer.service_day == day_lower
-            )
-
-    customer_result = await db.execute(customer_query)
-    customers = list(customer_result.scalars().all())
-
-    # Get active drivers for this organization
-    driver_query = select(Tech)\
-        .where(Tech.organization_id == auth.organization_id)\
-        .where(Tech.is_active == True)
-    if request.num_drivers:
-        driver_query = driver_query.limit(request.num_drivers)
-
-    driver_result = await db.execute(driver_query)
-    drivers = list(driver_result.scalars().all())
-
-    if not customers:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active customers found for optimization"
-        )
-
-    if not drivers:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active drivers found for optimization"
-        )
-
-    # Run optimization
-    result = await optimization_service.optimize_routes(
-        customers=customers,
-        techs=drivers,
-        service_day=request.service_day,
-        allow_day_reassignment=request.allow_day_reassignment,
-        optimization_mode=request.optimization_mode,
-        optimization_speed=request.optimization_speed
+    # Base tech query
+    driver_query = select(Tech).where(
+        Tech.organization_id == auth.organization_id,
+        Tech.is_active == True
     )
 
-    return result
+    # Handle different optimization scopes
+    if request.optimization_scope == "selected_day":
+        # Scope 1: Selected techs, selected day only
+        if not request.service_day:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="service_day required for selected_day scope"
+            )
+        if not request.selected_tech_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="selected_tech_ids required for selected_day scope"
+            )
+
+        # Filter techs by selection
+        driver_query = driver_query.where(Tech.id.in_([UUID(tid) for tid in request.selected_tech_ids]))
+
+        # Filter customers by day
+        day_lower = request.service_day.lower()
+        day_abbrev_map = {'monday': 'Mo', 'tuesday': 'Tu', 'wednesday': 'We',
+                          'thursday': 'Th', 'friday': 'Fr', 'saturday': 'Sa', 'sunday': 'Su'}
+        day_abbrev = day_abbrev_map.get(day_lower)
+
+        if day_abbrev:
+            customer_query = customer_query.where(
+                or_(Customer.service_day == day_lower, Customer.service_schedule.like(f'%{day_abbrev}%'))
+            )
+
+        customer_result = await db.execute(customer_query)
+        customers = list(customer_result.scalars().all())
+
+        driver_result = await db.execute(driver_query)
+        drivers = list(driver_result.scalars().all())
+
+        if not customers or not drivers:
+            return {"routes": [], "message": "No customers or techs found for optimization"}
+
+        result = await optimization_service.optimize_routes(
+            customers=customers,
+            techs=drivers,
+            service_day=request.service_day,
+            allow_day_reassignment=False,
+            optimization_mode=request.optimization_mode,
+            optimization_speed=request.optimization_speed
+        )
+
+        return result
+
+    elif request.optimization_scope == "entire_week":
+        # Scope 2: Selected techs, all days Mon-Sat separately (no day changes)
+        if not request.selected_tech_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="selected_tech_ids required for entire_week scope"
+            )
+
+        # Filter techs by selection
+        driver_query = driver_query.where(Tech.id.in_([UUID(tid) for tid in request.selected_tech_ids]))
+        driver_result = await db.execute(driver_query)
+        drivers = list(driver_result.scalars().all())
+
+        if not drivers:
+            return {"routes": [], "message": "No techs found for optimization"}
+
+        # Get all customers (no day filter yet)
+        customer_result = await db.execute(customer_query)
+        all_customers = list(customer_result.scalars().all())
+
+        if not all_customers:
+            return {"routes": [], "message": "No customers found for optimization"}
+
+        # Optimize each day separately
+        all_routes = []
+        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+        day_abbrev_map = {'monday': 'Mo', 'tuesday': 'Tu', 'wednesday': 'We',
+                          'thursday': 'Th', 'friday': 'Fr', 'saturday': 'Sa'}
+
+        for day in days:
+            day_customers = [
+                c for c in all_customers
+                if c.service_day == day or (c.service_schedule and day_abbrev_map[day] in c.service_schedule)
+            ]
+
+            if not day_customers:
+                continue
+
+            day_result = await optimization_service.optimize_routes(
+                customers=day_customers,
+                techs=drivers,
+                service_day=day,
+                allow_day_reassignment=False,
+                optimization_mode=request.optimization_mode,
+                optimization_speed=request.optimization_speed
+            )
+
+            if day_result and "routes" in day_result:
+                all_routes.extend(day_result["routes"])
+
+        return {"routes": all_routes, "summary": {"total_routes": len(all_routes)}}
+
+    elif request.optimization_scope == "complete_rerouting":
+        # Scope 3: All techs, all days - just optimize each day separately
+        all_routes = []
+        # Build days list based on flags (weekdays by default)
+        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+        if request.include_saturday:
+            days.append('saturday')
+        if request.include_sunday:
+            days.append('sunday')
+
+        for day in days:
+            # Get customers for this day
+            day_customer_query = customer_query.where(
+                or_(
+                    Customer.service_day == day,
+                    Customer.service_schedule.like(f'%{day[:2].capitalize()}%')
+                )
+            )
+            customer_result = await db.execute(day_customer_query)
+            day_customers = list(customer_result.scalars().all())
+
+            if not day_customers:
+                continue
+
+            # Get all techs
+            driver_result = await db.execute(driver_query)
+            day_techs = list(driver_result.scalars().all())
+
+            if not day_techs:
+                continue
+
+            try:
+                day_result = await optimization_service.optimize_routes(
+                    customers=day_customers,
+                    techs=day_techs,
+                    service_day=day,
+                    allow_day_reassignment=False,
+                    unlocked_customer_ids=None,
+                    optimization_mode=request.optimization_mode,
+                    optimization_speed=request.optimization_speed
+                )
+
+                if day_result and "routes" in day_result:
+                    all_routes.extend(day_result["routes"])
+            except Exception as e:
+                logger.error(f"Optimization failed for {day}: {str(e)}")
+                logger.error(traceback.format_exc())
+                # Continue with other days
+
+        return {"routes": all_routes, "summary": {"total_routes": len(all_routes)}}
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid optimization_scope: {request.optimization_scope}"
+        )
+
+
+@router.post(
+    "/temp-assignment",
+    response_model=dict,
+    summary="Create temporary tech assignment for a customer"
+)
+async def create_temp_assignment(
+    request: dict,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a temporary tech assignment that persists for the current day only.
+    This allows reassigning customers to different techs without updating the permanent record.
+
+    Automatically re-routes affected techs and returns updated routes.
+    """
+    customer_id = UUID(request.get("customer_id"))
+    new_tech_id = UUID(request.get("tech_id"))
+    service_day = request.get("service_day")
+    today = date.today()
+
+    # Clean up old temp assignments (older than 6 days)
+    cutoff_date = today - timedelta(days=6)
+    await db.execute(
+        delete(TempTechAssignment).where(
+            TempTechAssignment.organization_id == auth.organization_id,
+            TempTechAssignment.assignment_date < cutoff_date
+        )
+    )
+
+    # Get old tech ID if there was a previous temp assignment
+    old_temp_result = await db.execute(
+        select(TempTechAssignment).where(
+            TempTechAssignment.organization_id == auth.organization_id,
+            TempTechAssignment.customer_id == customer_id,
+            TempTechAssignment.service_day == service_day,
+            TempTechAssignment.assignment_date == today
+        )
+    )
+    old_temp = old_temp_result.scalar_one_or_none()
+    old_tech_id = old_temp.tech_id if old_temp else None
+
+    # Get customer's permanent assignment to check if we need to re-route original tech
+    customer_result = await db.execute(
+        select(Customer).where(Customer.id == customer_id)
+    )
+    customer = customer_result.scalar_one()
+
+    # If no old temp assignment, old tech is the permanent assignment
+    if not old_tech_id:
+        old_tech_id = customer.assigned_tech_id
+
+    # Delete existing temp assignment for this customer/day
+    await db.execute(
+        delete(TempTechAssignment).where(
+            TempTechAssignment.organization_id == auth.organization_id,
+            TempTechAssignment.customer_id == customer_id,
+            TempTechAssignment.service_day == service_day
+        )
+    )
+
+    # Only create temp assignment if different from permanent assignment
+    if new_tech_id != customer.assigned_tech_id:
+        temp_assignment = TempTechAssignment(
+            organization_id=auth.organization_id,
+            customer_id=customer_id,
+            tech_id=new_tech_id,
+            service_day=service_day,
+            assignment_date=today
+        )
+        db.add(temp_assignment)
+
+    await db.commit()
+
+    # Collect affected tech IDs (both old and new, excluding None)
+    affected_tech_ids = set()
+    if old_tech_id:
+        affected_tech_ids.add(old_tech_id)
+    if new_tech_id:
+        affected_tech_ids.add(new_tech_id)
+
+    # Delete routes for affected techs
+    await db.execute(
+        delete(TechRoute).where(
+            TechRoute.organization_id == auth.organization_id,
+            TechRoute.tech_id.in_(list(affected_tech_ids)),
+            TechRoute.service_day == service_day,
+            TechRoute.route_date == today
+        )
+    )
+    await db.commit()
+
+    # Generate new routes for affected techs
+    updated_routes = []
+
+    for tech_id in affected_tech_ids:
+        # Load tech
+        tech_result = await db.execute(
+            select(Tech).where(Tech.id == tech_id)
+        )
+        tech = tech_result.scalar_one_or_none()
+        if not tech:
+            continue
+
+        # Get customers for this tech on this day (with temp assignments applied)
+        # Start with customers that have this day in their schedule
+        day_abbrev_map = {
+            'monday': 'Mo', 'tuesday': 'Tu', 'wednesday': 'We',
+            'thursday': 'Th', 'friday': 'Fr', 'saturday': 'Sa', 'sunday': 'Su'
+        }
+        day_abbrev = day_abbrev_map.get(service_day.lower())
+
+        customers_query = select(Customer).where(
+            Customer.organization_id == auth.organization_id,
+            Customer.is_active == True,
+            or_(
+                Customer.service_day == service_day.lower(),
+                Customer.service_schedule.like(f'%{day_abbrev}%') if day_abbrev else False
+            )
+        )
+        customers_result = await db.execute(customers_query)
+        all_customers = list(customers_result.scalars().all())
+
+        # Get temp assignments for today/this day
+        temp_assignments_query = select(TempTechAssignment).where(
+            TempTechAssignment.organization_id == auth.organization_id,
+            TempTechAssignment.service_day == service_day,
+            TempTechAssignment.assignment_date == today
+        )
+        temp_assignments_result = await db.execute(temp_assignments_query)
+        temp_assignments = {ta.customer_id: ta.tech_id for ta in temp_assignments_result.scalars().all()}
+
+        # Filter to customers assigned to this tech (permanent or temp)
+        tech_customers = []
+        for c in all_customers:
+            # Check if temp assignment exists
+            if c.id in temp_assignments:
+                if temp_assignments[c.id] == tech_id:
+                    tech_customers.append(c)
+            elif c.assigned_tech_id == tech_id:
+                tech_customers.append(c)
+
+        # Generate route
+        tech_route = await tech_routing_service.generate_route_for_tech(
+            tech=tech,
+            customers=tech_customers,
+            service_day=service_day,
+            route_date=today,
+            organization_id=auth.organization_id
+        )
+
+        # Save route
+        db.add(tech_route)
+        await db.commit()
+        await db.refresh(tech_route)
+
+        # Convert to response format
+        updated_routes.append({
+            "tech_id": str(tech_id),
+            "tech_name": tech.name,
+            "tech_color": tech.color,
+            "stop_sequence": tech_route.stop_sequence,
+            "total_distance": tech_route.total_distance,
+            "total_duration": tech_route.total_duration
+        })
+
+    return {
+        "message": "Temporary assignment created and routes updated",
+        "id": str(temp_assignment.id),
+        "updated_routes": updated_routes
+    }
 
 
 @router.post(
@@ -691,3 +957,161 @@ async def move_stop_to_route(
         "to_route": str(target_route_id),
         "new_sequence": new_sequence
     }
+
+
+@router.get(
+    "/tech-routes/{service_day}",
+    summary="Get tech routes for a specific day"
+)
+async def get_tech_routes_for_day(
+    service_day: str,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all tech routes for a specific service day.
+    Auto-generates routes if they don't exist.
+    Returns routes with stop sequences for drawing on the map.
+    """
+    today = date.today()
+
+    # Get all tech routes for this day and organization
+    result = await db.execute(
+        select(TechRoute)
+        .options(selectinload(TechRoute.tech))
+        .where(TechRoute.organization_id == auth.organization_id)
+        .where(TechRoute.service_day == service_day)
+        .where(TechRoute.route_date == today)
+    )
+    tech_routes = list(result.scalars().all())
+
+    # If no routes exist, auto-generate them
+    if not tech_routes:
+        logger.info(f"No routes found for {service_day}, auto-generating...")
+
+        # Get all techs for this organization
+        techs_result = await db.execute(
+            select(Tech)
+            .where(Tech.organization_id == auth.organization_id)
+            .where(Tech.is_active == True)
+        )
+        techs = techs_result.scalars().all()
+
+        # Get all customers with temp assignments applied
+        temp_assignments_result = await db.execute(
+            select(TempTechAssignment)
+            .where(TempTechAssignment.organization_id == auth.organization_id)
+            .where(TempTechAssignment.service_day == service_day)
+            .where(TempTechAssignment.assignment_date == today)
+        )
+        temp_assignments_by_customer = {
+            str(ta.customer_id): ta for ta in temp_assignments_result.scalars().all()
+        }
+
+        # Generate route for each tech
+        for tech in techs:
+            # Get customers for this tech and day (with temp assignments applied)
+            customers_query = (
+                select(Customer)
+                .where(Customer.organization_id == auth.organization_id)
+                .where(Customer.is_active == True)
+            )
+
+            customers_result = await db.execute(customers_query)
+            all_customers = customers_result.scalars().all()
+
+            # Filter customers for this tech and day
+            tech_customers = []
+            for customer in all_customers:
+                # Check if there's a temp assignment for this customer
+                temp_assignment = temp_assignments_by_customer.get(str(customer.id))
+
+                if temp_assignment:
+                    # Use temp assignment
+                    if temp_assignment.tech_id == tech.id:
+                        tech_customers.append(customer)
+                else:
+                    # Use permanent assignment
+                    if customer.service_day == service_day and customer.assigned_tech_id == tech.id:
+                        tech_customers.append(customer)
+
+            # Generate route if tech has customers
+            if tech_customers:
+                tech_route = await tech_routing_service.generate_route_for_tech(
+                    tech=tech,
+                    customers=tech_customers,
+                    service_day=service_day,
+                    route_date=today,
+                    organization_id=auth.organization_id
+                )
+
+                db.add(tech_route)
+                tech_routes.append(tech_route)
+
+        await db.commit()
+
+        # Reload with relationships
+        if tech_routes:
+            result = await db.execute(
+                select(TechRoute)
+                .options(selectinload(TechRoute.tech))
+                .where(TechRoute.organization_id == auth.organization_id)
+                .where(TechRoute.service_day == service_day)
+                .where(TechRoute.route_date == today)
+            )
+            tech_routes = list(result.scalars().all())
+
+    if not tech_routes:
+        return []
+
+    # Get all active customers for this organization to look up details
+    customer_result = await db.execute(
+        select(Customer)
+        .where(Customer.organization_id == auth.organization_id)
+        .where(Customer.is_active == True)
+    )
+    customers_by_id = {str(c.id): c for c in customer_result.scalars().all()}
+
+    # Build response
+    routes = []
+    for tech_route in tech_routes:
+        # Get customer details for each stop in sequence
+        stops = []
+        for customer_id in tech_route.stop_sequence:
+            customer = customers_by_id.get(customer_id)
+            if customer:
+                # Format address as "street, city"
+                address_parts = customer.address.split(',')
+                short_address = ', '.join(address_parts[:2]).strip() if len(address_parts) >= 2 else customer.address
+
+                stops.append({
+                    "customer_id": customer_id,
+                    "customer_name": customer.display_name or customer.name,
+                    "address": short_address,
+                    "latitude": customer.latitude,
+                    "longitude": customer.longitude
+                })
+
+        routes.append({
+            "tech_id": str(tech_route.tech_id),
+            "driver_id": str(tech_route.tech_id),
+            "driver_name": tech_route.tech.name,
+            "driver_color": tech_route.tech.color,
+            "service_day": tech_route.service_day,
+            "start_location": {
+                "address": tech_route.tech.start_location_address,
+                "latitude": tech_route.tech.start_latitude,
+                "longitude": tech_route.tech.start_longitude
+            },
+            "end_location": {
+                "address": tech_route.tech.end_location_address,
+                "latitude": tech_route.tech.end_latitude,
+                "longitude": tech_route.tech.end_longitude
+            },
+            "stop_sequence": tech_route.stop_sequence,
+            "stops": stops,
+            "total_distance": tech_route.total_distance,
+            "total_duration": tech_route.total_duration
+        })
+
+    return routes

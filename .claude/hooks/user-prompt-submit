@@ -1,0 +1,7 @@
+#!/bin/bash
+# Block background bash commands per CLAUDE.md rule #2
+
+if echo "$CLAUDE_TOOL_INPUT" | grep -q '"run_in_background"\s*:\s*true'; then
+    echo "BLOCKED: run_in_background not allowed per CLAUDE.md rule #2"
+    exit 1
+fi

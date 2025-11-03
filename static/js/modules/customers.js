@@ -1,4 +1,4 @@
-// RouteOptimizer - Customers Module
+// QuantumPools - Customers Module
 //
 // Handles customer management, CRUD operations, search, and filtering
 // Dependencies: API_BASE, loadCustomers() from map.js, highlightCustomerMarker() from map.js,
@@ -199,7 +199,7 @@ function displayClientProfile(customer) {
                     </div>
                     <div class="profile-field">
                         <label>Assigned Tech</label>
-                        <p>${customer.assigned_tech_name || 'Unassigned'}</p>
+                        <p>${customer.assigned_tech?.name || 'Unassigned'}</p>
                     </div>
                     <div class="profile-field">
                         <label>Service Day Locked</label>

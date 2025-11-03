@@ -1,4 +1,4 @@
-/* RouteOptimizer Styles - Components (Buttons, Modals, Forms, Responsive) */
+/* QuantumPools Styles - Components (Buttons, Modals, Forms, Responsive) */
 
 /* ===== BUTTONS ===== */
 .btn-primary, .btn-secondary {
@@ -247,4 +247,37 @@
     width: 95%;
     max-height: 90vh;
     padding: 1.5rem;
+}
+
+/* ===== CONTEXT MENU ===== */
+.context-menu {
+    position: absolute;
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    min-width: 100px;
+    padding: 0.25rem 0;
+    z-index: 10000;
+    opacity: 0;
+    transform: scale(0.95);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.context-menu.show {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.context-menu-item {
+    display: block;
+    padding: 0.3rem 0.75rem;
+    color: var(--text-color);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-size: 0.75rem;
+}
+
+.context-menu-item:hover {
+    background-color: #f8f9fa;
 }

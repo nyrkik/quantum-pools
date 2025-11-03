@@ -290,7 +290,7 @@ class RouteOptimizationService:
                         customer = valid_customers[node_index - 1]
                         route_customers.append({
                             "customer_id": str(customer.id),
-                            "customer_name": customer.name,
+                            "customer_name": customer.display_name or customer.name or "Unknown",
                             "address": customer.address,
                             "latitude": customer.latitude,
                             "longitude": customer.longitude,
@@ -348,12 +348,227 @@ class RouteOptimizationService:
             }
         }
 
+    async def _optimize_with_day_reassignment(
+        self,
+        customers: List[Customer],
+        techs: List[Tech],
+        unlocked_customer_ids: Optional[List[str]],
+        optimization_speed: str
+    ) -> Dict:
+        """
+        Optimize routes with ability to reassign unlocked customers to different days.
+
+        Args:
+            customers: All customers
+            techs: All techs
+            unlocked_customer_ids: List of customer IDs that can be reassigned to different days
+            optimization_speed: 'quick' or 'thorough'
+
+        Returns:
+            Dict with optimized routes across all days
+        """
+        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+        unlocked_ids = set(unlocked_customer_ids or [])
+
+        logger.info(f"Starting cross-day optimization with {len(customers)} customers, {len(techs)} techs, {len(unlocked_ids)} unlocked")
+
+        # Build initial day assignments for all customers
+        customer_day_assignments = {}
+        multi_day_customers = {}
+
+        for customer in customers:
+            if customer.service_days_per_week == 1 and customer.service_day:
+                # Single-day customer
+                customer_day_assignments[customer.id] = [customer.service_day.lower()]
+            elif customer.service_schedule:
+                # Multi-day customer - store their pattern
+                day_abbrev_to_full = {
+                    'Mo': 'monday', 'Tu': 'tuesday', 'We': 'wednesday',
+                    'Th': 'thursday', 'Fr': 'friday', 'Sa': 'saturday', 'Su': 'sunday'
+                }
+                assigned_days = [
+                    day_abbrev_to_full[abbr]
+                    for abbr in customer.service_schedule.split(',')
+                    if abbr in day_abbrev_to_full
+                ]
+                customer_day_assignments[customer.id] = assigned_days
+                multi_day_customers[customer.id] = {
+                    'frequency': customer.service_days_per_week,
+                    'original_days': assigned_days
+                }
+            else:
+                logger.warning(f"Customer {customer.id} has no valid service_day or service_schedule")
+
+        logger.info(f"Built day assignments for {len(customer_day_assignments)} customers ({len(multi_day_customers)} multi-day)")
+
+        # Optimize with current assignments first to get baseline
+        logger.info("Running initial optimization with current day assignments")
+        initial_routes = await self._optimize_all_days_separately(
+            customers, techs, days, customer_day_assignments, optimization_speed
+        )
+
+        logger.info(f"Initial optimization complete: {len(initial_routes.get('routes', []))} routes generated")
+
+        if not unlocked_ids:
+            # No customers to reassign, return initial optimization
+            return initial_routes
+
+        # Try to improve by reassigning unlocked customers
+        logger.info(f"Attempting to reassign {len(unlocked_ids)} unlocked customers for better optimization")
+
+        # Build day-by-day customer counts and workload
+        day_workloads = {day: 0 for day in days}
+        for customer in customers:
+            if customer.id in customer_day_assignments:
+                for day in customer_day_assignments[customer.id]:
+                    day_workloads[day] += 1
+
+        # For each unlocked customer, try moving to less busy days
+        for customer in customers:
+            if customer.id not in unlocked_ids:
+                continue
+
+            if customer.id in multi_day_customers:
+                # Multi-day customer: try shifting entire schedule
+                freq = multi_day_customers[customer.id]['frequency']
+                current_days = customer_day_assignments[customer.id]
+
+                # Try different day combinations with same frequency
+                best_days = current_days
+                min_workload_variance = self._calculate_workload_variance(
+                    day_workloads, current_days, []
+                )
+
+                # Generate alternative schedules
+                from itertools import combinations
+                for new_days in combinations(days, freq):
+                    new_days = list(new_days)
+                    # Calculate what workload would be with this change
+                    variance = self._calculate_workload_variance(
+                        day_workloads, current_days, new_days
+                    )
+                    if variance < min_workload_variance:
+                        min_workload_variance = variance
+                        best_days = new_days
+
+                # Update assignment if we found better days
+                if best_days != current_days:
+                    # Update workloads
+                    for day in current_days:
+                        day_workloads[day] -= 1
+                    for day in best_days:
+                        day_workloads[day] += 1
+                    customer_day_assignments[customer.id] = best_days
+                    logger.info(f"Reassigned multi-day customer {customer.display_name} from {current_days} to {best_days}")
+
+            else:
+                # Single-day customer: try moving to least busy compatible day
+                current_day = customer_day_assignments[customer.id][0]
+                min_workload = day_workloads[current_day]
+                best_day = current_day
+
+                for day in days:
+                    if day_workloads[day] < min_workload:
+                        min_workload = day_workloads[day]
+                        best_day = day
+
+                # Move to less busy day if found
+                if best_day != current_day:
+                    day_workloads[current_day] -= 1
+                    day_workloads[best_day] += 1
+                    customer_day_assignments[customer.id] = [best_day]
+                    logger.info(f"Reassigned customer {customer.display_name} from {current_day} to {best_day}")
+
+        # Re-optimize with new assignments
+        logger.info("Re-optimizing with reassigned customers")
+        final_routes = await self._optimize_all_days_separately(
+            customers, techs, days, customer_day_assignments, optimization_speed
+        )
+
+        return final_routes
+
+    def _calculate_workload_variance(
+        self,
+        day_workloads: Dict[str, int],
+        old_days: List[str],
+        new_days: List[str]
+    ) -> float:
+        """Calculate variance in workload distribution after a potential reassignment."""
+        # Create copy of workloads
+        test_workloads = dict(day_workloads)
+
+        # Remove from old days
+        for day in old_days:
+            test_workloads[day] -= 1
+
+        # Add to new days
+        for day in new_days:
+            test_workloads[day] += 1
+
+        # Calculate variance
+        values = list(test_workloads.values())
+        mean = sum(values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        return variance
+
+    async def _optimize_all_days_separately(
+        self,
+        customers: List[Customer],
+        techs: List[Tech],
+        days: List[str],
+        customer_day_assignments: Dict[str, List[str]],
+        optimization_speed: str = "quick"
+    ) -> Dict:
+        """Optimize each day separately using the provided day assignments."""
+        all_routes = []
+        total_customers = 0
+        total_distance = 0
+        total_duration = 0
+
+        for day in days:
+            # Get customers assigned to this day
+            day_customer_ids = [
+                cust_id for cust_id, assigned_days in customer_day_assignments.items()
+                if day in assigned_days
+            ]
+
+            day_customers = [c for c in customers if c.id in day_customer_ids]
+
+            if not day_customers:
+                continue
+
+            logger.info(f"Optimizing {len(day_customers)} customers for {day}")
+
+            day_result = await self._optimize_single_day(
+                day_customers, techs, day, optimization_speed
+            )
+
+            if day_result and "routes" in day_result:
+                all_routes.extend(day_result["routes"])
+                if "summary" in day_result:
+                    total_customers += day_result["summary"].get("total_customers", 0)
+                    total_distance += day_result["summary"].get("total_distance_miles", 0)
+                    total_duration += day_result["summary"].get("total_duration_minutes", 0)
+
+        return {
+            "routes": all_routes,
+            "summary": {
+                "total_routes": len(all_routes),
+                "total_customers": total_customers,
+                "total_distance_miles": round(total_distance, 2),
+                "total_duration_minutes": total_duration,
+                "optimization_time_seconds": self.time_limit_seconds,
+                "optimization_mode": "cross_day_reassignment"
+            }
+        }
+
     async def optimize_routes(
         self,
         customers: List[Customer],
         techs: List[Tech],
         service_day: Optional[str] = None,
         allow_day_reassignment: bool = False,
+        unlocked_customer_ids: Optional[set] = None,
         optimization_mode: str = "full",
         optimization_speed: str = "quick"
     ) -> Dict:
@@ -362,9 +577,10 @@ class RouteOptimizationService:
 
         Args:
             customers: List of customers to route
-            techs: List of available techs
+            techs: List of available techs (will use efficiency_multiplier for capacity)
             service_day: Specific day to optimize (or None for all)
             allow_day_reassignment: If True, can move customers to different days
+            unlocked_customer_ids: Set of customer IDs that can be reassigned to different days
             optimization_mode: 'refine' keeps tech assignments, 'full' allows reassignment
             optimization_speed: 'quick' (30s) or 'thorough' (120s)
 
@@ -386,17 +602,11 @@ class RouteOptimizationService:
         # If no specific day selected, handle based on reassignment setting
         if not service_day:
             if allow_day_reassignment:
-                # TRUE FULL OPTIMIZATION: Optimize all customers across all days
-                # This is computationally expensive but provides best overall optimization
-                logger.info("Running full cross-day optimization - this may take several minutes")
-                # For now, return a message. Full cross-day optimization with day assignment
-                # is a complex problem that requires additional constraints.
-                return {
-                    "routes": [],
-                    "message": "Full cross-day optimization with day reassignment is not yet implemented. "
-                               "Please either select a specific day or uncheck 'Allow day reassignment' "
-                               "to optimize each day separately."
-                }
+                # TRUE FULL OPTIMIZATION: Optimize all customers across all days with day reassignment
+                logger.info("Running full cross-day optimization with day reassignment")
+                return await self._optimize_with_day_reassignment(
+                    customers, techs, unlocked_customer_ids, optimization_speed
+                )
             else:
                 # Optimize each day separately (maintains current day assignments)
                 logger.info("Optimizing all days separately")
@@ -583,19 +793,43 @@ class RouteOptimizationService:
         )
 
         # Add time span cost to balance workload across techs
-        # Higher coefficient for quick mode since it has less time to optimize
-        # Quick: 500 (very strong balance), Thorough: 300 (strong balance)
+        # Higher coefficient prioritizes balanced workload over minimizing total distance
+        # Quick: 5000 (maximum balance priority), Thorough: 4000 (maximum balance)
         time_dimension = routing.GetDimensionOrDie('Time')
-        time_coeff = 500 if optimization_speed == "quick" else 300
+        time_coeff = 5000 if optimization_speed == "quick" else 4000
         for vehicle_id in range(len(techs)):
             time_dimension.SetSpanCostCoefficientForVehicle(time_coeff, vehicle_id)
+
+        # Add capacity dimension using efficiency_multiplier
+        # Each customer has demand=1, each tech has capacity based on their efficiency
+        def demand_callback(from_index):
+            from_node = manager.IndexToNode(from_index)
+            # Customers have demand=1, depots have demand=0
+            return 1 if from_node >= customer_start_idx else 0
+
+        demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+
+        # Set per-vehicle capacities based on max_customers_per_day * efficiency_multiplier
+        vehicle_capacities = []
+        for tech in techs:
+            effective_capacity = int(tech.max_customers_per_day * tech.efficiency_multiplier)
+            vehicle_capacities.append(effective_capacity)
+            logger.info(f"Tech {tech.name}: capacity={tech.max_customers_per_day} * efficiency={tech.efficiency_multiplier} = {effective_capacity} customers")
+
+        routing.AddDimensionWithVehicleCapacity(
+            demand_callback_index,
+            0,  # No slack
+            vehicle_capacities,  # Per-vehicle capacity limits
+            True,  # Start cumul to zero
+            'Capacity'
+        )
 
         return routing
 
     def _configure_search_parameters(
         self,
         optimization_speed: str
-    ) -> pywrapcp.RoutingSearchParameters:
+    ) -> pywrapcp.DefaultRoutingSearchParameters:
         """
         Configure OR-Tools search parameters based on speed setting.
 
@@ -681,7 +915,7 @@ class RouteOptimizationService:
                     customer = customers[customer_idx]
                     route_customers.append({
                         "customer_id": str(customer.id),
-                        "customer_name": customer.name,
+                        "customer_name": customer.display_name or customer.name or "Unknown",
                         "address": customer.address,
                         "latitude": customer.latitude,
                         "longitude": customer.longitude,

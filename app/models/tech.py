@@ -84,6 +84,12 @@ class Tech(Base):
         default=20,
         comment="Maximum number of customers this tech can service in one day"
     )
+    efficiency_multiplier = Column(
+        Float,
+        nullable=False,
+        default=1.0,
+        comment="Efficiency multiplier for route optimization (e.g., 1.5 = 50% more efficient)"
+    )
 
     # Status
     is_active = Column(

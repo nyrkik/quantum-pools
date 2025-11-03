@@ -1,4 +1,4 @@
-// RouteOptimizer - Routes Module
+// QuantumPools - Routes Module
 //
 // Handles route optimization, display, saving, and drag-and-drop editing
 // Dependencies: API_BASE, selectedDay, currentRouteResult, draggedStop, draggedStopRoute, selectedTechIds, map global, displayRoutesOnMap() from map.js, loadCustomers(), loadCustomersManagement()
@@ -11,6 +11,9 @@ function initDaySelector() {
     // Set today as selected day and active tab
     selectedDay = today;
 
+    // Load routes for today initially (wait for customers to load first in app.js)
+    // loadTechRoutesForDay will be called after customers load
+
     document.querySelectorAll('.day-tab').forEach(tab => {
         if (tab.dataset.day === today) {
             tab.classList.add('active');
@@ -19,15 +22,27 @@ function initDaySelector() {
         tab.addEventListener('click', async function() {
             selectedDay = this.dataset.day;
 
-            // Clear route result when switching days
-            currentRouteResult = null;
-
             // Update active day
             document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
             this.classList.add('active');
 
-            // Reload customers for selected day
+            // Reload customers FIRST so temp assignment borders work
             await loadCustomers();
+
+            // Check if there's a saved route result for this day
+            if (routeResultsByDay[selectedDay]) {
+                currentRouteResult = routeResultsByDay[selectedDay];
+                displayRoutes(currentRouteResult);
+                displayRoutesOnMap(currentRouteResult.routes);
+            } else {
+                currentRouteResult = null;
+                displayRoutesOnMap([]);
+                initRoutesHeader();
+
+                // Load persistent tech routes for this day
+                await loadTechRoutesForDay(selectedDay);
+            }
+
             loadCustomersManagement();
 
             // Reload techs to get updated customer counts for selected day
@@ -37,26 +52,68 @@ function initDaySelector() {
 }
 
 async function optimizeRoutes() {
-    const numTechs = parseInt(document.getElementById('num-techs').value);
-    const allowReassignment = document.getElementById('allow-reassignment').checked;
-    const includeUnassigned = document.getElementById('include-unassigned').checked;
-    const includePending = document.getElementById('include-pending').checked;
-    const optimizationMode = document.querySelector('input[name="optimization-mode"]:checked').value;
-    const optimizationSpeed = document.querySelector('input[name="optimization-speed"]:checked').value;
+    console.log('optimizeRoutes called');
+
+    const optimizationScope = document.querySelector('input[name="optimization-scope"]:checked')?.value;
+    if (!optimizationScope) {
+        console.error('No optimization scope selected');
+        alert('Please select an optimization scope');
+        return;
+    }
+
+    const includeUnassigned = document.getElementById('include-unassigned')?.checked || false;
+    const includePending = document.getElementById('include-pending')?.checked || false;
+    const includeSaturday = document.getElementById('include-saturday')?.checked || false;
+    const includeSunday = document.getElementById('include-sunday')?.checked || false;
+
+    // For complete rerouting, always use 'full' mode
+    const optimizationModeElement = document.querySelector('input[name="optimization-mode"]:checked');
+    const optimizationMode = optimizationScope === 'complete_rerouting' ? 'full' : (optimizationModeElement ? optimizationModeElement.value : 'full');
+
+    const optimizationSpeedElement = document.querySelector('input[name="optimization-speed"]:checked');
+    if (!optimizationSpeedElement) {
+        console.error('No optimization speed selected');
+        alert('Please select an optimization speed');
+        return;
+    }
+    const optimizationSpeed = optimizationSpeedElement.value;
+
+
+    // Get selected tech IDs (excluding unassigned)
+    const selectedTechs = Array.from(selectedTechIds).filter(id => id !== 'unassigned');
+
+    // Validate tech selection for non-complete-rerouting scopes
+    if (optimizationScope !== 'complete_rerouting' && selectedTechs.length === 0) {
+        alert('Please select at least one tech to optimize.');
+        return;
+    }
+
+    // Get unlocked customer IDs for complete rerouting (unlocked = can move days)
+    let unlockedCustomerIds = [];
+    if (optimizationScope === 'complete_rerouting') {
+        const lockButtons = document.querySelectorAll('.customer-lock-toggle');
+        unlockedCustomerIds = Array.from(lockButtons)
+            .filter(btn => btn.dataset.locked === 'false')
+            .map(btn => btn.dataset.customerId);
+    }
 
     // Show loading overlay
     showLoadingOverlay('Calculating optimal routes...');
 
     try {
         const requestBody = {
-            num_drivers: numTechs || null,
-            service_day: selectedDay === 'all' ? null : selectedDay,
-            allow_day_reassignment: allowReassignment,
+            optimization_scope: optimizationScope,
+            selected_tech_ids: optimizationScope === 'complete_rerouting' ? null : selectedTechs,
+            service_day: (optimizationScope === 'complete_rerouting' || selectedDay === 'all') ? null : selectedDay,
+            unlocked_customer_ids: optimizationScope === 'complete_rerouting' ? unlockedCustomerIds : null,
             include_unassigned: includeUnassigned,
             include_pending: includePending,
+            include_saturday: includeSaturday,
+            include_sunday: includeSunday,
             optimization_mode: optimizationMode,
             optimization_speed: optimizationSpeed
         };
+
 
         const response = await Auth.apiRequest(`${API_BASE}/api/routes/optimize`, {
             method: 'POST',
@@ -66,6 +123,7 @@ async function optimizeRoutes() {
             body: JSON.stringify(requestBody)
         });
 
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Optimization failed');
@@ -73,8 +131,28 @@ async function optimizeRoutes() {
 
         const result = await response.json();
 
+
         if (result.routes && result.routes.length > 0) {
             currentRouteResult = result; // Store for filtering
+            // When complete rerouting returns routes for all days, split and store them by day
+            const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+            if (includeSaturday) days.push('saturday');
+            if (includeSunday) days.push('sunday');
+            const routesByDay = {};
+
+            days.forEach(day => {
+                routesByDay[day] = result.routes.filter(route => route.service_day === day);
+            });
+
+            // Store routes for each day separately
+            days.forEach(day => {
+                if (routesByDay[day].length > 0) {
+                    routeResultsByDay[day] = {
+                        routes: routesByDay[day],
+                        summary: result.summary // Use overall summary for now
+                    };
+                }
+            });
 
             // Auto-select techs that are in the optimization result
             selectedTechIds.clear();
@@ -90,8 +168,10 @@ async function optimizeRoutes() {
                 allToggle.checked = false;
             }
 
-            displayRoutes(result);
-            displayRoutesOnMap(result.routes);
+            // Display only routes for the current selected day
+            const currentDayRoutes = routeResultsByDay[selectedDay] || result;
+            displayRoutes(currentDayRoutes);
+            displayRoutesOnMap(currentDayRoutes.routes);
 
             // Update tech chips with stop counts and selection state
             // Pass false to preserve the selectedTechIds we just set
@@ -100,6 +180,7 @@ async function optimizeRoutes() {
             }
         } else {
             currentRouteResult = null;
+            delete routeResultsByDay[selectedDay];
             alert(result.message || 'No routes generated. Add customers and techs first.');
         }
     } catch (error) {
@@ -110,53 +191,67 @@ async function optimizeRoutes() {
     }
 }
 
-function displayRoutes(result) {
+function initRoutesHeader() {
     const container = document.getElementById('routes-content');
     container.innerHTML = '';
 
+    // Create sticky header
+    const summary = document.createElement('div');
+    summary.id = 'routes-summary-header';
+    summary.className = 'route-summary';
+    summary.style.position = 'sticky';
+    summary.style.top = '0';
+    summary.style.zIndex = '100';
+    summary.style.fontSize = '0.85rem';
+    summary.style.padding = '0.75rem';
+    summary.style.display = 'none'; // Hidden by default, shown only when optimized
+
+    const content = document.createElement('div');
+    content.id = 'routes-summary-content';
+    summary.appendChild(content);
+    container.appendChild(summary);
+
+    // Placeholder for route cards
+    const routesContainer = document.createElement('div');
+    routesContainer.id = 'routes-cards-container';
+    container.appendChild(routesContainer);
+}
+
+function displayRoutes(result) {
+    const container = document.getElementById('routes-content');
+    const summaryHeader = document.getElementById('routes-summary-header');
+    const summaryContent = document.getElementById('routes-summary-content');
+    const routesContainer = document.getElementById('routes-cards-container');
+
+    // Initialize if not present
+    if (!summaryHeader) {
+        initRoutesHeader();
+        return displayRoutes(result);
+    }
+
+    // Clear routes container
+    routesContainer.innerHTML = '';
+
     if (!result.routes || result.routes.length === 0) {
-        container.innerHTML = '<p class="placeholder">No routes generated</p>';
+        summaryHeader.style.display = 'none';
         return;
     }
 
-    // Show summary
+    // Show and update summary content
+    summaryHeader.style.display = 'block';
     if (result.summary) {
-        const summary = document.createElement('div');
-        summary.className = 'route-summary';
-        summary.style.position = 'relative';
+        // Format total duration
+        const totalMinutes = result.summary.total_duration_minutes || 0;
+        const totalHours = Math.floor(totalMinutes / 60);
+        const totalMins = totalMinutes % 60;
+        const totalDurationStr = totalHours > 0 ? `${totalHours}hr ${totalMins}min` : `${totalMins}min`;
 
-        // Add close button
-        const closeBtn = document.createElement('button');
-        closeBtn.innerHTML = '&times;';
-        closeBtn.style.position = 'absolute';
-        closeBtn.style.top = '0.5rem';
-        closeBtn.style.right = '0.5rem';
-        closeBtn.style.background = 'none';
-        closeBtn.style.border = 'none';
-        closeBtn.style.fontSize = '1.5rem';
-        closeBtn.style.cursor = 'pointer';
-        closeBtn.style.color = '#7f8c8d';
-        closeBtn.style.transition = 'color 0.2s';
-        closeBtn.onmouseover = () => closeBtn.style.color = '#e74c3c';
-        closeBtn.onmouseout = () => closeBtn.style.color = '#7f8c8d';
-        closeBtn.onclick = () => {
-            currentRouteResult = null;
-            container.innerHTML = '<p class="placeholder">No routes generated</p>';
-            displayRoutesOnMap([]);
-            loadCustomers();
-            loadTechs();
-        };
-        summary.appendChild(closeBtn);
-
-        const content = document.createElement('div');
-        content.innerHTML = `
-            <h3>Route Summary</h3>
-            <p><strong>Total Routes:</strong> ${result.summary.total_routes}</p>
-            <p><strong>Total Customers:</strong> ${result.summary.total_customers}</p>
-            <p><strong>Total Distance:</strong> ${result.summary.total_distance_miles.toFixed(1)} miles</p>
-            <p><strong>Total Duration:</strong> ${result.summary.total_duration_minutes} minutes</p>
+        summaryContent.innerHTML = `
+            <p style="margin: 0.25rem 0;"><strong>Total Routes:</strong> ${result.summary.total_routes}</p>
+            <p style="margin: 0.25rem 0;"><strong>Total Customers:</strong> ${result.summary.total_customers || 0}</p>
+            <p style="margin: 0.25rem 0;"><strong>Total Distance:</strong> ${(result.summary.total_distance_miles || 0).toFixed(1)} miles</p>
+            <p style="margin: 0.25rem 0;"><strong>Total Duration:</strong> ${totalDurationStr}</p>
         `;
-        summary.appendChild(content);
 
         // Add action buttons
         const buttonContainer = document.createElement('div');
@@ -170,8 +265,10 @@ function displayRoutes(result) {
         acceptBtn.onclick = async () => {
             await saveRoutes(result);
             currentRouteResult = null;
+            delete routeResultsByDay[selectedDay];
             await loadCustomers();
             loadTechs();
+            initRoutesHeader();
         };
 
         const cancelBtn = document.createElement('button');
@@ -179,30 +276,29 @@ function displayRoutes(result) {
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = () => {
             currentRouteResult = null;
-            container.innerHTML = '<p class="placeholder">No routes generated</p>';
-            // Clear map routes
+            delete routeResultsByDay[selectedDay];
             displayRoutesOnMap([]);
-            // Reload customers to show original markers
             loadCustomers();
             loadTechs();
+            initRoutesHeader();
         };
 
         buttonContainer.appendChild(acceptBtn);
         buttonContainer.appendChild(cancelBtn);
-        content.appendChild(buttonContainer);
-
-        container.appendChild(summary);
+        summaryContent.appendChild(buttonContainer);
     }
 
-    // Filter and show routes based on selected techs
+    // Filter and show routes based on selected techs and current day
     const filteredRoutes = result.routes.filter(route => {
         if (selectedTechIds.size === 0) return false;
         if (route.driver_id && !selectedTechIds.has(route.driver_id)) return false;
+        // Filter by current day tab (only show routes for the selected day)
+        if (route.service_day && route.service_day !== selectedDay) return false;
         return true;
     });
 
     if (filteredRoutes.length === 0) {
-        container.innerHTML += '<p class="placeholder">No routes for selected techs</p>';
+        routesContainer.innerHTML = '<p class="placeholder">No routes for selected techs</p>';
         return;
     }
 
@@ -217,6 +313,8 @@ function displayRoutes(result) {
         routeCard.appendChild(colorIndicator);
 
         const title = document.createElement('h3');
+        title.style.cursor = 'pointer';
+        title.style.userSelect = 'none';
 
         // Format duration as "Xhr Ymin"
         const hours = Math.floor(route.total_duration_minutes / 60);
@@ -226,7 +324,7 @@ function displayRoutes(result) {
         // Format distance
         const distanceStr = `${route.total_distance_miles.toFixed(0)} mi`;
 
-        title.innerHTML = `<strong>${route.driver_name}</strong> <span class="stop-count">- ${route.total_customers} stops - ${durationStr} - ${distanceStr}</span>`;
+        title.innerHTML = `<span class="collapse-icon">▶</span> <strong>${route.driver_name}</strong> <span class="stop-count">- ${route.total_customers} stops - ${durationStr} - ${distanceStr}</span>`;
         routeCard.appendChild(title);
 
         const stopsList = document.createElement('ul');
@@ -235,10 +333,7 @@ function displayRoutes(result) {
         route.stops.forEach((stop) => {
             const stopItem = document.createElement('li');
             stopItem.dataset.customerId = stop.customer_id;
-            // Extract just the street address (before city/state)
-            const addressParts = stop.address.split(',');
-            const streetAddress = addressParts[0] || stop.address;
-            stopItem.innerHTML = `<span class="customer-name">${stop.customer_name}</span> - ${streetAddress}`;
+            stopItem.innerHTML = `<span class="customer-name">${stop.customer_name}</span>`;
 
             // Add hover handlers to highlight marker and show popup
             stopItem.addEventListener('mouseenter', () => {
@@ -255,8 +350,24 @@ function displayRoutes(result) {
             stopsList.appendChild(stopItem);
         });
 
+        // Collapsed by default
+        stopsList.style.display = 'none';
+
         routeCard.appendChild(stopsList);
-        container.appendChild(routeCard);
+
+        // Add collapse/expand functionality
+        title.addEventListener('click', () => {
+            const icon = title.querySelector('.collapse-icon');
+            if (stopsList.style.display === 'none' || !stopsList.style.display) {
+                stopsList.style.display = 'block';
+                icon.textContent = '▼';
+            } else {
+                stopsList.style.display = 'none';
+                icon.textContent = '▶';
+            }
+        });
+
+        routesContainer.appendChild(routeCard);
     });
 }
 
@@ -384,7 +495,9 @@ function makeSavedRoutesEditable(routes) {
         routeCard.dataset.routeId = route.id;
 
         const title = document.createElement('h3');
-        title.textContent = `Route: ${route.id.substring(0, 8)} - ${route.service_day}`;
+        title.innerHTML = `<span class="collapse-icon">▶</span> Route: ${route.id.substring(0, 8)} - ${route.service_day}`;
+        title.style.cursor = 'pointer';
+        title.style.userSelect = 'none';
         routeCard.appendChild(title);
 
         const info = document.createElement('p');
@@ -403,6 +516,21 @@ function makeSavedRoutesEditable(routes) {
         routeDetails.stops.forEach((stop) => {
             const stopItem = createDraggableStop(stop, route.id);
             stopsList.appendChild(stopItem);
+        });
+
+        // Collapsed by default
+        stopsList.style.display = 'none';
+
+        // Add collapse/expand functionality
+        title.addEventListener('click', () => {
+            const icon = title.querySelector('.collapse-icon');
+            if (stopsList.style.display === 'none' || !stopsList.style.display) {
+                stopsList.style.display = 'block';
+                icon.textContent = '▼';
+            } else {
+                stopsList.style.display = 'none';
+                icon.textContent = '▶';
+            }
         });
 
         routeCard.appendChild(stopsList);
@@ -571,5 +699,36 @@ async function moveStopToRoute(stopId, sourceRouteId, targetRouteId, sequence) {
     } catch (error) {
         console.error('Error moving stop:', error);
         alert('Failed to move stop. Please try again.');
+    }
+}
+
+async function loadTechRoutesForDay(serviceDay) {
+    // Show loading spinner
+    showLoadingOverlay('Loading routes...');
+
+    try {
+        const response = await Auth.apiRequest(`${API_BASE}/api/routes/tech-routes/${serviceDay}`);
+
+        if (!response.ok) {
+            console.error('Failed to load tech routes');
+            hideLoadingOverlay();
+            return;
+        }
+
+        const routes = await response.json();
+
+        if (routes.length === 0) {
+            hideLoadingOverlay();
+            displayRoutesOnMap([]);
+            return;
+        }
+
+        // Display routes on map with depot markers and polylines
+        displayRoutesOnMap(routes);
+
+        hideLoadingOverlay();
+    } catch (error) {
+        console.error('Error loading tech routes:', error);
+        hideLoadingOverlay();
     }
 }

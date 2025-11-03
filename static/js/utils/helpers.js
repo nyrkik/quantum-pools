@@ -1,4 +1,4 @@
-// RouteOptimizer Utilities - Helper Functions
+// QuantumPools Utilities - Helper Functions
 //
 // Pure utility functions with no dependencies
 // Safe to load first before any other modules

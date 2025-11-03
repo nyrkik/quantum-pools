@@ -26,7 +26,7 @@ class GeocodingService:
         else:
             # Use free OpenStreetMap Nominatim
             self.geocoder = Nominatim(
-                user_agent="RouteOptimizer/0.1.0",
+                user_agent="QuantumPools/0.1.0",
                 timeout=10
             )
             self.provider = "OpenStreetMap Nominatim"

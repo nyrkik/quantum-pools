@@ -1,4 +1,4 @@
-// RouteOptimizer Frontend Application
+// QuantumPools Frontend Application
 
 /*
  * ✅ REFACTORING COMPLETE: Reduced from 3,516 lines to ~108 lines (96.9% reduction)
@@ -21,6 +21,8 @@ const HOME_BASE = { lat: 38.4088, lng: -121.3716 }; // Elk Grove, CA
 
 // Current route result (for filtering when tech selection changes)
 let currentRouteResult = null;
+// Store route results per day
+let routeResultsByDay = {};
 
 // Drag and drop state
 let draggedStop = null;
@@ -44,8 +46,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     attachEventListeners();
     initOptimizationModal();
     initDaySelector();  // Must run before loadCustomers to set selectedDay
+    initRoutesHeader();  // Initialize routes header
     await loadCustomers();  // Load customers first to count unassigned
     loadTechs();  // Then load techs with unassigned count
+    await loadTechRoutesForDay(selectedDay);  // Load routes after customers are ready
     loadCustomersManagement();
     initTabs();
     loadGooglePlacesAPI();

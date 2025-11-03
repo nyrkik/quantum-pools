@@ -116,7 +116,7 @@
 ## Environment
 
 **Development:**
-- Server: localhost:7007
+- Server: localhost:7008
 - Database: PostgreSQL (local)
 - Frontend: Vanilla JS + Leaflet
 - Backend: FastAPI + SQLAlchemy 2.0

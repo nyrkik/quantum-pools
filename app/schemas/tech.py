@@ -49,6 +49,13 @@ class TechBase(BaseModel):
         description="Maximum customers this tech can service per day"
     )
 
+    efficiency_multiplier: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=5.0,
+        description="Efficiency multiplier for optimization (e.g., 1.5 = 50% more efficient)"
+    )
+
     notes: Optional[str] = Field(
         default=None,
         min_length=0,
@@ -75,6 +82,7 @@ class TechUpdate(BaseModel):
     working_hours_start: Optional[time] = None
     working_hours_end: Optional[time] = None
     max_customers_per_day: Optional[int] = Field(None, ge=1, le=100)
+    efficiency_multiplier: Optional[float] = Field(None, ge=0.1, le=5.0)
     notes: Optional[str] = Field(None, max_length=1000)
     is_active: Optional[bool] = None
 

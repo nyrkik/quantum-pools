@@ -1,4 +1,4 @@
-// RouteOptimizer - Navigation Module
+// QuantumPools - Navigation Module
 //
 // Handles module switching, sidebar navigation, and hash-based routing
 // Dependencies: map global, loadCustomersManagement(), loadTechs() from app.js

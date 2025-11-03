@@ -1,4 +1,4 @@
-// RouteOptimizer - Techs Module
+// QuantumPools - Techs Module
 //
 // Handles tech/team member management, tech chips, and color picker
 // Dependencies: API_BASE, allTechs, selectedTechIds globals, filterRoutesByTechs(), loadCustomers(), displayRoutes(), displayRoutesOnMap(), combineAddressFields(), parseAddress(), initAutocomplete()
@@ -44,6 +44,14 @@ async function loadTechs() {
 
         displayTechs(allTechs);
         populateTechChips(allTechs);
+
+        // Refresh map and route list to apply tech filter
+        if (window.currentCustomers) {
+            displayCustomersOnMap(window.currentCustomers);
+            if (typeof displayCurrentAssignments === 'function') {
+                displayCurrentAssignments(window.currentCustomers);
+            }
+        }
 
         // Show add tech button
         const addBtn = document.getElementById('add-tech-btn');
@@ -129,12 +137,9 @@ function populateTechChips(techs, resetSelection = true) {
     }
 
     techs.forEach(tech => {
-        // Create wrapper for label + badge button
-        const wrapper = document.createElement('div');
-        wrapper.className = 'tech-chip-wrapper';
-
-        // Calculate stop count
+        // Calculate stop count and temp assignment count
         let stopCount = 0;
+        let tempCount = 0;
 
         // First check if customer_count is available from API (assigned customers)
         if (tech.customer_count !== undefined && tech.customer_count !== null) {
@@ -148,6 +153,16 @@ function populateTechChips(techs, resetSelection = true) {
             }
         }
 
+        // Count temp assignments for this tech from current customers
+        if (window.currentCustomers) {
+            tempCount = window.currentCustomers.filter(c =>
+                c.assigned_tech_id === tech.id && c.has_temp_assignment
+            ).length;
+            if (tempCount > 0) {
+                console.log(`Tech ${tech.name} has ${tempCount} temp assignments`);
+            }
+        }
+
         // Check if this tech is currently selected
         const isSelected = resetSelection ? true : selectedTechIds.has(tech.id);
 
@@ -156,80 +171,97 @@ function populateTechChips(techs, resetSelection = true) {
             selectedTechIds.add(tech.id);
         }
 
-        // Create name label (clickable)
-        const nameLabel = document.createElement('span');
-        nameLabel.className = isSelected ? 'tech-chip-label selected' : 'tech-chip-label';
-        nameLabel.dataset.techId = tech.id;
-        nameLabel.style.color = tech.color || '#3498db';
-        nameLabel.textContent = tech.name;
+        // Create wrapper
+        const wrapper = document.createElement('div');
+        wrapper.className = isSelected ? 'tech-chip-wrapper selected' : 'tech-chip-wrapper unselected';
+        wrapper.dataset.techId = tech.id;
 
-        // Create count badge button (clickable)
-        const badge = document.createElement('button');
-        badge.className = isSelected ? 'tech-chip-badge selected' : 'tech-chip-badge unselected';
-        badge.dataset.techId = tech.id;
-        badge.style.backgroundColor = tech.color || '#3498db';
-        badge.style.opacity = isSelected ? '1' : '0.3';
-        badge.textContent = stopCount > 0 ? stopCount : '0';
+        const techColor = tech.color || '#3498db';
 
-        wrapper.appendChild(nameLabel);
+        // Add border color
+        wrapper.style.borderColor = techColor;
+
+        // Convert hex to rgba for lighter background
+        const hex = techColor.replace('#', '');
+        const r = parseInt(hex.substr(0, 2), 16);
+        const g = parseInt(hex.substr(2, 2), 16);
+        const b = parseInt(hex.substr(4, 2), 16);
+
+        // Add background to entire wrapper
+        wrapper.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.25)`;
+
+        // Create name span
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'tech-chip-name';
+        nameSpan.style.color = techColor;
+        nameSpan.textContent = tech.name;
+
+        // Create count badge with full color
+        const badge = document.createElement('span');
+        badge.className = 'tech-chip-badge';
+        badge.style.backgroundColor = techColor;
+
+        // Display count with temp assignments if any
+        if (tempCount > 0) {
+            badge.innerHTML = `${stopCount} <span style="color: #ff8800;">+${tempCount}</span>`;
+        } else {
+            badge.textContent = stopCount;
+        }
+
+        wrapper.appendChild(nameSpan);
         wrapper.appendChild(badge);
 
-        // Click handler with Ctrl detection for both label and badge
-        const clickHandler = function(e) {
+        // Click handler with Ctrl detection
+        wrapper.addEventListener('click', function(e) {
             toggleTechSelection(tech.id, e.ctrlKey || e.metaKey);
-        };
-        nameLabel.addEventListener('click', clickHandler);
-        badge.addEventListener('click', clickHandler);
+        });
 
         // Long-press handler for mobile multi-select
         let pressTimer;
-        badge.addEventListener('touchstart', function(e) {
+        wrapper.addEventListener('touchstart', function(e) {
             pressTimer = setTimeout(function() {
-                toggleTechSelection(tech.id, true); // true = multi-select mode
-            }, 500); // 500ms for long-press
+                toggleTechSelection(tech.id, true);
+            }, 500);
         });
-        badge.addEventListener('touchend', function() {
+        wrapper.addEventListener('touchend', function() {
             clearTimeout(pressTimer);
         });
-        badge.addEventListener('touchmove', function() {
+        wrapper.addEventListener('touchmove', function() {
             clearTimeout(pressTimer);
         });
 
         container.appendChild(wrapper);
     });
 
-    // Add unassigned chip if there are unassigned customers
+    // Add unassigned container if there are unassigned customers
     if (window.unassignedCustomerCount && window.unassignedCustomerCount > 0) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'tech-chip-wrapper';
-
         const isUnassignedSelected = resetSelection ? true : selectedTechIds.has('unassigned');
 
         if (resetSelection) {
             selectedTechIds.add('unassigned');
         }
 
-        const nameLabel = document.createElement('span');
-        nameLabel.className = isUnassignedSelected ? 'tech-chip-label selected' : 'tech-chip-label';
-        nameLabel.dataset.techId = 'unassigned';
-        nameLabel.style.color = '#e74c3c';
-        nameLabel.textContent = 'Unassigned';
+        // Create container
+        const wrapper = document.createElement('div');
+        wrapper.className = isUnassignedSelected ? 'unassigned-container selected' : 'unassigned-container unselected';
+        wrapper.dataset.techId = 'unassigned';
 
-        const badge = document.createElement('button');
-        badge.className = isUnassignedSelected ? 'tech-chip-badge selected unassigned-badge' : 'tech-chip-badge unselected unassigned-badge';
-        badge.dataset.techId = 'unassigned';
-        badge.style.backgroundColor = '#e74c3c';
-        badge.style.opacity = isUnassignedSelected ? '1' : '0.3';
-        badge.textContent = window.unassignedCustomerCount;
+        // Create name span
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'unassigned-name';
+        nameSpan.textContent = 'Unassigned';
 
-        wrapper.appendChild(nameLabel);
-        wrapper.appendChild(badge);
+        // Create count badge
+        const countSpan = document.createElement('span');
+        countSpan.className = 'unassigned-count';
+        countSpan.textContent = window.unassignedCustomerCount;
 
-        const clickHandler = function(e) {
+        wrapper.appendChild(nameSpan);
+        wrapper.appendChild(countSpan);
+
+        wrapper.addEventListener('click', function(e) {
             toggleTechSelection('unassigned', e.ctrlKey || e.metaKey);
-        };
-        nameLabel.addEventListener('click', clickHandler);
-        badge.addEventListener('click', clickHandler);
+        });
 
         container.appendChild(wrapper);
     }
@@ -245,57 +277,37 @@ function toggleAllTechs() {
 
         allTechs.forEach(tech => {
             selectedTechIds.add(tech.id);
-            const badge = document.querySelector(`.tech-chip-badge[data-tech-id="${tech.id}"]`);
-            const label = document.querySelector(`.tech-chip-label[data-tech-id="${tech.id}"]`);
-            if (badge) {
-                badge.classList.remove('unselected');
-                badge.classList.add('selected');
-                badge.style.opacity = '1';
-            }
-            if (label) {
-                label.classList.add('selected');
+            const wrapper = document.querySelector(`.tech-chip-wrapper[data-tech-id="${tech.id}"]`);
+            if (wrapper) {
+                wrapper.classList.remove('unselected');
+                wrapper.classList.add('selected');
             }
         });
 
         // Select unassigned if exists
         selectedTechIds.add('unassigned');
-        const unassignedBadge = document.querySelector(`.tech-chip-badge[data-tech-id="unassigned"]`);
-        const unassignedLabel = document.querySelector(`.tech-chip-label[data-tech-id="unassigned"]`);
-        if (unassignedBadge) {
-            unassignedBadge.classList.remove('unselected');
-            unassignedBadge.classList.add('selected');
-            unassignedBadge.style.opacity = '1';
-        }
-        if (unassignedLabel) {
-            unassignedLabel.classList.add('selected');
+        const unassignedWrapper = document.querySelector(`.unassigned-container[data-tech-id="unassigned"]`);
+        if (unassignedWrapper) {
+            unassignedWrapper.classList.remove('unselected');
+            unassignedWrapper.classList.add('selected');
         }
     } else {
         // Deselect all
         selectedTechIds.clear();
 
         allTechs.forEach(tech => {
-            const badge = document.querySelector(`.tech-chip-badge[data-tech-id="${tech.id}"]`);
-            const label = document.querySelector(`.tech-chip-label[data-tech-id="${tech.id}"]`);
-            if (badge) {
-                badge.classList.remove('selected');
-                badge.classList.add('unselected');
-                badge.style.opacity = '0.3';
-            }
-            if (label) {
-                label.classList.remove('selected');
+            const wrapper = document.querySelector(`.tech-chip-wrapper[data-tech-id="${tech.id}"]`);
+            if (wrapper) {
+                wrapper.classList.remove('selected');
+                wrapper.classList.add('unselected');
             }
         });
 
         // Deselect unassigned if exists
-        const unassignedBadge = document.querySelector(`.tech-chip-badge[data-tech-id="unassigned"]`);
-        const unassignedLabel = document.querySelector(`.tech-chip-label[data-tech-id="unassigned"]`);
-        if (unassignedBadge) {
-            unassignedBadge.classList.remove('selected');
-            unassignedBadge.classList.add('unselected');
-            unassignedBadge.style.opacity = '0.3';
-        }
-        if (unassignedLabel) {
-            unassignedLabel.classList.remove('selected');
+        const unassignedWrapper = document.querySelector(`.unassigned-container[data-tech-id="unassigned"]`);
+        if (unassignedWrapper) {
+            unassignedWrapper.classList.remove('selected');
+            unassignedWrapper.classList.add('unselected');
         }
     }
 
@@ -303,9 +315,8 @@ function toggleAllTechs() {
 }
 
 function toggleTechSelection(techId, multiSelect = false) {
-    const badge = document.querySelector(`.tech-chip-badge[data-tech-id="${techId}"]`);
-    const label = document.querySelector(`.tech-chip-label[data-tech-id="${techId}"]`);
-    if (!badge) return;
+    const wrapper = document.querySelector(`.tech-chip-wrapper[data-tech-id="${techId}"], .unassigned-container[data-tech-id="${techId}"]`);
+    if (!wrapper) return;
 
     const allToggle = document.getElementById('all-toggle');
 
@@ -313,71 +324,61 @@ function toggleTechSelection(techId, multiSelect = false) {
         // Multi-select mode: toggle this tech only
         if (selectedTechIds.has(techId)) {
             selectedTechIds.delete(techId);
-            badge.classList.remove('selected');
-            badge.classList.add('unselected');
-            badge.style.opacity = '0.3';
-            if (label) label.classList.remove('selected');
+            wrapper.classList.remove('selected');
+            wrapper.classList.add('unselected');
         } else {
             selectedTechIds.add(techId);
-            badge.classList.remove('unselected');
-            badge.classList.add('selected');
-            badge.style.opacity = '1';
-            if (label) label.classList.add('selected');
+            wrapper.classList.remove('unselected');
+            wrapper.classList.add('selected');
         }
     } else {
         // Single-select mode: deselect all others, select only this one
         selectedTechIds.clear();
 
-        // Deselect all badges and labels
+        // Deselect all tech wrappers
         allTechs.forEach(tech => {
-            const otherBadge = document.querySelector(`.tech-chip-badge[data-tech-id="${tech.id}"]`);
-            const otherLabel = document.querySelector(`.tech-chip-label[data-tech-id="${tech.id}"]`);
-            if (otherBadge) {
-                otherBadge.classList.remove('selected');
-                otherBadge.classList.add('unselected');
-                otherBadge.style.opacity = '0.3';
-            }
-            if (otherLabel) {
-                otherLabel.classList.remove('selected');
+            const otherWrapper = document.querySelector(`.tech-chip-wrapper[data-tech-id="${tech.id}"]`);
+            if (otherWrapper) {
+                otherWrapper.classList.remove('selected');
+                otherWrapper.classList.add('unselected');
             }
         });
 
         // Deselect unassigned if exists
-        const unassignedBadge = document.querySelector(`.tech-chip-badge[data-tech-id="unassigned"]`);
-        const unassignedLabel = document.querySelector(`.tech-chip-label[data-tech-id="unassigned"]`);
-        if (unassignedBadge) {
-            unassignedBadge.classList.remove('selected');
-            unassignedBadge.classList.add('unselected');
-            unassignedBadge.style.opacity = '0.3';
-        }
-        if (unassignedLabel) {
-            unassignedLabel.classList.remove('selected');
+        const unassignedWrapper = document.querySelector(`.unassigned-container[data-tech-id="unassigned"]`);
+        if (unassignedWrapper) {
+            unassignedWrapper.classList.remove('selected');
+            unassignedWrapper.classList.add('unselected');
         }
 
         // Select only this tech
         selectedTechIds.add(techId);
-        badge.classList.remove('unselected');
-        badge.classList.add('selected');
-        badge.style.opacity = '1';
-        if (label) label.classList.add('selected');
+        wrapper.classList.remove('unselected');
+        wrapper.classList.add('selected');
     }
 
     // Update All toggle state
     if (allToggle) {
-        allToggle.checked = (selectedTechIds.size === allTechs.length);
+        // All is checked if all techs are selected AND unassigned is selected (if it exists)
+        const allTechsSelected = allTechs.every(tech => selectedTechIds.has(tech.id));
+        const unassignedSelected = window.unassignedCustomerCount > 0 ? selectedTechIds.has('unassigned') : true;
+        allToggle.checked = allTechsSelected && unassignedSelected;
     }
 
     filterRoutesByTechs();
 }
 
-function filterRoutesByTechs() {
-    // Reload customers to update map with filtered techs
-    loadCustomers();
+async function filterRoutesByTechs() {
+    // Reload customers FIRST to update map with filtered techs and temp assignments
+    await loadCustomers();
 
     // Re-filter and redisplay routes if they exist
     if (currentRouteResult && currentRouteResult.routes) {
         displayRoutes(currentRouteResult);
         displayRoutesOnMap(currentRouteResult.routes);
+    } else {
+        // Reload persistent tech routes for the selected day
+        await loadTechRoutesForDay(selectedDay);
     }
 }
 
@@ -390,20 +391,126 @@ function displayTechs(techs) {
     }
 
     container.innerHTML = '';
-    techs.forEach(tech => {
+
+    // Apply filters
+    const searchTerm = document.getElementById('team-search')?.value.toLowerCase() || '';
+    const statusFilter = document.getElementById('team-status-filter')?.value || 'active';
+    const workloadFilter = document.getElementById('team-workload-filter')?.value || 'all';
+
+    const filteredTechs = techs.filter(tech => {
+        // Search filter
+        if (searchTerm && !tech.name.toLowerCase().includes(searchTerm)) {
+            return false;
+        }
+
+        // Status filter
+        if (statusFilter === 'active' && !tech.is_active) return false;
+        if (statusFilter === 'inactive' && tech.is_active) return false;
+
+        // Workload filter
+        const customerCount = tech.customer_count || 0;
+        if (workloadFilter === 'high' && customerCount <= 30) return false;
+        if (workloadFilter === 'medium' && (customerCount < 15 || customerCount > 30)) return false;
+        if (workloadFilter === 'low' && customerCount >= 15) return false;
+
+        return true;
+    });
+
+    if (filteredTechs.length === 0) {
+        container.innerHTML = '<p class="placeholder">No team members match your filters</p>';
+        return;
+    }
+
+    filteredTechs.forEach(tech => {
+        const initials = tech.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        const customerCount = tech.customer_count || 0;
+        const maxCustomers = tech.max_customers_per_day || 50;
+        const workloadPercent = Math.min(100, Math.round((customerCount / maxCustomers) * 100));
+        const efficiencyMultiplier = tech.efficiency_multiplier || 1.0;
+        const statusBadge = tech.is_active
+            ? '<span class="status-badge status-active">Active</span>'
+            : '<span class="status-badge status-inactive">Inactive</span>';
+
+        // Workload indicator color
+        let workloadColor = '#27ae60'; // green
+        if (workloadPercent > 80) workloadColor = '#e74c3c'; // red
+        else if (workloadPercent > 60) workloadColor = '#f39c12'; // orange
+
         const driverCard = document.createElement('div');
-        driverCard.className = 'tech-card';
+        driverCard.className = 'tech-card-enhanced';
+        driverCard.dataset.techId = tech.id;
+        driverCard.dataset.customerCount = customerCount;
+
         driverCard.innerHTML = `
-            <div class="tech-color-indicator" style="background-color: ${tech.color || '#3498db'}"></div>
-            <div class="tech-info">
-                <strong>${tech.name}</strong>
-                <small>${tech.working_hours_start} - ${tech.working_hours_end}</small>
-                <small>Max: ${tech.max_customers_per_day} customers/day</small>
+            <div class="tech-card-header">
+                <div class="tech-avatar" style="background-color: ${tech.color || '#3498db'}">
+                    ${initials}
+                </div>
+                <div class="tech-header-info">
+                    <div class="tech-name-row">
+                        <h3>${tech.name}</h3>
+                        ${statusBadge}
+                    </div>
+                    <div class="tech-contact">
+                        ${tech.phone ? `<span>📞 ${tech.phone}</span>` : ''}
+                        ${tech.email ? `<span>✉️ ${tech.email}</span>` : ''}
+                    </div>
+                </div>
+                <button class="context-menu-btn" onclick="toggleContextMenu(event, 'tech-${tech.id}')">⋮</button>
+                <div id="menu-tech-${tech.id}" class="context-menu">
+                    <button onclick="showEditTechForm('${tech.id}'); closeAllContextMenus();">Edit</button>
+                    <button onclick="deleteTech('${tech.id}'); closeAllContextMenus();" class="delete">Delete</button>
+                </div>
             </div>
-            <button class="context-menu-btn" onclick="toggleContextMenu(event, 'tech-${tech.id}')">⋮</button>
-            <div id="menu-tech-${tech.id}" class="context-menu">
-                <button onclick="showEditTechForm('${tech.id}'); closeAllContextMenus();">Edit</button>
-                <button onclick="deleteTech('${tech.id}'); closeAllContextMenus();" class="delete">Delete</button>
+
+            <div class="tech-card-body">
+                <div class="tech-stats-grid">
+                    <div class="tech-stat">
+                        <span class="stat-label">Customers</span>
+                        <span class="stat-value">${customerCount}</span>
+                    </div>
+                    <div class="tech-stat">
+                        <span class="stat-label">Max/Day</span>
+                        <span class="stat-value">${maxCustomers}</span>
+                    </div>
+                    <div class="tech-stat">
+                        <span class="stat-label">Efficiency</span>
+                        <span class="stat-value">${efficiencyMultiplier}x</span>
+                    </div>
+                    <div class="tech-stat">
+                        <span class="stat-label">Hours</span>
+                        <span class="stat-value">${tech.working_hours_start}-${tech.working_hours_end}</span>
+                    </div>
+                </div>
+
+                <div class="workload-indicator">
+                    <div class="workload-label">
+                        <span>Workload</span>
+                        <span>${workloadPercent}%</span>
+                    </div>
+                    <div class="workload-bar">
+                        <div class="workload-fill" style="width: ${workloadPercent}%; background-color: ${workloadColor}"></div>
+                    </div>
+                </div>
+
+                ${tech.start_location_address ? `
+                <div class="tech-location">
+                    <span class="location-label">📍 Depot:</span>
+                    <span class="location-address">${tech.start_location_address.split(',')[0]}</span>
+                </div>
+                ` : ''}
+            </div>
+
+            <div class="tech-card-actions">
+                <button class="btn-action" onclick="viewTechCustomers('${tech.id}')" title="View Customers">
+                    <span>👥</span> Customers
+                </button>
+                <button class="btn-action" onclick="viewTechRoutes('${tech.id}')" title="View Routes">
+                    <span>🗺️</span> Routes
+                </button>
+                <button class="btn-action" onclick="showEditTechForm('${tech.id}')" title="Edit">
+                    <span>✏️</span> Edit
+                </button>
             </div>
         `;
         container.appendChild(driverCard);
@@ -544,6 +651,10 @@ function showAddTechForm() {
                         <label>Max Customers/Day:</label>
                         <input type="number" id="tech-max-customers" min="1" max="50" value="20">
                     </div>
+                    <div class="control-group control-group-medium">
+                        <label>Efficiency Multiplier:</label>
+                        <input type="number" id="tech-efficiency" min="0.1" max="5.0" step="0.1" value="1.0" title="1.0 = normal, 1.5 = 50% more efficient">
+                    </div>
                 </div>
             </div>
         </div>
@@ -589,6 +700,7 @@ async function saveTech() {
     const startTime = document.getElementById('tech-start-time').value;
     const endTime = document.getElementById('tech-end-time').value;
     const maxCustomers = parseInt(document.getElementById('tech-max-customers').value);
+    const efficiencyMultiplier = parseFloat(document.getElementById('tech-efficiency').value) || 1.0;
 
     if (!name || !startLocation || !endLocation) {
         alert('Please fill in all required fields');
@@ -608,7 +720,8 @@ async function saveTech() {
                 end_location_address: endLocation,
                 working_hours_start: startTime + ':00',
                 working_hours_end: endTime + ':00',
-                max_customers_per_day: maxCustomers
+                max_customers_per_day: maxCustomers,
+                efficiency_multiplier: efficiencyMultiplier
             })
         });
 
@@ -742,6 +855,10 @@ async function showEditTechForm(techId) {
                             <label>Max Customers/Day:</label>
                             <input type="number" id="edit-tech-max-customers" min="1" max="50" value="${tech.max_customers_per_day || 20}">
                         </div>
+                        <div class="control-group control-group-medium">
+                            <label>Efficiency Multiplier:</label>
+                            <input type="number" id="edit-tech-efficiency" min="0.1" max="5.0" step="0.1" value="${tech.efficiency_multiplier || 1.0}" title="1.0 = normal, 1.5 = 50% more efficient">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -792,6 +909,7 @@ async function updateTech(techId) {
     const startTime = document.getElementById('edit-tech-start-time').value;
     const endTime = document.getElementById('edit-tech-end-time').value;
     const maxCustomers = parseInt(document.getElementById('edit-tech-max-customers').value);
+    const efficiencyMultiplier = parseFloat(document.getElementById('edit-tech-efficiency').value) || 1.0;
 
     if (!name || !startLocation || !endLocation) {
         alert('Please fill in all required fields');
@@ -811,7 +929,8 @@ async function updateTech(techId) {
                 end_location_address: endLocation,
                 working_hours_start: startTime + ':00',
                 working_hours_end: endTime + ':00',
-                max_customers_per_day: maxCustomers
+                max_customers_per_day: maxCustomers,
+                efficiency_multiplier: efficiencyMultiplier
             })
         });
 
@@ -826,3 +945,80 @@ async function updateTech(techId) {
         alert('Failed to update tech. Please try again.');
     }
 }
+
+// Helper functions for quick actions
+function viewTechCustomers(techId) {
+    // Navigate to clients module and filter by tech
+    const navItem = document.querySelector('[data-module="clients"]');
+    if (navItem) {
+        navItem.click();
+        
+        // Wait for module to load, then apply filter
+        setTimeout(() => {
+            const techFilter = document.getElementById('filter-assigned-tech');
+            if (techFilter) {
+                techFilter.value = techId;
+                techFilter.dispatchEvent(new Event('change'));
+            }
+        }, 200);
+    }
+}
+
+function viewTechRoutes(techId) {
+    // Navigate to routes module and select tech
+    const navItem = document.querySelector('[data-module="routes"]');
+    if (navItem) {
+        navItem.click();
+        
+        // Wait for module to load, then select only this tech
+        setTimeout(() => {
+            selectedTechIds.clear();
+            selectedTechIds.add(techId);
+            
+            // Update visual selection
+            document.querySelectorAll('.tech-chip-wrapper').forEach(wrapper => {
+                if (wrapper.dataset.techId === techId) {
+                    wrapper.classList.add('selected');
+                    wrapper.classList.remove('unselected');
+                } else {
+                    wrapper.classList.remove('selected');
+                    wrapper.classList.add('unselected');
+                }
+            });
+            
+            // Reload routes for this tech
+            filterRoutesByTechs();
+        }, 200);
+    }
+}
+
+// Event listeners for filters
+document.addEventListener('DOMContentLoaded', function() {
+    const teamSearch = document.getElementById('team-search');
+    const statusFilter = document.getElementById('team-status-filter');
+    const workloadFilter = document.getElementById('team-workload-filter');
+    
+    if (teamSearch) {
+        teamSearch.addEventListener('input', () => {
+            if (allTechs && allTechs.length > 0) {
+                displayTechs(allTechs);
+            }
+        });
+    }
+    
+    if (statusFilter) {
+        statusFilter.addEventListener('change', () => {
+            if (allTechs && allTechs.length > 0) {
+                displayTechs(allTechs);
+            }
+        });
+    }
+    
+    if (workloadFilter) {
+        workloadFilter.addEventListener('change', () => {
+            if (allTechs && allTechs.length > 0) {
+                displayTechs(allTechs);
+            }
+        });
+    }
+});

@@ -87,5 +87,15 @@ else
     echo -e "${GREEN}Direct dependencies: $REQUIREMENTS_COUNT / 25${NC}"
 fi
 
+# 8. Check for zombie background processes
+echo
+ZOMBIE_COUNT=$(pgrep -f "restart_server.sh|npm run dev|uvicorn" -u $USER 2>/dev/null | wc -l)
+if [ "$ZOMBIE_COUNT" -gt 2 ]; then
+    echo -e "${YELLOW}⚠️  Warning: $ZOMBIE_COUNT background processes detected${NC}"
+    echo -e "${YELLOW}   Run: scripts/cleanup-stale-shells.sh${NC}"
+elif [ "$ZOMBIE_COUNT" -gt 0 ]; then
+    echo -e "${GREEN}Background processes: $ZOMBIE_COUNT (normal)${NC}"
+fi
+
 echo
 echo -e "${GREEN}=== END HEALTH CHECK ===${NC}"

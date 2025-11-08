@@ -5,3 +5,9 @@ if echo "$CLAUDE_TOOL_INPUT" | grep -q '"run_in_background"\s*:\s*true'; then
     echo "BLOCKED: run_in_background not allowed per CLAUDE.md rule #2"
     exit 1
 fi
+
+# Block bash commands with & (background syntax)
+if echo "$CLAUDE_TOOL_INPUT" | grep -qE '"command"[^}]*\s&\s*[";]'; then
+    echo "BLOCKED: Background bash with & not allowed per CLAUDE.md rule #2"
+    exit 1
+fi

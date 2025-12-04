@@ -66,6 +66,9 @@ class Organization(Base):
     techs = relationship("Tech", back_populates="organization")
     routes = relationship("Route", back_populates="organization")
     organization_users = relationship("OrganizationUser", back_populates="organization")
+    visits = relationship("Visit", back_populates="organization")
+    issues = relationship("Issue", back_populates="organization")
+    service_catalog = relationship("ServiceCatalog", back_populates="organization")
 
     def __repr__(self) -> str:
         return f"<Organization(id={self.id}, name='{self.name}', slug='{self.slug}')>"

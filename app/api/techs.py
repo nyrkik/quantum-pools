@@ -172,6 +172,65 @@ async def get_active_techs(
 
 
 @router.get(
+    "/summary",
+    summary="Get tech summary with today's visit counts"
+)
+async def get_tech_summary(
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get summary of all active techs with visit counts for today.
+
+    Useful for manager/admin overview of daily operations.
+    """
+    from datetime import datetime, date
+    from app.models.visit import Visit
+
+    # Get all active techs
+    result = await db.execute(
+        select(Tech)
+        .where(Tech.organization_id == auth.organization_id)
+        .where(Tech.is_active == True)
+        .order_by(Tech.name)
+    )
+    techs = result.scalars().all()
+
+    # Get today's date range
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+
+    tech_summaries = []
+    for tech in techs:
+        # Count today's visits for this tech
+        count_query = select(func.count()).select_from(Visit).where(
+            Visit.organization_id == auth.organization_id,
+            Visit.tech_id == tech.id,
+            Visit.scheduled_date >= today_start,
+            Visit.scheduled_date <= today_end
+        )
+        count_result = await db.execute(count_query)
+        visit_count = count_result.scalar() or 0
+
+        tech_summaries.append({
+            "id": str(tech.id),
+            "name": tech.name,
+            "color": tech.color,
+            "visit_count": visit_count,
+            "working_hours_start": tech.working_hours_start.strftime("%H:%M"),
+            "working_hours_end": tech.working_hours_end.strftime("%H:%M"),
+        })
+
+    return {
+        "date": today.isoformat(),
+        "techs": tech_summaries,
+        "total_techs": len(tech_summaries),
+        "total_visits": sum(t["visit_count"] for t in tech_summaries)
+    }
+
+
+@router.get(
     "/{tech_id}",
     response_model=TechResponse,
     summary="Get a specific tech"

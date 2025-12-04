@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.organization import Organization
 from app.models.organization_user import OrganizationUser
+from app.models.tech import Tech
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -22,6 +23,7 @@ from app.schemas.auth import (
     OrganizationInfo,
 )
 from app.services.auth import AuthService
+from app.dependencies.auth import get_current_user, AuthContext
 
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
@@ -210,12 +212,26 @@ async def login(
     client_ip = req.client.host if req.client else None
     await AuthService.update_last_login(db, user.id, client_ip)
 
-    # Generate JWT token
+    # Check if user has a linked tech record
+    tech_id = None
+    tech_result = await db.execute(
+        select(Tech).where(
+            Tech.user_id == user.id,
+            Tech.organization_id == organization.id,
+            Tech.is_active == True
+        )
+    )
+    tech = tech_result.scalar_one_or_none()
+    if tech:
+        tech_id = tech.id
+
+    # Generate JWT token (with tech_id if found)
     token = AuthService.generate_token(
         user_id=user.id,
         organization_id=organization.id,
         role=role,
-        email=user.email
+        email=user.email,
+        tech_id=tech_id
     )
 
     return TokenResponse(
@@ -237,3 +253,87 @@ async def login(
             role=role,
         )
     )
+
+
+@router.get("/me")
+async def get_current_user_info(
+    auth: AuthContext = Depends(get_current_user)
+):
+    """
+    Get current authenticated user's information.
+
+    Returns user details including tech_id if user is linked to a tech.
+    """
+    return {
+        "user_id": str(auth.user_id),
+        "organization_id": str(auth.organization_id),
+        "role": auth.role,
+        "email": auth.email,
+        "tech_id": str(auth.tech_id) if auth.tech_id else None,
+        "is_tech": auth.tech_id is not None,
+        "user": {
+            "id": str(auth.user.id),
+            "email": auth.user.email,
+            "first_name": auth.user.first_name,
+            "last_name": auth.user.last_name,
+            "full_name": auth.user.full_name,
+        },
+        "organization": {
+            "id": str(auth.organization.id),
+            "name": auth.organization.name,
+            "slug": auth.organization.slug,
+        }
+    }
+
+
+@router.put("/profile")
+async def update_profile(
+    profile_data: dict,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update user profile information."""
+    user = auth.user
+
+    # Update user fields
+    if "first_name" in profile_data:
+        user.first_name = profile_data["first_name"]
+    if "last_name" in profile_data:
+        user.last_name = profile_data["last_name"]
+    if "email" in profile_data:
+        user.email = profile_data["email"]
+
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "full_name": user.full_name,
+    }
+
+
+@router.post("/change-password")
+async def change_password(
+    password_data: dict,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change user password."""
+    user = auth.user
+
+    # Verify current password
+    if not verify_password(password_data["current_password"], user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+
+    # Update password
+    user.password_hash = hash_password(password_data["new_password"])
+
+    await db.commit()
+
+    return {"message": "Password changed successfully"}

@@ -366,12 +366,12 @@ async function displayRoutesOnMap(routes) {
     for (const route of routes) {
         // Filter by selected techs
         if (selectedTechIds.size === 0) {
-            return; // No techs selected, don't show route
+            continue; // No techs selected, skip this route
         }
 
         const routeTechId = route.tech_id || route.driver_id;
         if (routeTechId && !selectedTechIds.has(routeTechId)) {
-            return; // Skip routes for techs not in selection
+            continue; // Skip routes for techs not in selection
         }
 
         // Use tech's color, or fall back to default
@@ -424,7 +424,19 @@ async function displayRoutesOnMap(routes) {
 
                 const marker = L.marker(latLng, { icon: numberIcon }).addTo(map);
 
-                marker.bindPopup(`<b>#${index + 1}: ${stop.customer_name}</b><br>${stop.address}<br><em>${route.driver_name}</em>`);
+                const popupContent = `
+                    <div style="min-width: 180px;">
+                        <b>#${index + 1}: ${stop.customer_name}</b><br>
+                        ${stop.address}<br>
+                        <em>${route.driver_name}</em><br>
+                        <button class="btn btn-sm btn-secondary"
+                                onclick="showNewIssueModal('${stop.customer_id}', '${stop.customer_name.replace(/'/g, "\\'")}');"
+                                style="margin-top: 8px; font-size: 0.8rem; padding: 0.25rem 0.5rem;">
+                            <i class="fas fa-exclamation-triangle"></i> Report Issue
+                        </button>
+                    </div>
+                `;
+                marker.bindPopup(popupContent);
                 marker.bindTooltip(stop.customer_name, {
                     permanent: false,
                     direction: 'top',

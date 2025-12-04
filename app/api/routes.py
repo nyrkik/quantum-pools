@@ -388,13 +388,14 @@ async def create_temp_assignment(
             elif c.assigned_tech_id == tech_id:
                 tech_customers.append(c)
 
-        # Generate route
+        # Generate route (with auto-created visits)
         tech_route = await tech_routing_service.generate_route_for_tech(
             tech=tech,
             customers=tech_customers,
             service_day=service_day,
             route_date=today,
-            organization_id=auth.organization_id
+            organization_id=auth.organization_id,
+            db_session=db
         )
 
         # Save route
@@ -1020,9 +1021,25 @@ async def get_tech_routes_for_day(
             customers_result = await db.execute(customers_query)
             all_customers = customers_result.scalars().all()
 
+            # Day abbreviation mapping for service_schedule check
+            day_abbrev_map = {
+                'monday': 'Mo', 'tuesday': 'Tu', 'wednesday': 'We',
+                'thursday': 'Th', 'friday': 'Fr', 'saturday': 'Sa', 'sunday': 'Su'
+            }
+            day_abbrev = day_abbrev_map.get(service_day.lower())
+
             # Filter customers for this tech and day
             tech_customers = []
             for customer in all_customers:
+                # Check if customer is scheduled for this day
+                is_scheduled_today = (
+                    customer.service_day == service_day or
+                    (day_abbrev and customer.service_schedule and day_abbrev in customer.service_schedule)
+                )
+
+                if not is_scheduled_today:
+                    continue
+
                 # Check if there's a temp assignment for this customer
                 temp_assignment = temp_assignments_by_customer.get(str(customer.id))
 
@@ -1032,17 +1049,18 @@ async def get_tech_routes_for_day(
                         tech_customers.append(customer)
                 else:
                     # Use permanent assignment
-                    if customer.service_day == service_day and customer.assigned_tech_id == tech.id:
+                    if customer.assigned_tech_id == tech.id:
                         tech_customers.append(customer)
 
-            # Generate route if tech has customers
+            # Generate route if tech has customers (with auto-created visits)
             if tech_customers:
                 tech_route = await tech_routing_service.generate_route_for_tech(
                     tech=tech,
                     customers=tech_customers,
                     service_day=service_day,
                     route_date=today,
-                    organization_id=auth.organization_id
+                    organization_id=auth.organization_id,
+                    db_session=db
                 )
 
                 db.add(tech_route)

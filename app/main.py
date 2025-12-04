@@ -52,12 +52,9 @@ async def health_check():
 # Root endpoint
 @app.get("/")
 async def root():
-    """Root endpoint - redirect to docs or serve frontend."""
-    return {
-        "message": "QuantumPools API",
-        "docs": "/docs",
-        "frontend": "/static/index.html"
-    }
+    """Root endpoint - redirect to login page."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/login.html")
 
 
 # Config endpoint for frontend
@@ -218,12 +215,15 @@ async def validate_customer_coordinates():
 
 
 # Import and include routers
-from app.api import auth, customers, techs, routes, imports
+from app.api import auth, customers, techs, routes, imports, visits, issues, services
 app.include_router(auth.router)
 app.include_router(customers.router)
 app.include_router(techs.router)
 app.include_router(routes.router)
 app.include_router(imports.router)
+app.include_router(visits.router)
+app.include_router(issues.router)
+app.include_router(services.router)
 
 
 @app.on_event("startup")

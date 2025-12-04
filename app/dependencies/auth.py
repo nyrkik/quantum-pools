@@ -28,6 +28,7 @@ class AuthContext(BaseModel):
     organization_id: UUID
     role: str
     email: str
+    tech_id: Optional[UUID] = None
     user: Optional[User] = None
     organization: Optional[Organization] = None
 
@@ -68,6 +69,7 @@ async def get_current_user(
         organization_id = UUID(payload.get("organization_id"))
         role = payload.get("role")
         email = payload.get("email")
+        tech_id = UUID(payload.get("tech_id")) if payload.get("tech_id") else None
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -118,6 +120,7 @@ async def get_current_user(
         organization_id=organization_id,
         role=role,
         email=email,
+        tech_id=tech_id,
         user=user,
         organization=organization
     )

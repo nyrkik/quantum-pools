@@ -29,6 +29,16 @@ class Tech(Base):
         comment="Organization this tech belongs to"
     )
 
+    # User account link (optional - for tech self-service)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('users.id'),
+        nullable=True,
+        index=True,
+        unique=True,
+        comment="User account linked to this tech (for login access)"
+    )
+
     # Basic information
     name = Column(String(200), nullable=False, index=True)
     email = Column(String(255), nullable=True)
@@ -111,11 +121,16 @@ class Tech(Base):
 
     # Relationships
     organization = relationship("Organization", back_populates="techs")
+    user = relationship("User", backref="tech")
     routes = relationship(
         "Route",
         back_populates="tech",
         cascade="all, delete-orphan"
     )
+    visits = relationship("Visit", back_populates="tech", cascade="all, delete-orphan")
+    reported_issues = relationship("Issue", foreign_keys="Issue.reported_by_tech_id", back_populates="reported_by")
+    assigned_issues = relationship("Issue", foreign_keys="Issue.assigned_tech_id", back_populates="assigned_tech")
+    resolved_issues = relationship("Issue", foreign_keys="Issue.resolved_by_tech_id", back_populates="resolved_by")
 
     def __repr__(self) -> str:
         return f"<Tech(id={self.id}, name='{self.name}', is_active={self.is_active})>"

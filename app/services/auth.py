@@ -55,7 +55,7 @@ class AuthService:
         return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
     @staticmethod
-    def generate_token(user_id: UUID, organization_id: UUID, role: str, email: str) -> str:
+    def generate_token(user_id: UUID, organization_id: UUID, role: str, email: str, tech_id: Optional[UUID] = None) -> str:
         """
         Generate a JWT access token.
 
@@ -64,6 +64,7 @@ class AuthService:
             organization_id: Organization's UUID
             role: User's role in the organization
             email: User's email address
+            tech_id: Optional Tech UUID if user is linked to a tech
 
         Returns:
             str: JWT token
@@ -78,6 +79,9 @@ class AuthService:
             "exp": expiration,
             "iat": datetime.utcnow(),
         }
+
+        if tech_id:
+            payload["tech_id"] = str(tech_id)
 
         token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
         return token

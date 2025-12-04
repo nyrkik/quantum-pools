@@ -150,6 +150,9 @@ function displayClientProfile(customer) {
                     <h2>${displayName}</h2>
                 </div>
                 <div class="profile-actions">
+                    <button class="btn-icon btn-icon-secondary" onclick="showNewIssueModal('${customer.id}', '${displayName.replace(/'/g, "\\'")}')" title="Report Issue">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </button>
                     <button class="btn-icon btn-icon-primary" onclick="editCustomer('${customer.id}')" title="Edit">
                         <i class="fas fa-edit"></i>
                     </button>
@@ -178,7 +181,7 @@ function displayClientProfile(customer) {
                 </div>
             </div>
 
-            <div class="profile-section">
+            <div class="profile-section mobile-hidden">
                 <h3>Service Details</h3>
                 <div class="profile-grid">
                     <div class="profile-field">
@@ -207,8 +210,28 @@ function displayClientProfile(customer) {
                     </div>
                 </div>
             </div>
+
+            <button class="view-full-profile-btn" onclick="toggleFullProfile()">
+                <i class="fas fa-info-circle"></i>
+                <span>View Full Profile</span>
+            </button>
         </div>
     `;
+}
+
+function toggleFullProfile() {
+    const hiddenSections = document.querySelectorAll('.profile-section.mobile-hidden');
+    const btn = document.querySelector('.view-full-profile-btn');
+
+    hiddenSections.forEach(section => {
+        if (section.style.display === 'block') {
+            section.style.display = '';
+            btn.innerHTML = '<i class="fas fa-info-circle"></i><span>View Full Profile</span>';
+        } else {
+            section.style.display = 'block';
+            btn.innerHTML = '<i class="fas fa-eye-slash"></i><span>Hide Details</span>';
+        }
+    });
 }
 
 async function editCustomer(customerId) {

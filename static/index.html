@@ -4,18 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pool Scout Pro - Pool Service Management</title>
-    <link rel="stylesheet" href="/static/css/base.css?v=9">
-    <link rel="stylesheet" href="/static/css/layout.css?v=9">
-    <link rel="stylesheet" href="/static/css/components.css?v=9">
-    <link rel="stylesheet" href="/static/css/modules.css?v=9">
+    <link rel="stylesheet" href="/static/css/base.css?v=12">
+    <link rel="stylesheet" href="/static/css/layout.css?v=23">
+    <link rel="stylesheet" href="/static/css/components.css?v=18">
+    <link rel="stylesheet" href="/static/css/modules.css?v=13">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <!-- Mobile Hamburger Button -->
-    <button id="mobile-menu-toggle" class="mobile-menu-toggle">
-        <i class="fas fa-bars"></i>
-    </button>
+    <!-- Top Bar with Menu & Profile -->
+    <div class="top-bar">
+        <button id="mobile-menu-toggle" class="mobile-menu-toggle">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <div style="position: relative;">
+            <div class="profile-avatar" id="profile-avatar">U</div>
+            <div class="context-menu" id="profile-context-menu">
+                <a href="#settings" class="context-menu-item" id="profile-settings-link">
+                    <i class="fas fa-cog"></i> Settings
+                </a>
+                <button class="context-menu-item" id="profile-menu-logout">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Icon Sidebar -->
     <nav id="app-sidebar">
@@ -45,6 +59,18 @@
                 <a href="#routes" class="nav-item" data-module="routes" title="Routes">
                     <i class="fas fa-route"></i>
                     <span class="nav-label">Routes</span>
+                </a>
+            </li>
+            <li>
+                <a href="#visits" class="nav-item" data-module="visits" title="Visits">
+                    <i class="fas fa-calendar-check"></i>
+                    <span class="nav-label">Visits</span>
+                </a>
+            </li>
+            <li>
+                <a href="#issues" class="nav-item" data-module="issues" title="Service Alerts">
+                    <i class="fas fa-bell"></i>
+                    <span class="nav-label">Service Alerts</span>
                 </a>
             </li>
             <li>
@@ -84,39 +110,38 @@
             });
         </script>
         <button id="sidebar-toggle" class="sidebar-toggle" title="Toggle Sidebar">
-            <i class="fas fa-bars"></i>
+            <i class="fas fa-angles-left"></i>
         </button>
     </nav>
 
     <!-- Main Content Area -->
     <main id="app-content">
-
         <!-- Dashboard Module -->
         <div id="module-dashboard" class="module-content active">
             <div class="page-header">
                 <h1>Dashboard</h1>
             </div>
             <div class="dashboard-grid">
-                <div class="dashboard-card">
-                    <i class="fas fa-dollar-sign"></i>
-                    <h3>Revenue</h3>
-                    <p class="placeholder">Coming soon</p>
-                </div>
-                <div class="dashboard-card">
-                    <i class="fas fa-users"></i>
-                    <h3>Customers</h3>
-                    <p class="placeholder">Coming soon</p>
-                </div>
-                <div class="dashboard-card">
-                    <i class="fas fa-user-tie"></i>
-                    <h3>Team Members</h3>
-                    <p class="placeholder">Coming soon</p>
-                </div>
-                <div class="dashboard-card">
+                <a href="#visits" class="dashboard-card dashboard-card-link">
+                    <i class="fas fa-calendar-check"></i>
+                    <h3>Service Visits</h3>
+                    <p id="dashboard-visits-count" class="placeholder">Loading...</p>
+                </a>
+                <a href="#issues" class="dashboard-card dashboard-card-link">
+                    <i class="fas fa-bell"></i>
+                    <h3>Service Alerts</h3>
+                    <p id="dashboard-alerts-count" class="placeholder">Loading...</p>
+                </a>
+                <a href="#routes" class="dashboard-card dashboard-card-link">
                     <i class="fas fa-route"></i>
-                    <h3>Today's Routes</h3>
-                    <p class="placeholder">Coming soon</p>
-                </div>
+                    <h3>Routes</h3>
+                    <p id="dashboard-routes-count" class="placeholder">Loading...</p>
+                </a>
+                <a href="#clients" class="dashboard-card dashboard-card-link">
+                    <i class="fas fa-address-book"></i>
+                    <h3>Clients</h3>
+                    <p id="dashboard-clients-count" class="placeholder">Loading...</p>
+                </a>
             </div>
         </div>
 
@@ -152,8 +177,14 @@
             <div class="page-header">
                 <h1>Clients</h1>
                 <div class="header-actions">
-                    <button id="add-customer-btn" class="btn-primary">+ Add Customer</button>
-                    <button id="bulk-edit-btn" class="btn-primary">Bulk Edit</button>
+                    <button id="add-customer-btn" class="btn-primary">
+                        <i class="fas fa-plus"></i>
+                        <span class="btn-text">Add Customer</span>
+                    </button>
+                    <button id="bulk-edit-btn" class="btn-primary">
+                        <i class="fas fa-edit"></i>
+                        <span class="btn-text">Bulk Edit</span>
+                    </button>
                 </div>
             </div>
             <div class="clients-layout">
@@ -167,8 +198,14 @@
                         </div>
                         <div class="clients-quick-filter">
                             <button class="quick-filter-btn active" data-filter="all">All</button>
-                            <button class="quick-filter-btn" data-filter="residential"><i class="fas fa-home"></i> Res</button>
-                            <button class="quick-filter-btn" data-filter="commercial"><i class="fas fa-building"></i> Com</button>
+                            <button class="quick-filter-btn" data-filter="residential">
+                                <i class="fas fa-home"></i>
+                                <span>Res</span>
+                            </button>
+                            <button class="quick-filter-btn" data-filter="commercial">
+                                <i class="fas fa-building"></i>
+                                <span>Com</span>
+                            </button>
                         </div>
                     </div>
                     <div id="customers-list">
@@ -233,14 +270,109 @@
             </div>
         </div>
 
-        <!-- Jobs Module (Placeholder) -->
+        <!-- Jobs/Services Module -->
         <div id="module-jobs" class="module-content" style="display: none;">
             <div class="page-header">
-                <h1>Job Tracking</h1>
+                <h1>Service Catalog</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="add-service-btn">
+                        <i class="fas fa-plus"></i> Add Service
+                    </button>
+                </div>
             </div>
-            <div class="placeholder-content">
-                <i class="fas fa-clipboard-list"></i>
-                <p>Job tracking module coming soon</p>
+            <div id="services-container" class="content-area">
+                <!-- Services will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Service Alerts Module -->
+        <div id="module-issues" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Service Alerts</h1>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" id="issue-filter-btn">
+                        <i class="fas fa-filter"></i> Filter
+                    </button>
+                    <button class="btn btn-primary btn-mobile-lg" onclick="showNewIssueModal()">
+                        <i class="fas fa-bell"></i> Report Alert
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="issues-filters" style="display: none;">
+                <div class="form-row">
+                    <div class="control-group">
+                        <label>Status</label>
+                        <select id="issue-status-filter" class="filter-select">
+                            <option value="all">All Statuses</option>
+                            <option value="pending" selected>Pending</option>
+                            <option value="scheduled">Scheduled</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="resolved">Resolved</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Severity</label>
+                        <select id="issue-severity-filter" class="filter-select">
+                            <option value="all">All Severities</option>
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Tech</label>
+                        <select id="issue-tech-filter" class="filter-select">
+                            <option value="all">All Techs</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Issues List -->
+            <div id="issues-container">
+                <!-- Issues will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Visits Module -->
+        <div id="module-visits" class="module-content" style="display: none;">
+            <div class="page-header">
+                <h1>Service Visits</h1>
+                <div class="header-actions">
+                    <div class="filter-group">
+                        <select id="visit-status-filter">
+                            <option value="">All Statuses</option>
+                            <option value="scheduled">Scheduled</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                            <option value="no_show">No Show</option>
+                        </select>
+                        <select id="visit-tech-filter">
+                            <option value="">All Techs</option>
+                        </select>
+                        <select id="visit-customer-filter">
+                            <option value="">All Customers</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" id="add-visit-btn">
+                        <i class="fas fa-plus"></i> Log Visit
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tech Overview (for non-tech users) -->
+            <div id="tech-overview" style="display: none;">
+                <div class="tech-summary-cards">
+                    <!-- Tech summary cards will be loaded here -->
+                </div>
+            </div>
+
+            <div id="visits-container" class="content-area">
+                <!-- Visits will be loaded here -->
             </div>
         </div>
 
@@ -255,14 +387,94 @@
             </div>
         </div>
 
-        <!-- Settings Module (Placeholder) -->
+        <!-- Settings Module -->
         <div id="module-settings" class="module-content" style="display: none;">
             <div class="page-header">
                 <h1>Settings</h1>
             </div>
-            <div class="placeholder-content">
-                <i class="fas fa-cog"></i>
-                <p>Settings module coming soon</p>
+
+            <div style="max-width: 800px;">
+                <!-- Profile Section -->
+                <div class="settings-card">
+                    <h2 style="margin-bottom: 1.5rem; color: var(--primary-dark); display: flex; justify-content: space-between; align-items: center;">
+                        <span><i class="fas fa-user-circle"></i> Profile</span>
+                        <button class="btn-secondary" id="edit-profile-btn" style="font-size: 0.9rem; padding: 0.5rem 1rem;">
+                            <i class="fas fa-pen"></i> Edit
+                        </button>
+                    </h2>
+
+                    <div id="profile-success" style="display: none; padding: 0.75rem; background: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 1rem;">
+                        Profile updated successfully!
+                    </div>
+
+                    <div id="profile-error" style="display: none; padding: 0.75rem; background: #f8d7da; color: #721c24; border-radius: 4px; margin-bottom: 1rem;">
+                    </div>
+
+                    <div class="form-grid-2col">
+                        <div class="control-group">
+                            <label for="settings-first-name">First Name</label>
+                            <input type="text" id="settings-first-name" readonly>
+                        </div>
+                        <div class="control-group">
+                            <label for="settings-last-name">Last Name</label>
+                            <input type="text" id="settings-last-name" readonly>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label for="settings-email">Email</label>
+                        <input type="email" id="settings-email" readonly>
+                    </div>
+
+                    <button class="btn-primary" id="save-profile-btn" style="display: none;">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
+                </div>
+
+                <!-- Organization Section -->
+                <div class="settings-card">
+                    <h2 style="margin-bottom: 1.5rem; color: var(--primary-dark);">
+                        <i class="fas fa-building"></i> Organization
+                    </h2>
+
+                    <div class="control-group">
+                        <label for="settings-org-name">Organization Name</label>
+                        <input type="text" id="settings-org-name" readonly>
+                    </div>
+                </div>
+
+                <!-- Change Password Section -->
+                <div class="settings-card">
+                    <h2 style="margin-bottom: 1.5rem; color: var(--primary-dark);">
+                        <i class="fas fa-lock"></i> Change Password
+                    </h2>
+
+                    <div id="password-success" style="display: none; padding: 0.75rem; background: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 1rem;">
+                        Password updated successfully!
+                    </div>
+
+                    <div id="password-error" style="display: none; padding: 0.75rem; background: #f8d7da; color: #721c24; border-radius: 4px; margin-bottom: 1rem;">
+                    </div>
+
+                    <div class="control-group">
+                        <label for="current-password">Current Password</label>
+                        <input type="password" id="current-password" placeholder="Enter current password">
+                    </div>
+
+                    <div class="control-group">
+                        <label for="new-password">New Password</label>
+                        <input type="password" id="new-password" placeholder="Enter new password (min 8 characters)">
+                    </div>
+
+                    <div class="control-group">
+                        <label for="confirm-password">Confirm New Password</label>
+                        <input type="password" id="confirm-password" placeholder="Re-enter new password">
+                    </div>
+
+                    <button class="btn-primary" id="change-password-btn">
+                        <i class="fas fa-key"></i> Update Password
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -541,6 +753,26 @@
     <!-- Hidden file input for CSV import -->
     <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
 
+    <!-- Mobile Bottom Navigation -->
+    <nav id="mobile-bottom-nav" class="mobile-bottom-nav">
+        <a href="#routes" class="mobile-nav-item active" data-module="routes">
+            <i class="fas fa-route"></i>
+            <span>Routes</span>
+        </a>
+        <a href="#visits" class="mobile-nav-item" data-module="visits">
+            <i class="fas fa-calendar-check"></i>
+            <span>Visits</span>
+        </a>
+        <a href="#issues" class="mobile-nav-item" data-module="issues">
+            <i class="fas fa-bell"></i>
+            <span>Alerts</span>
+        </a>
+        <a href="#clients" class="mobile-nav-item" data-module="clients">
+            <i class="fas fa-address-book"></i>
+            <span>Clients</span>
+        </a>
+    </nav>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Authentication (must load first) -->
     <script src="/static/js/auth.js"></script>
@@ -551,14 +783,18 @@
     <!-- Utilities (no dependencies - load first) -->
     <script src="/static/js/utils/helpers.js"></script>
     <!-- Feature modules (must load before app.js) -->
-    <script src="/static/js/modules/navigation.js"></script>
+    <script src="/static/js/modules/navigation.js?v=5"></script>
     <script src="/static/js/modules/map.js"></script>
     <script src="/static/js/modules/modals.js"></script>
     <script src="/static/js/modules/techs.js"></script>
     <script src="/static/js/modules/routes.js"></script>
-    <script src="/static/js/modules/customers.js"></script>
+    <script src="/static/js/modules/customers.js?v=2"></script>
+    <script src="/static/js/modules/issues.js"></script>
+    <script src="/static/js/modules/services.js"></script>
+    <script src="/static/js/modules/visits.js"></script>
+    <script src="/static/js/modules/dashboard.js?v=2"></script>
     <script src="/static/js/modules/bulk-edit.js"></script>
     <!-- Main application -->
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=2"></script>
 </body>
 </html>

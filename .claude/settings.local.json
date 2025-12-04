@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(chmod:*)",
+      "Bash(pytest:*)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(./restart_server.sh:*)",
+      "Bash(pip install:*)",
+      "Bash(lsof:*)",
+      "Bash(journalctl:*)",
+      "Bash(curl:*)",
+      "Bash(source:*)",
+      "Bash(pkill:*)",
+      "Bash(python:*)",
+      "Bash(psql:*)",
+      "Bash(PGPASSWORD=routeoptimizer123 psql:*)",
+      "Bash(uvicorn app.main:app:*)",
+      "Bash(python3:*)",
+      "Bash(pgrep:*)",
+      "Bash(xargs:*)",
+      "Bash(kill:*)",
+      "Bash(alembic revision:*)",
+      "Bash(alembic upgrade:*)",
+      "Bash(find:*)",
+      "Bash(node -c:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

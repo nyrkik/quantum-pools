@@ -540,6 +540,98 @@ function displayRoutesOnMap() { ... }
 
 ---
 
+## Mobile & Deployment Strategy
+
+**Philosophy:** Web-first progressive enhancement to native apps
+
+### Current Phase: Responsive Web Application
+
+**Status:** ✅ Active
+**Platform:** Browser-based PWA
+**Target:** Phones, tablets, desktops
+
+**Features:**
+- Responsive design with mobile-first breakpoints (≤768px)
+- Touch-optimized UI (48px+ touch targets)
+- Bottom navigation bar for mobile
+- Icon-only buttons for space efficiency
+- Browser Geolocation API for field location tracking
+
+**Tech Stack:**
+- Vanilla JavaScript (no framework overhead)
+- CSS Grid/Flexbox responsive layouts
+- Leaflet.js for mapping
+- FastAPI backend on localhost:7008
+
+### Phase 2: GPS Field Tracking (Planned)
+
+**Use Case:** Track tech locations during service visits
+
+**Implementation:**
+- Browser Geolocation API (navigator.geolocation)
+- Distance calculation via Haversine formula
+- localStorage persistence (survives tab close)
+- Auto-resume interrupted sessions
+- Accuracy filtering (ignore bad GPS readings)
+- Fallback to manual distance entry
+
+**Example:**
+```javascript
+navigator.geolocation.getCurrentPosition(
+  (position) => {
+    const { latitude, longitude, accuracy } = position.coords;
+    if (accuracy < 50) recordLocation(latitude, longitude);
+  },
+  handleError,
+  { enableHighAccuracy: true, timeout: 5000 }
+);
+```
+
+### Phase 3: Native Mobile Apps (Future)
+
+**Trigger:** After 10-20 beta customers validate web app
+**Technology:** Capacitor (Ionic framework)
+
+**Benefits:**
+- Better GPS accuracy and background tracking
+- Native camera access for photo uploads
+- Push notifications for alerts
+- Offline mode with local storage
+- App store distribution (iOS/Android)
+
+**Migration Path:**
+1. Install `@capacitor/core` and `@capacitor/cli`
+2. Minimal code changes - swap browser APIs:
+   - `navigator.geolocation` → `@capacitor/geolocation`
+   - `<input type="file">` → `@capacitor/camera`
+   - Service Worker notifications → `@capacitor/push-notifications`
+3. Build native apps via Xcode (iOS) and Android Studio
+4. Submit to App Store / Google Play
+
+**Effort Estimate:** 1-2 days (90% code reuse)
+
+**Key Principle:** Same codebase for web and mobile - only plugin swaps required
+
+### Deployment Architecture
+
+**Development:**
+- Backend: `localhost:7008` (FastAPI dev server)
+- Frontend: Static files served by FastAPI
+- Database: PostgreSQL local
+- Hot reload enabled
+
+**Production:**
+- Backend: Digital Ocean App Platform
+- Frontend: Static files via CDN (Cloudflare)
+- Database: Digital Ocean Managed PostgreSQL
+- HTTPS/SSL: Automatic via platform
+
+**Scaling:**
+- Web app: Stateless, horizontally scalable
+- Native apps: Same backend API, no additional infrastructure
+
+---
+
 ## Development Setup
 
 ### Quick Start

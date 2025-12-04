@@ -9,16 +9,24 @@
     flex-direction: column;
     position: fixed;
     left: 0;
-    top: 0;
-    height: 100vh;
+    top: 60px;
+    height: calc(100vh - 60px);
     z-index: 1000;
     overflow-x: hidden;
+    transition: width var(--transition-speed) ease;
+}
+
+#app-sidebar.expanded {
+    width: var(--sidebar-expanded-width);
 }
 
 .sidebar-header {
     padding: 1rem;
     text-align: center;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .logo {
@@ -78,43 +86,71 @@
 
 .nav-label {
     display: none;
+    margin-left: 1rem;
+    opacity: 0;
+    transition: opacity var(--transition-speed) ease;
+}
+
+#app-sidebar.expanded .nav-label {
+    display: inline;
+    opacity: 1;
 }
 
 .sidebar-toggle {
-    display: none;
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    background-color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 1rem;
+    background-color: transparent;
     border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     color: white;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
     cursor: pointer;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
+    transition: all 0.2s ease;
+    margin-top: auto;
+    opacity: 0.7;
+}
+
+.sidebar-toggle:hover {
+    background-color: rgba(52, 152, 219, 0.2);
+    opacity: 1;
+}
+
+.sidebar-toggle i {
+    transition: transform 0.3s ease;
+}
+
+#app-sidebar:not(.expanded) .sidebar-toggle i {
+    transform: rotate(180deg);
+}
+
+/* Make logo clickable */
+.logo {
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.logo:hover {
+    transform: scale(1.05);
 }
 
 .mobile-menu-toggle {
     display: none;
-    position: fixed;
-    top: 1rem;
-    left: 1rem;
-    z-index: 999;
-    background-color: var(--primary-color);
+    background-color: transparent;
     border: none;
-    color: white;
-    width: 50px;
-    height: 50px;
-    border-radius: 8px;
+    color: var(--primary-dark);
+    width: 44px;
+    height: 44px;
     cursor: pointer;
     font-size: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
 /* ===== MAIN CONTENT AREA ===== */
 #app-content {
     margin-left: var(--sidebar-width);
+    margin-top: 60px;
     flex: 1 !important;
     min-height: 0 !important;
     padding: 2rem;
@@ -122,6 +158,10 @@
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
+}
+
+#app-content.sidebar-expanded {
+    margin-left: var(--sidebar-expanded-width);
 }
 
 /* ===== MODULE CONTENT ===== */
@@ -158,4 +198,75 @@
 .module-header p {
     color: var(--text-light);
     font-size: 1rem;
+}
+
+/* ===== MOBILE BOTTOM NAVIGATION ===== */
+.mobile-bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid #e0e0e0;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    z-index: 1000;
+    padding: 0.5rem 0;
+    justify-content: space-around;
+    align-items: center;
+}
+
+.mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    text-decoration: none;
+    color: #666;
+    transition: all 0.2s;
+    min-width: 70px;
+    touch-action: manipulation;
+}
+
+.mobile-nav-item i {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.mobile-nav-item span {
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.mobile-nav-item.active {
+    color: var(--primary-color);
+}
+
+.mobile-nav-item:active {
+    transform: scale(0.95);
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+/* Show bottom nav on mobile */
+@media (max-width: 768px) {
+    .mobile-bottom-nav {
+        display: flex;
+    }
+
+    /* Hide desktop sidebar toggle on mobile */
+    .sidebar-toggle {
+        display: none !important;
+    }
+
+    /* Add bottom padding to prevent content from being hidden behind nav */
+    #app-content {
+        padding-bottom: 80px !important;
+    }
+
+    /* Adjust module content to account for bottom nav */
+    .module-content {
+        padding-bottom: 1rem;
+    }
 }

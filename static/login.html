@@ -71,6 +71,63 @@
             font-size: 0.95rem;
         }
 
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #eee;
+        }
+
+        .auth-tab {
+            flex: 1;
+            padding: 0.875rem;
+            background: transparent;
+            border: none;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-light);
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .auth-tab:hover {
+            color: var(--primary-color);
+        }
+
+        .auth-tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .success-message {
+            background-color: #efe;
+            color: var(--primary-color);
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            display: none;
+            border: 1px solid #cfc;
+        }
+
+        .success-message.active {
+            display: block;
+        }
+
         .form-group {
             margin-bottom: 1.5rem;
         }
@@ -200,13 +257,18 @@
     <div class="login-container">
         <div class="login-header">
             <div class="logo">PSP</div>
-            <h1>Welcome Back</h1>
-            <p>Sign in to continue to Pool Scout Pro</p>
+            <h1>Pool Scout Pro</h1>
+            <p>Pool Service Management System</p>
         </div>
 
-        <div id="error-message" class="error-message"></div>
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">Login</button>
+            <button class="auth-tab" data-tab="register">Register</button>
+        </div>
 
-        <form id="login-form">
+        <!-- Login Form -->
+        <form id="login-form" class="auth-form active">
+            <div id="login-error" class="error-message"></div>
             <div class="form-group">
                 <label for="email">Email Address</label>
                 <div class="input-group">
@@ -243,84 +305,172 @@
             </button>
         </form>
 
+        <!-- Registration Form -->
+        <form id="register-form" class="auth-form">
+            <div id="register-error" class="error-message"></div>
+            <div id="register-success" class="success-message"></div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="reg-first-name">First Name</label>
+                    <input type="text" id="reg-first-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-last-name">Last Name</label>
+                    <input type="text" id="reg-last-name" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg-email">Email Address</label>
+                <div class="input-group">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" id="reg-email" required autocomplete="email">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg-company">Company Name</label>
+                <div class="input-group">
+                    <i class="fas fa-building"></i>
+                    <input type="text" id="reg-company" required placeholder="e.g., Acme Pool Service">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg-password">Password</label>
+                <div class="input-group">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" id="reg-password" required autocomplete="new-password" minlength="8">
+                </div>
+            </div>
+
+            <button type="submit" id="register-btn" class="login-btn">
+                <span class="spinner"></span>
+                <span id="reg-btn-text">Create Account</span>
+            </button>
+        </form>
+
         <div class="login-footer">
             Pool Scout Pro &copy; 2025
         </div>
     </div>
 
     <script>
-        const loginForm = document.getElementById('login-form');
-        const loginBtn = document.getElementById('login-btn');
-        const btnText = document.getElementById('btn-text');
-        const errorMessage = document.getElementById('error-message');
-        const emailInput = document.getElementById('email');
-        const passwordInput = document.getElementById('password');
-
         // Check if already authenticated
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-            // Verify token is still valid by checking if we can access the API
+        if (localStorage.getItem('auth_token')) {
             window.location.href = '/static/index.html';
         }
 
-        loginForm.addEventListener('submit', async (e) => {
+        // Tab switching
+        document.querySelectorAll('.auth-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabName = this.dataset.tab;
+                document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+                document.getElementById(tabName + '-form').classList.add('active');
+                document.querySelectorAll('.error-message, .success-message').forEach(m => m.classList.remove('active'));
+            });
+        });
+
+        // Login form
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('login-error');
+            const btnText = document.getElementById('btn-text');
+            const btn = document.getElementById('login-btn');
 
-            // Clear previous errors
-            errorMessage.classList.remove('active');
-            errorMessage.textContent = '';
-
-            // Disable form
-            loginBtn.disabled = true;
+            errorDiv.classList.remove('active');
+            btn.disabled = true;
             btnText.textContent = 'Signing in...';
-
-            const email = emailInput.value.trim();
-            const password = passwordInput.value;
 
             try {
                 const response = await fetch('/api/v1/auth/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    // Store authentication token and user info
                     localStorage.setItem('auth_token', data.access_token);
                     localStorage.setItem('user', JSON.stringify(data.user));
                     localStorage.setItem('organization', JSON.stringify(data.organization));
-
-                    // Redirect to main app
                     window.location.href = '/static/index.html';
                 } else {
-                    // Show error message
-                    errorMessage.textContent = data.detail || 'Invalid email or password';
-                    errorMessage.classList.add('active');
-
-                    // Re-enable form
-                    loginBtn.disabled = false;
+                    errorDiv.textContent = data.detail || 'Invalid email or password';
+                    errorDiv.classList.add('active');
+                    btn.disabled = false;
                     btnText.textContent = 'Sign In';
-
-                    // Focus password field for retry
-                    passwordInput.select();
                 }
             } catch (error) {
-                console.error('Login error:', error);
-                errorMessage.textContent = 'Unable to connect to server. Please try again.';
-                errorMessage.classList.add('active');
-
-                // Re-enable form
-                loginBtn.disabled = false;
+                errorDiv.textContent = 'Unable to connect to server. Please try again.';
+                errorDiv.classList.add('active');
+                btn.disabled = false;
                 btnText.textContent = 'Sign In';
             }
         });
 
-        // Auto-focus email field
-        emailInput.focus();
+        // Registration form
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const firstName = document.getElementById('reg-first-name').value;
+            const lastName = document.getElementById('reg-last-name').value;
+            const email = document.getElementById('reg-email').value;
+            const company = document.getElementById('reg-company').value;
+            const password = document.getElementById('reg-password').value;
+            const errorDiv = document.getElementById('register-error');
+            const successDiv = document.getElementById('register-success');
+            const btnText = document.getElementById('reg-btn-text');
+            const btn = document.getElementById('register-btn');
+
+            errorDiv.classList.remove('active');
+            successDiv.classList.remove('active');
+            btn.disabled = true;
+            btnText.textContent = 'Creating account...';
+
+            try {
+                const response = await fetch('/api/v1/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        password,
+                        first_name: firstName,
+                        last_name: lastName,
+                        organization_name: company
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    localStorage.setItem('auth_token', data.access_token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    localStorage.setItem('organization', JSON.stringify(data.organization));
+                    successDiv.textContent = 'Account created! Redirecting...';
+                    successDiv.classList.add('active');
+                    setTimeout(() => window.location.href = '/static/index.html', 1500);
+                } else {
+                    errorDiv.textContent = data.detail || 'Registration failed';
+                    errorDiv.classList.add('active');
+                    btn.disabled = false;
+                    btnText.textContent = 'Create Account';
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Unable to connect to server. Please try again.';
+                errorDiv.classList.add('active');
+                btn.disabled = false;
+                btnText.textContent = 'Create Account';
+            }
+        });
+
+        // Auto-focus
+        document.getElementById('email').focus();
     </script>
 </body>
 </html>

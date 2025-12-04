@@ -187,6 +187,8 @@ class Customer(Base):
         back_populates="customer",
         cascade="all, delete-orphan"
     )
+    visits = relationship("Visit", back_populates="customer", cascade="all, delete-orphan")
+    issues = relationship("Issue", back_populates="customer", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Customer(id={self.id}, display_name='{self.display_name}', service_day='{self.service_day}')>"

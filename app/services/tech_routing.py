@@ -1,18 +1,20 @@
 """
 Single-tech route generation service.
 Creates optimized stop sequences for individual techs using TSP (Traveling Salesman Problem).
+Auto-creates Visit records for each stop in the route.
 """
 
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
-from typing import List, Dict, Tuple
-from datetime import datetime, date
+from typing import List, Dict, Tuple, Optional
+from datetime import datetime, date, time, timedelta
 from uuid import UUID
 import logging
 
 from app.models.customer import Customer
 from app.models.tech import Tech
 from app.models.tech_route import TechRoute
+from app.models.visit import Visit
 from app.services.routing import routing_service
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,8 @@ class TechRoutingService:
         customers: List[Customer],
         service_day: str,
         route_date: date,
-        organization_id: UUID
+        organization_id: UUID,
+        db_session: Optional[any] = None
     ) -> TechRoute:
         """
         Generate an optimized route for a single tech and their customers.
@@ -122,7 +125,84 @@ class TechRoutingService:
             f"{solution['total_distance']:.1f} miles, {solution['total_duration']} minutes"
         )
 
+        # Auto-create Visit records for each stop if db_session provided
+        if db_session:
+            await self._create_visits_for_route(
+                tech=tech,
+                customers=customers,
+                stop_sequence=solution['stop_sequence'],
+                service_day=service_day,
+                route_date=route_date,
+                organization_id=organization_id,
+                db_session=db_session
+            )
+
         return tech_route
+
+    async def _create_visits_for_route(
+        self,
+        tech: Tech,
+        customers: List[Customer],
+        stop_sequence: List[str],
+        service_day: str,
+        route_date: date,
+        organization_id: UUID,
+        db_session: any
+    ):
+        """
+        Auto-create Visit records for each customer in the route.
+
+        Args:
+            tech: Tech performing the route
+            customers: List of all customers
+            stop_sequence: Ordered list of customer IDs
+            service_day: Day of week
+            route_date: Date of the route
+            organization_id: Organization ID
+            db_session: SQLAlchemy async session
+        """
+        from sqlalchemy import select, delete
+        from app.models.visit import Visit
+
+        # Delete existing visits for this tech on this date
+        await db_session.execute(
+            delete(Visit).where(
+                Visit.organization_id == organization_id,
+                Visit.tech_id == tech.id,
+                Visit.scheduled_date >= datetime.combine(route_date, time.min),
+                Visit.scheduled_date < datetime.combine(route_date, time.max)
+            )
+        )
+
+        # Create customer map for quick lookup
+        customer_map = {str(c.id): c for c in customers}
+
+        # Calculate estimated arrival times
+        tech_start_time = tech.working_hours_start
+        current_time = datetime.combine(route_date, tech_start_time)
+
+        # Create Visit record for each stop
+        for customer_id in stop_sequence:
+            customer = customer_map.get(customer_id)
+            if not customer:
+                continue
+
+            visit = Visit(
+                organization_id=organization_id,
+                customer_id=UUID(customer_id),
+                tech_id=tech.id,
+                scheduled_date=current_time,
+                service_day=service_day,
+                status="scheduled"
+            )
+            db_session.add(visit)
+
+            # Increment time for next stop (add service duration + travel time estimate)
+            current_time = current_time + timedelta(minutes=customer.visit_duration + 10)  # +10 min travel estimate
+
+        # Commit visits
+        await db_session.commit()
+        logger.info(f"Created {len(stop_sequence)} visit records for {tech.name} on {route_date}")
 
     def _solve_tsp(
         self,

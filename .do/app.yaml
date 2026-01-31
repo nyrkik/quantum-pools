@@ -1,0 +1,46 @@
+name: quantumpools
+region: nyc
+services:
+  - name: api
+    source_dir: /app
+    dockerfile_path: Dockerfile
+    http_port: 7060
+    instance_count: 1
+    instance_size_slug: professional-xs
+    routes:
+      - path: /api
+    envs:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+      - key: REDIS_URL
+        value: ${redis.REDIS_URL}
+      - key: SECRET_KEY
+        type: SECRET
+      - key: SENTRY_DSN
+        type: SECRET
+      - key: CORS_ORIGINS
+        value: "https://quantumpools.com"
+    health_check:
+      http_path: /api/health
+
+  - name: web
+    source_dir: /frontend
+    build_command: npm run build
+    run_command: npm start
+    http_port: 7061
+    instance_count: 1
+    instance_size_slug: professional-xs
+    routes:
+      - path: /
+    envs:
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://quantumpools.com"
+
+databases:
+  - name: db
+    engine: PG
+    version: "15"
+    size: db-s-1vcpu-1gb
+    num_nodes: 1

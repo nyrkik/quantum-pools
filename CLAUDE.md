@@ -1,0 +1,126 @@
+# QuantumPools - Claude Code Context
+
+## Project Overview
+Enterprise pool service management platform consolidating:
+- **BarkurrRX** (architecture reference): FastAPI + Next.js 16 + React 19 + TypeScript + Tailwind 4 + shadcn/ui
+- **Quantum Pools (NAS)**: OR-Tools VRP route optimization, Leaflet maps, customer/tech management, multi-tenancy
+- **Pool Scout Pro**: EMD inspection scraping, PDF extraction, violation analysis, AI summarization
+
+## Architecture
+
+| Concern | Choice |
+|---------|--------|
+| Frontend | Next.js 16 + React 19 + TS + Tailwind 4 + shadcn/ui |
+| Backend | FastAPI + Python 3.11+ (async throughout) |
+| Database | PostgreSQL 15 + SQLAlchemy 2.0 async + Alembic |
+| Maps | Leaflet via react-leaflet |
+| Scraping | Playwright (replacing Selenium) |
+| Auth | JWT HttpOnly cookies (access 24h + refresh 7d) |
+| Deployment | DigitalOcean App Platform |
+| Monitoring | Sentry (backend + frontend) |
+| Background jobs | APScheduler (async) + Redis |
+| Route optimization | Google OR-Tools VRP |
+| Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
+| AI | Claude API (anthropic SDK) |
+
+## Local Dev Ports
+
+| Service | Port |
+|---------|------|
+| Backend (FastAPI) | 7060 |
+| Frontend (Next.js) | 7061 |
+| PostgreSQL | 5434 |
+| Redis | 6380 |
+
+## Project Structure
+
+```
+QuantumPools/
+├── app/                              # FastAPI backend
+│   ├── app.py                        # create_app() factory
+│   ├── worker.py                     # APScheduler background jobs
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── alembic.ini
+│   ├── migrations/versions/
+│   └── src/
+│       ├── api/
+│       │   ├── deps.py               # Auth deps, RBAC, org scoping
+│       │   └── v1/                    # All route modules
+│       ├── core/
+│       │   ├── config.py             # Pydantic settings
+│       │   ├── database.py           # Async engine, migration-only init
+│       │   ├── security.py           # JWT, bcrypt, RBAC
+│       │   ├── exceptions.py
+│       │   ├── redis_client.py
+│       │   └── rate_limiter.py
+│       ├── middleware/
+│       ├── models/                    # SQLAlchemy ORM (one file per model)
+│       ├── schemas/                   # Pydantic request/response
+│       ├── services/                  # Business logic layer
+│       │   └── emd/                   # EMD-specific services
+│       ├── seeds/
+│       └── utils/
+├── frontend/                          # Next.js 16
+│   ├── app/                           # App router
+│   │   └── portal/                    # Customer portal
+│   ├── components/
+│   │   ├── ui/                        # shadcn/ui primitives
+│   │   ├── layout/                    # Sidebar, header, mobile nav
+│   │   ├── maps/                      # Leaflet components
+│   │   └── {domain}/                  # Domain-specific components
+│   └── lib/
+│       ├── api.ts                     # API client (cookie auth)
+│       └── auth-context.tsx           # AuthProvider + useAuth
+├── docs/
+├── docker-compose.yml
+├── .do/app.yaml
+└── CLAUDE.md
+```
+
+## Critical Reference Files
+
+- `/home/brian/00_MyProjects/BarkurrRX/app/src/core/database.py` — migration-only DB init pattern
+- `/home/brian/00_MyProjects/BarkurrRX/app/src/api/deps.py` — auth dependency chain
+- `/home/brian/00_MyProjects/BarkurrRX/app/app.py` — app factory with lifespan, Sentry, middleware
+- `/home/brian/00_MyProjects/BarkurrRX/frontend/lib/api.ts` — API client with cookie auth
+- `/home/brian/00_MyProjects/BarkurrRX/frontend/lib/auth-context.tsx` — auth context pattern
+
+## RBAC Roles
+
+| Role | Customers | Properties | Routes | Visits | Invoices | Techs | EMD | Settings |
+|------|-----------|------------|--------|--------|----------|-------|-----|----------|
+| owner | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
+| admin | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | Read |
+| manager | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | - |
+| technician | Read | Read | Read own | CRUD own | - | Read | Read | - |
+| readonly | Read | Read | Read | Read | Read | Read | Read | - |
+
+## Key Relationships
+
+```
+Organization 1──* OrganizationUser *──1 User
+Organization 1──* Customer 1──* Property
+Organization 1──* Tech
+Customer 1──1 BillingSchedule
+Customer 1──* Invoice 1──* InvoiceLineItem
+Customer 1──* Payment
+Customer 1──1 PortalUser
+Customer 1──* ServiceRequest
+Property 1──* Visit *──1 Tech
+Property 1──* ChemicalReading
+Visit 1──* ChemicalReading
+Visit *──* Service (through VisitService)
+Tech 1──* TechRoute 1──* RouteStop ──1 Property
+EMDFacility 1──* EMDInspectionReport 1──* EMDViolation
+```
+
+## Phase Status
+
+- [x] Phase 0: Foundation (Auth + skeleton end-to-end)
+- [ ] Phase 1: Core Business Operations (customers, properties, techs, visits, chemical readings)
+- [ ] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
+- [ ] Phase 3: Invoicing & Billing (invoices, payments, PDF, email, QuantumTax sync)
+- [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
+- [ ] Phase 5: EMD Inspection Intelligence (Playwright scraping, PDF extraction, AI summaries)
+- [ ] Phase 6: Advanced Features (Stripe, equipment tracking, SMS, PWA)

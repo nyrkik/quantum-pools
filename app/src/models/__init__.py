@@ -16,6 +16,7 @@ from src.models.visit import Visit
 from src.models.visit_service import VisitService
 from src.models.chemical_reading import ChemicalReading
 from src.models.geocode_cache import GeocodeCache
+from src.models.route import Route, RouteStop, TempTechAssignment
 
 __all__ = [
     "Base",
@@ -31,4 +32,7 @@ __all__ = [
     "VisitService",
     "ChemicalReading",
     "GeocodeCache",
+    "Route",
+    "RouteStop",
+    "TempTechAssignment",
 ]

@@ -23,14 +23,23 @@ Enterprise pool service management platform consolidating:
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) |
 
+## Network
+
+| Host | IP | Role |
+|------|-----|------|
+| ms-01 (server) | 10.10.10.10 | Dev server, runs all services |
+| Desktop (Brian) | 10.10.10.101 | Development workstation, browser |
+
+UFW is active on ms-01. Ports must be explicitly opened: `sudo ufw allow <port>/tcp`
+
 ## Local Dev Ports
 
-| Service | Port |
-|---------|------|
-| Backend (FastAPI) | 7060 |
-| Frontend (Next.js) | 7061 |
-| PostgreSQL | 5434 |
-| Redis | 6380 |
+| Service | Port | UFW |
+|---------|------|-----|
+| Backend (FastAPI) | 7060 | opened |
+| Frontend (Next.js) | 7061 | opened |
+| PostgreSQL | 5434 | internal only |
+| Redis | 6380 | internal only |
 
 ## Project Structure
 

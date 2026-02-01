@@ -89,6 +89,16 @@ QuantumPools/
 └── CLAUDE.md
 ```
 
+## Dev Environment Notes
+
+- **Python venv**: `/home/brian/00_MyProjects/QuantumPools/venv` (NOT inside `app/`)
+- **Alembic**: Run from `app/` dir using full path: `/home/brian/00_MyProjects/QuantumPools/venv/bin/alembic`
+- **Backend start**: `/home/brian/00_MyProjects/QuantumPools/venv/bin/uvicorn app:app --host 0.0.0.0 --port 7060` from `app/`
+- **Frontend start**: `npm run dev` from `frontend/` (port 7061)
+- **DB defaults are in Python only**: SQLAlchemy model defaults (e.g. `Boolean default=False`, `Integer default=30`) do NOT exist at the PostgreSQL column level. Raw SQL inserts must explicitly provide ALL not-null columns.
+- **Org scoping**: Frontend does not send `X-Organization-Id` header. Backend `get_current_org_user` picks the first org for the user via `.limit(1)`. All users currently belong to a single org ("Pool Co").
+- **Old app reference**: `/mnt/Projects/quantum-pools` — original single-tenant app. SQL dump with all customer/driver data at `backups/backup_pre_saas.sql`. Migration script at `app/scripts/migrate_from_old.py`.
+
 ## Critical Reference Files
 
 - `/home/brian/00_MyProjects/BarkurrRX/app/src/core/database.py` — migration-only DB init pattern

@@ -1,5 +1,7 @@
 # QuantumPools - Claude Code Context
 
+**Repo**: `git@github.com:nyrkik/quantum-pools.git`
+
 ## Project Overview
 Enterprise pool service management platform consolidating:
 - **BarkurrRX** (architecture reference): FastAPI + Next.js 16 + React 19 + TypeScript + Tailwind 4 + shadcn/ui

@@ -120,15 +120,15 @@ Property 1──* Visit *──1 Tech
 Property 1──* ChemicalReading
 Visit 1──* ChemicalReading
 Visit *──* Service (through VisitService)
-Tech 1──* TechRoute 1──* RouteStop ──1 Property
+Tech 1──* Route 1──* RouteStop ──1 Property
 EMDFacility 1──* EMDInspectionReport 1──* EMDViolation
 ```
 
 ## Phase Status
 
 - [x] Phase 0: Foundation (Auth + skeleton end-to-end)
-- [ ] Phase 1: Core Business Operations (customers, properties, techs, visits, chemical readings)
-- [ ] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
+- [x] Phase 1: Core Business Operations (customers, properties, techs, visits, chemical readings)
+- [x] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
 - [ ] Phase 3: Invoicing & Billing (invoices, payments, PDF, email, QuantumTax sync)
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [ ] Phase 5: EMD Inspection Intelligence (Playwright scraping, PDF extraction, AI summaries)

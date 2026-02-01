@@ -60,14 +60,23 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t p-4">
-        <div className="mb-2">
-          <p className="text-sm font-medium truncate">
-            {user?.first_name} {user?.last_name}
-          </p>
-          <p className="text-xs text-muted-foreground truncate">
-            {organizationName}
-          </p>
-        </div>
+        <Link
+          href="/settings"
+          className="mb-3 flex items-center gap-3 rounded-md p-1 -mx-1 transition-colors hover:bg-accent/50"
+        >
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+            {user?.first_name?.[0]}
+            {user?.last_name?.[0]}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate">
+              {user?.first_name} {user?.last_name}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {organizationName}
+            </p>
+          </div>
+        </Link>
         <Button
           variant="ghost"
           size="sm"

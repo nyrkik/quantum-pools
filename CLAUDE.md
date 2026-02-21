@@ -26,13 +26,8 @@ Enterprise pool service management platform consolidating:
 | AI | Claude API (anthropic SDK) |
 
 ## Network
-
-| Host | IP | Role |
-|------|-----|------|
-| ms-01 (server) | 10.10.10.10 | Dev server, runs all services |
-| Desktop (Brian) | 10.10.10.101 | Development workstation, browser |
-
-UFW is active on ms-01. Ports must be explicitly opened: `sudo ufw allow <port>/tcp`
+See `~/.claude/CLAUDE.md` for full network topology and port registry.
+UFW is active on ms-01 — new ports need `sudo ufw allow` (requires user approval).
 
 ## Local Dev Ports
 

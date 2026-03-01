@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -14,7 +15,6 @@ import {
   Shield,
   Settings,
   LogOut,
-  Droplets,
 } from "lucide-react";
 
 const navItems = [
@@ -33,9 +33,9 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-background">
-      <div className="flex items-center gap-2 border-b px-4 py-4">
-        <Droplets className="h-6 w-6 text-blue-600" />
-        <span className="text-lg font-semibold">QuantumPools</span>
+      <div className="flex items-center gap-3 border-b px-4 py-4">
+        <Image src="/logo.png" alt="QuantumPools" width={72} height={72} />
+        <span className="text-lg font-semibold text-[#2989BE]">QuantumPools</span>
       </div>
 
       <nav className="flex-1 space-y-1 px-2 py-3">

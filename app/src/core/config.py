@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     spaces_region: str = Field(default="nyc3", env="SPACES_REGION")
     spaces_endpoint: Optional[str] = Field(default=None, env="SPACES_ENDPOINT")
 
+    # Stripe
+    stripe_secret_key: Optional[str] = Field(default=None, env="STRIPE_SECRET_KEY")
+    stripe_publishable_key: Optional[str] = Field(default=None, env="STRIPE_PUBLISHABLE_KEY")
+    stripe_webhook_secret: Optional[str] = Field(default=None, env="STRIPE_WEBHOOK_SECRET")
+
     # Monitoring
     sentry_dsn: Optional[str] = Field(default=None, env="SENTRY_DSN")
 

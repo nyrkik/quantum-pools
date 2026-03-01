@@ -7,7 +7,7 @@ from datetime import datetime
 
 class CustomerCreate(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field("", max_length=100)
     company_name: Optional[str] = None
     customer_type: str = "residential"
     email: Optional[str] = None
@@ -73,5 +73,6 @@ class CustomerResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     property_count: int = 0
+    first_property_address: Optional[str] = None
 
     model_config = {"from_attributes": True}

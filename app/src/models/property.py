@@ -41,6 +41,9 @@ class Property(Base):
     chlorinator_type: Mapped[str | None] = mapped_column(String(100))
     automation_system: Mapped[str | None] = mapped_column(String(100))
 
+    # PSS migration
+    pss_id: Mapped[str | None] = mapped_column(String(50), index=True)
+
     # Access
     gate_code: Mapped[str | None] = mapped_column(String(50))
     access_instructions: Mapped[str | None] = mapped_column(Text)

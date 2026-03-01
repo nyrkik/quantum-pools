@@ -22,8 +22,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, MapPin } from "lucide-react";
+import Link from "next/link";
 
 interface Customer {
   id: string;
@@ -57,6 +66,16 @@ interface Property {
   is_active: boolean;
 }
 
+interface Invoice {
+  id: string;
+  invoice_number: string;
+  subject: string | null;
+  status: string;
+  issue_date: string;
+  total: number;
+  balance: number;
+}
+
 export default function CustomerDetailPage({
   params,
 }: {
@@ -66,16 +85,19 @@ export default function CustomerDetailPage({
   const router = useRouter();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [addPropOpen, setAddPropOpen] = useState(false);
 
   const fetch = useCallback(async () => {
     try {
-      const [c, p] = await Promise.all([
+      const [c, p, inv] = await Promise.all([
         api.get<Customer>(`/v1/customers/${id}`),
         api.get<{ items: Property[] }>(`/v1/properties?customer_id=${id}`),
+        api.get<{ items: Invoice[] }>(`/v1/invoices?customer_id=${id}`),
       ]);
       setCustomer(c);
       setProperties(p.items);
+      setInvoices(inv.items);
     } catch {
       toast.error("Failed to load customer");
     }
@@ -122,10 +144,15 @@ export default function CustomerDetailPage({
         </Button>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            {customer.first_name} {customer.last_name}
+            {customer.customer_type === "commercial"
+              ? customer.first_name
+              : `${customer.first_name} ${customer.last_name}`}
           </h1>
           {customer.company_name && (
             <p className="text-muted-foreground">{customer.company_name}</p>
+          )}
+          {customer.customer_type === "commercial" && (
+            <Badge variant="outline" className="mt-1">commercial</Badge>
           )}
         </div>
         <Badge variant={customer.is_active ? "default" : "secondary"}>
@@ -139,7 +166,9 @@ export default function CustomerDetailPage({
           <TabsTrigger value="properties">
             Properties ({properties.length})
           </TabsTrigger>
-          <TabsTrigger value="invoices">Invoices</TabsTrigger>
+          <TabsTrigger value="invoices">
+            Invoices ({invoices.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="info" className="space-y-4">
@@ -292,9 +321,72 @@ export default function CustomerDetailPage({
         </TabsContent>
 
         <TabsContent value="invoices">
-          <p className="text-center text-muted-foreground py-8">
-            Invoicing available in Phase 3
-          </p>
+          {invoices.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">
+              No invoices yet
+            </p>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Subject</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Issue Date</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Balance</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv) => (
+                    <TableRow key={inv.id}>
+                      <TableCell>
+                        <Link
+                          href={`/invoices/${inv.id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {inv.invoice_number}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {inv.subject || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            inv.status === "paid"
+                              ? "default"
+                              : inv.status === "overdue"
+                                ? "destructive"
+                                : "secondary"
+                          }
+                          className={
+                            inv.status === "paid"
+                              ? "bg-green-600"
+                              : inv.status === "sent"
+                                ? "border-blue-400 text-blue-600"
+                                : ""
+                          }
+                        >
+                          {inv.status.replace("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{inv.issue_date}</TableCell>
+                      <TableCell className="text-right">
+                        ${inv.total.toFixed(2)}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right ${inv.balance > 0 ? "text-red-600 font-medium" : ""}`}
+                      >
+                        ${inv.balance.toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

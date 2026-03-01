@@ -1,0 +1,89 @@
+"""Payment service — record payments, update invoice and customer balance."""
+
+import uuid
+from typing import Optional, List
+from datetime import date
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
+
+from src.models.payment import Payment, PaymentStatus
+from src.models.invoice import Invoice
+from src.models.customer import Customer
+from src.core.exceptions import NotFoundError, ValidationError
+from src.services.invoice_service import InvoiceService
+
+
+class PaymentService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def list(
+        self,
+        org_id: str,
+        customer_id: Optional[str] = None,
+        invoice_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[List[Payment], int]:
+        query = (
+            select(Payment)
+            .where(Payment.organization_id == org_id)
+            .options(selectinload(Payment.customer), selectinload(Payment.invoice))
+        )
+        count_query = select(func.count(Payment.id)).where(Payment.organization_id == org_id)
+
+        if customer_id:
+            query = query.where(Payment.customer_id == customer_id)
+            count_query = count_query.where(Payment.customer_id == customer_id)
+        if invoice_id:
+            query = query.where(Payment.invoice_id == invoice_id)
+            count_query = count_query.where(Payment.invoice_id == invoice_id)
+
+        total = (await self.db.execute(count_query)).scalar() or 0
+        result = await self.db.execute(
+            query.order_by(Payment.payment_date.desc(), Payment.created_at.desc())
+            .offset(skip).limit(limit)
+        )
+        return list(result.scalars().all()), total
+
+    async def create(self, org_id: str, **kwargs) -> Payment:
+        customer_id = kwargs["customer_id"]
+        invoice_id = kwargs.get("invoice_id")
+
+        # Verify customer
+        cust_result = await self.db.execute(
+            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
+        )
+        customer = cust_result.scalar_one_or_none()
+        if not customer:
+            raise NotFoundError("Customer")
+
+        # Verify invoice if provided
+        invoice = None
+        if invoice_id:
+            inv_svc = InvoiceService(self.db)
+            invoice = await inv_svc.get(org_id, invoice_id)
+            if invoice.customer_id != customer_id:
+                raise ValidationError("Invoice does not belong to this customer")
+
+        payment = Payment(
+            id=str(uuid.uuid4()),
+            organization_id=org_id,
+            status=PaymentStatus.completed.value,
+            **kwargs,
+        )
+        self.db.add(payment)
+
+        # Update invoice balance
+        if invoice:
+            inv_svc = InvoiceService(self.db)
+            await inv_svc.record_payment(invoice, payment.amount)
+
+        # Update customer balance
+        customer.balance = round(customer.balance - payment.amount, 2)
+
+        await self.db.flush()
+        await self.db.refresh(payment)
+        return payment

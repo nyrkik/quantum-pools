@@ -53,6 +53,12 @@ class Customer(Base):
     balance: Mapped[float] = mapped_column(Float, default=0.0)
     difficulty_rating: Mapped[int] = mapped_column(Integer, default=1)
     notes: Mapped[str | None] = mapped_column(Text)
+
+    # PSS migration + billing
+    pss_id: Mapped[str | None] = mapped_column(String(50), index=True)
+    autopay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
@@ -63,6 +69,8 @@ class Customer(Base):
 
     organization = relationship("Organization", lazy="noload")
     properties = relationship("Property", back_populates="customer", lazy="noload")
+    invoices = relationship("Invoice", back_populates="customer", lazy="noload")
+    payments = relationship("Payment", back_populates="customer", lazy="noload")
 
     @property
     def full_name(self) -> str:
@@ -70,6 +78,6 @@ class Customer(Base):
 
     @property
     def display_name(self) -> str:
-        if self.company_name:
-            return self.company_name
+        if self.customer_type == "commercial":
+            return self.first_name
         return self.full_name

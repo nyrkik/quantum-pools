@@ -29,7 +29,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Search } from "lucide-react";
 
@@ -45,6 +44,12 @@ interface Customer {
   balance: number;
   is_active: boolean;
   property_count: number;
+  first_property_address: string | null;
+}
+
+function customerDisplayName(c: Customer) {
+  if (c.customer_type === "commercial") return c.first_name;
+  return `${c.first_name} ${c.last_name}`.trim();
 }
 
 export default function CustomersPage() {
@@ -53,6 +58,7 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [newType, setNewType] = useState("residential");
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true);
@@ -78,11 +84,16 @@ export default function CustomersPage() {
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const isCommercial = newType === "commercial";
     const body = {
-      first_name: form.get("first_name") as string,
-      last_name: form.get("last_name") as string,
-      company_name: (form.get("company_name") as string) || undefined,
-      customer_type: form.get("customer_type") as string,
+      first_name: isCommercial
+        ? (form.get("property_name") as string)
+        : (form.get("first_name") as string),
+      last_name: isCommercial ? "" : (form.get("last_name") as string),
+      company_name: isCommercial
+        ? (form.get("company_name") as string) || undefined
+        : undefined,
+      customer_type: newType,
       email: (form.get("email") as string) || undefined,
       phone: (form.get("phone") as string) || undefined,
       monthly_rate: parseFloat(form.get("monthly_rate") as string) || 0,
@@ -91,6 +102,7 @@ export default function CustomersPage() {
       await api.post("/v1/customers", body);
       toast.success("Customer created");
       setDialogOpen(false);
+      setNewType("residential");
       fetchCustomers();
     } catch {
       toast.error("Failed to create customer");
@@ -116,20 +128,52 @@ export default function CustomersPage() {
               <DialogTitle>New Customer</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="first_name">First name</Label>
-                  <Input id="first_name" name="first_name" required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="last_name">Last name</Label>
-                  <Input id="last_name" name="last_name" required />
-                </div>
-              </div>
               <div className="space-y-2">
-                <Label htmlFor="company_name">Company (optional)</Label>
-                <Input id="company_name" name="company_name" />
+                <Label>Type</Label>
+                <Select value={newType} onValueChange={setNewType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="residential">Residential</SelectItem>
+                    <SelectItem value="commercial">Commercial</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
+              {newType === "commercial" ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="property_name">Property Name</Label>
+                    <Input
+                      id="property_name"
+                      name="property_name"
+                      placeholder="e.g. Parkwood Square"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="company_name">Management Company</Label>
+                    <Input
+                      id="company_name"
+                      name="company_name"
+                      placeholder="e.g. Bright PM"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="first_name">First Name</Label>
+                    <Input id="first_name" name="first_name" required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="last_name">Last Name</Label>
+                    <Input id="last_name" name="last_name" required />
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
@@ -140,29 +184,15 @@ export default function CustomersPage() {
                   <Input id="phone" name="phone" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="customer_type">Type</Label>
-                  <Select name="customer_type" defaultValue="residential">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="residential">Residential</SelectItem>
-                      <SelectItem value="commercial">Commercial</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="monthly_rate">Monthly Rate</Label>
-                  <Input
-                    id="monthly_rate"
-                    name="monthly_rate"
-                    type="number"
-                    step="0.01"
-                    defaultValue="0"
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="monthly_rate">Monthly Rate</Label>
+                <Input
+                  id="monthly_rate"
+                  name="monthly_rate"
+                  type="number"
+                  step="0.01"
+                  defaultValue="0"
+                />
               </div>
               <Button type="submit" className="w-full">
                 Create Customer
@@ -188,8 +218,9 @@ export default function CustomersPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Property</TableHead>
+              <TableHead>Mgmt Co</TableHead>
               <TableHead>Contact</TableHead>
-              <TableHead>Properties</TableHead>
               <TableHead>Monthly Rate</TableHead>
               <TableHead>Balance</TableHead>
               <TableHead>Status</TableHead>
@@ -198,14 +229,14 @@ export default function CustomersPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : customers.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center py-8 text-muted-foreground"
                 >
                   No customers found
@@ -219,16 +250,17 @@ export default function CustomersPage() {
                       href={`/customers/${c.id}`}
                       className="font-medium hover:underline"
                     >
-                      {c.first_name} {c.last_name}
+                      {customerDisplayName(c)}
                     </Link>
-                    {c.company_name && (
-                      <p className="text-xs text-muted-foreground">
-                        {c.company_name}
-                      </p>
-                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{c.customer_type}</Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {c.first_property_address || "—"}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {c.company_name || "—"}
                   </TableCell>
                   <TableCell>
                     <div className="text-sm">{c.email}</div>
@@ -236,7 +268,6 @@ export default function CustomersPage() {
                       {c.phone}
                     </div>
                   </TableCell>
-                  <TableCell>{c.property_count}</TableCell>
                   <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
                   <TableCell
                     className={c.balance > 0 ? "text-red-600 font-medium" : ""}

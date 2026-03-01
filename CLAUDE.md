@@ -26,17 +26,8 @@ Enterprise pool service management platform consolidating:
 | AI | Claude API (anthropic SDK) |
 
 ## Network
-See `~/.claude/CLAUDE.md` for full network topology and port registry.
-UFW is active on ms-01 — new ports need `sudo ufw allow` (requires user approval).
 
-## Local Dev Ports
-
-| Service | Port | UFW |
-|---------|------|-----|
-| Backend (FastAPI) | 7060 | opened |
-| Frontend (Next.js) | 7061 | opened |
-| PostgreSQL | 5434 | internal only |
-| Redis | 6380 | internal only |
+See `~/.claude/CLAUDE.md` for full network topology, port registry, and Tailscale ACL.
 
 ## Project Structure
 

@@ -17,6 +17,8 @@ from src.models.visit_service import VisitService
 from src.models.chemical_reading import ChemicalReading
 from src.models.geocode_cache import GeocodeCache
 from src.models.route import Route, RouteStop, TempTechAssignment
+from src.models.invoice import Invoice, InvoiceLineItem
+from src.models.payment import Payment
 
 __all__ = [
     "Base",
@@ -35,4 +37,7 @@ __all__ = [
     "Route",
     "RouteStop",
     "TempTechAssignment",
+    "Invoice",
+    "InvoiceLineItem",
+    "Payment",
 ]

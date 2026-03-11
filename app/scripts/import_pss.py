@@ -27,7 +27,7 @@ from pathlib import Path
 import asyncpg
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
-NEW_DB = "postgresql://quantumpools:quantumpools@localhost:5434/quantumpools"
+NEW_DB = "postgresql://quantumpools:quantumpools@localhost:7062/quantumpools"
 
 # CSV files (dated export)
 CLIENTS_CSV = DATA_DIR / "pssclients-2026-02-13.csv"

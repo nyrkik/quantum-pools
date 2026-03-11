@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 0.0.0.0 -p 7061",
+    "dev": "next dev -H 0.0.0.0 -p 7060",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -33,6 +33,7 @@
     "lucide-react": "^0.563.0",
     "next": "16.1.6",
     "next-themes": "^0.4.6",
+    "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-day-picker": "^9.13.0",
     "react-dom": "19.2.3",

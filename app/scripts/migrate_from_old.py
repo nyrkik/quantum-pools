@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import asyncpg
 
 OLD_DUMP = "/mnt/Projects/quantum-pools/backups/backup_pre_saas.sql"
-NEW_DB = "postgresql://quantumpools:quantumpools@localhost:5434/quantumpools"
+NEW_DB = "postgresql://quantumpools:quantumpools@localhost:7062/quantumpools"
 
 
 def parse_copy_block(lines: list[str], table_name: str) -> list[list[str]]:

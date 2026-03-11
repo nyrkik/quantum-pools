@@ -21,13 +21,13 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = Field(
-        default="postgresql://quantumpools:quantumpools@localhost:5434/quantumpools",
+        default="postgresql://quantumpools:quantumpools@localhost:7062/quantumpools",
         env="DATABASE_URL",
     )
     sql_echo: bool = Field(default=False, env="SQL_ECHO")
 
     # Redis
-    redis_url: str = Field(default="redis://localhost:6380/0", env="REDIS_URL")
+    redis_url: str = Field(default="redis://localhost:7063/0", env="REDIS_URL")
 
     # Security & Auth
     jwt_access_token_expire_hours: int = Field(default=24, env="JWT_ACCESS_TOKEN_EXPIRE_HOURS")
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins_raw: str = Field(
-        default="http://localhost:7061,http://localhost:3000",
+        default="http://localhost:7060,http://localhost:7061,http://localhost:3000",
         validation_alias=AliasChoices("CORS_ORIGINS", "cors_origins"),
     )
 
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     smtp_password: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
     smtp_from_email: Optional[str] = Field(default=None, env="SMTP_FROM_EMAIL")
     smtp_from_name: str = Field(default="QuantumPools", env="SMTP_FROM_NAME")
-    frontend_url: str = Field(default="http://localhost:7061", env="FRONTEND_URL")
+    frontend_url: str = Field(default="http://localhost:7060", env="FRONTEND_URL")
 
     # AI Services
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")

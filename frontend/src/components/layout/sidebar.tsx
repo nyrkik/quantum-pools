@@ -15,6 +15,7 @@ import {
   Shield,
   Settings,
   LogOut,
+  TrendingUp,
 } from "lucide-react";
 
 const navItems = [
@@ -23,6 +24,7 @@ const navItems = [
   { href: "/properties", label: "Properties", icon: MapPin },
   { href: "/routes", label: "Routes", icon: Route },
   { href: "/invoices", label: "Invoices", icon: FileText },
+  { href: "/profitability", label: "Profitability", icon: TrendingUp },
   { href: "/emd", label: "EMD Intel", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

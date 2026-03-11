@@ -79,8 +79,8 @@ QuantumPools/
 
 - **Python venv**: `/home/brian/00_MyProjects/QuantumPools/venv` (NOT inside `app/`)
 - **Alembic**: Run from `app/` dir using full path: `/home/brian/00_MyProjects/QuantumPools/venv/bin/alembic`
-- **Backend start**: `/home/brian/00_MyProjects/QuantumPools/venv/bin/uvicorn app:app --host 0.0.0.0 --port 7060` from `app/`
-- **Frontend start**: `npm run dev` from `frontend/` (port 7061)
+- **Backend start**: `/home/brian/00_MyProjects/QuantumPools/venv/bin/uvicorn app:app --host 0.0.0.0 --port 7061` from `app/`
+- **Frontend start**: `npm run dev` from `frontend/` (port 7060)
 - **DB defaults are in Python only**: SQLAlchemy model defaults (e.g. `Boolean default=False`, `Integer default=30`) do NOT exist at the PostgreSQL column level. Raw SQL inserts must explicitly provide ALL not-null columns.
 - **Org scoping**: Frontend does not send `X-Organization-Id` header. Backend `get_current_org_user` picks the first org for the user via `.limit(1)`. All users currently belong to a single org ("Pool Co").
 - **Old app reference**: `/mnt/Projects/quantum-pools` — original single-tenant app. SQL dump with all customer/driver data at `backups/backup_pre_saas.sql`. Migration script at `app/scripts/migrate_from_old.py`.
@@ -109,6 +109,7 @@ QuantumPools/
 Organization 1──* OrganizationUser *──1 User
 Organization 1──* Customer 1──* Property
 Organization 1──* Tech
+Organization 1──1 OrgCostSettings
 Customer 1──1 BillingSchedule
 Customer 1──* Invoice 1──* InvoiceLineItem
 Customer 1──* Payment
@@ -116,6 +117,8 @@ Customer 1──1 PortalUser
 Customer 1──* ServiceRequest
 Property 1──* Visit *──1 Tech
 Property 1──* ChemicalReading
+Property 1──1 PropertyDifficulty
+Property 1──1 PropertyJurisdiction ──1 BatherLoadJurisdiction
 Visit 1──* ChemicalReading
 Visit *──* Service (through VisitService)
 Tech 1──* Route 1──* RouteStop ──1 Property
@@ -127,7 +130,11 @@ EMDFacility 1──* EMDInspectionReport 1──* EMDViolation
 - [x] Phase 0: Foundation (Auth + skeleton end-to-end)
 - [x] Phase 1: Core Business Operations (customers, properties, techs, visits, chemical readings)
 - [x] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
-- [ ] Phase 3: Invoicing & Billing (invoices, payments, PDF, email, QuantumTax sync)
+- [x] Phase 3a: Invoicing CRUD (invoices, payments — missing email/PDF/Stripe/worker)
+- [x] Phase 3b: Profitability Analysis (models, difficulty scoring, cost breakdown, bather load calculator, frontend dashboard)
+  - Satellite detection deferred — needs Google Maps Static API key
+- [ ] Phase 3c: Complete Invoicing (email, PDF, Stripe, AutoPay, background worker)
+- [ ] Phase 3d: Core Pool Ops (multiple bodies of water, LSI/dosing, workflows)
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [ ] Phase 5: EMD Inspection Intelligence (Playwright scraping, PDF extraction, AI summaries)
 - [ ] Phase 6: Advanced Features (Stripe, equipment tracking, SMS, PWA)

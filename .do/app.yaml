@@ -4,7 +4,7 @@ services:
   - name: api
     source_dir: /app
     dockerfile_path: Dockerfile
-    http_port: 7060
+    http_port: 7061
     instance_count: 1
     instance_size_slug: professional-xs
     routes:
@@ -29,7 +29,7 @@ services:
     source_dir: /frontend
     build_command: npm run build
     run_command: npm start
-    http_port: 7061
+    http_port: 7060
     instance_count: 1
     instance_size_slug: professional-xs
     routes:

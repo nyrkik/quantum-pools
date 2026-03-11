@@ -1,0 +1,227 @@
+"""Profitability analysis endpoints."""
+
+from typing import Optional
+from fastapi import APIRouter, Depends, Query, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.database import get_db
+from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.models.organization_user import OrgRole
+from src.schemas.profitability import (
+    OrgCostSettingsUpdate,
+    OrgCostSettingsResponse,
+    PropertyDifficultyUpdate,
+    PropertyDifficultyResponse,
+    ProfitabilityOverview,
+    WhaleCurvePoint,
+    PricingSuggestion,
+    ProfitabilityAccount,
+    JurisdictionResponse,
+    BatherLoadRequest,
+    BatherLoadResult,
+    BulkJurisdictionRequest,
+)
+from src.services.profitability_service import ProfitabilityService
+from src.services.bather_load_service import BatherLoadService
+from src.services.property_service import PropertyService
+
+router = APIRouter(prefix="/profitability", tags=["profitability"])
+
+
+# --- Settings ---
+
+@router.get("/settings", response_model=OrgCostSettingsResponse)
+async def get_settings(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    settings = await svc.get_or_create_settings(ctx.organization_id)
+    return OrgCostSettingsResponse.model_validate(settings)
+
+
+@router.put("/settings", response_model=OrgCostSettingsResponse)
+async def update_settings(
+    body: OrgCostSettingsUpdate,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    settings = await svc.update_settings(ctx.organization_id, **body.model_dump(exclude_unset=True))
+    return OrgCostSettingsResponse.model_validate(settings)
+
+
+# --- Overview & Analysis ---
+
+@router.get("/overview", response_model=ProfitabilityOverview)
+async def get_overview(
+    min_margin: Optional[float] = Query(None),
+    max_margin: Optional[float] = Query(None),
+    min_difficulty: Optional[float] = Query(None),
+    max_difficulty: Optional[float] = Query(None),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    return await svc.get_overview(
+        ctx.organization_id,
+        min_margin=min_margin,
+        max_margin=max_margin,
+        min_difficulty=min_difficulty,
+        max_difficulty=max_difficulty,
+    )
+
+
+@router.get("/account/{customer_id}", response_model=list[ProfitabilityAccount])
+async def get_account_detail(
+    customer_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    return await svc.get_account_detail(ctx.organization_id, customer_id)
+
+
+@router.get("/whale-curve", response_model=list[WhaleCurvePoint])
+async def get_whale_curve(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    return await svc.get_whale_curve(ctx.organization_id)
+
+
+@router.get("/suggestions", response_model=list[PricingSuggestion])
+async def get_suggestions(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    return await svc.get_suggestions(ctx.organization_id)
+
+
+# --- Property Difficulty ---
+
+@router.get("/properties/{property_id}/difficulty", response_model=PropertyDifficultyResponse)
+async def get_difficulty(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prof_svc = ProfitabilityService(db)
+    prop_svc = PropertyService(db)
+    prop = await prop_svc.get(ctx.organization_id, property_id)
+    diff = await prof_svc.get_or_create_difficulty(ctx.organization_id, property_id)
+    return prof_svc.get_difficulty_response(prop, diff)
+
+
+@router.put("/properties/{property_id}/difficulty", response_model=PropertyDifficultyResponse)
+async def update_difficulty(
+    property_id: str,
+    body: PropertyDifficultyUpdate,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    prof_svc = ProfitabilityService(db)
+    prop_svc = PropertyService(db)
+    prop = await prop_svc.get(ctx.organization_id, property_id)
+    diff = await prof_svc.update_difficulty(ctx.organization_id, property_id, **body.model_dump(exclude_unset=True))
+    return prof_svc.get_difficulty_response(prop, diff)
+
+
+# --- Jurisdictions & Bather Load ---
+
+@router.get("/jurisdictions", response_model=list[JurisdictionResponse])
+async def list_jurisdictions(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = BatherLoadService(db)
+    jurisdictions = await svc.list_jurisdictions()
+    return [JurisdictionResponse.model_validate(j) for j in jurisdictions]
+
+
+@router.put("/properties/{property_id}/jurisdiction")
+async def assign_jurisdiction(
+    property_id: str,
+    jurisdiction_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    prop_svc = PropertyService(db)
+    await prop_svc.get(ctx.organization_id, property_id)
+    bl_svc = BatherLoadService(db)
+    await bl_svc.assign_jurisdiction(ctx.organization_id, property_id, jurisdiction_id)
+    return {"status": "ok"}
+
+
+@router.post("/bulk-jurisdiction")
+async def bulk_assign_jurisdiction(
+    body: BulkJurisdictionRequest,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = BatherLoadService(db)
+    count = await svc.bulk_assign_jurisdiction(
+        ctx.organization_id, body.jurisdiction_id,
+        city=body.city, zip_code=body.zip_code, state=body.state,
+    )
+    return {"assigned": count}
+
+
+@router.get("/properties/{property_id}/bather-load", response_model=BatherLoadResult)
+async def get_bather_load(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    prop_svc = PropertyService(db)
+    prop = await prop_svc.get(ctx.organization_id, property_id)
+
+    bl_svc = BatherLoadService(db)
+    jurisdiction = await bl_svc.get_property_jurisdiction(ctx.organization_id, property_id)
+    if not jurisdiction:
+        jurisdiction = await bl_svc.get_default_jurisdiction()
+
+    prof_svc = ProfitabilityService(db)
+    diff = await prof_svc.get_or_create_difficulty(ctx.organization_id, property_id)
+
+    return bl_svc.calculate(
+        jurisdiction,
+        pool_sqft=prop.pool_sqft,
+        pool_gallons=prop.pool_gallons,
+        shallow_sqft=diff.shallow_sqft,
+        deep_sqft=diff.deep_sqft,
+        has_deep_end=diff.has_deep_end,
+        spa_sqft=diff.spa_sqft,
+        diving_board_count=diff.diving_board_count,
+        pump_flow_gpm=diff.pump_flow_gpm,
+        is_indoor=diff.is_indoor,
+    )
+
+
+@router.post("/bather-load/calculate", response_model=BatherLoadResult)
+async def calculate_bather_load(
+    body: BatherLoadRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Standalone bather load calculator — no property needed."""
+    bl_svc = BatherLoadService(db)
+    if body.jurisdiction_id:
+        jurisdiction = await bl_svc.get_jurisdiction(body.jurisdiction_id)
+    else:
+        jurisdiction = await bl_svc.get_default_jurisdiction()
+
+    return bl_svc.calculate(
+        jurisdiction,
+        pool_sqft=body.pool_sqft,
+        pool_gallons=body.pool_gallons,
+        shallow_sqft=body.shallow_sqft,
+        deep_sqft=body.deep_sqft,
+        has_deep_end=body.has_deep_end,
+        spa_sqft=body.spa_sqft,
+        diving_board_count=body.diving_board_count,
+        pump_flow_gpm=body.pump_flow_gpm,
+        is_indoor=body.is_indoor,
+    )

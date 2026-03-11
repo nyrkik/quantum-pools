@@ -13,6 +13,7 @@ class PropertyCreate(BaseModel):
     zip_code: str = Field(..., min_length=1)
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
+    pool_sqft: Optional[float] = None
     pool_surface: Optional[str] = None
     has_spa: bool = False
     has_water_feature: bool = False
@@ -37,6 +38,7 @@ class PropertyUpdate(BaseModel):
     zip_code: Optional[str] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
+    pool_sqft: Optional[float] = None
     pool_surface: Optional[str] = None
     has_spa: Optional[bool] = None
     has_water_feature: Optional[bool] = None
@@ -66,6 +68,7 @@ class PropertyResponse(BaseModel):
     lng: Optional[float] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
+    pool_sqft: Optional[float] = None
     pool_surface: Optional[str] = None
     has_spa: bool
     has_water_feature: bool

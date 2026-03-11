@@ -30,6 +30,7 @@ class Property(Base):
     # Pool details
     pool_type: Mapped[str | None] = mapped_column(String(50))
     pool_gallons: Mapped[int | None] = mapped_column(Integer)
+    pool_sqft: Mapped[float | None] = mapped_column(Float)
     pool_surface: Mapped[str | None] = mapped_column(String(50))
     has_spa: Mapped[bool] = mapped_column(Boolean, default=False)
     has_water_feature: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -67,6 +68,8 @@ class Property(Base):
     customer = relationship("Customer", back_populates="properties", lazy="noload")
     visits = relationship("Visit", back_populates="property", lazy="noload")
     chemical_readings = relationship("ChemicalReading", back_populates="property", lazy="noload")
+    difficulty = relationship("PropertyDifficulty", back_populates="property", uselist=False, lazy="noload")
+    jurisdiction = relationship("PropertyJurisdiction", back_populates="property", uselist=False, lazy="noload")
 
     @property
     def full_address(self) -> str:

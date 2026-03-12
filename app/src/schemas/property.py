@@ -15,6 +15,13 @@ class PropertyCreate(BaseModel):
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
     pool_surface: Optional[str] = None
+    pool_length_ft: Optional[float] = None
+    pool_width_ft: Optional[float] = None
+    pool_depth_shallow: Optional[float] = None
+    pool_depth_deep: Optional[float] = None
+    pool_depth_avg: Optional[float] = None
+    pool_shape: Optional[str] = None
+    pool_volume_method: Optional[str] = None
     has_spa: bool = False
     has_water_feature: bool = False
     pump_type: Optional[str] = None
@@ -40,6 +47,13 @@ class PropertyUpdate(BaseModel):
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
     pool_surface: Optional[str] = None
+    pool_length_ft: Optional[float] = None
+    pool_width_ft: Optional[float] = None
+    pool_depth_shallow: Optional[float] = None
+    pool_depth_deep: Optional[float] = None
+    pool_depth_avg: Optional[float] = None
+    pool_shape: Optional[str] = None
+    pool_volume_method: Optional[str] = None
     has_spa: Optional[bool] = None
     has_water_feature: Optional[bool] = None
     pump_type: Optional[str] = None
@@ -70,6 +84,13 @@ class PropertyResponse(BaseModel):
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
     pool_surface: Optional[str] = None
+    pool_length_ft: Optional[float] = None
+    pool_width_ft: Optional[float] = None
+    pool_depth_shallow: Optional[float] = None
+    pool_depth_deep: Optional[float] = None
+    pool_depth_avg: Optional[float] = None
+    pool_shape: Optional[str] = None
+    pool_volume_method: Optional[str] = None
     has_spa: bool
     has_water_feature: bool
     pump_type: Optional[str] = None

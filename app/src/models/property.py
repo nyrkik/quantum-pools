@@ -32,6 +32,13 @@ class Property(Base):
     pool_gallons: Mapped[int | None] = mapped_column(Integer)
     pool_sqft: Mapped[float | None] = mapped_column(Float)
     pool_surface: Mapped[str | None] = mapped_column(String(50))
+    pool_length_ft: Mapped[float | None] = mapped_column(Float)
+    pool_width_ft: Mapped[float | None] = mapped_column(Float)
+    pool_depth_shallow: Mapped[float | None] = mapped_column(Float)
+    pool_depth_deep: Mapped[float | None] = mapped_column(Float)
+    pool_depth_avg: Mapped[float | None] = mapped_column(Float)
+    pool_shape: Mapped[str | None] = mapped_column(String(50))
+    pool_volume_method: Mapped[str | None] = mapped_column(String(20))
     has_spa: Mapped[bool] = mapped_column(Boolean, default=False)
     has_water_feature: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -71,6 +78,7 @@ class Property(Base):
     difficulty = relationship("PropertyDifficulty", back_populates="property", uselist=False, lazy="noload")
     jurisdiction = relationship("PropertyJurisdiction", back_populates="property", uselist=False, lazy="noload")
     satellite_analysis = relationship("SatelliteAnalysis", back_populates="property", uselist=False, lazy="noload")
+    measurements = relationship("PoolMeasurement", back_populates="property", lazy="noload")
 
     @property
     def full_address(self) -> str:

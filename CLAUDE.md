@@ -23,7 +23,8 @@ Enterprise pool service management platform consolidating:
 | Background jobs | APScheduler (async) + Redis |
 | Route optimization | Google OR-Tools VRP |
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
-| AI | Claude API (anthropic SDK) |
+| AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
+| File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
 ## Network
 
@@ -34,12 +35,14 @@ See `~/.claude/CLAUDE.md` for full network topology, port registry, and Tailscal
 ```
 QuantumPools/
 ├── app/                              # FastAPI backend
-│   ├── app.py                        # create_app() factory
+│   ├── app.py                        # create_app() factory + /uploads static mount
 │   ├── worker.py                     # APScheduler background jobs
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── alembic.ini
 │   ├── migrations/versions/
+│   ├── scripts/                       # One-off scripts (reimport, batch geocode)
+│   ├── uploads/                       # Local file storage (measurements, etc.)
 │   └── src/
 │       ├── api/
 │       │   ├── deps.py               # Auth deps, RBAC, org scoping
@@ -63,11 +66,12 @@ QuantumPools/
 │   │   └── portal/                    # Customer portal
 │   ├── components/
 │   │   ├── ui/                        # shadcn/ui primitives
-│   │   ├── layout/                    # Sidebar, header, mobile nav
+│   │   ├── layout/                    # Sidebar (responsive) + mobile nav
 │   │   ├── maps/                      # Leaflet components
+│   │   ├── measurement/              # Pool measurement photo capture + results
 │   │   └── {domain}/                  # Domain-specific components
 │   └── lib/
-│       ├── api.ts                     # API client (cookie auth)
+│       ├── api.ts                     # API client (cookie auth + FormData upload)
 │       └── auth-context.tsx           # AuthProvider + useAuth
 ├── docs/
 ├── docker-compose.yml
@@ -86,6 +90,9 @@ QuantumPools/
 - **DB defaults are in Python only**: SQLAlchemy model defaults (e.g. `Boolean default=False`, `Integer default=30`) do NOT exist at the PostgreSQL column level. Raw SQL inserts must explicitly provide ALL not-null columns.
 - **Org scoping**: Frontend does not send `X-Organization-Id` header. Backend `get_current_org_user` picks the first org for the user via `.limit(1)`. All users currently belong to a single org ("Pool Co").
 - **Old app reference**: `/mnt/Projects/quantum-pools` — original single-tenant app. SQL dump with all customer/driver data at `backups/backup_pre_saas.sql`. Migration script at `app/scripts/migrate_from_old.py`.
+- **Responsive layout**: Sidebar hidden on mobile, replaced with hamburger menu (Sheet). Main content uses `p-4 sm:p-6` padding, `pt-16` clears mobile top bar.
+- **Properties under Customers**: Properties are accessed via Customer detail page (Properties tab), not as a top-level nav item. `/properties` route still exists for direct links.
+- **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`.
 
 ## Critical Reference Files
 
@@ -122,6 +129,7 @@ Property 1──* ChemicalReading
 Property 1──1 PropertyDifficulty
 Property 1──1 PropertyJurisdiction ──1 BatherLoadJurisdiction
 Property 1──1 SatelliteAnalysis
+Property 1──* PoolMeasurement
 Visit 1──* ChemicalReading
 Visit *──* Service (through VisitService)
 Tech 1──* Route 1──* RouteStop ──1 Property
@@ -135,6 +143,7 @@ EMDFacility 1──* EMDInspectionReport 1──* EMDViolation
 - [x] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
 - [x] Phase 3a: Invoicing CRUD (invoices, payments — missing email/PDF/Stripe/worker)
 - [x] Phase 3b: Profitability Analysis (models, difficulty scoring, cost breakdown, bather load calculator, frontend dashboard, satellite detection)
+- [x] Pool Measurement: Ground-truth dimensions via tech photos + Claude Vision (upload, analyze, apply to property)
 - [ ] Phase 3c: Complete Invoicing (email, PDF, Stripe, AutoPay, background worker)
 - [ ] Phase 3d: Core Pool Ops (multiple bodies of water, LSI/dosing, workflows)
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)

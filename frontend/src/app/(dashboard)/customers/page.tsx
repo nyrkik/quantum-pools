@@ -29,8 +29,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Building2, Home } from "lucide-react";
 
 interface Customer {
   id: string;
@@ -110,17 +116,18 @@ export default function CustomersPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
-          <p className="text-muted-foreground">{total} total customers</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Customers</h1>
+          <p className="text-muted-foreground text-sm">{total} total</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Add Customer
+              <span className="hidden sm:inline">Add Customer</span>
+              <span className="sm:hidden">Add</span>
             </Button>
           </DialogTrigger>
           <DialogContent>
@@ -212,79 +219,90 @@ export default function CustomersPage() {
         />
       </div>
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Property</TableHead>
-              <TableHead>Mgmt Co</TableHead>
-              <TableHead>Contact</TableHead>
-              <TableHead>Monthly Rate</TableHead>
-              <TableHead>Balance</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
+      <TooltipProvider>
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
-                  Loading...
-                </TableCell>
+                <TableHead className="w-8"></TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead className="hidden md:table-cell">Property</TableHead>
+                <TableHead className="hidden lg:table-cell">Mgmt Co</TableHead>
+                <TableHead className="hidden sm:table-cell">Contact</TableHead>
+                <TableHead>Rate</TableHead>
+                <TableHead className="hidden sm:table-cell">Balance</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ) : customers.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center py-8 text-muted-foreground"
-                >
-                  No customers found
-                </TableCell>
-              </TableRow>
-            ) : (
-              customers.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>
-                    <Link
-                      href={`/customers/${c.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {customerDisplayName(c)}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{c.customer_type}</Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {c.first_property_address || "—"}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {c.company_name || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm">{c.email}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {c.phone}
-                    </div>
-                  </TableCell>
-                  <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
-                  <TableCell
-                    className={c.balance > 0 ? "text-red-600 font-medium" : ""}
-                  >
-                    ${c.balance.toFixed(2)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={c.is_active ? "default" : "secondary"}>
-                      {c.is_active ? "Active" : "Inactive"}
-                    </Badge>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    Loading...
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : customers.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={8}
+                    className="text-center py-8 text-muted-foreground"
+                  >
+                    No customers found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                customers.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="pr-0">
+                      <Tooltip>
+                        <TooltipTrigger>
+                          {c.customer_type === "commercial" ? (
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Home className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </TooltipTrigger>
+                        <TooltipContent>{c.customer_type}</TooltipContent>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/customers/${c.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {customerDisplayName(c)}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
+                      {c.first_property_address || "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
+                      {c.company_name || "—"}
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell">
+                      <div className="text-sm">{c.email}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {c.phone}
+                      </div>
+                    </TableCell>
+                    <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
+                    <TableCell
+                      className={`hidden sm:table-cell ${c.balance > 0 ? "text-red-600 font-medium" : ""}`}
+                    >
+                      ${c.balance.toFixed(2)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={c.is_active ? "default" : "secondary"}>
+                        {c.is_active ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </TooltipProvider>
     </div>
   );
 }

@@ -95,6 +95,35 @@ class ApiClient {
   async delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: "DELETE" });
   }
+
+  async upload<T>(path: string, formData: FormData): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
+
+    if (response.status === 401) {
+      const refreshed = await this.tryRefresh();
+      if (refreshed) {
+        const retryResponse = await fetch(url, {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        });
+        if (retryResponse.ok) return retryResponse.json();
+      }
+      throw { error: "unauthorized", message: "Session expired" } as ApiError;
+    }
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw (body.detail || body) as ApiError;
+    }
+
+    return response.json();
+  }
 }
 
 export const api = new ApiClient();

@@ -1,14 +1,19 @@
-"""Satellite analysis service — Google Maps Static API + OpenCV pool/vegetation detection."""
+"""Satellite analysis service — Google Maps Static API + Claude Vision for pool/vegetation detection.
 
-import io
+Two-pass approach:
+  1. LOCATE: Wide zoom (18) image → Claude finds the pool's pixel position → convert to lat/lng
+  2. ANALYZE: Zoomed-in (20) image centered on the pool → Claude measures and analyzes
+"""
+
+import base64
+import json
+import math
 import uuid
 import logging
-import math
 from typing import Optional
 
 import aiohttp
-import cv2
-import numpy as np
+import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -19,22 +24,71 @@ from src.models.property import Property
 
 logger = logging.getLogger(__name__)
 
-# Meters per pixel at zoom 20 at equator — adjusted by cos(lat) for actual location
-METERS_PER_PIXEL_Z20 = 0.149
+# --- Prompts ---
 
-# Analysis constants
-POOL_HSV_LOWER = np.array([90, 40, 80])
-POOL_HSV_UPPER = np.array([130, 255, 255])
-VEGETATION_HSV_LOWER = np.array([30, 30, 30])
-VEGETATION_HSV_UPPER = np.array([90, 255, 200])
-SHADOW_VALUE_THRESHOLD = 60
-MIN_POOL_AREA_PX = 200
-BUFFER_ZONE_PX = 40
+LOCATE_PROMPT = """This satellite image is centered on a property address. The property has a swimming pool somewhere in or near this image.
+
+Find the pool and return its pixel coordinates in the image (origin is top-left).
+
+The image is {width}x{height} pixels. Each pixel is approximately {ft_per_px:.1f} feet.
+
+Return ONLY a JSON object:
+{{
+  "pool_found": true/false,
+  "pool_x": number (center X pixel of the pool),
+  "pool_y": number (center Y pixel of the pool),
+  "notes": "brief description of where you found it"
+}}
+
+Look carefully — the pool may be:
+- Behind buildings (apartment complex pools are often in interior courtyards)
+- Under partial tree canopy
+- A non-standard color (green, dark, covered)
+- Small relative to the property
+
+Return ONLY the JSON object, no other text."""
+
+ANALYSIS_PROMPT = """Analyze this satellite image centered on a swimming pool.
+
+SCALE: This image is {width}x{height} pixels. Each pixel ≈ {ft_per_px:.2f} feet ({sqft_per_px:.3f} sqft/pixel). The full image spans {img_width_ft:.0f} × {img_height_ft:.0f} feet. A car is about {car_px:.0f} pixels long.
+
+MEASURE the pool precisely:
+1. Estimate the pool's width and height in PIXELS
+2. Calculate sqft = width_px × height_px × {sqft_per_px:.3f}
+3. For non-rectangular shapes (kidney, oval, freeform), multiply by 0.70-0.75
+
+Return ONLY a JSON object:
+{{
+  "pool_detected": true/false,
+  "pool_pixel_width": number (pool width in pixels),
+  "pool_pixel_height": number (pool height in pixels),
+  "estimated_pool_sqft": number (calculated as described above),
+  "pool_shape": "rectangle" | "kidney" | "L-shape" | "freeform" | "oval" | "round",
+  "pool_confidence": number 0.0-1.0,
+  "vegetation_pct": number 0-100,
+  "canopy_overhang_pct": number 0-100 (tree canopy near/over the pool),
+  "hardscape_pct": number 0-100,
+  "shadow_pct": number 0-100,
+  "has_spa": true/false,
+  "has_pool_cover": true/false,
+  "deck_material": "concrete" | "pavers" | "wood" | "stone" | null,
+  "notes": "brief observation relevant to pool service"
+}}
+
+This property HAS a pool — it should be visible near the center of this image.
+Return ONLY the JSON object, no other text."""
 
 
 class SatelliteService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._client: Optional[anthropic.AsyncAnthropic] = None
+
+    @property
+    def client(self) -> anthropic.AsyncAnthropic:
+        if not self._client:
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        return self._client
 
     async def get_analysis(self, organization_id: str, property_id: str) -> Optional[SatelliteAnalysis]:
         result = await self.db.execute(
@@ -50,8 +104,9 @@ class SatelliteService:
     ) -> SatelliteAnalysis:
         if not settings.google_maps_api_key:
             raise ValueError("Google Maps API key not configured")
+        if not settings.anthropic_api_key:
+            raise ValueError("Anthropic API key not configured")
 
-        # Get property
         result = await self.db.execute(
             select(Property).where(
                 Property.id == property_id,
@@ -65,33 +120,59 @@ class SatelliteService:
         if not prop.lat or not prop.lng:
             raise ValueError(f"Property {property_id} has no coordinates — geocode first")
 
-        # Check for existing analysis
         existing = await self.get_analysis(organization_id, property_id)
         if existing and not force:
             return existing
 
-        # Fetch satellite image
-        zoom = 20
         width, height = 640, 640
-        image_url = self._build_image_url(prop.lat, prop.lng, zoom, width, height)
-        image_bytes = await self._fetch_image(image_url)
 
-        if not image_bytes:
-            return await self._save_analysis(
+        # --- Pass 1: LOCATE the pool (wide view ~500m across) ---
+        locate_zoom = 17
+        locate_url = self._build_image_url(prop.lat, prop.lng, locate_zoom, width, height)
+        locate_bytes = await self._fetch_image(locate_url)
+
+        if not locate_bytes:
+            return await self._save_error(
                 organization_id, property_id, existing,
-                error_message="Failed to fetch satellite image",
-                image_url=image_url, image_zoom=zoom, image_width=width, image_height=height,
+                "Failed to fetch wide satellite image",
+                locate_url, locate_zoom, width, height,
             )
 
-        # Run CV analysis
+        pool_lat, pool_lng = prop.lat, prop.lng  # default to property center
         try:
-            results = self._analyze_image(image_bytes, prop.lat, zoom)
+            location = await self._locate_pool(locate_bytes, prop.lat, prop.lng, locate_zoom, width, height)
+            if location:
+                pool_lat, pool_lng = location
+                logger.info(f"Pool located at {pool_lat:.6f},{pool_lng:.6f} (offset from address {prop.lat:.6f},{prop.lng:.6f})")
         except Exception as e:
-            logger.error(f"CV analysis failed for property {property_id}: {e}")
-            return await self._save_analysis(
+            logger.warning(f"Pool location failed for {property_id}, using address center: {e}")
+
+        # --- Pass 2: ANALYZE — try zoom 21 (best detail), fall back to 20 (wider) ---
+        results = None
+        analyze_url = None
+        analyze_zoom = None
+
+        for zoom_level in [21, 20]:
+            analyze_zoom = zoom_level
+            analyze_url = self._build_image_url(pool_lat, pool_lng, zoom_level, width, height)
+            analyze_bytes = await self._fetch_image(analyze_url)
+            if not analyze_bytes:
+                continue
+            try:
+                results = await self._analyze_pool(
+                    analyze_bytes, prop.address, pool_lat, zoom_level, width, height,
+                )
+                if results["pool_detected"]:
+                    break
+                logger.info(f"Pool not found at zoom {zoom_level} for {prop.address}, trying wider")
+            except Exception as e:
+                logger.warning(f"Analysis at zoom {zoom_level} failed for {property_id}: {e}")
+
+        if not results:
+            return await self._save_error(
                 organization_id, property_id, existing,
-                error_message=f"Analysis failed: {e}",
-                image_url=image_url, image_zoom=zoom, image_width=width, image_height=height,
+                "Pool not detected at any zoom level",
+                analyze_url or "", analyze_zoom or 21, width, height,
             )
 
         # Update property pool_sqft if detected and not already set
@@ -102,13 +183,14 @@ class SatelliteService:
             organization_id, property_id, existing,
             pool_detected=results["pool_detected"],
             estimated_pool_sqft=results["estimated_pool_sqft"],
-            pool_contour_points=results["pool_contour_points"],
+            pool_contour_points=None,
             pool_confidence=results["pool_confidence"],
             vegetation_pct=results["vegetation_pct"],
             canopy_overhang_pct=results["canopy_overhang_pct"],
             hardscape_pct=results["hardscape_pct"],
             shadow_pct=results["shadow_pct"],
-            image_url=image_url, image_zoom=zoom, image_width=width, image_height=height,
+            image_url=analyze_url, image_zoom=analyze_zoom,
+            image_width=width, image_height=height,
             raw_results=results,
         )
 
@@ -158,6 +240,8 @@ class SatelliteService:
             "results": analyzed,
         }
 
+    # --- Image helpers ---
+
     def _build_image_url(self, lat: float, lng: float, zoom: int, width: int, height: int) -> str:
         return (
             f"https://maps.googleapis.com/maps/api/staticmap"
@@ -181,117 +265,142 @@ class SatelliteService:
             logger.error(f"Failed to fetch satellite image: {e}")
         return None
 
-    def _analyze_image(self, image_bytes: bytes, lat: float, zoom: int) -> dict:
-        img_array = np.frombuffer(image_bytes, dtype=np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("Could not decode image")
+    # --- Scale math ---
 
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        total_pixels = img.shape[0] * img.shape[1]
+    def _scale_info(self, lat: float, zoom: int, width: int, height: int) -> dict:
+        meters_per_px = 0.149 * (2 ** (20 - zoom)) / math.cos(math.radians(lat))
+        ft_per_px = meters_per_px * 3.28084
+        return {
+            "meters_per_px": meters_per_px,
+            "ft_per_px": ft_per_px,
+            "sqft_per_px": ft_per_px * ft_per_px,
+            "img_width_ft": width * ft_per_px,
+            "img_height_ft": height * ft_per_px,
+            "car_px": 15.0 / ft_per_px,
+        }
 
-        # Meters per pixel at this latitude and zoom
-        mpp = METERS_PER_PIXEL_Z20 * (2 ** (20 - zoom)) / math.cos(math.radians(lat))
-        sqm_per_pixel = mpp * mpp
-        sqft_per_pixel = sqm_per_pixel * 10.7639
+    def _pixel_to_latlng(
+        self, px_x: int, px_y: int,
+        center_lat: float, center_lng: float,
+        zoom: int, width: int, height: int,
+    ) -> tuple[float, float]:
+        """Convert pixel coordinates in the image to lat/lng."""
+        meters_per_px = 0.149 * (2 ** (20 - zoom)) / math.cos(math.radians(center_lat))
 
-        # Pool detection (blue/cyan regions)
-        pool_mask = cv2.inRange(hsv, POOL_HSV_LOWER, POOL_HSV_UPPER)
-        pool_mask = cv2.morphologyEx(pool_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-        pool_mask = cv2.morphologyEx(pool_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        # Pixel offset from center
+        dx = px_x - width / 2
+        dy = px_y - height / 2
 
-        contours, _ = cv2.findContours(pool_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Convert to meters, then to degrees
+        meters_east = dx * meters_per_px
+        meters_south = dy * meters_per_px
 
-        pool_detected = False
-        estimated_pool_sqft = None
-        pool_contour_points = None
-        pool_confidence = 0.0
-        best_contour = None
-        best_area = 0
+        lat = center_lat - (meters_south / 111320)
+        lng = center_lng + (meters_east / (111320 * math.cos(math.radians(center_lat))))
 
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area < MIN_POOL_AREA_PX:
-                continue
+        return lat, lng
 
-            # Shape analysis — pools are roughly convex
-            hull = cv2.convexHull(contour)
-            hull_area = cv2.contourArea(hull)
-            if hull_area == 0:
-                continue
-            solidity = area / hull_area
+    # --- Claude calls ---
 
-            # Pools typically have solidity > 0.6
-            if solidity < 0.5:
-                continue
+    async def _call_claude(self, image_bytes: bytes, text: str) -> str:
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        message = await self.client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+                    },
+                    {"type": "text", "text": text},
+                ],
+            }],
+        )
+        response = message.content[0].text.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[1]
+            if response.endswith("```"):
+                response = response[:-3].strip()
+        return response
 
-            if area > best_area:
-                best_area = area
-                best_contour = contour
+    async def _locate_pool(
+        self, image_bytes: bytes,
+        center_lat: float, center_lng: float,
+        zoom: int, width: int, height: int,
+    ) -> Optional[tuple[float, float]]:
+        """Pass 1: Find the pool in a wide-angle image, return its lat/lng."""
+        scale = self._scale_info(center_lat, zoom, width, height)
+        prompt = LOCATE_PROMPT.format(
+            width=width, height=height, ft_per_px=scale["ft_per_px"],
+        )
 
-        if best_contour is not None and best_area >= MIN_POOL_AREA_PX:
-            pool_detected = True
-            estimated_pool_sqft = round(best_area * sqft_per_pixel, 1)
+        response = await self._call_claude(image_bytes, prompt)
+        result = json.loads(response)
 
-            # Confidence based on area and solidity
-            hull = cv2.convexHull(best_contour)
-            hull_area = cv2.contourArea(hull)
-            solidity = best_area / hull_area if hull_area > 0 else 0
+        if not result.get("pool_found"):
+            return None
 
-            # Confidence: area contribution (bigger = more confident) + shape contribution
-            area_conf = min(best_area / 2000, 0.5)
-            shape_conf = solidity * 0.5
-            pool_confidence = round(min(area_conf + shape_conf, 1.0), 3)
+        px_x = result.get("pool_x", width // 2)
+        px_y = result.get("pool_y", height // 2)
 
-            # Store simplified contour points
-            epsilon = 0.02 * cv2.arcLength(best_contour, True)
-            approx = cv2.approxPolyDP(best_contour, epsilon, True)
-            pool_contour_points = approx.reshape(-1, 2).tolist()
+        # Only use if meaningfully different from center (>30px offset)
+        if abs(px_x - width // 2) < 30 and abs(px_y - height // 2) < 30:
+            return None  # pool is near center anyway, no offset needed
 
-        # Create pool mask for overhang detection
-        final_pool_mask = np.zeros(pool_mask.shape, dtype=np.uint8)
-        if best_contour is not None:
-            cv2.drawContours(final_pool_mask, [best_contour], -1, 255, -1)
+        return self._pixel_to_latlng(px_x, px_y, center_lat, center_lng, zoom, width, height)
 
-        # Vegetation detection (green regions)
-        veg_mask = cv2.inRange(hsv, VEGETATION_HSV_LOWER, VEGETATION_HSV_UPPER)
-        veg_mask = cv2.morphologyEx(veg_mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-        vegetation_pct = round(np.count_nonzero(veg_mask) / total_pixels * 100, 1)
+    async def _analyze_pool(
+        self, image_bytes: bytes, address: str,
+        lat: float, zoom: int, width: int, height: int,
+    ) -> dict:
+        """Pass 2: Detailed analysis of zoomed-in pool image."""
+        scale = self._scale_info(lat, zoom, width, height)
+        prompt = ANALYSIS_PROMPT.format(
+            width=width, height=height,
+            ft_per_px=scale["ft_per_px"],
+            sqft_per_px=scale["sqft_per_px"],
+            img_width_ft=scale["img_width_ft"],
+            img_height_ft=scale["img_height_ft"],
+            car_px=scale["car_px"],
+        )
 
-        # Canopy overhang — vegetation within buffer zone of pool
-        canopy_overhang_pct = 0.0
-        if pool_detected:
-            dilated_pool = cv2.dilate(final_pool_mask, np.ones((BUFFER_ZONE_PX, BUFFER_ZONE_PX), np.uint8))
-            buffer_zone = cv2.subtract(dilated_pool, final_pool_mask)
-            buffer_pixels = np.count_nonzero(buffer_zone)
-            if buffer_pixels > 0:
-                overhang_pixels = np.count_nonzero(cv2.bitwise_and(veg_mask, buffer_zone))
-                canopy_overhang_pct = round(overhang_pixels / buffer_pixels * 100, 1)
-
-        # Shadow detection (dark areas)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        shadow_mask = (gray < SHADOW_VALUE_THRESHOLD).astype(np.uint8) * 255
-        # Exclude pool from shadow count
-        if pool_detected:
-            shadow_mask = cv2.bitwise_and(shadow_mask, cv2.bitwise_not(final_pool_mask))
-        shadow_pct = round(np.count_nonzero(shadow_mask) / total_pixels * 100, 1)
-
-        # Hardscape — not pool, not vegetation, not shadow
-        non_hardscape = cv2.bitwise_or(veg_mask, shadow_mask)
-        if pool_detected:
-            non_hardscape = cv2.bitwise_or(non_hardscape, final_pool_mask)
-        hardscape_pct = round((1 - np.count_nonzero(non_hardscape) / total_pixels) * 100, 1)
+        response = await self._call_claude(
+            image_bytes,
+            f"Property address: {address}\n\n{prompt}",
+        )
+        result = json.loads(response)
 
         return {
-            "pool_detected": pool_detected,
-            "estimated_pool_sqft": estimated_pool_sqft,
-            "pool_contour_points": pool_contour_points,
-            "pool_confidence": pool_confidence,
-            "vegetation_pct": vegetation_pct,
-            "canopy_overhang_pct": canopy_overhang_pct,
-            "hardscape_pct": hardscape_pct,
-            "shadow_pct": shadow_pct,
+            "pool_detected": bool(result.get("pool_detected", False)),
+            "estimated_pool_sqft": result.get("estimated_pool_sqft"),
+            "pool_shape": result.get("pool_shape"),
+            "pool_contour_points": None,
+            "pool_confidence": float(result.get("pool_confidence", 0)),
+            "vegetation_pct": float(result.get("vegetation_pct", 0)),
+            "canopy_overhang_pct": float(result.get("canopy_overhang_pct", 0)),
+            "hardscape_pct": float(result.get("hardscape_pct", 0)),
+            "shadow_pct": float(result.get("shadow_pct", 0)),
+            "has_spa": result.get("has_spa", False),
+            "has_pool_cover": result.get("has_pool_cover", False),
+            "deck_material": result.get("deck_material"),
+            "notes": result.get("notes"),
         }
+
+    # --- Persistence ---
+
+    async def _save_error(
+        self, organization_id: str, property_id: str,
+        existing: Optional[SatelliteAnalysis],
+        error_message: str, image_url: str, zoom: int, width: int, height: int,
+    ) -> SatelliteAnalysis:
+        return await self._save_analysis(
+            organization_id, property_id, existing,
+            error_message=error_message,
+            image_url=image_url, image_zoom=zoom,
+            image_width=width, image_height=height,
+        )
 
     async def _save_analysis(
         self, organization_id: str, property_id: str,
@@ -299,9 +408,8 @@ class SatelliteService:
     ) -> SatelliteAnalysis:
         if existing:
             for key, value in kwargs.items():
-                if value is not None:
-                    setattr(existing, key, value)
-            existing.analysis_version = "1.0"
+                setattr(existing, key, value)
+            existing.analysis_version = "3.0"
             await self.db.flush()
             await self.db.refresh(existing)
             return existing

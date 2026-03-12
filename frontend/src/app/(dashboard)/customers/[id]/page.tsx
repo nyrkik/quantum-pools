@@ -30,8 +30,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, MapPin } from "lucide-react";
+import { ArrowLeft, Plus, MapPin, Ruler, Building2, Home } from "lucide-react";
 import Link from "next/link";
 
 interface Customer {
@@ -62,6 +68,8 @@ interface Property {
   zip_code: string;
   pool_type: string | null;
   pool_gallons: number | null;
+  pool_sqft: number | null;
+  pool_volume_method: string | null;
   has_spa: boolean;
   is_active: boolean;
 }
@@ -135,32 +143,41 @@ export default function CustomerDetailPage({
     );
   }
 
+  const TypeIcon = customer.customer_type === "commercial" ? Building2 : Home;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => router.back()}>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-start gap-2 sm:gap-4">
+        <Button variant="ghost" size="sm" className="shrink-0 mt-1" onClick={() => router.back()}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back
         </Button>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            {customer.customer_type === "commercial"
-              ? customer.first_name
-              : `${customer.first_name} ${customer.last_name}`}
-          </h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <TypeIcon className="h-5 w-5 text-muted-foreground shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent>{customer.customer_type}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight truncate">
+              {customer.customer_type === "commercial"
+                ? customer.first_name
+                : `${customer.first_name} ${customer.last_name}`}
+            </h1>
+            <Badge variant={customer.is_active ? "default" : "secondary"} className="shrink-0">
+              {customer.is_active ? "Active" : "Inactive"}
+            </Badge>
+          </div>
           {customer.company_name && (
-            <p className="text-muted-foreground">{customer.company_name}</p>
-          )}
-          {customer.customer_type === "commercial" && (
-            <Badge variant="outline" className="mt-1">commercial</Badge>
+            <p className="text-muted-foreground text-sm truncate">{customer.company_name}</p>
           )}
         </div>
-        <Badge variant={customer.is_active ? "default" : "secondary"}>
-          {customer.is_active ? "Active" : "Inactive"}
-        </Badge>
       </div>
 
-      <Tabs defaultValue="info">
+      <Tabs defaultValue="properties">
         <TabsList>
           <TabsTrigger value="info">Info</TabsTrigger>
           <TabsTrigger value="properties">
@@ -185,10 +202,6 @@ export default function CustomerDetailPage({
                 <div>
                   <span className="text-muted-foreground">Phone: </span>
                   {customer.phone || "—"}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Type: </span>
-                  {customer.customer_type}
                 </div>
               </CardContent>
             </Card>
@@ -300,19 +313,37 @@ export default function CustomerDetailPage({
                 <Card key={p.id}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <MapPin className="h-4 w-4" />
-                      {p.address}
+                      <MapPin className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{p.address}</span>
                     </CardTitle>
                     <CardDescription>
                       {p.city}, {p.state} {p.zip_code}
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="text-sm space-y-1">
-                    {p.pool_type && <div>Pool: {p.pool_type}</div>}
-                    {p.pool_gallons && (
-                      <div>{p.pool_gallons.toLocaleString()} gallons</div>
+                  <CardContent className="text-sm space-y-3">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                      {p.pool_type && <span>Pool: {p.pool_type}</span>}
+                      {p.pool_gallons && (
+                        <span>{p.pool_gallons.toLocaleString()} gal</span>
+                      )}
+                      {p.pool_sqft && (
+                        <span>{p.pool_sqft.toLocaleString()} sqft</span>
+                      )}
+                      {p.has_spa && <Badge variant="outline">Spa</Badge>}
+                    </div>
+                    {p.pool_volume_method && (
+                      <Badge variant="outline" className="text-xs capitalize">
+                        {p.pool_volume_method}
+                      </Badge>
                     )}
-                    {p.has_spa && <Badge variant="outline">Spa</Badge>}
+                    <div className="pt-1">
+                      <Link href={`/properties/${p.id}/measure`}>
+                        <Button variant="outline" size="sm" className="h-9">
+                          <Ruler className="h-4 w-4 mr-1.5" />
+                          Measure Pool
+                        </Button>
+                      </Link>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -331,9 +362,9 @@ export default function CustomerDetailPage({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Invoice #</TableHead>
-                    <TableHead>Subject</TableHead>
+                    <TableHead className="hidden sm:table-cell">Subject</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Issue Date</TableHead>
+                    <TableHead className="hidden sm:table-cell">Issue Date</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead className="text-right">Balance</TableHead>
                   </TableRow>
@@ -349,7 +380,7 @@ export default function CustomerDetailPage({
                           {inv.invoice_number}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-muted-foreground hidden sm:table-cell">
                         {inv.subject || "—"}
                       </TableCell>
                       <TableCell>
@@ -372,7 +403,7 @@ export default function CustomerDetailPage({
                           {inv.status.replace("_", " ")}
                         </Badge>
                       </TableCell>
-                      <TableCell>{inv.issue_date}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{inv.issue_date}</TableCell>
                       <TableCell className="text-right">
                         ${inv.total.toFixed(2)}
                       </TableCell>

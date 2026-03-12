@@ -24,6 +24,7 @@ from src.models.property_difficulty import PropertyDifficulty
 from src.models.bather_load_jurisdiction import BatherLoadJurisdiction
 from src.models.property_jurisdiction import PropertyJurisdiction
 from src.models.satellite_analysis import SatelliteAnalysis
+from src.models.pool_measurement import PoolMeasurement
 
 __all__ = [
     "Base",
@@ -50,4 +51,5 @@ __all__ = [
     "BatherLoadJurisdiction",
     "PropertyJurisdiction",
     "SatelliteAnalysis",
+    "PoolMeasurement",
 ]

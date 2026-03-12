@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -12,7 +13,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { MapPin } from "lucide-react";
+import { MapPin, Ruler } from "lucide-react";
+import Link from "next/link";
 
 interface Property {
   id: string;
@@ -67,19 +69,20 @@ export default function PropertiesPage() {
               <TableHead>Features</TableHead>
               <TableHead>Service Time</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : properties.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={7}
                   className="text-center py-8 text-muted-foreground"
                 >
                   No properties. Add them from a customer&apos;s detail page.
@@ -118,6 +121,14 @@ export default function PropertiesPage() {
                     <Badge variant={p.is_active ? "default" : "secondary"}>
                       {p.is_active ? "Active" : "Inactive"}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Link href={`/properties/${p.id}/measure`}>
+                      <Button variant="ghost" size="sm">
+                        <Ruler className="h-4 w-4 mr-1" />
+                        Measure
+                      </Button>
+                    </Link>
                   </TableCell>
                 </TableRow>
               ))

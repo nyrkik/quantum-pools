@@ -16,6 +16,7 @@ import {
   Settings,
   LogOut,
   TrendingUp,
+  Satellite,
 } from "lucide-react";
 
 const navItems = [
@@ -25,6 +26,7 @@ const navItems = [
   { href: "/routes", label: "Routes", icon: Route },
   { href: "/invoices", label: "Invoices", icon: FileText },
   { href: "/profitability", label: "Profitability", icon: TrendingUp },
+  { href: "/satellite", label: "Satellite", icon: Satellite },
   { href: "/emd", label: "EMD Intel", icon: Shield },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

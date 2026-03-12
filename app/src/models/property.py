@@ -70,6 +70,7 @@ class Property(Base):
     chemical_readings = relationship("ChemicalReading", back_populates="property", lazy="noload")
     difficulty = relationship("PropertyDifficulty", back_populates="property", uselist=False, lazy="noload")
     jurisdiction = relationship("PropertyJurisdiction", back_populates="property", uselist=False, lazy="noload")
+    satellite_analysis = relationship("SatelliteAnalysis", back_populates="property", uselist=False, lazy="noload")
 
     @property
     def full_address(self) -> str:

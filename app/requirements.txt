@@ -48,5 +48,8 @@ stripe>=7.0.0
 # PDF Generation
 reportlab>=4.0.0
 
+# Computer Vision
+opencv-python-headless>=4.9.0
+
 # Utilities
 python-dateutil>=2.8.2

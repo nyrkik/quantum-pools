@@ -23,6 +23,7 @@ from src.models.org_cost_settings import OrgCostSettings
 from src.models.property_difficulty import PropertyDifficulty
 from src.models.bather_load_jurisdiction import BatherLoadJurisdiction
 from src.models.property_jurisdiction import PropertyJurisdiction
+from src.models.satellite_analysis import SatelliteAnalysis
 
 __all__ = [
     "Base",
@@ -48,4 +49,5 @@ __all__ = [
     "PropertyDifficulty",
     "BatherLoadJurisdiction",
     "PropertyJurisdiction",
+    "SatelliteAnalysis",
 ]

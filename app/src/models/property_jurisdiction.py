@@ -19,7 +19,11 @@ class PropertyJurisdiction(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    body_of_water_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), index=True
+    )
 
     property = relationship("Property", back_populates="jurisdiction", lazy="noload")
     jurisdiction = relationship("BatherLoadJurisdiction", lazy="joined")
     organization = relationship("Organization", lazy="noload")
+    body_of_water = relationship("BodyOfWater", back_populates="jurisdiction", lazy="noload")

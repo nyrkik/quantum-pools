@@ -16,6 +16,18 @@ import { toast } from "sonner";
 import { MapPin, Ruler } from "lucide-react";
 import Link from "next/link";
 
+interface BodyOfWaterSummary {
+  id: string;
+  name: string | null;
+  water_type: string;
+  is_primary: boolean;
+  pool_type: string | null;
+  pool_gallons: number | null;
+  pool_sqft: number | null;
+  estimated_service_minutes: number;
+  monthly_rate: number | null;
+}
+
 interface Property {
   id: string;
   customer_id: string;
@@ -30,6 +42,7 @@ interface Property {
   has_water_feature: boolean;
   estimated_service_minutes: number;
   is_active: boolean;
+  bodies_of_water: BodyOfWaterSummary[];
 }
 
 export default function PropertiesPage() {
@@ -67,7 +80,7 @@ export default function PropertiesPage() {
               <TableHead>Address</TableHead>
               <TableHead>Pool</TableHead>
               <TableHead>Gallons</TableHead>
-              <TableHead>Features</TableHead>
+              <TableHead>Bodies of Water</TableHead>
               <TableHead>Service Time</TableHead>
               <TableHead>Status</TableHead>
               <TableHead></TableHead>
@@ -86,7 +99,7 @@ export default function PropertiesPage() {
                   colSpan={7}
                   className="text-center py-8 text-muted-foreground"
                 >
-                  No properties. Add them from a customer&apos;s detail page.
+                  No properties. Add them from a client&apos;s detail page.
                 </TableCell>
               </TableRow>
             ) : (
@@ -110,10 +123,18 @@ export default function PropertiesPage() {
                       : "—"}
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
-                      {p.has_spa && <Badge variant="outline">Spa</Badge>}
-                      {p.has_water_feature && (
-                        <Badge variant="outline">Water Feature</Badge>
+                    <div className="flex gap-1 flex-wrap">
+                      {(p.bodies_of_water?.length > 0) ? (
+                        p.bodies_of_water.map((bow) => (
+                          <Badge key={bow.id} variant="outline" className="capitalize text-xs">
+                            {bow.name || bow.water_type.replace("_", " ")}
+                          </Badge>
+                        ))
+                      ) : (
+                        <>
+                          {p.has_spa && <Badge variant="outline">Spa</Badge>}
+                          {p.has_water_feature && <Badge variant="outline">Water Feature</Badge>}
+                        </>
                       )}
                     </div>
                   </TableCell>

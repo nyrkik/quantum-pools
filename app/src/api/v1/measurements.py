@@ -17,6 +17,7 @@ router = APIRouter(prefix="/measurements", tags=["measurements"])
 async def upload_photos(
     property_id: str,
     scale_reference: str = Form("yardstick"),
+    body_of_water_id: str = Form(default=""),
     overview_photos: list[UploadFile] = File(...),
     depth_photos: list[UploadFile] = File(default=[]),
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -38,6 +39,7 @@ async def upload_photos(
     try:
         measurement = await svc.upload_photos(
             ctx.organization_id, property_id, photo_paths, scale_reference, ctx.user.id,
+            body_of_water_id=body_of_water_id or None,
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

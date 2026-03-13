@@ -37,6 +37,9 @@ class PropertyDifficulty(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    body_of_water_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), index=True
+    )
 
     # Measured fields (auto-calculated or entered)
     shallow_sqft: Mapped[float | None] = mapped_column(Float)
@@ -71,3 +74,4 @@ class PropertyDifficulty(Base):
 
     property = relationship("Property", back_populates="difficulty", lazy="noload")
     organization = relationship("Organization", lazy="noload")
+    body_of_water = relationship("BodyOfWater", back_populates="difficulty", lazy="noload")

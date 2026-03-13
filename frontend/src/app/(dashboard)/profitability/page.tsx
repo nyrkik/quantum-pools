@@ -293,7 +293,7 @@ export default function ProfitabilityPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Customer</TableHead>
+                <TableHead>Client</TableHead>
                 <TableHead>Address</TableHead>
                 <TableHead className="text-right">Rate</TableHead>
                 <TableHead className="text-right">Cost</TableHead>

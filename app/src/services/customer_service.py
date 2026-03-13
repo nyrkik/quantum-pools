@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 
 from src.models.customer import Customer
 from src.models.property import Property
+from src.models.body_of_water import BodyOfWater
 from src.core.exceptions import NotFoundError
 
 
@@ -89,3 +90,55 @@ class CustomerService:
             .order_by(Property.created_at).limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def get_first_property_pool_type(self, customer_id: str) -> Optional[str]:
+        # Try to get pool_type from primary BOW first
+        result = await self.db.execute(
+            select(BodyOfWater.pool_type)
+            .join(Property, Property.id == BodyOfWater.property_id)
+            .where(Property.customer_id == customer_id, BodyOfWater.is_primary == True)
+            .order_by(Property.created_at)
+            .limit(1)
+        )
+        bow_type = result.scalar_one_or_none()
+        if bow_type:
+            return bow_type
+        # Fall back to property
+        result = await self.db.execute(
+            select(Property.pool_type).where(Property.customer_id == customer_id)
+            .order_by(Property.created_at).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_property_bow_summary(self, customer_id: str) -> Optional[str]:
+        """Return BOW summary for customer's first property, e.g. 'Pool, Spa'."""
+        result = await self.db.execute(
+            select(Property.id).where(Property.customer_id == customer_id)
+            .order_by(Property.created_at).limit(1)
+        )
+        prop_id = result.scalar_one_or_none()
+        if not prop_id:
+            return None
+        bow_result = await self.db.execute(
+            select(BodyOfWater.water_type).where(
+                BodyOfWater.property_id == prop_id,
+                BodyOfWater.is_active == True,
+            ).order_by(BodyOfWater.is_primary.desc())
+        )
+        types = [r[0] for r in bow_result.all()]
+        if not types:
+            return None
+        parts = []
+        pool_count = sum(1 for t in types if t == "pool")
+        spa_count = sum(1 for t in types if t == "spa")
+        other = [t.replace("_", " ").title() for t in types if t not in ("pool", "spa")]
+        if pool_count == 1:
+            parts.append("Pool")
+        elif pool_count > 1:
+            parts.append(f"{pool_count} Pools")
+        if spa_count == 1:
+            parts.append("Spa")
+        elif spa_count > 1:
+            parts.append(f"{spa_count} Spas")
+        parts.extend(other)
+        return ", ".join(parts)

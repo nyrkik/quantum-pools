@@ -132,7 +132,7 @@ export default function AccountDetailPage() {
 
   const scoreFields = [
     { key: "access_difficulty_score", label: "Access Difficulty", description: "Locked gates, stairs, narrow paths" },
-    { key: "customer_demands_score", label: "Customer Demands", description: "Frequent calls, complaints, special requests" },
+    { key: "customer_demands_score", label: "Client Demands", description: "Frequent calls, complaints, special requests" },
     { key: "chemical_demand_score", label: "Chemical Demand", description: "Chronic algae, unstable chemistry" },
     { key: "callback_frequency_score", label: "Callback Frequency", description: "Rework rate" },
   ] as const;

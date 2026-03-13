@@ -410,7 +410,7 @@ export default function InvoiceDetailPage({
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div>
-              <span className="text-muted-foreground">Customer: </span>
+              <span className="text-muted-foreground">Client: </span>
               <Link
                 href={`/customers/${invoice.customer_id}`}
                 className="hover:underline"

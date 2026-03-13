@@ -54,7 +54,7 @@ export default function DashboardPage() {
 
   const statCards = [
     {
-      title: "Total Customers",
+      title: "Total Clients",
       value: stats.customers.toString(),
       description: "Active accounts",
       icon: Users,
@@ -96,7 +96,7 @@ export default function DashboardPage() {
         <Link href="/customers">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
-            Add Customer
+            Add Client
           </Button>
         </Link>
       </div>
@@ -130,7 +130,7 @@ export default function DashboardPage() {
             <Link href="/customers">
               <Button variant="outline" size="sm">
                 <Users className="mr-2 h-4 w-4" />
-                Customers
+                Clients
               </Button>
             </Link>
             <Link href="/properties">

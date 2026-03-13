@@ -14,6 +14,7 @@ class PhotoInfo(BaseModel):
 class MeasurementResponse(BaseModel):
     id: str
     property_id: str
+    body_of_water_id: Optional[str] = None
     measured_by: Optional[str] = None
     length_ft: Optional[float] = None
     width_ft: Optional[float] = None

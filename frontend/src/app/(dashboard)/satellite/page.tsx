@@ -238,7 +238,7 @@ export default function SatellitePage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Customer</TableHead>
+                <TableHead>Client</TableHead>
                 <TableHead>Address</TableHead>
                 <TableHead className="text-right">Pool sqft</TableHead>
                 <TableHead className="text-right">Vegetation</TableHead>

@@ -45,7 +45,7 @@ class Customer(Base):
     billing_state: Mapped[str | None] = mapped_column(String(50))
     billing_zip: Mapped[str | None] = mapped_column(String(20))
     service_frequency: Mapped[str | None] = mapped_column(String(50))
-    preferred_day: Mapped[str | None] = mapped_column(String(20))
+    preferred_day: Mapped[str | None] = mapped_column(String(100))
     billing_frequency: Mapped[str] = mapped_column(String(20), default=BillingFrequency.monthly.value)
     monthly_rate: Mapped[float] = mapped_column(Float, default=0.0)
     payment_method: Mapped[str | None] = mapped_column(String(20))

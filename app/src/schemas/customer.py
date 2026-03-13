@@ -74,5 +74,7 @@ class CustomerResponse(BaseModel):
     updated_at: datetime
     property_count: int = 0
     first_property_address: Optional[str] = None
+    first_property_pool_type: Optional[str] = None
+    bow_summary: Optional[str] = None
 
     model_config = {"from_attributes": True}

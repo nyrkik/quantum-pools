@@ -16,6 +16,7 @@ from src.core.config import settings
 from src.core.exceptions import NotFoundError
 from src.models.pool_measurement import PoolMeasurement
 from src.models.property import Property
+from src.models.body_of_water import BodyOfWater
 
 logger = logging.getLogger(__name__)
 
@@ -125,16 +126,31 @@ class PoolMeasurementService:
         return self._client
 
     async def upload_photos(
-        self, org_id: str, property_id: str, photo_paths: list[dict], scale_reference: str, user_id: Optional[str] = None,
+        self, org_id: str, property_id: str, photo_paths: list[dict], scale_reference: str,
+        user_id: Optional[str] = None, body_of_water_id: Optional[str] = None,
     ) -> PoolMeasurement:
         prop = await self._get_property(org_id, property_id)
         if not prop:
             raise NotFoundError(f"Property {property_id} not found")
 
+        # If no BOW specified, use primary
+        if not body_of_water_id:
+            bow_result = await self.db.execute(
+                select(BodyOfWater).where(
+                    BodyOfWater.property_id == property_id,
+                    BodyOfWater.organization_id == org_id,
+                    BodyOfWater.is_primary == True,
+                )
+            )
+            primary_bow = bow_result.scalar_one_or_none()
+            if primary_bow:
+                body_of_water_id = primary_bow.id
+
         measurement = PoolMeasurement(
             id=str(uuid.uuid4()),
             property_id=property_id,
             organization_id=org_id,
+            body_of_water_id=body_of_water_id,
             measured_by=user_id,
             scale_reference=scale_reference,
             photo_paths=photo_paths,
@@ -218,23 +234,39 @@ class PoolMeasurementService:
         if not prop:
             raise NotFoundError(f"Property {measurement.property_id} not found")
 
-        if measurement.length_ft:
-            prop.pool_length_ft = measurement.length_ft
-        if measurement.width_ft:
-            prop.pool_width_ft = measurement.width_ft
-        if measurement.depth_shallow_ft:
-            prop.pool_depth_shallow = measurement.depth_shallow_ft
-        if measurement.depth_deep_ft:
-            prop.pool_depth_deep = measurement.depth_deep_ft
-        if measurement.depth_avg_ft:
-            prop.pool_depth_avg = measurement.depth_avg_ft
-        if measurement.calculated_sqft:
-            prop.pool_sqft = measurement.calculated_sqft
-        if measurement.calculated_gallons:
-            prop.pool_gallons = measurement.calculated_gallons
-        if measurement.pool_shape:
-            prop.pool_shape = measurement.pool_shape
-        prop.pool_volume_method = "measured"
+        # Write dimensions to BOW if available, also keep property in sync
+        bow = None
+        if measurement.body_of_water_id:
+            bow_result = await self.db.execute(
+                select(BodyOfWater).where(
+                    BodyOfWater.id == measurement.body_of_water_id,
+                    BodyOfWater.organization_id == org_id,
+                )
+            )
+            bow = bow_result.scalar_one_or_none()
+
+        targets = [prop]
+        if bow:
+            targets.append(bow)
+
+        for target in targets:
+            if measurement.length_ft:
+                target.pool_length_ft = measurement.length_ft
+            if measurement.width_ft:
+                target.pool_width_ft = measurement.width_ft
+            if measurement.depth_shallow_ft:
+                target.pool_depth_shallow = measurement.depth_shallow_ft
+            if measurement.depth_deep_ft:
+                target.pool_depth_deep = measurement.depth_deep_ft
+            if measurement.depth_avg_ft:
+                target.pool_depth_avg = measurement.depth_avg_ft
+            if measurement.calculated_sqft:
+                target.pool_sqft = measurement.calculated_sqft
+            if measurement.calculated_gallons:
+                target.pool_gallons = measurement.calculated_gallons
+            if measurement.pool_shape:
+                target.pool_shape = measurement.pool_shape
+            target.pool_volume_method = "measured"
 
         measurement.applied_to_property = True
         await self.db.flush()

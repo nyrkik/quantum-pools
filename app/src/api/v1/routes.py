@@ -13,6 +13,7 @@ from src.api.deps import get_current_org_user, OrgUserContext
 from src.models.property import Property
 from src.models.customer import Customer
 from src.models.tech import Tech
+from src.models.body_of_water import BodyOfWater
 from src.schemas.route import (
     RouteOptimizationRequest,
     RouteOptimizationResponse,
@@ -90,6 +91,21 @@ async def optimize(
     prop_result = await db.execute(prop_query)
     properties = list(prop_result.unique().scalars().all())
 
+    # Load BOW service minutes aggregated by property
+    property_ids = [p.id for p in properties]
+    bow_minutes: dict[str, int] = {}
+    if property_ids:
+        from sqlalchemy import func as sa_func
+        bow_result = await db.execute(
+            select(BodyOfWater.property_id, sa_func.sum(BodyOfWater.estimated_service_minutes))
+            .where(
+                BodyOfWater.property_id.in_(property_ids),
+                BodyOfWater.is_active == True,
+            )
+            .group_by(BodyOfWater.property_id)
+        )
+        bow_minutes = {r[0]: int(r[1]) for r in bow_result.all()}
+
     # Convert to dicts for optimizer
     prop_dicts = []
     for p in properties:
@@ -98,7 +114,7 @@ async def optimize(
             "id": p.id,
             "lat": p.lat,
             "lng": p.lng,
-            "estimated_service_minutes": p.estimated_service_minutes,
+            "estimated_service_minutes": bow_minutes.get(p.id, p.estimated_service_minutes),
             "difficulty_rating": cust.difficulty_rating if cust else 1,
             "customer_name": cust.full_name if cust else "",
             "address": p.full_address,

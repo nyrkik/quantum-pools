@@ -1,21 +1,14 @@
-"""Property schemas."""
+"""BodyOfWater schemas."""
 
-from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 from datetime import datetime
 
-if TYPE_CHECKING:
-    pass
 
-
-class PropertyCreate(BaseModel):
-    customer_id: str
+class BodyOfWaterCreate(BaseModel):
     name: Optional[str] = None
-    address: str = Field(..., min_length=1)
-    city: str = Field(..., min_length=1)
-    state: str = Field(..., min_length=1)
-    zip_code: str = Field(..., min_length=1)
+    water_type: str = "pool"
+    is_primary: bool = False
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
@@ -27,28 +20,21 @@ class PropertyCreate(BaseModel):
     pool_depth_avg: Optional[float] = None
     pool_shape: Optional[str] = None
     pool_volume_method: Optional[str] = None
-    has_spa: bool = False
-    has_water_feature: bool = False
+    sanitizer_type: Optional[str] = None
     pump_type: Optional[str] = None
     filter_type: Optional[str] = None
     heater_type: Optional[str] = None
     chlorinator_type: Optional[str] = None
     automation_system: Optional[str] = None
-    gate_code: Optional[str] = None
-    access_instructions: Optional[str] = None
-    dog_on_property: bool = False
     estimated_service_minutes: int = 30
-    is_locked_to_day: bool = False
-    service_day_pattern: Optional[str] = None
+    monthly_rate: Optional[float] = None
     notes: Optional[str] = None
 
 
-class PropertyUpdate(BaseModel):
+class BodyOfWaterUpdate(BaseModel):
     name: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip_code: Optional[str] = None
+    water_type: Optional[str] = None
+    is_primary: Optional[bool] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
@@ -60,80 +46,46 @@ class PropertyUpdate(BaseModel):
     pool_depth_avg: Optional[float] = None
     pool_shape: Optional[str] = None
     pool_volume_method: Optional[str] = None
-    has_spa: Optional[bool] = None
-    has_water_feature: Optional[bool] = None
+    sanitizer_type: Optional[str] = None
     pump_type: Optional[str] = None
     filter_type: Optional[str] = None
     heater_type: Optional[str] = None
     chlorinator_type: Optional[str] = None
     automation_system: Optional[str] = None
-    gate_code: Optional[str] = None
-    access_instructions: Optional[str] = None
-    dog_on_property: Optional[bool] = None
     estimated_service_minutes: Optional[int] = None
-    is_locked_to_day: Optional[bool] = None
-    service_day_pattern: Optional[str] = None
+    monthly_rate: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
 
-class PropertyResponse(BaseModel):
+class BodyOfWaterResponse(BaseModel):
     id: str
-    customer_id: str
-    name: Optional[str] = None
-    address: str
-    city: str
-    state: str
-    zip_code: str
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    pool_type: Optional[str] = None
-    pool_gallons: Optional[int] = None
-    pool_sqft: Optional[float] = None
-    pool_surface: Optional[str] = None
-    pool_length_ft: Optional[float] = None
-    pool_width_ft: Optional[float] = None
-    pool_depth_shallow: Optional[float] = None
-    pool_depth_deep: Optional[float] = None
-    pool_depth_avg: Optional[float] = None
-    pool_shape: Optional[str] = None
-    pool_volume_method: Optional[str] = None
-    has_spa: bool
-    has_water_feature: bool
-    pump_type: Optional[str] = None
-    filter_type: Optional[str] = None
-    heater_type: Optional[str] = None
-    chlorinator_type: Optional[str] = None
-    automation_system: Optional[str] = None
-    gate_code: Optional[str] = None
-    access_instructions: Optional[str] = None
-    dog_on_property: bool
-    estimated_service_minutes: int
-    is_locked_to_day: bool
-    service_day_pattern: Optional[str] = None
-    notes: Optional[str] = None
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-    bodies_of_water: list[BodyOfWaterSummary] = []
-
-    model_config = {"from_attributes": True}
-
-
-class BodyOfWaterSummary(BaseModel):
-    """Inline BOW summary for property responses."""
-    id: str
+    property_id: str
     name: Optional[str] = None
     water_type: str
     is_primary: bool
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
+    pool_surface: Optional[str] = None
+    pool_length_ft: Optional[float] = None
+    pool_width_ft: Optional[float] = None
+    pool_depth_shallow: Optional[float] = None
+    pool_depth_deep: Optional[float] = None
+    pool_depth_avg: Optional[float] = None
+    pool_shape: Optional[str] = None
+    pool_volume_method: Optional[str] = None
+    sanitizer_type: Optional[str] = None
+    pump_type: Optional[str] = None
+    filter_type: Optional[str] = None
+    heater_type: Optional[str] = None
+    chlorinator_type: Optional[str] = None
+    automation_system: Optional[str] = None
     estimated_service_minutes: int
     monthly_rate: Optional[float] = None
+    notes: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-# Rebuild PropertyResponse to resolve forward ref
-PropertyResponse.model_rebuild()

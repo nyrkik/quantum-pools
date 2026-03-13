@@ -348,13 +348,13 @@ export default function InvoicesPage() {
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>Customer</Label>
+                  <Label>Client</Label>
                   <Select
                     value={selectedCustomerId}
                     onValueChange={setSelectedCustomerId}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select customer" />
+                      <SelectValue placeholder="Select client" />
                     </SelectTrigger>
                     <SelectContent>
                       {customers.map((c) => (
@@ -807,7 +807,7 @@ export default function InvoicesPage() {
               <TableHead>Status</TableHead>
               <TableHead>Issue Date</TableHead>
               <TableHead>Invoice #</TableHead>
-              <TableHead>Customer</TableHead>
+              <TableHead>Client</TableHead>
               <TableHead>Subject</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Balance</TableHead>

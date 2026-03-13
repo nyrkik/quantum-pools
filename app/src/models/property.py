@@ -82,6 +82,7 @@ class Property(Base):
     jurisdiction = relationship("PropertyJurisdiction", back_populates="property", uselist=False, lazy="noload")
     satellite_analysis = relationship("SatelliteAnalysis", back_populates="property", uselist=False, lazy="noload")
     measurements = relationship("PoolMeasurement", back_populates="property", lazy="noload")
+    bodies_of_water = relationship("BodyOfWater", back_populates="property", lazy="noload")
 
     @property
     def full_address(self) -> str:

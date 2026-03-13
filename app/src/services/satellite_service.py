@@ -21,6 +21,7 @@ from src.core.config import settings
 from src.core.exceptions import NotFoundError
 from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.property import Property
+from src.models.body_of_water import BodyOfWater
 
 logger = logging.getLogger(__name__)
 
@@ -175,9 +176,20 @@ class SatelliteService:
                 analyze_url or "", analyze_zoom or 21, width, height,
             )
 
-        # Update property pool_sqft if detected and not already set
+        # Update pool_sqft on primary BOW and property if detected and not already set
         if results["pool_detected"] and results["estimated_pool_sqft"] and not prop.pool_sqft:
             prop.pool_sqft = results["estimated_pool_sqft"]
+            # Also write to primary BOW
+            bow_result = await self.db.execute(
+                select(BodyOfWater).where(
+                    BodyOfWater.property_id == property_id,
+                    BodyOfWater.organization_id == organization_id,
+                    BodyOfWater.is_primary == True,
+                )
+            )
+            primary_bow = bow_result.scalar_one_or_none()
+            if primary_bow and not primary_bow.pool_sqft:
+                primary_bow.pool_sqft = results["estimated_pool_sqft"]
 
         return await self._save_analysis(
             organization_id, property_id, existing,

@@ -9,6 +9,7 @@ from src.api.deps import get_current_org_user, OrgUserContext
 from src.schemas.property import PropertyCreate, PropertyUpdate, PropertyResponse
 from src.services.property_service import PropertyService
 from src.services.geocoding_service import GeocodingService
+from src.services.body_of_water_service import BodyOfWaterService
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -33,10 +34,21 @@ async def list_properties(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PropertyService(db)
+    bow_svc = BodyOfWaterService(db)
     properties, total = await svc.list(
         ctx.organization_id, customer_id=customer_id, is_active=is_active, skip=skip, limit=limit
     )
-    return {"items": [PropertyResponse.model_validate(p) for p in properties], "total": total}
+    results = []
+    for p in properties:
+        resp = PropertyResponse.model_validate(p)
+        resp.bodies_of_water = [
+            {"id": b.id, "name": b.name, "water_type": b.water_type, "is_primary": b.is_primary,
+             "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
+             "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
+            for b in await bow_svc.list_for_property(ctx.organization_id, p.id)
+        ]
+        results.append(resp)
+    return {"items": results, "total": total}
 
 
 @router.post("", response_model=PropertyResponse, status_code=201)
@@ -59,8 +71,16 @@ async def get_property(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PropertyService(db)
+    bow_svc = BodyOfWaterService(db)
     prop = await svc.get(ctx.organization_id, property_id)
-    return PropertyResponse.model_validate(prop)
+    resp = PropertyResponse.model_validate(prop)
+    resp.bodies_of_water = [
+        {"id": b.id, "name": b.name, "water_type": b.water_type, "is_primary": b.is_primary,
+         "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
+         "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
+        for b in await bow_svc.list_for_property(ctx.organization_id, prop.id)
+    ]
+    return resp
 
 
 @router.put("/{property_id}", response_model=PropertyResponse)

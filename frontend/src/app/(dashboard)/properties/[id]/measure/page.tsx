@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +27,16 @@ import {
   type MeasurementData,
 } from "@/components/measurement/measurement-results";
 
+interface BodyOfWater {
+  id: string;
+  name: string | null;
+  water_type: string;
+  pool_type: string | null;
+  pool_sqft: number | null;
+  pool_gallons: number | null;
+  pool_volume_method: string | null;
+}
+
 interface Property {
   id: string;
   address: string;
@@ -37,6 +47,7 @@ interface Property {
   pool_sqft: number | null;
   pool_gallons: number | null;
   pool_volume_method: string | null;
+  bodies_of_water?: BodyOfWater[];
 }
 
 type Step = "capture" | "analyze" | "apply";
@@ -44,9 +55,12 @@ type Step = "capture" | "analyze" | "apply";
 export default function MeasurePage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const propertyId = params.id as string;
+  const bowId = searchParams.get("bow");
 
   const [property, setProperty] = useState<Property | null>(null);
+  const [bow, setBow] = useState<BodyOfWater | null>(null);
   const [step, setStep] = useState<Step>("capture");
   const [overviewPhotos, setOverviewPhotos] = useState<PhotoFile[]>([]);
   const [depthPhotos, setDepthPhotos] = useState<PhotoFile[]>([]);
@@ -66,9 +80,16 @@ export default function MeasurePage() {
         ]);
         setProperty(prop);
         setPastMeasurements(measurements);
+        // Find the targeted BOW if specified
+        let targetBow: BodyOfWater | undefined;
+        if (bowId && prop.bodies_of_water) {
+          targetBow = prop.bodies_of_water.find((b: BodyOfWater) => b.id === bowId);
+          if (targetBow) setBow(targetBow);
+        }
         // Commercial pools almost always have depth marker tiles — default to tile
         // Residential pools less likely, default to yardstick
-        if (prop.pool_type === "residential") {
+        const poolType = targetBow?.pool_type ?? prop.pool_type;
+        if (poolType === "residential") {
           setScaleRef("yardstick");
         }
       } catch {
@@ -87,6 +108,7 @@ export default function MeasurePage() {
     try {
       const formData = new FormData();
       formData.append("scale_reference", scaleRef);
+      if (bowId) formData.append("body_of_water_id", bowId);
       for (const p of overviewPhotos) {
         formData.append("overview_photos", p.file);
       }
@@ -130,7 +152,7 @@ export default function MeasurePage() {
     setApplying(true);
     try {
       await api.post(`/v1/measurements/${measurement.id}/apply`);
-      toast.success("Property updated with measured dimensions");
+      toast.success(bow ? "Body of water updated with measured dimensions" : "Property updated with measured dimensions");
       setStep("apply");
       const prop = await api.get<Property>(`/v1/properties/${propertyId}`);
       setProperty(prop);
@@ -161,7 +183,7 @@ export default function MeasurePage() {
           variant="ghost"
           size="icon"
           className="shrink-0 mt-0.5"
-          onClick={() => router.push("/properties")}
+          onClick={() => router.back()}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -171,7 +193,7 @@ export default function MeasurePage() {
             Pool Measurement
           </h1>
           <p className="text-sm text-muted-foreground truncate">
-            {property.address}, {property.city}
+            {bow ? `${bow.name || bow.water_type} — ` : ""}{property.address}, {property.city}
           </p>
         </div>
       </div>
@@ -200,7 +222,7 @@ export default function MeasurePage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              {property.pool_type === "commercial" || scaleRef === "depth_marker_tile" ? (
+              {(bow?.pool_type ?? property.pool_type) === "commercial" || scaleRef === "depth_marker_tile" ? (
                 <>
                   <p>
                     <strong>Overview photo:</strong> Stand back to get the full
@@ -311,9 +333,9 @@ export default function MeasurePage() {
               <MeasurementResults
                 measurement={measurement}
                 currentValues={{
-                  pool_sqft: property.pool_sqft,
-                  pool_gallons: property.pool_gallons,
-                  pool_volume_method: property.pool_volume_method,
+                  pool_sqft: bow?.pool_sqft ?? property.pool_sqft,
+                  pool_gallons: bow?.pool_gallons ?? property.pool_gallons,
+                  pool_volume_method: bow?.pool_volume_method ?? property.pool_volume_method,
                 }}
               />
 
@@ -340,7 +362,7 @@ export default function MeasurePage() {
                       {applying ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        "Apply to Property"
+                        bow ? "Apply to Body of Water" : "Apply to Property"
                       )}
                     </Button>
                   </div>
@@ -373,22 +395,22 @@ export default function MeasurePage() {
               Measurements Applied
             </h2>
             <p className="text-sm text-muted-foreground mb-6 text-center px-4">
-              Property record updated with ground-truth dimensions
+              {bow ? "Body of water" : "Property"} record updated with ground-truth dimensions
             </p>
             <div className="grid grid-cols-2 gap-4 text-center text-sm mb-6 w-full max-w-xs">
               <div>
                 <span className="text-muted-foreground">Surface Area</span>
                 <p className="font-medium text-lg">
-                  {property.pool_sqft
-                    ? `${property.pool_sqft.toLocaleString()} sqft`
+                  {(bow?.pool_sqft ?? property.pool_sqft)
+                    ? `${(bow?.pool_sqft ?? property.pool_sqft)!.toLocaleString()} sqft`
                     : "—"}
                 </p>
               </div>
               <div>
                 <span className="text-muted-foreground">Volume</span>
                 <p className="font-medium text-lg">
-                  {property.pool_gallons
-                    ? `${property.pool_gallons.toLocaleString()} gal`
+                  {(bow?.pool_gallons ?? property.pool_gallons)
+                    ? `${(bow?.pool_gallons ?? property.pool_gallons)!.toLocaleString()} gal`
                     : "—"}
                 </p>
               </div>
@@ -396,7 +418,7 @@ export default function MeasurePage() {
             <Button
               variant="outline"
               className="h-12 sm:h-10"
-              onClick={() => router.push("/properties")}
+              onClick={() => router.back()}
             >
               Back to Properties
             </Button>

@@ -10,6 +10,7 @@ from src.models.org_cost_settings import OrgCostSettings
 from src.models.property_difficulty import PropertyDifficulty
 from src.models.property import Property
 from src.models.customer import Customer
+from src.models.body_of_water import BodyOfWater
 from src.schemas.profitability import (
     CostBreakdown,
     ProfitabilityAccount,
@@ -119,22 +120,37 @@ class ProfitabilityService:
         return diff
 
     def compute_composite_score(
-        self, prop: Property, diff: Optional[PropertyDifficulty]
+        self, prop: Property, diff: Optional[PropertyDifficulty],
+        bows: Optional[list[BodyOfWater]] = None,
     ) -> float:
         if diff and diff.override_composite is not None:
             return diff.override_composite
 
         scores = {}
 
+        # Aggregate from BOWs if available, else fall back to property fields
+        if bows:
+            total_gallons = sum(b.pool_gallons or 0 for b in bows) or None
+            total_sqft = sum(b.pool_sqft or 0 for b in bows) or None
+            total_service_minutes = sum(b.estimated_service_minutes or 0 for b in bows) or None
+            has_spa = any(b.water_type == "spa" for b in bows)
+            has_water_feature = any(b.water_type in ("water_feature", "fountain") for b in bows)
+        else:
+            total_gallons = prop.pool_gallons
+            total_sqft = prop.pool_sqft
+            total_service_minutes = prop.estimated_service_minutes
+            has_spa = prop.has_spa
+            has_water_feature = prop.has_water_feature
+
         # Measured factors
-        scores["pool_gallons"] = _range_score(prop.pool_gallons, GALLON_RANGES)
-        scores["pool_sqft"] = _range_score(prop.pool_sqft, SQFT_RANGES)
-        scores["service_time"] = _range_score(prop.estimated_service_minutes, SERVICE_TIME_RANGES)
+        scores["pool_gallons"] = _range_score(total_gallons, GALLON_RANGES)
+        scores["pool_sqft"] = _range_score(total_sqft, SQFT_RANGES)
+        scores["service_time"] = _range_score(total_service_minutes, SERVICE_TIME_RANGES)
 
         water_feature_score = 1.0
-        if prop.has_spa:
+        if has_spa:
             water_feature_score += 1.5
-        if prop.has_water_feature:
+        if has_water_feature:
             water_feature_score += 1.0
         scores["water_features"] = min(water_feature_score, 5.0)
 
@@ -176,16 +192,21 @@ class ProfitabilityService:
         customer: Customer,
         difficulty_score: float,
         total_accounts: int,
+        bows: Optional[list[BodyOfWater]] = None,
     ) -> CostBreakdown:
         multiplier = self.difficulty_to_multiplier(difficulty_score)
         visits_per_month = 4.0  # Standard weekly service
 
-        # Chemical cost
-        gallons = prop.pool_gallons or 15000
+        # Chemical cost — aggregate gallons from BOWs
+        if bows:
+            gallons = sum(b.pool_gallons or 0 for b in bows) or 15000
+            service_minutes = sum(b.estimated_service_minutes or 0 for b in bows) or 30
+        else:
+            gallons = prop.pool_gallons or 15000
+            service_minutes = prop.estimated_service_minutes or 30
         chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits_per_month
 
         # Labor cost
-        service_minutes = prop.estimated_service_minutes or 30
         labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits_per_month * multiplier
 
         # Travel cost (estimate 15 min drive, 8 miles per stop)
@@ -240,6 +261,17 @@ class ProfitabilityService:
         result = await self.db.execute(query)
         customers = list(result.unique().scalars().all())
 
+        # Load all BOWs for org, indexed by property_id
+        bow_result = await self.db.execute(
+            select(BodyOfWater).where(
+                BodyOfWater.organization_id == org_id,
+                BodyOfWater.is_active == True,
+            )
+        )
+        bows_by_property: dict[str, list[BodyOfWater]] = {}
+        for bow in bow_result.scalars().all():
+            bows_by_property.setdefault(bow.property_id, []).append(bow)
+
         # Count total for overhead calc
         total_accounts = sum(
             1 for c in customers for p in (c.properties or []) if p.is_active
@@ -257,10 +289,11 @@ class ProfitabilityService:
                 if not prop.is_active:
                     continue
 
+                prop_bows = bows_by_property.get(prop.id, [])
                 diff = difficulties.get(prop.id)
-                score = self.compute_composite_score(prop, diff)
+                score = self.compute_composite_score(prop, diff, bows=prop_bows)
                 multiplier = self.difficulty_to_multiplier(score)
-                cost = self.compute_cost_breakdown(settings, prop, customer, score, total_accounts)
+                cost = self.compute_cost_breakdown(settings, prop, customer, score, total_accounts, bows=prop_bows)
 
                 # Apply filters
                 if min_margin is not None and cost.margin_pct < min_margin:
@@ -272,9 +305,13 @@ class ProfitabilityService:
                 if max_difficulty is not None and score > max_difficulty:
                     continue
 
+                total_gallons = sum(b.pool_gallons or 0 for b in prop_bows) if prop_bows else prop.pool_gallons
+                total_sqft = sum(b.pool_sqft or 0 for b in prop_bows) if prop_bows else prop.pool_sqft
+                total_svc_min = sum(b.estimated_service_minutes or 0 for b in prop_bows) if prop_bows else (prop.estimated_service_minutes or 30)
+
                 rate_per_gallon = None
-                if prop.pool_gallons and customer.monthly_rate:
-                    rate_per_gallon = round(customer.monthly_rate / prop.pool_gallons, 4)
+                if total_gallons and customer.monthly_rate:
+                    rate_per_gallon = round(customer.monthly_rate / total_gallons, 4)
 
                 accounts.append(ProfitabilityAccount(
                     customer_id=customer.id,
@@ -282,9 +319,9 @@ class ProfitabilityService:
                     property_id=prop.id,
                     property_address=prop.address,
                     monthly_rate=customer.monthly_rate or 0.0,
-                    pool_gallons=prop.pool_gallons,
-                    pool_sqft=prop.pool_sqft,
-                    estimated_service_minutes=prop.estimated_service_minutes or 30,
+                    pool_gallons=total_gallons,
+                    pool_sqft=total_sqft,
+                    estimated_service_minutes=total_svc_min,
                     difficulty_score=score,
                     difficulty_multiplier=multiplier,
                     cost_breakdown=cost,
@@ -338,18 +375,37 @@ class ProfitabilityService:
         )
         difficulties = {d.property_id: d for d in diff_result.scalars().all()}
 
+        # Load BOWs for this customer's properties
+        property_ids = [p.id for p in (customer.properties or []) if p.is_active]
+        bow_result = await self.db.execute(
+            select(BodyOfWater).where(
+                BodyOfWater.organization_id == org_id,
+                BodyOfWater.property_id.in_(property_ids),
+                BodyOfWater.is_active == True,
+            )
+        ) if property_ids else None
+        bows_by_property: dict[str, list[BodyOfWater]] = {}
+        if bow_result:
+            for bow in bow_result.scalars().all():
+                bows_by_property.setdefault(bow.property_id, []).append(bow)
+
         accounts = []
         for prop in (customer.properties or []):
             if not prop.is_active:
                 continue
+            prop_bows = bows_by_property.get(prop.id, [])
             diff = difficulties.get(prop.id)
-            score = self.compute_composite_score(prop, diff)
+            score = self.compute_composite_score(prop, diff, bows=prop_bows)
             multiplier = self.difficulty_to_multiplier(score)
-            cost = self.compute_cost_breakdown(settings, prop, customer, score, total_accounts)
+            cost = self.compute_cost_breakdown(settings, prop, customer, score, total_accounts, bows=prop_bows)
+
+            total_gallons = sum(b.pool_gallons or 0 for b in prop_bows) if prop_bows else prop.pool_gallons
+            total_sqft = sum(b.pool_sqft or 0 for b in prop_bows) if prop_bows else prop.pool_sqft
+            total_svc_min = sum(b.estimated_service_minutes or 0 for b in prop_bows) if prop_bows else (prop.estimated_service_minutes or 30)
 
             rate_per_gallon = None
-            if prop.pool_gallons and customer.monthly_rate:
-                rate_per_gallon = round(customer.monthly_rate / prop.pool_gallons, 4)
+            if total_gallons and customer.monthly_rate:
+                rate_per_gallon = round(customer.monthly_rate / total_gallons, 4)
 
             accounts.append(ProfitabilityAccount(
                 customer_id=customer.id,
@@ -357,9 +413,9 @@ class ProfitabilityService:
                 property_id=prop.id,
                 property_address=prop.address,
                 monthly_rate=customer.monthly_rate or 0.0,
-                pool_gallons=prop.pool_gallons,
-                pool_sqft=prop.pool_sqft,
-                estimated_service_minutes=prop.estimated_service_minutes or 30,
+                pool_gallons=total_gallons,
+                pool_sqft=total_sqft,
+                estimated_service_minutes=total_svc_min,
                 difficulty_score=score,
                 difficulty_multiplier=multiplier,
                 cost_breakdown=cost,

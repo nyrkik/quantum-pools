@@ -29,6 +29,8 @@ async def list_customers(
         resp = CustomerResponse.model_validate(c)
         resp.property_count = await svc.get_property_count(c.id)
         resp.first_property_address = await svc.get_first_property_address(c.id)
+        resp.first_property_pool_type = await svc.get_first_property_pool_type(c.id)
+        resp.bow_summary = await svc.get_property_bow_summary(c.id)
         results.append(resp)
     return {"items": results, "total": total}
 

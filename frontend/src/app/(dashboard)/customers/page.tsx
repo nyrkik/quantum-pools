@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Plus, Search, Building2, Home } from "lucide-react";
+import { Plus, Search, Building2, Home, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
 interface Customer {
   id: string;
@@ -51,11 +51,23 @@ interface Customer {
   is_active: boolean;
   property_count: number;
   first_property_address: string | null;
+  first_property_pool_type: string | null;
+  bow_summary: string | null;
 }
+
+type SortKey = "name" | "property" | "company" | "pool" | "rate" | "balance" | "status";
+type SortDir = "asc" | "desc";
 
 function customerDisplayName(c: Customer) {
   if (c.customer_type === "commercial") return c.first_name;
   return `${c.first_name} ${c.last_name}`.trim();
+}
+
+function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <ArrowUpDown className="h-3.5 w-3.5 ml-1 text-muted-foreground/40" />;
+  return dir === "asc"
+    ? <ArrowUp className="h-3.5 w-3.5 ml-1" />
+    : <ArrowDown className="h-3.5 w-3.5 ml-1" />;
 }
 
 export default function CustomersPage() {
@@ -65,6 +77,20 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newType, setNewType] = useState("residential");
+  const [newCompany, setNewCompany] = useState("");
+  const [newCompanyCustom, setNewCompanyCustom] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"commercial" | "residential" | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true);
@@ -77,7 +103,7 @@ export default function CustomersPage() {
       setCustomers(data.items);
       setTotal(data.total);
     } catch {
-      toast.error("Failed to load customers");
+      toast.error("Failed to load clients");
     } finally {
       setLoading(false);
     }
@@ -87,7 +113,6 @@ export default function CustomersPage() {
     fetchCustomers();
   }, [fetchCustomers]);
 
-  // Refetch when navigating back (page regains focus)
   useEffect(() => {
     const handleFocus = () => fetchCustomers();
     window.addEventListener("focus", handleFocus);
@@ -104,7 +129,7 @@ export default function CustomersPage() {
         : (form.get("first_name") as string),
       last_name: isCommercial ? "" : (form.get("last_name") as string),
       company_name: isCommercial
-        ? (form.get("company_name") as string) || undefined
+        ? (newCompany === "__new__" ? newCompanyCustom : newCompany) || undefined
         : undefined,
       customer_type: newType,
       email: (form.get("email") as string) || undefined,
@@ -113,33 +138,80 @@ export default function CustomersPage() {
     };
     try {
       await api.post("/v1/customers", body);
-      toast.success("Customer created");
+      toast.success("Client created");
       setDialogOpen(false);
       setNewType("residential");
+      setNewCompany("");
+      setNewCompanyCustom("");
       fetchCustomers();
     } catch {
-      toast.error("Failed to create customer");
+      toast.error("Failed to create client");
     }
   };
+
+  const commercialCount = customers.filter(c => c.customer_type === "commercial").length;
+  const residentialCount = customers.filter(c => c.customer_type === "residential").length;
+  const hasCommercial = commercialCount > 0;
+  const hasResidential = residentialCount > 0;
+
+  const sorted = useMemo(() => {
+    const filtered = typeFilter ? customers.filter(c => c.customer_type === typeFilter) : customers;
+    return [...filtered].sort((a, b) => {
+      // Commercial always first, then sort within groups
+      const typeOrder = (a.customer_type === "commercial" ? 0 : 1) - (b.customer_type === "commercial" ? 0 : 1);
+      if (typeOrder !== 0) return typeOrder;
+
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortKey) {
+        case "name":
+          return dir * customerDisplayName(a).localeCompare(customerDisplayName(b));
+        case "property":
+          return dir * (a.first_property_address ?? "").localeCompare(b.first_property_address ?? "");
+        case "company":
+          return dir * (a.company_name ?? "").localeCompare(b.company_name ?? "");
+        case "pool":
+          return dir * (a.bow_summary ?? a.first_property_pool_type ?? "").localeCompare(b.bow_summary ?? b.first_property_pool_type ?? "");
+        case "rate":
+          return dir * (a.monthly_rate - b.monthly_rate);
+        case "balance":
+          return dir * (a.balance - b.balance);
+        case "status": {
+          const av = a.is_active ? 0 : 1;
+          const bv = b.is_active ? 0 : 1;
+          return dir * (av - bv);
+        }
+        default:
+          return 0;
+      }
+    });
+  }, [customers, typeFilter, sortKey, sortDir]);
+
+  const existingCompanies = useMemo(() => {
+    const names = new Set<string>();
+    customers.forEach(c => { if (c.company_name) names.add(c.company_name); });
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  const thClass = "cursor-pointer select-none";
 
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Customers</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Clients</h1>
           <p className="text-muted-foreground text-sm">{total} total</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              <span className="hidden sm:inline">Add Customer</span>
+              <span className="hidden sm:inline">Add Client</span>
               <span className="sm:hidden">Add</span>
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>New Customer</DialogTitle>
+              <DialogTitle>New Client</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="space-y-2">
@@ -167,12 +239,35 @@ export default function CustomersPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="company_name">Management Company</Label>
-                    <Input
-                      id="company_name"
-                      name="company_name"
-                      placeholder="e.g. Bright PM"
-                    />
+                    <Label>Mgmt Company</Label>
+                    {existingCompanies.length > 0 ? (
+                      <>
+                        <Select value={newCompany} onValueChange={setNewCompany}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select or add new..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {existingCompanies.map(name => (
+                              <SelectItem key={name} value={name}>{name}</SelectItem>
+                            ))}
+                            <SelectItem value="__new__">+ New company...</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {newCompany === "__new__" && (
+                          <Input
+                            placeholder="New company name..."
+                            value={newCompanyCustom}
+                            onChange={(e) => setNewCompanyCustom(e.target.value)}
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <Input
+                        placeholder="e.g. Bright PM"
+                        value={newCompany}
+                        onChange={(e) => setNewCompany(e.target.value)}
+                      />
+                    )}
                   </div>
                 </>
               ) : (
@@ -209,7 +304,7 @@ export default function CustomersPage() {
                 />
               </div>
               <Button type="submit" className="w-full">
-                Create Customer
+                Create Client
               </Button>
             </form>
           </DialogContent>
@@ -219,12 +314,40 @@ export default function CustomersPage() {
       <div className="flex items-center gap-2">
         <Search className="h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search customers..."
+          placeholder="Search clients..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm"
         />
       </div>
+
+      {hasCommercial && hasResidential && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant={typeFilter === null ? "default" : "outline"}
+            size="sm"
+            onClick={() => setTypeFilter(null)}
+          >
+            All
+          </Button>
+          <Button
+            variant={typeFilter === "commercial" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setTypeFilter("commercial")}
+          >
+            <Building2 className="h-3.5 w-3.5 mr-1.5" />
+            Commercial ({commercialCount})
+          </Button>
+          <Button
+            variant={typeFilter === "residential" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setTypeFilter("residential")}
+          >
+            <Home className="h-3.5 w-3.5 mr-1.5" />
+            Residential ({residentialCount})
+          </Button>
+        </div>
+      )}
 
       <TooltipProvider>
         <div className="rounded-md border">
@@ -232,13 +355,27 @@ export default function CustomersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8"></TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead className="hidden md:table-cell">Property</TableHead>
-                <TableHead className="hidden lg:table-cell">Mgmt Co</TableHead>
-                <TableHead className="hidden sm:table-cell">Contact</TableHead>
-                <TableHead>Rate</TableHead>
-                <TableHead className="hidden sm:table-cell">Balance</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className={thClass} onClick={() => toggleSort("name")}>
+                  <div className="flex items-center">Name<SortIcon active={sortKey === "name"} dir={sortDir} /></div>
+                </TableHead>
+                <TableHead className={`hidden md:table-cell ${thClass}`} onClick={() => toggleSort("property")}>
+                  <div className="flex items-center">Property<SortIcon active={sortKey === "property"} dir={sortDir} /></div>
+                </TableHead>
+                <TableHead className={`hidden lg:table-cell ${thClass}`} onClick={() => toggleSort("company")}>
+                  <div className="flex items-center">Mgmt Company<SortIcon active={sortKey === "company"} dir={sortDir} /></div>
+                </TableHead>
+                <TableHead className={`hidden sm:table-cell ${thClass}`} onClick={() => toggleSort("pool")}>
+                  <div className="flex items-center">Pool Type<SortIcon active={sortKey === "pool"} dir={sortDir} /></div>
+                </TableHead>
+                <TableHead className={thClass} onClick={() => toggleSort("rate")}>
+                  <div className="flex items-center">Rate<SortIcon active={sortKey === "rate"} dir={sortDir} /></div>
+                </TableHead>
+                <TableHead className={`hidden sm:table-cell ${thClass}`} onClick={() => toggleSort("balance")}>
+                  <div className="flex items-center">Balance<SortIcon active={sortKey === "balance"} dir={sortDir} /></div>
+                </TableHead>
+                <TableHead className={thClass} onClick={() => toggleSort("status")}>
+                  <div className="flex items-center">Status<SortIcon active={sortKey === "status"} dir={sortDir} /></div>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -254,11 +391,11 @@ export default function CustomersPage() {
                     colSpan={8}
                     className="text-center py-8 text-muted-foreground"
                   >
-                    No customers found
+                    No clients found
                   </TableCell>
                 </TableRow>
               ) : (
-                customers.map((c) => (
+                sorted.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell className="pr-0">
                       <Tooltip>
@@ -281,16 +418,13 @@ export default function CustomersPage() {
                       </Link>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
-                      {c.first_property_address || "—"}
+                      {c.first_property_address || "\u2014"}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
-                      {c.company_name || "—"}
+                      {c.company_name || "\u2014"}
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <div className="text-sm">{c.email}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {c.phone}
-                      </div>
+                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground capitalize">
+                      {c.bow_summary || c.first_property_pool_type || "\u2014"}
                     </TableCell>
                     <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
                     <TableCell

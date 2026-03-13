@@ -58,24 +58,28 @@ export default function DashboardPage() {
       value: stats.customers.toString(),
       description: "Active accounts",
       icon: Users,
+      href: "/customers",
     },
     {
       title: "Properties",
       value: stats.properties.toString(),
       description: "Service locations",
       icon: MapPin,
+      href: "/properties",
     },
     {
       title: "Today's Visits",
       value: stats.todayVisits.toString(),
       description: "Scheduled stops",
       icon: CalendarCheck,
+      href: "/routes",
     },
     {
       title: "Monthly Revenue",
       value: `$${stats.monthlyRevenue.toLocaleString()}`,
       description: "Current period",
       icon: DollarSign,
+      href: "/invoices",
     },
   ];
 
@@ -99,18 +103,20 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {statCards.map((stat) => (
-          <Card key={stat.title}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <CardDescription>{stat.description}</CardDescription>
-            </CardContent>
-          </Card>
+          <Link key={stat.title} href={stat.href}>
+            <Card className="cursor-pointer transition-colors hover:bg-muted/50">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {stat.title}
+                </CardTitle>
+                <stat.icon className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stat.value}</div>
+                <CardDescription>{stat.description}</CardDescription>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
 

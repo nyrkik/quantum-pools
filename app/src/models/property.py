@@ -18,6 +18,9 @@ class Property(Base):
         String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
+    # Identity
+    name: Mapped[str | None] = mapped_column(String(100))
+
     # Address
     address: Mapped[str] = mapped_column(String(255), nullable=False)
     city: Mapped[str] = mapped_column(String(100), nullable=False)

@@ -19,6 +19,7 @@ import Link from "next/link";
 interface Property {
   id: string;
   customer_id: string;
+  name: string | null;
   address: string;
   city: string;
   state: string;
@@ -95,9 +96,9 @@ export default function PropertiesPage() {
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground" />
                       <div>
-                        <div className="font-medium">{p.address}</div>
+                        <div className="font-medium">{p.name || p.address}</div>
                         <div className="text-xs text-muted-foreground">
-                          {p.city}, {p.state} {p.zip_code}
+                          {p.name ? p.address + ", " : ""}{p.city}, {p.state} {p.zip_code}
                         </div>
                       </div>
                     </div>

@@ -22,27 +22,40 @@ logger = logging.getLogger(__name__)
 MEASUREMENT_PROMPT = """You are analyzing photos of a swimming pool to determine its precise dimensions and volume.
 
 PHOTOS PROVIDED:
-- Overview photo(s): Show the full pool with a scale reference object visible
-- Depth marker photo(s): Show depth markers IN CONTEXT — the marker should be readable, but the surrounding pool perimeter, coping, and deck should also be visible so you can determine WHERE along the pool each marker is located
+- Overview photo(s): Show the full pool. A scale reference should be visible (see below).
+- Depth marker photo(s): Show depth markers IN CONTEXT — the marker should be readable, but the surrounding pool perimeter, coping, and deck should also be visible so you can determine WHERE along the pool each marker is located.
 
-SCALE REFERENCE: The photographer placed a {scale_reference} near the pool for scale.
-Common reference sizes:
+SCALE REFERENCE: {scale_reference}
+
+DEPTH MARKER TILES AS SCALE REFERENCE:
+Most commercial pools have standardized depth marker tiles set into the coping or pool edge.
+These tiles are almost always 6 inches × 6 inches (some are 6" × 12").
+If you can see ANY depth marker tile in the photo, use it as your primary scale reference —
+it is more reliable than a placed object because:
+- It is a known, standardized size
+- It is embedded in the pool structure (no parallax from placement)
+- Multiple tiles at different positions give you multiple scale calibration points
+Count tile widths along the pool edge to measure length and width.
+If you see both tiles and another scale reference, cross-check them.
+
+OTHER SCALE REFERENCES (if no tiles visible):
 - Yardstick/meter stick: 36 inches (3 feet)
 - Pool pole: typically 8 feet or 16 feet
 - Standard shoe: approximately 12 inches
-- Pool tile: typically 6 inches
 - Concrete expansion joint spacing: typically 10 feet
+- Standard coping stones: typically 12 inches wide
 
 INSTRUCTIONS:
-1. Find the scale reference object in the overview photo
-2. Use it to measure the pool's length and width in feet
-3. Read ALL depth markers visible in the photos (e.g., "3 FT", "5 FT", "8 FT")
-4. Note WHERE each marker is along the pool perimeter — this tells you the slope profile:
+1. Look for depth marker tiles first — they are the best scale reference
+2. If tiles aren't visible, find the designated scale reference object
+3. Use the scale to measure the pool's length and width in feet
+4. Read ALL depth markers visible in the photos (e.g., "3 FT", "5 FT", "8 FT")
+5. Note WHERE each marker is along the pool perimeter — this tells you the slope profile:
    - Which end is shallow vs deep
    - Where the transition/break point is
    - Whether it's a constant slope, hopper bottom, or multi-depth layout
-5. Determine the pool shape
-6. Calculate volume using the depth profile and these formulas:
+6. Determine the pool shape
+7. Calculate volume using the depth profile and these formulas:
 
 VOLUME FORMULAS (cubic feet → gallons: multiply by 7.48):
 - Rectangle: length × width × avg_depth × 7.48
@@ -59,7 +72,9 @@ AVERAGE DEPTH — use the slope profile from marker positions:
 Return ONLY a JSON object:
 {{
   "scale_reference_found": true/false,
+  "scale_reference_type": "depth_marker_tile" | "yardstick" | "pool_pole" | "shoe" | "expansion_joint" | "other",
   "scale_reference_pixels": number (length of reference object in pixels, if found),
+  "tiles_detected": number (count of depth marker tiles visible, 0 if none),
   "pool_length_ft": number,
   "pool_width_ft": number,
   "pool_shape": "rectangle" | "oval" | "kidney" | "L-shape" | "freeform" | "round",
@@ -76,6 +91,16 @@ Return ONLY a JSON object:
 }}
 
 Return ONLY the JSON object, no other text."""
+
+SCALE_REFERENCE_LABELS = {
+    "depth_marker_tile": "Depth marker tiles are visible at the pool edge (standard 6×6 inch tiles). Use them as the primary scale reference.",
+    "pool_tile": "Depth marker tiles are visible at the pool edge (standard 6×6 inch tiles). Use them as the primary scale reference.",
+    "yardstick": "The photographer placed a yardstick (36 inches / 3 feet) near the pool for scale.",
+    "pool_pole_8ft": "The photographer placed an 8-foot pool pole near the pool for scale.",
+    "pool_pole_16ft": "The photographer placed a 16-foot pool pole near the pool for scale.",
+    "shoe": "The photographer placed a shoe (~12 inches) near the pool for scale.",
+    "other": "The photographer placed an object of unknown size near the pool. Look for depth marker tiles or other known-size features to calibrate.",
+}
 
 # Volume calculation formulas (server-side validation)
 VOLUME_FORMULAS = {
@@ -136,9 +161,9 @@ class PoolMeasurementService:
             if not image_contents:
                 raise ValueError("No valid photos found")
 
-            prompt = MEASUREMENT_PROMPT.format(
-                scale_reference=measurement.scale_reference or "unknown object",
-            )
+            scale_ref = measurement.scale_reference or "other"
+            scale_desc = SCALE_REFERENCE_LABELS.get(scale_ref, SCALE_REFERENCE_LABELS["other"])
+            prompt = MEASUREMENT_PROMPT.format(scale_reference=scale_desc)
 
             result = await self._call_claude(image_contents, prompt)
 

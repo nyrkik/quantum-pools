@@ -7,6 +7,7 @@ from datetime import datetime
 
 class PropertyCreate(BaseModel):
     customer_id: str
+    name: Optional[str] = None
     address: str = Field(..., min_length=1)
     city: str = Field(..., min_length=1)
     state: str = Field(..., min_length=1)
@@ -39,6 +40,7 @@ class PropertyCreate(BaseModel):
 
 
 class PropertyUpdate(BaseModel):
+    name: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -74,6 +76,7 @@ class PropertyUpdate(BaseModel):
 class PropertyResponse(BaseModel):
     id: str
     customer_id: str
+    name: Optional[str] = None
     address: str
     city: str
     state: str

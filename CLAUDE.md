@@ -92,6 +92,10 @@ QuantumPools/
 - **Old app reference**: `/mnt/Projects/quantum-pools` — original single-tenant app. SQL dump with all customer/driver data at `backups/backup_pre_saas.sql`. Migration script at `app/scripts/migrate_from_old.py`.
 - **Responsive layout**: Sidebar hidden on mobile, replaced with hamburger menu (Sheet). Main content uses `p-4 sm:p-6` padding, `pt-16` clears mobile top bar.
 - **Properties under Customers**: Properties are accessed via Customer detail page (Properties tab), not as a top-level nav item. `/properties` route still exists for direct links.
+- **Property names**: Properties have an optional `name` field (e.g., "Big Pool", "Small Pool", "Spa"). When set, name is displayed as primary label with address as secondary. Multiple properties per customer for sites with multiple bodies of water.
+- **Customer/Property editing**: Single "Edit Customer & Properties" button at bottom of customer detail page. Opens unified edit view with customer form + collapsible property cards (expand to edit, save per-card, add/delete properties).
+- **Pool measurement scale reference**: Default is "Depth Marker Tile (6x6)" — standard commercial pool tiles used as scale reference. Claude Vision prompt prioritizes tile detection over placed objects. Residential pools default to yardstick.
+- **Dashboard tiles**: Clickable — link to Customers, Properties, Routes, Invoices respectively.
 - **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`.
 
 ## Critical Reference Files

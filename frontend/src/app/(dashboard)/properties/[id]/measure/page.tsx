@@ -33,6 +33,7 @@ interface Property {
   city: string;
   state: string;
   zip_code: string;
+  pool_type: string | null;
   pool_sqft: number | null;
   pool_gallons: number | null;
   pool_volume_method: string | null;
@@ -49,7 +50,7 @@ export default function MeasurePage() {
   const [step, setStep] = useState<Step>("capture");
   const [overviewPhotos, setOverviewPhotos] = useState<PhotoFile[]>([]);
   const [depthPhotos, setDepthPhotos] = useState<PhotoFile[]>([]);
-  const [scaleRef, setScaleRef] = useState("yardstick");
+  const [scaleRef, setScaleRef] = useState("depth_marker_tile");
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -65,6 +66,11 @@ export default function MeasurePage() {
         ]);
         setProperty(prop);
         setPastMeasurements(measurements);
+        // Commercial pools almost always have depth marker tiles — default to tile
+        // Residential pools less likely, default to yardstick
+        if (prop.pool_type === "residential") {
+          setScaleRef("yardstick");
+        }
       } catch {
         toast.error("Failed to load property");
       }
@@ -194,18 +200,37 @@ export default function MeasurePage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <p>
-                <strong>Overview photo:</strong> Stand back to get the full pool
-                in frame. Place a yardstick, pool pole, or other known-size
-                object next to the pool edge.
-              </p>
-              <p>
-                <strong>Depth markers:</strong> Photograph each depth marker
-                with enough surrounding pool edge visible so the position along
-                the perimeter is clear. Don&apos;t zoom in too tight — the marker
-                needs to be readable but seeing where it sits relative to the
-                pool helps calculate the slope profile.
-              </p>
+              {property.pool_type === "commercial" || scaleRef === "depth_marker_tile" ? (
+                <>
+                  <p>
+                    <strong>Overview photo:</strong> Stand back to get the full
+                    pool in frame. Make sure at least one depth marker tile is
+                    visible at the pool edge — the standard 6&quot;×6&quot; tiles
+                    are used as the scale reference. No need to place anything extra.
+                  </p>
+                  <p>
+                    <strong>Depth markers:</strong> Photograph each depth marker
+                    tile with enough surrounding pool edge visible so the position
+                    along the perimeter is clear. Multiple marker photos from
+                    different positions help determine the slope profile and volume.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    <strong>Overview photo:</strong> Stand back to get the full pool
+                    in frame. Place a yardstick, pool pole, or other known-size
+                    object next to the pool edge.
+                  </p>
+                  <p>
+                    <strong>Depth markers:</strong> Photograph each depth marker
+                    with enough surrounding pool edge visible so the position along
+                    the perimeter is clear. Don&apos;t zoom in too tight — the marker
+                    needs to be readable but seeing where it sits relative to the
+                    pool helps calculate the slope profile.
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -218,11 +243,11 @@ export default function MeasurePage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="depth_marker_tile">Depth Marker Tile (6&quot;×6&quot;)</SelectItem>
                 <SelectItem value="yardstick">Yardstick (36&quot;)</SelectItem>
                 <SelectItem value="pool_pole_8ft">Pool Pole (8 ft)</SelectItem>
                 <SelectItem value="pool_pole_16ft">Pool Pole (16 ft)</SelectItem>
                 <SelectItem value="shoe">Shoe (~12&quot;)</SelectItem>
-                <SelectItem value="pool_tile">Pool Tile (~6&quot;)</SelectItem>
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>

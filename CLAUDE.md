@@ -100,7 +100,7 @@ QuantumPools/
 - **Pool measurement per-BOW**: Measure page accepts `?bow={id}` query param, passes `body_of_water_id` in upload FormData, shows/applies to specific BOW.
 - **Pool measurement scale reference**: Default is "Depth Marker Tile (6x6)" — standard commercial pool tiles used as scale reference. Claude Vision prompt prioritizes tile detection over placed objects. Residential pools default to yardstick.
 - **Dashboard tiles**: Clickable — link to Customers, Properties, Routes, Invoices respectively.
-- **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`.
+- **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`. Uploads bypass the Next.js rewrite proxy (body size limits) and go directly to the backend on port 7061. Photos are resized client-side to max 1600px before upload. CORS allows Tailscale + LAN origins.
 - **BodyOfWater (BOW)**: Each Property has 1+ BodyOfWater records (pool, spa, hot_tub, wading_pool, fountain, water_feature). One is `is_primary=True`. Pool dimensions, equipment, gallons, service minutes all live on BOW. Property still has the old columns for backward compat during transition. Profitability, route optimization, measurements, and chemical readings all aggregate from BOWs. Migration `8c1a65b5a13d` created BOW table and backfilled from properties. API: `/api/v1/bodies-of-water/property/{id}` (list/create), `/api/v1/bodies-of-water/{id}` (get/update/delete).
 
 ## Critical Reference Files
@@ -120,6 +120,27 @@ QuantumPools/
 | manager | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | - |
 | technician | Read | Read | Read own | CRUD own | - | Read | Read | - |
 | readonly | Read | Read | Read | Read | Read | Read | Read | - |
+
+### Role-Based UI Visibility
+
+Frontend views are filtered by role. A `usePermissions()` hook exposes feature flags.
+
+| Section | technician | manager | admin | owner |
+|---------|-----------|---------|-------|-------|
+| Equipment/sanitizer/access | yes | yes | yes | yes |
+| Service schedule | own | all | all | all |
+| Chemical readings | own | all | all | all |
+| Measurement tool | no | yes | yes | yes |
+| Dimensions/gallons | no | yes | yes | yes |
+| Difficulty scoring | no | yes | yes | yes |
+| Satellite analysis | no | yes | yes | yes |
+| Route management | no | yes | yes | yes |
+| Customer list (full) | no | yes | yes | yes |
+| Rates/billing | no | no | yes | yes |
+| Invoices/payments | no | no | yes | yes |
+| Profitability | no | no | yes | yes |
+| Tech management | no | no | yes | yes |
+| Settings/org | no | no | no | yes |
 
 ## Key Relationships
 

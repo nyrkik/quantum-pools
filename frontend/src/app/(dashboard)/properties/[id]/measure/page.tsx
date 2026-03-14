@@ -21,6 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, Ruler, CheckCircle } from "lucide-react";
+import { resizeImage } from "@/components/measurement/photo-capture";
 import { PhotoCapture, type PhotoFile } from "@/components/measurement/photo-capture";
 import {
   MeasurementResults,
@@ -110,10 +111,12 @@ export default function MeasurePage() {
       formData.append("scale_reference", scaleRef);
       if (bowId) formData.append("body_of_water_id", bowId);
       for (const p of overviewPhotos) {
-        formData.append("overview_photos", p.file);
+        const resized = await resizeImage(p.file);
+        formData.append("overview_photos", resized);
       }
       for (const p of depthPhotos) {
-        formData.append("depth_photos", p.file);
+        const resized = await resizeImage(p.file);
+        formData.append("depth_photos", resized);
       }
 
       const uploaded = await api.upload<MeasurementData>(

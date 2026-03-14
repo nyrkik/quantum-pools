@@ -97,8 +97,10 @@ class ApiClient {
   }
 
   async upload<T>(path: string, formData: FormData): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const response = await fetch(url, {
+    // Upload directly to the backend, bypassing Next.js rewrite proxy
+    // which has body size limits that reject large photo uploads
+    const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api${path}`;
+    const response = await fetch(backendUrl, {
       method: "POST",
       body: formData,
       credentials: "include",
@@ -107,7 +109,7 @@ class ApiClient {
     if (response.status === 401) {
       const refreshed = await this.tryRefresh();
       if (refreshed) {
-        const retryResponse = await fetch(url, {
+        const retryResponse = await fetch(backendUrl, {
           method: "POST",
           body: formData,
           credentials: "include",

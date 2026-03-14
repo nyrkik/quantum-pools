@@ -1,8 +1,44 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Camera, X } from "lucide-react";
+import { Camera, X, Loader2 } from "lucide-react";
+
+const MAX_DIMENSION = 1600;
+const JPEG_QUALITY = 0.85;
+
+function resizeImage(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width <= MAX_DIMENSION && height <= MAX_DIMENSION) {
+        URL.revokeObjectURL(img.src);
+        resolve(file);
+        return;
+      }
+      const scale = MAX_DIMENSION / Math.max(width, height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(img.src);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("Resize failed"));
+          resolve(new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        JPEG_QUALITY
+      );
+    };
+    img.onerror = () => reject(new Error("Failed to load image"));
+    img.src = URL.createObjectURL(file);
+  });
+}
 
 interface PhotoFile {
   file: File;
@@ -26,16 +62,23 @@ export function PhotoCapture({
   onRemove,
 }: PhotoCaptureProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [resizing, setResizing] = useState(false);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    onAdd({
-      file,
-      preview: URL.createObjectURL(file),
-      type: photoType,
-    });
-    if (inputRef.current) inputRef.current.value = "";
+    setResizing(true);
+    try {
+      const resized = await resizeImage(file);
+      onAdd({
+        file: resized,
+        preview: URL.createObjectURL(resized),
+        type: photoType,
+      });
+    } finally {
+      setResizing(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
   };
 
   return (
@@ -61,9 +104,19 @@ export function PhotoCapture({
         variant="outline"
         className="w-full h-16 sm:h-20 border-dashed text-base"
         onClick={() => inputRef.current?.click()}
+        disabled={resizing}
       >
-        <Camera className="h-6 w-6 mr-2" />
-        Take Photo
+        {resizing ? (
+          <>
+            <Loader2 className="h-6 w-6 mr-2 animate-spin" />
+            Processing...
+          </>
+        ) : (
+          <>
+            <Camera className="h-6 w-6 mr-2" />
+            Take Photo
+          </>
+        )}
       </Button>
 
       {photos.length > 0 && (
@@ -90,4 +143,5 @@ export function PhotoCapture({
   );
 }
 
+export { resizeImage };
 export type { PhotoFile };

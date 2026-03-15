@@ -26,6 +26,7 @@ export interface PoolBowWithCoords {
   water_type: string;
   address: string;
   customer_name: string;
+  customer_type: string;
   lat: number | null;
   lng: number | null;
   pool_lat: number | null;

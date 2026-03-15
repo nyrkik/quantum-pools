@@ -29,6 +29,8 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Building2,
+  Home,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -74,6 +76,7 @@ export default function SatellitePage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(new Set(["analyzed", "pinned", "not_analyzed"]));
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
   const listRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
@@ -134,8 +137,38 @@ export default function SatellitePage() {
     return "not_analyzed";
   };
 
+  const toggleType = (t: string) => {
+    setTypeFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+  };
+
+  const sortFn = useCallback((a: PoolBowWithCoords, b: PoolBowWithCoords) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const aAnalysis = analysisMap.get(a.id);
+    const bAnalysis = analysisMap.get(b.id);
+    switch (sortKey) {
+      case "name":
+        return dir * a.customer_name.localeCompare(b.customer_name);
+      case "address":
+        return dir * a.address.localeCompare(b.address);
+      case "sqft":
+        return dir * ((aAnalysis?.estimated_pool_sqft ?? 0) - (bAnalysis?.estimated_pool_sqft ?? 0));
+      case "status": {
+        const order: Record<StatusFilter, number> = { pinned: 0, analyzed: 1, not_analyzed: 2 };
+        return dir * (order[getStatus(a)] - order[getStatus(b)]);
+      }
+      default:
+        return 0;
+    }
+  }, [sortKey, sortDir, analysisMap]);
+
   const filteredBows = useMemo(() => {
-    let list = poolBows.filter((b) => {
+    return poolBows.filter((b) => {
+      if (!typeFilter.has(b.customer_type)) return false;
       if (!statusFilters.has(getStatus(b))) return false;
       if (!search) return true;
       const q = search.toLowerCase();
@@ -143,29 +176,16 @@ export default function SatellitePage() {
         || b.address.toLowerCase().includes(q)
         || (b.bow_name?.toLowerCase().includes(q) ?? false);
     });
+  }, [poolBows, search, statusFilters, typeFilter, analysisMap]);
 
-    list.sort((a, b) => {
-      const dir = sortDir === "asc" ? 1 : -1;
-      const aAnalysis = analysisMap.get(a.id);
-      const bAnalysis = analysisMap.get(b.id);
-      switch (sortKey) {
-        case "name":
-          return dir * a.customer_name.localeCompare(b.customer_name);
-        case "address":
-          return dir * a.address.localeCompare(b.address);
-        case "sqft":
-          return dir * ((aAnalysis?.estimated_pool_sqft ?? 0) - (bAnalysis?.estimated_pool_sqft ?? 0));
-        case "status": {
-          const order: Record<StatusFilter, number> = { pinned: 0, analyzed: 1, not_analyzed: 2 };
-          return dir * (order[getStatus(a)] - order[getStatus(b)]);
-        }
-        default:
-          return 0;
-      }
-    });
-
-    return list;
-  }, [poolBows, search, sortKey, sortDir, statusFilters, analysisMap]);
+  const commercialBows = useMemo(() =>
+    filteredBows.filter(b => b.customer_type === "commercial").sort(sortFn),
+    [filteredBows, sortFn]
+  );
+  const residentialBows = useMemo(() =>
+    filteredBows.filter(b => b.customer_type !== "commercial").sort(sortFn),
+    [filteredBows, sortFn]
+  );
 
   // Load images when BOW is selected (images are property-keyed)
   const loadImages = useCallback(async (propertyId: string) => {
@@ -430,8 +450,24 @@ export default function SatellitePage() {
             />
           </div>
 
-          {/* Filter buttons */}
+          {/* Type + status filters */}
           <div className="flex items-center gap-1 mb-2 flex-wrap">
+            {[
+              { value: "commercial", label: "Commercial", Icon: Building2 },
+              { value: "residential", label: "Residential", Icon: Home },
+            ].map((t) => (
+              <Button
+                key={t.value}
+                variant={typeFilter.has(t.value) ? "default" : "outline"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => toggleType(t.value)}
+              >
+                <t.Icon className="h-3 w-3 mr-1" />
+                {t.label}
+              </Button>
+            ))}
+            <span className="w-px h-4 bg-border mx-0.5" />
             {([
               { value: "analyzed" as StatusFilter, label: "Analyzed", color: "bg-yellow-500" },
               { value: "pinned" as StatusFilter, label: "Pinned", color: "bg-green-500" },
@@ -471,53 +507,67 @@ export default function SatellitePage() {
             ))}
           </div>
 
-          {/* BOW list */}
-          <div ref={listRef} className="flex-1 overflow-y-auto space-y-1 pr-1">
-            {filteredBows.map((b) => {
-              const a = analysisMap.get(b.id);
-              const isSelected = b.id === selectedBowId;
-              const status = getStatus(b);
-              return (
-                <button
-                  key={b.id}
-                  id={`bow-${b.id}`}
-                  onClick={() => handleBowSelect(b.id)}
-                  className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors ${
-                    isSelected
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-muted"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                        status === "pinned"
-                          ? "bg-green-500"
-                          : status === "analyzed"
-                          ? "bg-yellow-500"
-                          : "bg-red-500"
-                      }`}
-                    />
-                    <span className="font-medium truncate">
-                      {b.customer_name}
-                    </span>
-                  </div>
-                  <div className={`text-xs truncate ml-4 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                    {b.address}
-                  </div>
-                  {b.bow_name && (
-                    <div className={`text-xs truncate ml-4 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                      {b.bow_name}
-                    </div>
-                  )}
-                  {a?.estimated_pool_sqft && (
-                    <div className={`text-xs ml-4 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                      {a.estimated_pool_sqft.toLocaleString()} ft²
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+          {/* BOW list — commercial first */}
+          <div ref={listRef} className="flex-1 overflow-y-auto space-y-0 pr-1">
+            {[
+              { label: "Commercial", Icon: Building2, items: commercialBows, show: typeFilter.has("commercial") },
+              { label: "Residential", Icon: Home, items: residentialBows, show: typeFilter.has("residential") },
+            ].map((section) => section.show && section.items.length > 0 && (
+              <div key={section.label}>
+                <div className="flex items-center gap-2 bg-primary text-primary-foreground px-3 py-1.5 rounded-md mb-1 sticky top-0 z-10">
+                  <section.Icon className="h-3.5 w-3.5 opacity-70" />
+                  <span className="text-xs font-medium uppercase tracking-wide">{section.label}</span>
+                  <span className="text-xs opacity-70 ml-auto">{section.items.length}</span>
+                </div>
+                <div className="space-y-0.5 mb-2">
+                  {section.items.map((b) => {
+                    const a = analysisMap.get(b.id);
+                    const isSelected = b.id === selectedBowId;
+                    const status = getStatus(b);
+                    return (
+                      <button
+                        key={b.id}
+                        id={`bow-${b.id}`}
+                        onClick={() => handleBowSelect(b.id)}
+                        className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors ${
+                          isSelected
+                            ? "bg-primary text-primary-foreground"
+                            : "hover:bg-muted"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                              status === "pinned"
+                                ? "bg-green-500"
+                                : status === "analyzed"
+                                ? "bg-yellow-500"
+                                : "bg-red-500"
+                            }`}
+                          />
+                          <span className="font-medium truncate">
+                            {b.customer_name}
+                          </span>
+                        </div>
+                        <div className={`text-xs truncate ml-4 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                          {b.address}
+                        </div>
+                        {b.bow_name && (
+                          <div className={`text-xs truncate ml-4 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                            {b.bow_name}
+                          </div>
+                        )}
+                        {a?.estimated_pool_sqft && (
+                          <div className={`text-xs ml-4 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                            {a.estimated_pool_sqft.toLocaleString()} ft²
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
             {filteredBows.length === 0 && (
               <div className="text-center py-6 text-sm text-muted-foreground">No matching pools</div>
             )}

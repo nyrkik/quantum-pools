@@ -46,6 +46,7 @@ class PoolBowWithCoordsResponse(BaseModel):
     water_type: str
     address: str
     customer_name: str
+    customer_type: str = "residential"
     lat: Optional[float] = None
     lng: Optional[float] = None
     pool_lat: Optional[float] = None

@@ -25,6 +25,7 @@ from src.schemas.profitability import (
 from src.services.profitability_service import ProfitabilityService
 from src.services.bather_load_service import BatherLoadService
 from src.services.property_service import PropertyService
+from src.models.body_of_water import BodyOfWater
 
 router = APIRouter(prefix="/profitability", tags=["profitability"])
 
@@ -116,6 +117,41 @@ async def get_property_profitability(
         if a.property_id == property_id:
             return a
     raise HTTPException(status_code=404, detail="Profitability data not available")
+
+
+@router.get("/property/{property_id}/rate-allocation")
+async def get_rate_allocation(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get per-BOW rate allocation for a property."""
+    from src.models.property import Property
+    from src.models.customer import Customer
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+
+    result = await db.execute(
+        select(Property).where(
+            Property.id == property_id,
+            Property.organization_id == ctx.organization_id,
+        ).options(joinedload(Property.customer))
+    )
+    prop = result.unique().scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    bow_result = await db.execute(
+        select(BodyOfWater).where(
+            BodyOfWater.property_id == property_id,
+            BodyOfWater.organization_id == ctx.organization_id,
+            BodyOfWater.is_active == True,
+        )
+    )
+    bows = list(bow_result.scalars().all())
+    total_rate = prop.customer.monthly_rate if prop.customer else 0
+
+    return ProfitabilityService.allocate_rate_to_bows(total_rate, bows)
 
 
 @router.get("/whale-curve", response_model=list[WhaleCurvePoint])

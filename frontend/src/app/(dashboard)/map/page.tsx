@@ -152,6 +152,7 @@ export default function MapPage() {
   const [bowDetails, setBowDetails] = useState<Map<string, Record<string, unknown>>>(new Map());
   const [propDetail, setPropDetail] = useState<Record<string, unknown> | null>(null);
   const [profitData, setProfitData] = useState<Record<string, unknown> | null>(null);
+  const [rateAllocation, setRateAllocation] = useState<Record<string, { allocated_rate: number; allocation_method: string; weight: number }>>({});
   const [dimComparisons, setDimComparisons] = useState<Map<string, DimensionComparison>>(new Map());
   const [medians, setMedians] = useState<PortfolioMedians | null>(null);
   const [perimeterInputs, setPerimeterInputs] = useState<Map<string, string>>(new Map());
@@ -307,6 +308,7 @@ export default function MapPage() {
     setPropDetail(null);
     setProfitData(null);
     setDimComparisons(new Map());
+    setRateAllocation({});
 
     const bowPromises = bows.map(async (b) => {
       const [bow, comparison] = await Promise.all([
@@ -316,14 +318,16 @@ export default function MapPage() {
       return { bowId: b.id, bow, comparison };
     });
 
-    const [prop, profit, ...bowResults] = await Promise.all([
+    const [prop, profit, allocation, ...bowResults] = await Promise.all([
       api.get<Record<string, unknown>>(`/v1/properties/${propertyId}`).catch(() => null),
       api.get<Record<string, unknown>>(`/v1/profitability/property/${propertyId}`).catch(() => null),
+      api.get<Record<string, { allocated_rate: number; allocation_method: string; weight: number }>>(`/v1/profitability/property/${propertyId}/rate-allocation`).catch(() => ({})),
       ...bowPromises,
     ]);
 
     setPropDetail(prop);
     setProfitData(profit);
+    setRateAllocation(allocation || {});
 
     const newBowDetails = new Map<string, Record<string, unknown>>();
     const newDimComps = new Map<string, DimensionComparison>();
@@ -546,10 +550,11 @@ export default function MapPage() {
                   <span className="text-base font-bold">{(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">min</span></span>
                 )}
                 {perms.canViewRates && (() => {
+                  const alloc = rateAllocation[bow.id];
                   const bowRate = (bowDetail as { monthly_rate?: number })?.monthly_rate;
-                  const custRate = (profitData as { monthly_rate?: number })?.monthly_rate;
-                  const rate = bowRate || custRate;
+                  const rate = bowRate || alloc?.allocated_rate || null;
                   const margin = profitData ? (profitData as { cost_breakdown: { margin_pct: number } }).cost_breakdown?.margin_pct : null;
+                  const ALLOC_LABELS: Record<string, string> = { gallons: "vol", sqft: "area", service_time: "time", type_weight: "type", sole: "" };
                   return (<>
                     <span className="text-muted-foreground/30">·</span>
                     <span className={`text-base font-bold ${
@@ -561,6 +566,11 @@ export default function MapPage() {
                     }`}>
                       {rate ? `$${rate.toFixed(0)}` : "$\u2014"}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">/mo</span>
                     </span>
+                    {alloc && alloc.allocation_method !== "sole" && (
+                      <span className="text-[9px] text-muted-foreground/50" title={`Allocated by ${alloc.allocation_method} (${(alloc.weight * 100).toFixed(0)}%)`}>
+                        ({ALLOC_LABELS[alloc.allocation_method] || alloc.allocation_method})
+                      </span>
+                    )}
                   </>);
                 })()}
               </div>

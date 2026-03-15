@@ -424,6 +424,68 @@ class ProfitabilityService:
             ))
         return accounts
 
+    @staticmethod
+    def allocate_rate_to_bows(total_rate: float, bows: list[BodyOfWater]) -> dict[str, dict]:
+        """Allocate a property's total rate across its BOWs.
+
+        Returns dict of bow_id -> {allocated_rate, allocation_method, weight}
+
+        Priority: gallons > sqft > service_time > type_weighting
+        """
+        if not bows or total_rate <= 0:
+            return {}
+
+        if len(bows) == 1:
+            return {bows[0].id: {"allocated_rate": total_rate, "allocation_method": "sole", "weight": 1.0}}
+
+        TYPE_WEIGHTS = {
+            "pool": 1.0,
+            "spa": 0.25,
+            "hot_tub": 0.20,
+            "wading_pool": 0.15,
+            "fountain": 0.10,
+            "water_feature": 0.10,
+        }
+
+        # Try gallons
+        gallons = [(b, b.pool_gallons or 0) for b in bows]
+        total_gal = sum(g for _, g in gallons)
+        if total_gal > 0 and all(g > 0 for _, g in gallons):
+            result = {}
+            for b, g in gallons:
+                w = g / total_gal
+                result[b.id] = {"allocated_rate": round(total_rate * w, 2), "allocation_method": "gallons", "weight": round(w, 4)}
+            return result
+
+        # Try sqft
+        sqfts = [(b, b.pool_sqft or 0) for b in bows]
+        total_sqft = sum(s for _, s in sqfts)
+        if total_sqft > 0 and all(s > 0 for _, s in sqfts):
+            result = {}
+            for b, s in sqfts:
+                w = s / total_sqft
+                result[b.id] = {"allocated_rate": round(total_rate * w, 2), "allocation_method": "sqft", "weight": round(w, 4)}
+            return result
+
+        # Try service time
+        times = [(b, b.estimated_service_minutes or 0) for b in bows]
+        total_time = sum(t for _, t in times)
+        if total_time > 0 and all(t > 0 for _, t in times):
+            result = {}
+            for b, t in times:
+                w = t / total_time
+                result[b.id] = {"allocated_rate": round(total_rate * w, 2), "allocation_method": "service_time", "weight": round(w, 4)}
+            return result
+
+        # Type weighting (always available)
+        weights = [(b, TYPE_WEIGHTS.get(b.water_type, 0.5)) for b in bows]
+        total_w = sum(w for _, w in weights)
+        result = {}
+        for b, w in weights:
+            ratio = w / total_w if total_w > 0 else 1.0 / len(bows)
+            result[b.id] = {"allocated_rate": round(total_rate * ratio, 2), "allocation_method": "type_weight", "weight": round(ratio, 4)}
+        return result
+
     async def get_portfolio_medians(self, org_id: str) -> dict:
         """Compute median rate/gal, cost, margin, difficulty across all active accounts."""
         import statistics

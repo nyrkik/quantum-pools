@@ -9,13 +9,28 @@ export interface MapActions {
   isZoomedIn: boolean;
 }
 
+export interface PropertyGroup {
+  property_id: string;
+  customer_id: string;
+  customer_name: string;
+  customer_type: string;
+  address: string;
+  city: string;
+  lat: number | null;
+  lng: number | null;
+  tech_name: string | null;
+  tech_color: string | null;
+  bows: PoolBowWithCoords[];
+  best_status: "analyzed" | "pinned" | "not_analyzed";
+}
+
 export interface SatelliteMapProps {
-  poolBows: PoolBowWithCoords[];
-  selectedBowId: string | null;
+  propertyGroups: PropertyGroup[];
+  selectedPropertyId: string | null;
   pinPosition: { lat: number; lng: number } | null;
   flyTo: boolean;
   actionsRef?: MutableRefObject<MapActions | null>;
-  onBowSelect: (bowId: string) => void;
+  onPropertySelect: (propertyId: string) => void;
   onPinPlace: (lat: number, lng: number) => void;
 }
 

@@ -60,7 +60,7 @@ import type { SatelliteAnalysis, PoolBowWithCoords } from "@/types/satellite";
 import type { PropertyPhoto } from "@/types/photo";
 import { resizeImage } from "@/lib/image-utils";
 import SatelliteMap from "@/components/maps/satellite-map";
-import type { MapActions } from "@/components/maps/satellite-map";
+import type { MapActions, PropertyGroup } from "@/components/maps/satellite-map";
 import { usePermissions } from "@/lib/permissions";
 import DifficultyModal from "@/components/profitability/difficulty-modal";
 
@@ -116,6 +116,19 @@ const MAP_MODES = [
   { key: "profitability" as MapMode, label: "Profitability", Icon: TrendingUp },
 ];
 
+function getBowStatus(bow: PoolBowWithCoords, analysisMap: Map<string | null, SatelliteAnalysis>): StatusFilter {
+  const a = analysisMap.get(bow.id);
+  if (a?.pool_detected && bow.pool_lat) return "pinned";
+  if (a?.pool_detected) return "analyzed";
+  return "not_analyzed";
+}
+
+function bestStatus(statuses: StatusFilter[]): StatusFilter {
+  if (statuses.includes("pinned")) return "pinned";
+  if (statuses.includes("analyzed")) return "analyzed";
+  return "not_analyzed";
+}
+
 export default function MapPage() {
   const searchParams = useSearchParams();
   const initialBowId = searchParams.get("bow");
@@ -125,7 +138,8 @@ export default function MapPage() {
   const [poolBows, setPoolBows] = useState<PoolBowWithCoords[]>([]);
   const [analyses, setAnalyses] = useState<SatelliteAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedBowId, setSelectedBowId] = useState<string | null>(null);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
+  const [activeBowId, setActiveBowId] = useState<string | null>(null);
   const [pinPosition, setPinPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [savingPin, setSavingPin] = useState(false);
   const [search, setSearch] = useState("");
@@ -135,15 +149,15 @@ export default function MapPage() {
   const [shouldFlyTo, setShouldFlyTo] = useState(false);
   const [pinDirty, setPinDirty] = useState(false);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
-  const [bowDetail, setBowDetail] = useState<Record<string, unknown> | null>(null);
+  const [bowDetails, setBowDetails] = useState<Map<string, Record<string, unknown>>>(new Map());
   const [propDetail, setPropDetail] = useState<Record<string, unknown> | null>(null);
   const [profitData, setProfitData] = useState<Record<string, unknown> | null>(null);
-  const [dimComparison, setDimComparison] = useState<DimensionComparison | null>(null);
+  const [dimComparisons, setDimComparisons] = useState<Map<string, DimensionComparison>>(new Map());
   const [medians, setMedians] = useState<PortfolioMedians | null>(null);
-  const [perimeterInput, setPerimeterInput] = useState("");
-  const [perimeterShape, setPerimeterShape] = useState("rectangle");
+  const [perimeterInputs, setPerimeterInputs] = useState<Map<string, string>>(new Map());
+  const [perimeterShapes, setPerimeterShapes] = useState<Map<string, string>>(new Map());
   const [savingPerimeter, setSavingPerimeter] = useState(false);
-  const [measuringPerimeter, setMeasuringPerimeter] = useState(false);
+  const [measuringPerimeterBow, setMeasuringPerimeterBow] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mapActionsRef = useRef<MapActions | null>(null);
   const [isZoomedIn, setIsZoomedIn] = useState(false);
@@ -170,28 +184,66 @@ export default function MapPage() {
     loadData();
   }, [loadData]);
 
-  // Auto-select: URL param → first commercial → first pool
+  const analysisMap = useMemo(() => new Map(analyses.map((a) => [a.body_of_water_id, a])), [analyses]);
+
+  // Group BOWs by property
+  const propertyGroups = useMemo((): PropertyGroup[] => {
+    const groupMap = new Map<string, PropertyGroup>();
+    for (const bow of poolBows) {
+      let group = groupMap.get(bow.property_id);
+      if (!group) {
+        group = {
+          property_id: bow.property_id,
+          customer_id: bow.customer_id,
+          customer_name: bow.customer_name,
+          customer_type: bow.customer_type,
+          address: bow.address,
+          city: bow.city,
+          lat: bow.lat,
+          lng: bow.lng,
+          tech_name: bow.tech_name,
+          tech_color: bow.tech_color,
+          bows: [],
+          best_status: "not_analyzed",
+        };
+        groupMap.set(bow.property_id, group);
+      }
+      group.bows.push(bow);
+    }
+    // Compute best_status per property
+    for (const group of groupMap.values()) {
+      const statuses = group.bows.map((b) => getBowStatus(b, analysisMap));
+      group.best_status = bestStatus(statuses);
+    }
+    return Array.from(groupMap.values());
+  }, [poolBows, analysisMap]);
+
+  // Auto-select on load
   const autoSelected = useRef(false);
   useEffect(() => {
-    if (autoSelected.current || poolBows.length === 0) return;
+    if (autoSelected.current || propertyGroups.length === 0) return;
     autoSelected.current = true;
 
-    // URL param gets fly-to
-    if (initialBowId && poolBows.find((b) => b.id === initialBowId)) {
-      setShouldFlyTo(true);
-      handleBowSelect(initialBowId);
-      return;
+    // URL param: find property containing that BOW
+    if (initialBowId) {
+      const pg = propertyGroups.find((g) => g.bows.some((b) => b.id === initialBowId));
+      if (pg) {
+        setShouldFlyTo(true);
+        handlePropertySelect(pg.property_id);
+        return;
+      }
     }
 
-    // Default: select first pool quietly (no fly)
-    const sorted = [...poolBows].sort((a, b) => a.customer_name.localeCompare(b.customer_name));
-    const first = sorted.find(b => b.customer_type === "commercial") || sorted[0];
-    if (first) selectBowQuiet(first.id);
-  }, [poolBows, initialBowId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Default: first commercial property, then first overall
+    const sorted = [...propertyGroups].sort((a, b) => a.customer_name.localeCompare(b.customer_name));
+    const first = sorted.find((g) => g.customer_type === "commercial") || sorted[0];
+    if (first) selectPropertyQuiet(first.property_id);
+  }, [propertyGroups, initialBowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const analysisMap = useMemo(() => new Map(analyses.map((a) => [a.body_of_water_id, a])), [analyses]);
-  const selectedBow = poolBows.find((b) => b.id === selectedBowId) || null;
-  const selectedAnalysis = selectedBowId ? analysisMap.get(selectedBowId) || null : null;
+  const selectedGroup = useMemo(() =>
+    propertyGroups.find((g) => g.property_id === selectedPropertyId) || null,
+    [propertyGroups, selectedPropertyId]
+  );
 
   const toggleFilter = (f: StatusFilter) => {
     setStatusFilters((prev) => {
@@ -200,13 +252,6 @@ export default function MapPage() {
       else next.add(f);
       return next;
     });
-  };
-
-  const getStatus = (b: PoolBowWithCoords): StatusFilter => {
-    const a = analysisMap.get(b.id);
-    if (a?.pool_detected && b.pool_lat) return "pinned";
-    if (a?.pool_detected) return "analyzed";
-    return "not_analyzed";
   };
 
   const toggleType = (t: string) => {
@@ -218,32 +263,36 @@ export default function MapPage() {
     });
   };
 
-  const sortFn = useCallback((a: PoolBowWithCoords, b: PoolBowWithCoords) => {
+  const sortFn = useCallback((a: PropertyGroup, b: PropertyGroup) => {
     return a.customer_name.localeCompare(b.customer_name);
   }, []);
 
-  const filteredBows = useMemo(() => {
-    return poolBows.filter((b) => {
-      if (!typeFilter.has(b.customer_type)) return false;
-      if (!statusFilters.has(getStatus(b))) return false;
+  const filteredGroups = useMemo(() => {
+    return propertyGroups.filter((g) => {
+      if (!typeFilter.has(g.customer_type)) return false;
+      if (!statusFilters.has(g.best_status)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
-      return b.customer_name.toLowerCase().includes(q)
-        || b.address.toLowerCase().includes(q)
-        || (b.bow_name?.toLowerCase().includes(q) ?? false);
+      return g.customer_name.toLowerCase().includes(q)
+        || g.address.toLowerCase().includes(q)
+        || g.city.toLowerCase().includes(q)
+        || g.bows.some((b) => b.bow_name?.toLowerCase().includes(q));
     });
-  }, [poolBows, search, statusFilters, typeFilter, analysisMap]);
+  }, [propertyGroups, search, statusFilters, typeFilter]);
 
-  const commercialBows = useMemo(() =>
-    filteredBows.filter(b => b.customer_type === "commercial").sort(sortFn),
-    [filteredBows, sortFn]
+  const commercialGroups = useMemo(() =>
+    filteredGroups.filter((g) => g.customer_type === "commercial").sort(sortFn),
+    [filteredGroups, sortFn]
   );
-  const residentialBows = useMemo(() =>
-    filteredBows.filter(b => b.customer_type !== "commercial").sort(sortFn),
-    [filteredBows, sortFn]
+  const residentialGroups = useMemo(() =>
+    filteredGroups.filter((g) => g.customer_type !== "commercial").sort(sortFn),
+    [filteredGroups, sortFn]
   );
 
-  // Load images when BOW is selected (images are property-keyed)
+  // Count helpers for section headers
+  const countBows = (groups: PropertyGroup[]) => groups.reduce((sum, g) => sum + g.bows.length, 0);
+
+  // Load images when property is selected (images are property-keyed)
   const loadImages = useCallback(async (propertyId: string) => {
     try {
       const imgs = await api.get<PropertyPhoto[]>(`/v1/photos/properties/${propertyId}`);
@@ -253,81 +302,97 @@ export default function MapPage() {
     }
   }, []);
 
-  const loadDetail = useCallback(async (bowId: string, propertyId: string) => {
-    setBowDetail(null);
+  const loadPropertyDetail = useCallback(async (propertyId: string, bows: PoolBowWithCoords[]) => {
+    setBowDetails(new Map());
     setPropDetail(null);
     setProfitData(null);
-    setDimComparison(null);
-    const [bow, prop, profit, comparison] = await Promise.all([
-      api.get<Record<string, unknown>>(`/v1/bodies-of-water/${bowId}`).catch(() => null),
+    setDimComparisons(new Map());
+
+    const bowPromises = bows.map(async (b) => {
+      const [bow, comparison] = await Promise.all([
+        api.get<Record<string, unknown>>(`/v1/bodies-of-water/${b.id}`).catch(() => null),
+        api.get<DimensionComparison>(`/v1/dimensions/bows/${b.id}/comparison`).catch(() => null),
+      ]);
+      return { bowId: b.id, bow, comparison };
+    });
+
+    const [prop, profit, ...bowResults] = await Promise.all([
       api.get<Record<string, unknown>>(`/v1/properties/${propertyId}`).catch(() => null),
       api.get<Record<string, unknown>>(`/v1/profitability/property/${propertyId}`).catch(() => null),
-      api.get<DimensionComparison>(`/v1/dimensions/bows/${bowId}/comparison`).catch(() => null),
+      ...bowPromises,
     ]);
-    setBowDetail(bow);
+
     setPropDetail(prop);
     setProfitData(profit);
-    setDimComparison(comparison);
-    // Pre-fill perimeter shape from BOW
-    if (bow && (bow as { pool_shape?: string }).pool_shape) {
-      setPerimeterShape((bow as { pool_shape: string }).pool_shape);
-    } else {
-      setPerimeterShape("rectangle");
+
+    const newBowDetails = new Map<string, Record<string, unknown>>();
+    const newDimComps = new Map<string, DimensionComparison>();
+    for (const r of bowResults) {
+      if (r.bow) newBowDetails.set(r.bowId, r.bow);
+      if (r.comparison) newDimComps.set(r.bowId, r.comparison);
     }
-    setPerimeterInput("");
-    setMeasuringPerimeter(false);
+    setBowDetails(newBowDetails);
+    setDimComparisons(newDimComps);
+
+    // Reset perimeter states
+    const newShapes = new Map<string, string>();
+    for (const r of bowResults) {
+      if (r.bow && (r.bow as { pool_shape?: string }).pool_shape) {
+        newShapes.set(r.bowId, (r.bow as { pool_shape: string }).pool_shape);
+      } else {
+        newShapes.set(r.bowId, "rectangle");
+      }
+    }
+    setPerimeterShapes(newShapes);
+    setPerimeterInputs(new Map());
+    setMeasuringPerimeterBow(null);
   }, []);
 
-  const selectBowQuiet = useCallback((bowId: string) => {
-    setSelectedBowId(bowId);
+  const selectPropertyQuiet = useCallback((propertyId: string) => {
+    setSelectedPropertyId(propertyId);
+    setActiveBowId(null);
     setPinDirty(false);
+    setPinPosition(null);
     setIsZoomedIn(false);
-    const analysis = analyses.find((a) => a.body_of_water_id === bowId);
-    const bow = poolBows.find((b) => b.id === bowId);
-    if (analysis?.pool_lat && analysis?.pool_lng) {
-      setPinPosition({ lat: analysis.pool_lat, lng: analysis.pool_lng });
-    } else if (bow?.pool_lat && bow?.pool_lng) {
-      setPinPosition({ lat: bow.pool_lat, lng: bow.pool_lng });
-    } else {
-      setPinPosition(null);
-    }
-    if (bow) {
-      loadImages(bow.property_id);
-      loadDetail(bowId, bow.property_id);
-    }
-  }, [poolBows, analyses, loadImages, loadDetail]);
 
-  const handleBowSelect = useCallback((bowId: string) => {
+    const group = propertyGroups.find((g) => g.property_id === propertyId);
+    if (group) {
+      loadImages(propertyId);
+      loadPropertyDetail(propertyId, group.bows);
+    }
+  }, [propertyGroups, loadImages, loadPropertyDetail]);
+
+  const handlePropertySelect = useCallback((propertyId: string) => {
     setShouldFlyTo(true);
-    selectBowQuiet(bowId);
+    selectPropertyQuiet(propertyId);
     setTimeout(() => {
-      const el = document.getElementById(`bow-${bowId}`);
+      const el = document.getElementById(`prop-${propertyId}`);
       el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
-  }, [selectBowQuiet]);
+  }, [selectPropertyQuiet]);
 
   const handlePinPlace = useCallback((lat: number, lng: number) => {
-    if (!canEdit) return;
+    if (!canEdit || !activeBowId) return;
     setPinPosition({ lat, lng });
     setPinDirty(true);
-  }, [canEdit]);
+  }, [canEdit, activeBowId]);
 
   const savePin = async () => {
-    if (!selectedBowId || !pinPosition) return;
+    if (!activeBowId || !pinPosition) return;
     setSavingPin(true);
     try {
       const result = await api.put<SatelliteAnalysis>(
-        `/v1/satellite/bows/${selectedBowId}/pin`,
+        `/v1/satellite/bows/${activeBowId}/pin`,
         { pool_lat: pinPosition.lat, pool_lng: pinPosition.lng }
       );
       setAnalyses((prev) => {
-        const idx = prev.findIndex((a) => a.body_of_water_id === selectedBowId);
+        const idx = prev.findIndex((a) => a.body_of_water_id === activeBowId);
         if (idx >= 0) return [...prev.slice(0, idx), result, ...prev.slice(idx + 1)];
         return [...prev, result];
       });
       setPoolBows((prev) =>
         prev.map((b) =>
-          b.id === selectedBowId
+          b.id === activeBowId
             ? { ...b, pool_lat: pinPosition.lat, pool_lng: pinPosition.lng }
             : b
         )
@@ -341,8 +406,10 @@ export default function MapPage() {
     }
   };
 
-  const savePerimeter = async () => {
-    if (!selectedBowId || !perimeterInput) return;
+  const savePerimeter = async (bowId: string) => {
+    const perimeterInput = perimeterInputs.get(bowId) || "";
+    const perimeterShape = perimeterShapes.get(bowId) || "rectangle";
+    if (!perimeterInput) return;
     const ft = parseFloat(perimeterInput);
     if (isNaN(ft) || ft <= 0) {
       toast.error("Enter a valid perimeter in feet");
@@ -350,15 +417,15 @@ export default function MapPage() {
     }
     setSavingPerimeter(true);
     try {
-      await api.post(`/v1/dimensions/bows/${selectedBowId}/perimeter`, {
+      await api.post(`/v1/dimensions/bows/${bowId}/perimeter`, {
         perimeter_ft: ft,
         pool_shape: perimeterShape,
       });
       toast.success("Perimeter estimate saved");
-      setPerimeterInput("");
+      setPerimeterInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       // Refresh detail
-      if (selectedBow) {
-        await loadDetail(selectedBowId, selectedBow.property_id);
+      if (selectedGroup) {
+        await loadPropertyDetail(selectedPropertyId!, selectedGroup.bows);
       }
     } catch {
       toast.error("Failed to save perimeter");
@@ -367,18 +434,15 @@ export default function MapPage() {
     }
   };
 
-  // Image operations use property_id from the selected BOW
-  const selectedPropertyId = selectedBow?.property_id || null;
-
+  // Image operations
   const uploadPhoto = async (file: File) => {
     if (!selectedPropertyId) return;
     setCapturing(true);
     try {
-      // Client-side resize
       const resized = await resizeImage(file, 1600);
       const formData = new FormData();
       formData.append("photo", resized, file.name);
-      if (selectedBowId) formData.append("body_of_water_id", selectedBowId);
+      if (activeBowId) formData.append("body_of_water_id", activeBowId);
       const img = await api.upload<PropertyPhoto>(
         `/v1/photos/properties/${selectedPropertyId}/upload`,
         formData
@@ -414,6 +478,28 @@ export default function MapPage() {
     }
   };
 
+  // Activate a BOW for pin placement
+  const handleBowPinActivate = (bowId: string) => {
+    if (activeBowId === bowId) {
+      // Deactivate
+      setActiveBowId(null);
+      setPinPosition(null);
+      setPinDirty(false);
+    } else {
+      setActiveBowId(bowId);
+      setPinDirty(false);
+      const bow = poolBows.find((b) => b.id === bowId);
+      const analysis = analyses.find((a) => a.body_of_water_id === bowId);
+      if (analysis?.pool_lat && analysis?.pool_lng) {
+        setPinPosition({ lat: analysis.pool_lat, lng: analysis.pool_lng });
+      } else if (bow?.pool_lat && bow?.pool_lng) {
+        setPinPosition({ lat: bow.pool_lat, lng: bow.pool_lng });
+      } else {
+        setPinPosition(null);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -423,9 +509,8 @@ export default function MapPage() {
   }
 
   const analyzedCount = analyses.filter((a) => a.pool_detected).length;
-  const totalCount = poolBows.length;
+  const totalBowCount = poolBows.length;
 
-  // Source badge helper
   const renderSourceBadge = (source: string | null | undefined) => {
     if (!source) return null;
     const label = SOURCE_LABELS[source] || source;
@@ -434,6 +519,269 @@ export default function MapPage() {
       <Badge className={`${colorClass} text-[9px] px-1 py-0 leading-tight font-medium hover:${colorClass.split(" ")[0]}`}>
         {label}
       </Badge>
+    );
+  };
+
+  // Render a single BOW tile in the detail panel
+  const renderBowTile = (bow: PoolBowWithCoords, bowDetail: Record<string, unknown> | null, dimComparison: DimensionComparison | null) => {
+    const analysis = analysisMap.get(bow.id) || null;
+    const isBowActive = activeBowId === bow.id;
+    const perimeterInput = perimeterInputs.get(bow.id) || "";
+    const perimeterShape = perimeterShapes.get(bow.id) || "rectangle";
+    const isMeasuring = measuringPerimeterBow === bow.id;
+
+    return (
+      <Card key={bow.id} className={`shadow-sm border-l-4 ${isBowActive ? "border-l-primary" : "border-l-blue-500"}`}>
+        <CardContent className="p-4 space-y-3">
+          {/* Pool header */}
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-baseline gap-3">
+                <div className="flex items-center gap-2">
+                  <Droplets className="h-3.5 w-3.5 text-blue-500" />
+                  <span className="text-base font-semibold">{bow.bow_name || "Pool"}</span>
+                </div>
+                <span className="text-muted-foreground/30">·</span>
+                {bowDetail && (
+                  <span className="text-base font-bold">{(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">min</span></span>
+                )}
+                {perms.canViewRates && (() => {
+                  const bowRate = (bowDetail as { monthly_rate?: number })?.monthly_rate;
+                  const custRate = (profitData as { monthly_rate?: number })?.monthly_rate;
+                  const rate = bowRate || custRate;
+                  const margin = profitData ? (profitData as { cost_breakdown: { margin_pct: number } }).cost_breakdown?.margin_pct : null;
+                  return (<>
+                    <span className="text-muted-foreground/30">·</span>
+                    <span className={`text-base font-bold ${
+                      rate
+                        ? margin !== null
+                          ? margin >= 30 ? "text-emerald-600" : margin >= 0 ? "text-amber-600" : "text-red-600"
+                          : "text-foreground"
+                        : "text-muted-foreground/40"
+                    }`}>
+                      {rate ? `$${rate.toFixed(0)}` : "$\u2014"}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">/mo</span>
+                    </span>
+                  </>);
+                })()}
+              </div>
+              {canEdit && (
+                <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                  <Button
+                    variant={isBowActive ? "default" : "ghost"}
+                    size="sm"
+                    className="h-5 px-2 text-[10px] gap-1"
+                    onClick={() => handleBowPinActivate(bow.id)}
+                  >
+                    <Crosshair className="h-3 w-3" />
+                    {isBowActive ? "Placing pin..." : "Place pin"}
+                  </Button>
+                  {isBowActive && pinPosition && (
+                    <span className="text-green-600 font-medium text-[11px]">
+                      {pinPosition.lat.toFixed(6)}, {pinPosition.lng.toFixed(6)}
+                    </span>
+                  )}
+                  {!isBowActive && bow.pool_lat && bow.pool_lng && (
+                    <span className="text-green-600 font-medium text-[11px]">
+                      {bow.pool_lat.toFixed(6)}, {bow.pool_lng.toFixed(6)}
+                    </span>
+                  )}
+                  {!isBowActive && !bow.pool_lat && (
+                    <span className="text-muted-foreground/50 text-[11px]">No pin</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pin dirty banner */}
+          {isBowActive && canEdit && pinDirty && (
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 px-3 py-2 flex items-center justify-between">
+              <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">Pin moved — save to keep new location</span>
+              <Button size="sm" className="h-7 px-3 text-xs" disabled={savingPin} onClick={savePin}>
+                {savingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Pin"}
+              </Button>
+            </div>
+          )}
+
+          {/* Discrepancy alert */}
+          {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && (
+            <div className={`rounded-md p-2.5 flex items-start gap-2 ${
+              dimComparison.discrepancy_level === "alert"
+                ? "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
+                : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800"
+            }`}>
+              <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${
+                dimComparison.discrepancy_level === "alert" ? "text-red-600" : "text-amber-600"
+              }`} />
+              <div className="text-[11px]">
+                {dimComparison.discrepancy_level === "alert" ? (
+                  <span className="text-red-700 dark:text-red-400 font-medium">
+                    Significant discrepancy ({dimComparison.discrepancy_pct?.toFixed(0)}%) — verify measurements
+                  </span>
+                ) : (
+                  <span className="text-amber-700 dark:text-amber-400 font-medium">
+                    {dimComparison.discrepancy_pct?.toFixed(0)}% discrepancy between {
+                      dimComparison.estimates.length >= 2
+                        ? `${SOURCE_LABELS[dimComparison.estimates[0]?.source] || dimComparison.estimates[0]?.source} and ${SOURCE_LABELS[dimComparison.estimates[1]?.source] || dimComparison.estimates[1]?.source}`
+                        : "estimates"
+                    }
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Measurements + Equipment */}
+          {bowDetail && perms.canViewDimensions && (
+            <div className="grid grid-cols-2 gap-2">
+              {/* Measurements */}
+              <div className={`bg-muted/50 rounded-md overflow-hidden ${isMeasuring ? "border-l-3 border-l-amber-400" : ""}`}>
+                <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                  <Ruler className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Measurements</span>
+                  {canEdit && (bow.pool_lat || (bow.lat && bow.lng)) && (
+                    <a
+                      href={`https://www.google.com/maps/@${(bow.pool_lat ?? bow.lat)},${(bow.pool_lng ?? bow.lng)},20z/data=!3m1!1e3`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-auto text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => setMeasuringPerimeterBow(bow.id)}
+                      title="Measure in Google Maps"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+                <div className="px-2.5 py-2 space-y-1">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Area</span>
+                    <div className="flex items-center gap-1.5">
+                      {(bowDetail as { pool_sqft?: number }).pool_sqft
+                        ? <span className="font-semibold">{((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()} ft²</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>}
+                      {renderSourceBadge((bowDetail as { dimension_source?: string }).dimension_source)}
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-muted-foreground">Volume</span>
+                    {(bowDetail as { pool_gallons?: number }).pool_gallons
+                      ? <span className="font-medium">{((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()} gal</span>
+                      : <span className="text-muted-foreground/50 italic">—</span>}
+                  </div>
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Shape</span>
+                    {isMeasuring ? (
+                      <select
+                        value={perimeterShape}
+                        onChange={(e) => setPerimeterShapes((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                        className="h-6 text-[11px] rounded border border-input bg-background px-1.5"
+                      >
+                        {POOL_SHAPES.map((s) => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      (bowDetail as { pool_shape?: string }).pool_shape
+                        ? <span className="font-medium capitalize">{(bowDetail as { pool_shape: string }).pool_shape.replace(/_/g, " ")}</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Perimeter</span>
+                    {isMeasuring ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder="ft"
+                          value={perimeterInput}
+                          onChange={(e) => setPerimeterInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          className="h-6 w-20 text-[11px] px-1.5"
+                          min={0}
+                          step={0.1}
+                          autoFocus
+                        />
+                        <span className="text-muted-foreground">ft</span>
+                      </div>
+                    ) : (
+                      (bowDetail as { perimeter_ft?: number }).perimeter_ft
+                        ? <span className="font-medium">{(bowDetail as { perimeter_ft: number }).perimeter_ft} ft</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>
+                    )}
+                  </div>
+                  {isMeasuring && canEdit && (
+                    <div className="flex justify-end pt-1">
+                      <Button
+                        size="sm"
+                        className="h-6 px-3 text-[11px]"
+                        disabled={savingPerimeter || !perimeterInput}
+                        onClick={() => savePerimeter(bow.id)}
+                      >
+                        {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save Perimeter"}
+                      </Button>
+                    </div>
+                  )}
+                  {[
+                    { label: "L × W", value: (bowDetail as { pool_length_ft?: number; pool_width_ft?: number }).pool_length_ft && (bowDetail as { pool_width_ft?: number }).pool_width_ft ? `${(bowDetail as { pool_length_ft: number }).pool_length_ft} × ${(bowDetail as { pool_width_ft: number }).pool_width_ft} ft` : null },
+                    { label: "Depth", value: (bowDetail as { pool_depth_shallow?: number; pool_depth_deep?: number }).pool_depth_shallow && (bowDetail as { pool_depth_deep?: number }).pool_depth_deep ? `${(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow}–${(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft` : (bowDetail as { pool_depth_avg?: number }).pool_depth_avg ? `${(bowDetail as { pool_depth_avg: number }).pool_depth_avg} ft avg` : null },
+                    { label: "Surface", value: (bowDetail as { pool_surface?: string }).pool_surface },
+                  ].map((d) => (
+                    <div key={d.label} className="flex justify-between text-[11px]">
+                      <span className="text-muted-foreground">{d.label}</span>
+                      {d.value ? <span className="font-medium capitalize">{d.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Equipment */}
+              <div className="bg-muted/50 rounded-md overflow-hidden">
+                <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                  <Wrench className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment</span>
+                </div>
+                <div className="px-2.5 py-2 space-y-1">
+                  {[
+                    { icon: Gauge, label: "Pump", value: (bowDetail as { pump_type?: string }).pump_type },
+                    { icon: FlaskConical, label: "Filter", value: (bowDetail as { filter_type?: string }).filter_type },
+                    { icon: Thermometer, label: "Heater", value: (bowDetail as { heater_type?: string }).heater_type },
+                    { icon: FlaskConical, label: "Chlor.", value: (bowDetail as { chlorinator_type?: string }).chlorinator_type },
+                    { icon: Zap, label: "Auto", value: (bowDetail as { automation_system?: string }).automation_system },
+                  ].map((e) => (
+                    <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
+                      <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground">{e.label}</span>
+                      <span className="truncate ml-auto">
+                        {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Aerial analysis */}
+          {analysis && !analysis.error_message && analysis.pool_detected && (
+            <div className="rounded-md bg-muted/50 p-2.5 space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-[10px]">Aerial</Badge>
+                <Badge className={`text-[10px] ${analysis.pool_confidence >= 0.7 ? "bg-green-100 text-green-800 hover:bg-green-100" : analysis.pool_confidence >= 0.4 ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
+                  {(analysis.pool_confidence * 100).toFixed(0)}%
+                </Badge>
+                <span className="text-[10px] text-muted-foreground ml-auto">
+                  Veg {analysis.vegetation_pct}% · Canopy {analysis.canopy_overhang_pct}% · Shadow {analysis.shadow_pct}%
+                </span>
+              </div>
+            </div>
+          )}
+          {analysis?.error_message && (
+            <div className="rounded-md bg-destructive/5 p-2.5">
+              <Badge variant="destructive" className="text-[10px]">Analysis Error</Badge>
+              <p className="text-[11px] text-muted-foreground mt-1">{analysis.error_message}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     );
   };
 
@@ -458,11 +806,10 @@ export default function MapPage() {
           ))}
         </div>
 
-        {/* Mode-specific actions */}
         {mode === "pools" && (
           <div className="flex items-center gap-3">
             <span className="text-xs text-muted-foreground">
-              {analyzedCount}/{totalCount} analyzed
+              {analyzedCount}/{totalBowCount} analyzed
             </span>
           </div>
         )}
@@ -473,7 +820,6 @@ export default function MapPage() {
         {/* Left Panel */}
         <div className="lg:col-span-3 flex flex-col min-h-0">
         {mode === "pools" ? (<>
-        {/* Pool BOW List */}
           {/* Search + type toggles */}
           <div className="flex items-center gap-1.5 mb-2">
             <div className="relative flex-1">
@@ -505,28 +851,32 @@ export default function MapPage() {
             </Button>
           </div>
 
-          {/* BOW list — commercial first */}
+          {/* Property list — commercial first */}
           <div ref={listRef} className="flex-1 overflow-y-auto space-y-0 pr-1">
             {[
-              { label: "Commercial", Icon: Building2, items: commercialBows, show: typeFilter.has("commercial") },
-              { label: "Residential", Icon: Home, items: residentialBows, show: typeFilter.has("residential") },
+              { label: "Commercial", Icon: Building2, items: commercialGroups, show: typeFilter.has("commercial") },
+              { label: "Residential", Icon: Home, items: residentialGroups, show: typeFilter.has("residential") },
             ].map((section) => section.show && section.items.length > 0 && (
               <div key={section.label}>
                 <div className="flex items-center gap-2 px-1 pt-3 pb-1.5 mb-0.5 sticky top-0 z-10 bg-background border-b border-border">
                   <section.Icon className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{section.label}</span>
-                  <span className="text-[11px] text-muted-foreground/50">{section.items.length}</span>
+                  <span className="text-[11px] text-muted-foreground/50">
+                    {section.items.length}
+                    {countBows(section.items) !== section.items.length && (
+                      <> ({countBows(section.items)} pools)</>
+                    )}
+                  </span>
                   <div className="flex-1 border-t border-border ml-1" />
                 </div>
                 <div className="space-y-0.5 mb-2">
-                  {section.items.map((b) => {
-                    const isSelected = b.id === selectedBowId;
-                    const status = getStatus(b);
+                  {section.items.map((g) => {
+                    const isSelected = g.property_id === selectedPropertyId;
                     return (
                       <button
-                        key={b.id}
-                        id={`bow-${b.id}`}
-                        onClick={() => handleBowSelect(b.id)}
+                        key={g.property_id}
+                        id={`prop-${g.property_id}`}
+                        onClick={() => handlePropertySelect(g.property_id)}
                         className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors ${
                           isSelected
                             ? "bg-accent border-l-3 border-l-primary font-medium"
@@ -536,34 +886,34 @@ export default function MapPage() {
                         <div className="flex items-center gap-2">
                           <span
                             className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                              status === "pinned"
+                              g.best_status === "pinned"
                                 ? "bg-green-500"
-                                : status === "analyzed"
+                                : g.best_status === "analyzed"
                                 ? "bg-yellow-500"
                                 : "bg-red-500"
                             }`}
                           />
-                          <span className="font-medium truncate">
-                            {b.customer_name}
+                          <span className="font-medium truncate flex-1">
+                            {g.customer_name}
                           </span>
+                          {g.bows.length > 1 && (
+                            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0">
+                              {g.bows.length}
+                            </Badge>
+                          )}
                         </div>
                         <div className="text-xs truncate ml-4 text-muted-foreground">
-                          {b.address}
+                          {g.address}
                         </div>
-                        {b.bow_name && (
-                          <div className="text-xs truncate ml-4 text-muted-foreground">
-                            {b.bow_name}
+                        {g.city && (
+                          <div className="text-xs truncate ml-4 text-muted-foreground/70">
+                            {g.city}
                           </div>
                         )}
-                        {b.tech_name && (
+                        {g.tech_name && (
                           <div className="text-xs truncate ml-4 text-muted-foreground flex items-center gap-1.5">
-                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.tech_color || '#94a3b8' }} />
-                            {b.tech_name}
-                          </div>
-                        )}
-                        {b.pool_sqft && (
-                          <div className="text-xs ml-4 text-muted-foreground">
-                            {b.pool_sqft.toLocaleString()} ft²
+                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.tech_color || '#94a3b8' }} />
+                            {g.tech_name}
                           </div>
                         )}
                       </button>
@@ -572,12 +922,12 @@ export default function MapPage() {
                 </div>
               </div>
             ))}
-            {filteredBows.length === 0 && (
-              <div className="text-center py-6 text-sm text-muted-foreground">No matching pools</div>
+            {filteredGroups.length === 0 && (
+              <div className="text-center py-6 text-sm text-muted-foreground">No matching properties</div>
             )}
           </div>
           <div className="text-[11px] text-muted-foreground pt-1 border-t mt-1">
-            {filteredBows.length} of {totalCount} shown
+            {filteredGroups.length} of {propertyGroups.length} properties shown
           </div>
         </>) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -590,17 +940,17 @@ export default function MapPage() {
         <div className="lg:col-span-5 min-h-0 relative">
           <Card className="shadow-sm overflow-hidden h-full">
             <SatelliteMap
-              poolBows={filteredBows}
-              selectedBowId={selectedBowId}
+              propertyGroups={filteredGroups}
+              selectedPropertyId={selectedPropertyId}
               pinPosition={pinPosition}
               flyTo={shouldFlyTo}
               actionsRef={mapActionsRef}
-              onBowSelect={handleBowSelect}
+              onPropertySelect={handlePropertySelect}
               onPinPlace={handlePinPlace}
             />
           </Card>
-          {/* Zoom overlay — top-right of map */}
-          {selectedBowId && (
+          {/* Zoom overlay */}
+          {selectedPropertyId && (
             <button
               onClick={() => { mapActionsRef.current?.toggleZoom(); setIsZoomedIn((z) => !z); }}
               className="absolute top-3 right-3 z-[400] flex items-center gap-1.5 bg-background/90 backdrop-blur-sm rounded-md px-2.5 py-1.5 shadow-md border text-xs font-medium text-foreground hover:bg-background transition-colors"
@@ -610,7 +960,7 @@ export default function MapPage() {
             </button>
           )}
 
-          {/* Status filter overlay — bottom-left of map */}
+          {/* Status filter overlay */}
           <div className="absolute bottom-3 left-3 z-[400] flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-md px-2 py-1.5 shadow-md border">
             {([
               { value: "analyzed" as StatusFilter, label: "Analyzed", color: "bg-yellow-500" },
@@ -639,18 +989,21 @@ export default function MapPage() {
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
               {mode === "routes" ? "Route details coming soon" : "Profitability details coming soon"}
             </div>
-          ) : selectedBow ? (
+          ) : selectedGroup ? (
             <div className="space-y-3">
               {/* Property header */}
               <Card className="shadow-sm">
                 <CardContent className="p-4">
-                  <h3 className="text-base font-semibold">{selectedBow.customer_name}</h3>
-                  <p className="text-sm text-muted-foreground">{selectedBow.address}</p>
+                  <h3 className="text-base font-semibold">{selectedGroup.customer_name}</h3>
+                  <p className="text-sm text-muted-foreground">{selectedGroup.address}</p>
+                  {selectedGroup.city && (
+                    <p className="text-xs text-muted-foreground/70">{selectedGroup.city}</p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {selectedBow.tech_name && (
+                    {selectedGroup.tech_name && (
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedBow.tech_color || '#94a3b8' }} />
-                        <span className="font-medium">{selectedBow.tech_name}</span>
+                        <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedGroup.tech_color || '#94a3b8' }} />
+                        <span className="font-medium">{selectedGroup.tech_name}</span>
                       </div>
                     )}
                     {propDetail && (propDetail as { service_day_pattern?: string }).service_day_pattern && (
@@ -670,440 +1023,209 @@ export default function MapPage() {
                         {(propDetail as { gate_code: string }).gate_code}
                       </div>
                     )}
+                    {selectedGroup.bows.length > 1 && (
+                      <Badge variant="secondary" className="text-[10px]">{selectedGroup.bows.length} pools</Badge>
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Pool BOW tile */}
-              <Card className="shadow-sm border-l-4 border-l-blue-500">
-                <CardContent className="p-4 space-y-3">
-                  {/* Pool header: name · service time · rate */}
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-baseline gap-3">
-                        <div className="flex items-center gap-2">
-                          <Droplets className="h-3.5 w-3.5 text-blue-500" />
-                          <span className="text-base font-semibold">{selectedBow.bow_name || "Pool"}</span>
-                        </div>
-                        <span className="text-muted-foreground/30">·</span>
-                        {bowDetail && (
-                          <span className="text-base font-bold">{(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">min</span></span>
-                        )}
-                        {perms.canViewRates && (() => {
-                          const bowRate = (bowDetail as { monthly_rate?: number })?.monthly_rate;
-                          const custRate = (profitData as { monthly_rate?: number })?.monthly_rate;
-                          const rate = bowRate || custRate;
-                          const margin = profitData ? (profitData as { cost_breakdown: { margin_pct: number } }).cost_breakdown.margin_pct : null;
-                          return (<>
-                            <span className="text-muted-foreground/30">·</span>
-                            <span className={`text-base font-bold ${
-                              rate
-                                ? margin !== null
-                                  ? margin >= 30 ? "text-emerald-600" : margin >= 0 ? "text-amber-600" : "text-red-600"
-                                  : "text-foreground"
-                                : "text-muted-foreground/40"
-                            }`}>
-                              {rate ? `$${rate.toFixed(0)}` : "$\u2014"}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">/mo</span>
-                            </span>
-                          </>);
-                        })()}
-                      </div>
-                      {canEdit && (
-                        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                          <Crosshair className="h-3 w-3" />
-                          {pinPosition ? (
-                            <span className="text-green-600 font-medium">
-                              {pinPosition.lat.toFixed(6)}, {pinPosition.lng.toFixed(6)}
-                            </span>
-                          ) : (
-                            <span>Click map to place pin</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {canEdit && pinDirty && (
-                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 px-3 py-2 flex items-center justify-between">
-                      <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">Pin moved — save to keep new location</span>
-                      <Button size="sm" className="h-7 px-3 text-xs" disabled={savingPin} onClick={savePin}>
-                        {savingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Pin"}
-                      </Button>
-                    </div>
-                  )}
+              {/* Profitability — property-level */}
+              {perms.canViewProfitability && profitData && (() => {
+                const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
+                if (!cost) return null;
+                const diff = (profitData as { difficulty_score: number }).difficulty_score;
+                const rpg = (profitData as { rate_per_gallon?: number }).rate_per_gallon;
+                const m = medians;
 
-                  {/* Discrepancy alert */}
-                  {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && (
-                    <div className={`rounded-md p-2.5 flex items-start gap-2 ${
-                      dimComparison.discrepancy_level === "alert"
-                        ? "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
-                        : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800"
-                    }`}>
-                      <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${
-                        dimComparison.discrepancy_level === "alert" ? "text-red-600" : "text-amber-600"
-                      }`} />
-                      <div className="text-[11px]">
-                        {dimComparison.discrepancy_level === "alert" ? (
-                          <span className="text-red-700 dark:text-red-400 font-medium">
-                            Significant discrepancy ({dimComparison.discrepancy_pct?.toFixed(0)}%) — verify measurements
-                          </span>
-                        ) : (
-                          <span className="text-amber-700 dark:text-amber-400 font-medium">
-                            {dimComparison.discrepancy_pct?.toFixed(0)}% discrepancy between {
-                              dimComparison.estimates.length >= 2
-                                ? `${SOURCE_LABELS[dimComparison.estimates[0]?.source] || dimComparison.estimates[0]?.source} and ${SOURCE_LABELS[dimComparison.estimates[1]?.source] || dimComparison.estimates[1]?.source}`
-                                : "estimates"
-                            }
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                const compare = (val: number | null, med: number | null | undefined, higherIsGood: boolean) => {
+                  if (val == null || med == null || med === 0) return null;
+                  const pct = ((val - med) / med) * 100;
+                  if (Math.abs(pct) < 5) return { arrow: "~", color: "text-muted-foreground", tip: `median ${med.toFixed(1)}` };
+                  const above = pct > 0;
+                  const good = higherIsGood ? above : !above;
+                  return {
+                    arrow: above ? "↑" : "↓",
+                    color: good ? "text-emerald-600" : "text-red-500",
+                    tip: `${above ? "+" : ""}${pct.toFixed(0)}% vs median`,
+                  };
+                };
 
-                  {/* Profitability — above measurements */}
-                  {perms.canViewProfitability && profitData && (() => {
-                    const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
-                    const diff = (profitData as { difficulty_score: number }).difficulty_score;
-                    const rpg = (profitData as { rate_per_gallon?: number }).rate_per_gallon;
-                    const m = medians;
+                const metrics = [
+                  {
+                    label: "Rate/gal",
+                    value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null,
+                    medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null,
+                    color: "text-foreground",
+                    cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true),
+                    editable: false,
+                  },
+                  {
+                    label: "Est. Cost",
+                    value: `$${cost.total_cost.toFixed(0)}`,
+                    medianLabel: m ? `$${m.cost.toFixed(0)}` : null,
+                    color: "text-muted-foreground",
+                    cmp: compare(cost.total_cost, m?.cost, false),
+                    editable: false,
+                  },
+                  {
+                    label: "Margin",
+                    value: `${cost.margin_pct.toFixed(1)}%`,
+                    medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null,
+                    color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600",
+                    cmp: compare(cost.margin_pct, m?.margin_pct, true),
+                    editable: false,
+                  },
+                  {
+                    label: "Difficulty",
+                    value: `${diff.toFixed(1)}`,
+                    medianLabel: m ? `${m.difficulty.toFixed(1)}` : null,
+                    color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground",
+                    cmp: compare(diff, m?.difficulty, false),
+                    editable: true,
+                  },
+                ];
 
-                    // Compare helper: returns arrow + color for "higher is better" or "lower is better"
-                    const compare = (val: number | null, med: number | null | undefined, higherIsGood: boolean) => {
-                      if (val == null || med == null || med === 0) return null;
-                      const pct = ((val - med) / med) * 100;
-                      if (Math.abs(pct) < 5) return { arrow: "~", color: "text-muted-foreground", tip: `median ${med.toFixed(1)}` };
-                      const above = pct > 0;
-                      const good = higherIsGood ? above : !above;
-                      return {
-                        arrow: above ? "↑" : "↓",
-                        color: good ? "text-emerald-600" : "text-red-500",
-                        tip: `${above ? "+" : ""}${pct.toFixed(0)}% vs median`,
-                      };
-                    };
-
-                    const metrics = [
-                      {
-                        label: "Rate/gal",
-                        value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null,
-                        medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null,
-                        color: "text-foreground",
-                        cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true),
-                        editable: false,
-                      },
-                      {
-                        label: "Est. Cost",
-                        value: `$${cost.total_cost.toFixed(0)}`,
-                        medianLabel: m ? `$${m.cost.toFixed(0)}` : null,
-                        color: "text-muted-foreground",
-                        cmp: compare(cost.total_cost, m?.cost, false),
-                        editable: false,
-                      },
-                      {
-                        label: "Margin",
-                        value: `${cost.margin_pct.toFixed(1)}%`,
-                        medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null,
-                        color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600",
-                        cmp: compare(cost.margin_pct, m?.margin_pct, true),
-                        editable: false,
-                      },
-                      {
-                        label: "Difficulty",
-                        value: `${diff.toFixed(1)}`,
-                        medianLabel: m ? `${m.difficulty.toFixed(1)}` : null,
-                        color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground",
-                        cmp: compare(diff, m?.difficulty, false),
-                        editable: true,
-                      },
-                    ];
-
-                    return (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <TrendingUp className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Profitability</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {metrics.map((mt) => (
-                            <div key={mt.label} className="bg-muted/50 rounded-md px-2.5 py-2 relative">
-                              <div className="flex items-center justify-between">
-                                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
-                                {mt.editable && canEdit && selectedPropertyId && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5 -mr-1 -mt-0.5"
-                                    onClick={() => setDiffModalOpen(true)}
-                                  >
-                                    <Pencil className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-                                  </Button>
-                                )}
-                              </div>
-                              <div className="flex items-baseline gap-1.5">
-                                {mt.cmp ? (
-                                  <>
-                                    <p className={`text-lg font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
-                                    <span className={`text-xs font-bold ${mt.cmp.color}`}>
-                                      {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
-                                    </span>
-                                    {mt.medianLabel && (
-                                      <span className="text-xs text-muted-foreground/60">/ {mt.medianLabel}</span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <p className={`text-lg font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Measurements + Equipment */}
-                  {bowDetail && perms.canViewDimensions && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {/* Measurements */}
-                      <div className={`bg-muted/50 rounded-md overflow-hidden ${measuringPerimeter ? "border-l-3 border-l-amber-400" : ""}`}>
-                        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
-                          <Ruler className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Measurements</span>
-                          {canEdit && (pinPosition || (selectedBow.lat && selectedBow.lng)) && (
-                            <a
-                              href={`https://www.google.com/maps/@${(pinPosition?.lat ?? selectedBow.lat)},${(pinPosition?.lng ?? selectedBow.lng)},20z/data=!3m1!1e3`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="ml-auto text-muted-foreground hover:text-foreground transition-colors"
-                              onClick={() => setMeasuringPerimeter(true)}
-                              title="Measure in Google Maps"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          )}
-                        </div>
-                        <div className="px-2.5 py-2 space-y-1">
-                          {/* Area + source */}
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-muted-foreground">Area</span>
-                            <div className="flex items-center gap-1.5">
-                              {(bowDetail as { pool_sqft?: number }).pool_sqft
-                                ? <span className="font-semibold">{((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()} ft²</span>
-                                : <span className="text-muted-foreground/50 italic">—</span>}
-                              {renderSourceBadge((bowDetail as { dimension_source?: string }).dimension_source)}
-                            </div>
-                          </div>
-                          {/* Volume */}
-                          <div className="flex justify-between text-[11px]">
-                            <span className="text-muted-foreground">Volume</span>
-                            {(bowDetail as { pool_gallons?: number }).pool_gallons
-                              ? <span className="font-medium">{((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()} gal</span>
-                              : <span className="text-muted-foreground/50 italic">—</span>}
-                          </div>
-                          {/* Shape — editable when measuring */}
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-muted-foreground">Shape</span>
-                            {measuringPerimeter ? (
-                              <select
-                                value={perimeterShape}
-                                onChange={(e) => setPerimeterShape(e.target.value)}
-                                className="h-6 text-[11px] rounded border border-input bg-background px-1.5"
-                              >
-                                {POOL_SHAPES.map((s) => (
-                                  <option key={s.value} value={s.value}>{s.label}</option>
-                                ))}
-                              </select>
-                            ) : (
-                              (bowDetail as { pool_shape?: string }).pool_shape
-                                ? <span className="font-medium capitalize">{(bowDetail as { pool_shape: string }).pool_shape.replace(/_/g, " ")}</span>
-                                : <span className="text-muted-foreground/50 italic">—</span>
-                            )}
-                          </div>
-                          {/* Perimeter — editable when measuring */}
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-muted-foreground">Perimeter</span>
-                            {measuringPerimeter ? (
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  type="number"
-                                  placeholder="ft"
-                                  value={perimeterInput}
-                                  onChange={(e) => setPerimeterInput(e.target.value)}
-                                  className="h-6 w-20 text-[11px] px-1.5"
-                                  min={0}
-                                  step={0.1}
-                                  autoFocus
-                                />
-                                <span className="text-muted-foreground">ft</span>
-                              </div>
-                            ) : (
-                              (bowDetail as { perimeter_ft?: number }).perimeter_ft
-                                ? <span className="font-medium">{(bowDetail as { perimeter_ft: number }).perimeter_ft} ft</span>
-                                : <span className="text-muted-foreground/50 italic">—</span>
-                            )}
-                          </div>
-                          {/* Save button when measuring */}
-                          {measuringPerimeter && canEdit && (
-                            <div className="flex justify-end pt-1">
-                              <Button
-                                size="sm"
-                                className="h-6 px-3 text-[11px]"
-                                disabled={savingPerimeter || !perimeterInput}
-                                onClick={savePerimeter}
-                              >
-                                {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save Perimeter"}
-                              </Button>
-                            </div>
-                          )}
-                          {/* L×W, Depth, Surface */}
-                          {[
-                            { label: "L × W", value: (bowDetail as { pool_length_ft?: number; pool_width_ft?: number }).pool_length_ft && (bowDetail as { pool_width_ft?: number }).pool_width_ft ? `${(bowDetail as { pool_length_ft: number }).pool_length_ft} × ${(bowDetail as { pool_width_ft: number }).pool_width_ft} ft` : null },
-                            { label: "Depth", value: (bowDetail as { pool_depth_shallow?: number; pool_depth_deep?: number }).pool_depth_shallow && (bowDetail as { pool_depth_deep?: number }).pool_depth_deep ? `${(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow}–${(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft` : (bowDetail as { pool_depth_avg?: number }).pool_depth_avg ? `${(bowDetail as { pool_depth_avg: number }).pool_depth_avg} ft avg` : null },
-                            { label: "Surface", value: (bowDetail as { pool_surface?: string }).pool_surface },
-                          ].map((d) => (
-                            <div key={d.label} className="flex justify-between text-[11px]">
-                              <span className="text-muted-foreground">{d.label}</span>
-                              {d.value ? <span className="font-medium capitalize">{d.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Equipment */}
-                      <div className="bg-muted/50 rounded-md overflow-hidden">
-                        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
-                          <Wrench className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment</span>
-                        </div>
-                        <div className="px-2.5 py-2 space-y-1">
-                          {[
-                            { icon: Gauge, label: "Pump", value: (bowDetail as { pump_type?: string }).pump_type },
-                            { icon: FlaskConical, label: "Filter", value: (bowDetail as { filter_type?: string }).filter_type },
-                            { icon: Thermometer, label: "Heater", value: (bowDetail as { heater_type?: string }).heater_type },
-                            { icon: FlaskConical, label: "Chlor.", value: (bowDetail as { chlorinator_type?: string }).chlorinator_type },
-                            { icon: Zap, label: "Auto", value: (bowDetail as { automation_system?: string }).automation_system },
-                          ].map((e) => (
-                            <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
-                              <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
-                              <span className="text-muted-foreground">{e.label}</span>
-                              <span className="truncate ml-auto">
-                                {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Aerial analysis */}
-                  {selectedAnalysis && !selectedAnalysis.error_message && selectedAnalysis.pool_detected && (
-                    <div className="rounded-md bg-muted/50 p-2.5 space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap text-xs">
-                        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-[10px]">Aerial</Badge>
-                        <Badge className={`text-[10px] ${selectedAnalysis.pool_confidence >= 0.7 ? "bg-green-100 text-green-800 hover:bg-green-100" : selectedAnalysis.pool_confidence >= 0.4 ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
-                          {(selectedAnalysis.pool_confidence * 100).toFixed(0)}%
-                        </Badge>
-                        <span className="text-[10px] text-muted-foreground ml-auto">
-                          Veg {selectedAnalysis.vegetation_pct}% · Canopy {selectedAnalysis.canopy_overhang_pct}% · Shadow {selectedAnalysis.shadow_pct}%
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {selectedAnalysis?.error_message && (
-                    <div className="rounded-md bg-destructive/5 p-2.5">
-                      <Badge variant="destructive" className="text-[10px]">Analysis Error</Badge>
-                      <p className="text-[11px] text-muted-foreground mt-1">{selectedAnalysis.error_message}</p>
-                    </div>
-                  )}
-
-                  {/* Photos */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
+                return (
+                  <Card className="shadow-sm">
+                    <CardContent className="p-4 space-y-1.5">
                       <div className="flex items-center gap-1.5">
-                        <Camera className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Photos</span>
-                        <span className="text-[10px] text-muted-foreground/50">{images.length}/8</span>
+                        <TrendingUp className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Profitability</span>
                       </div>
-                      {canEdit && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-2 text-[11px] text-muted-foreground"
-                            disabled={capturing || images.length >= 8}
-                            onClick={() => document.getElementById("photo-upload")?.click()}
-                          >
-                            {capturing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Upload"}
-                          </Button>
-                          <input
-                            id="photo-upload"
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) uploadPhoto(file);
-                              e.target.value = "";
-                            }}
-                          />
-                        </>
-                      )}
-                    </div>
-                    {images.length > 0 ? (
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {images.map((img) => (
-                          <div key={img.id} className="relative group">
-                            <img
-                              src={`${API_BASE}${img.url}`}
-                              alt={img.caption || "Property photo"}
-                              className={`w-full aspect-square object-cover rounded border-2 ${
-                                img.is_hero ? "border-amber-400" : "border-transparent"
-                              }`}
-                            />
-                            {img.is_hero && (
-                              <div className="absolute top-0.5 left-0.5">
-                                <Star className="h-3 w-3 fill-amber-400 text-amber-400 drop-shadow" />
-                              </div>
-                            )}
-                            {canEdit && (
-                            <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
-                              {!img.is_hero && (
-                                <Button variant="secondary" size="icon" className="h-5 w-5 bg-white/90 hover:bg-white shadow-sm" onClick={() => setHero(img.id)} title="Set as hero">
-                                  <Star className="h-2.5 w-2.5" />
+                      <div className="grid grid-cols-2 gap-2">
+                        {metrics.map((mt) => (
+                          <div key={mt.label} className="bg-muted/50 rounded-md px-2.5 py-2 relative">
+                            <div className="flex items-center justify-between">
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
+                              {mt.editable && canEdit && selectedPropertyId && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 -mr-1 -mt-0.5"
+                                  onClick={() => setDiffModalOpen(true)}
+                                >
+                                  <Pencil className="h-3 w-3 text-muted-foreground hover:text-foreground" />
                                 </Button>
                               )}
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="secondary" size="icon" className="h-5 w-5 bg-white/90 hover:bg-white shadow-sm text-destructive" title="Delete">
-                                    <Trash2 className="h-2.5 w-2.5" />
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete photo?</AlertDialogTitle>
-                                    <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => deleteImage(img.id)}>Delete</AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
                             </div>
-                            )}
+                            <div className="flex items-baseline gap-1.5">
+                              {mt.cmp ? (
+                                <>
+                                  <p className={`text-lg font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
+                                  <span className={`text-xs font-bold ${mt.cmp.color}`}>
+                                    {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
+                                  </span>
+                                  {mt.medianLabel && (
+                                    <span className="text-xs text-muted-foreground/60">/ {mt.medianLabel}</span>
+                                  )}
+                                </>
+                              ) : (
+                                <p className={`text-lg font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-[11px] text-muted-foreground/50 italic">No photos yet</p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {/* BOW tiles — one per pool at this property */}
+              {selectedGroup.bows.map((bow) =>
+                renderBowTile(bow, bowDetails.get(bow.id) || null, dimComparisons.get(bow.id) || null)
+              )}
+
+              {/* Photos — property-level */}
+              <Card className="shadow-sm">
+                <CardContent className="p-4 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Camera className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Photos</span>
+                      <span className="text-[10px] text-muted-foreground/50">{images.length}/8</span>
+                    </div>
+                    {canEdit && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-[11px] text-muted-foreground"
+                          disabled={capturing || images.length >= 8}
+                          onClick={() => document.getElementById("photo-upload")?.click()}
+                        >
+                          {capturing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Upload"}
+                        </Button>
+                        <input
+                          id="photo-upload"
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) uploadPhoto(file);
+                            e.target.value = "";
+                          }}
+                        />
+                      </>
                     )}
                   </div>
+                  {images.length > 0 ? (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {images.map((img) => (
+                        <div key={img.id} className="relative group">
+                          <img
+                            src={`${API_BASE}${img.url}`}
+                            alt={img.caption || "Property photo"}
+                            className={`w-full aspect-square object-cover rounded border-2 ${
+                              img.is_hero ? "border-amber-400" : "border-transparent"
+                            }`}
+                          />
+                          {img.is_hero && (
+                            <div className="absolute top-0.5 left-0.5">
+                              <Star className="h-3 w-3 fill-amber-400 text-amber-400 drop-shadow" />
+                            </div>
+                          )}
+                          {canEdit && (
+                          <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+                            {!img.is_hero && (
+                              <Button variant="secondary" size="icon" className="h-5 w-5 bg-white/90 hover:bg-white shadow-sm" onClick={() => setHero(img.id)} title="Set as hero">
+                                <Star className="h-2.5 w-2.5" />
+                              </Button>
+                            )}
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="secondary" size="icon" className="h-5 w-5 bg-white/90 hover:bg-white shadow-sm text-destructive" title="Delete">
+                                  <Trash2 className="h-2.5 w-2.5" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete photo?</AlertDialogTitle>
+                                  <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => deleteImage(img.id)}>Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground/50 italic">No photos yet</p>
+                  )}
                 </CardContent>
               </Card>
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              Select a pool from the list or map
+              Select a property from the list or map
             </div>
           )}
         </div>
@@ -1114,10 +1236,10 @@ export default function MapPage() {
           open={diffModalOpen}
           onOpenChange={setDiffModalOpen}
           propertyId={selectedPropertyId}
-          bowDetail={bowDetail}
+          bowDetail={selectedGroup?.bows[0] ? (bowDetails.get(selectedGroup.bows[0].id) || null) : null}
           onSaved={() => {
-            if (selectedBowId && selectedPropertyId) {
-              loadDetail(selectedBowId, selectedPropertyId);
+            if (selectedPropertyId && selectedGroup) {
+              loadPropertyDetail(selectedPropertyId, selectedGroup.bows);
             }
           }}
         />

@@ -610,18 +610,20 @@ export default function CustomerDetailPage({
             {/* Metric cards */}
             <div className={`grid grid-cols-2 ${perms.canViewRates ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3`}>
               {perms.canViewRates && (
-                <Card className="shadow-sm">
-                  <CardContent className="pt-3 pb-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <DollarSign className="h-4 w-4 text-muted-foreground" />
-                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Monthly Rate</p>
-                    </div>
-                    <p className="text-2xl font-bold">${customer.monthly_rate.toFixed(2)}</p>
-                  </CardContent>
-                </Card>
+                <Link href={`/profitability/${customer.id}`}>
+                  <Card className="shadow-sm hover:bg-muted/50 transition-colors cursor-pointer">
+                    <CardContent className="pt-3 pb-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Monthly Rate</p>
+                      </div>
+                      <p className="text-2xl font-bold">${customer.monthly_rate.toFixed(2)}</p>
+                    </CardContent>
+                  </Card>
+                </Link>
               )}
               {perms.canViewBalance && (
-                <Card className={`shadow-sm ${outstandingTotal > 0 ? "border-red-200" : ""}`}>
+                <Card className={`shadow-sm hover:bg-muted/50 transition-colors cursor-pointer ${outstandingTotal > 0 ? "border-red-200" : ""}`} onClick={() => setViewTab("invoices")}>
                   <CardContent className="pt-3 pb-3">
                     <div className="flex items-center gap-2 mb-1">
                       <Receipt className="h-4 w-4 text-muted-foreground" />
@@ -659,7 +661,7 @@ export default function CustomerDetailPage({
             <div className={`grid grid-cols-1 ${perms.canViewInvoices ? "lg:grid-cols-2" : ""} gap-4`}>
               {/* Outstanding invoices */}
               {perms.canViewInvoices && (
-                <Card className="shadow-sm">
+                <Card className="shadow-sm hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => setViewTab("invoices")}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">Outstanding Invoices</CardTitle>
                   </CardHeader>
@@ -689,7 +691,7 @@ export default function CustomerDetailPage({
               )}
 
               {/* Water Features summary */}
-              <Card className="shadow-sm">
+              <Card className="shadow-sm hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => setViewTab("bows")}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">Water Features</CardTitle>
                 </CardHeader>

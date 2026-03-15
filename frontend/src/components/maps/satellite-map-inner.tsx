@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useCallback } from "react";
 import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
-import type { SatelliteMapProps } from "./satellite-map";
+import type { SatelliteMapProps, PropertyGroup } from "./satellite-map";
 
 // Fix default marker icon paths
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
@@ -33,10 +33,10 @@ const dotYellow = createDot("#eab308");
 const dotRed = createDot("#ef4444");
 const dotSelected = createDot("#3B82F6", 16);
 
-function getBowIcon(bow: { has_analysis: boolean; pool_lat: number | null }, isSelected: boolean) {
+function getPropertyIcon(pg: PropertyGroup, isSelected: boolean) {
   if (isSelected) return dotSelected;
-  if (bow.has_analysis && bow.pool_lat) return dotGreen;
-  if (bow.has_analysis) return dotYellow;
+  if (pg.best_status === "pinned") return dotGreen;
+  if (pg.best_status === "analyzed") return dotYellow;
   return dotRed;
 }
 
@@ -52,14 +52,14 @@ function FitBounds({ markers }: { markers: [number, number][] }) {
   return null;
 }
 
-function PanToSelected({ lat, lng, bowId }: { lat: number; lng: number; bowId: string }) {
+function PanToSelected({ lat, lng, propertyId }: { lat: number; lng: number; propertyId: string }) {
   const map = useMap();
   const prevRef = useRef<string>("");
   useEffect(() => {
-    if (bowId === prevRef.current) return;
-    prevRef.current = bowId;
+    if (propertyId === prevRef.current) return;
+    prevRef.current = propertyId;
     map.panTo([lat, lng], { animate: true, duration: 0.6 });
-  }, [lat, lng, bowId, map]);
+  }, [lat, lng, propertyId, map]);
   return null;
 }
 
@@ -80,12 +80,10 @@ function MapActionsProvider({ actionsRef, selectedLat, selectedLng, onZoomChange
         isZoomedIn: savedZoom.current !== null,
         toggleZoom: () => {
           if (savedZoom.current !== null) {
-            // Zoom out — restore previous view
             map.flyTo(savedCenter.current!, savedZoom.current, { duration: 0.6 });
             savedZoom.current = null;
             savedCenter.current = null;
           } else {
-            // Zoom in — save current view then zoom
             savedZoom.current = map.getZoom();
             savedCenter.current = map.getCenter();
             const lat = selectedLat ?? map.getCenter().lat;
@@ -115,21 +113,21 @@ function MapClickHandler({ onPinPlace, enabled }: { onPinPlace: (lat: number, ln
 }
 
 export default function SatelliteMapInner({
-  poolBows,
-  selectedBowId,
+  propertyGroups,
+  selectedPropertyId,
   pinPosition,
   flyTo,
   actionsRef,
-  onBowSelect,
+  onPropertySelect,
   onPinPlace,
 }: SatelliteMapProps) {
   const bounds = useMemo(
-    () => poolBows.filter((b) => b.lat && b.lng).map((b) => [b.lat!, b.lng!] as [number, number]),
-    [poolBows]
+    () => propertyGroups.filter((pg) => pg.lat && pg.lng).map((pg) => [pg.lat!, pg.lng!] as [number, number]),
+    [propertyGroups]
   );
 
-  const selectedBow = selectedBowId
-    ? poolBows.find((b) => b.id === selectedBowId)
+  const selectedGroup = selectedPropertyId
+    ? propertyGroups.find((pg) => pg.property_id === selectedPropertyId)
     : null;
 
   if (bounds.length === 0) {
@@ -152,40 +150,40 @@ export default function SatelliteMapInner({
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
       />
       <FitBounds markers={bounds} />
-      <MapClickHandler onPinPlace={onPinPlace} enabled={!!selectedBowId} />
+      <MapClickHandler onPinPlace={onPinPlace} enabled={!!selectedPropertyId} />
       <MapActionsProvider
         actionsRef={actionsRef}
-        selectedLat={selectedBow ? (selectedBow.pool_lat ?? selectedBow.lat) : null}
-        selectedLng={selectedBow ? (selectedBow.pool_lng ?? selectedBow.lng) : null}
+        selectedLat={selectedGroup?.lat ?? null}
+        selectedLng={selectedGroup?.lng ?? null}
         onZoomChange={() => { /* parent reads ref.current.isZoomedIn */ }}
       />
 
-      {flyTo && selectedBow && selectedBowId && selectedBow.lat && selectedBow.lng && (
+      {flyTo && selectedGroup && selectedPropertyId && selectedGroup.lat && selectedGroup.lng && (
         <PanToSelected
-          lat={selectedBow.pool_lat ?? selectedBow.lat}
-          lng={selectedBow.pool_lng ?? selectedBow.lng}
-          bowId={selectedBowId}
+          lat={selectedGroup.lat}
+          lng={selectedGroup.lng}
+          propertyId={selectedPropertyId}
         />
       )}
 
-      {poolBows.map((b) => {
-        if (!b.lat || !b.lng) return null;
-        const isSelected = b.id === selectedBowId;
-        const markerLat = isSelected && pinPosition ? pinPosition.lat : (b.pool_lat ?? b.lat);
-        const markerLng = isSelected && pinPosition ? pinPosition.lng : (b.pool_lng ?? b.lng);
+      {propertyGroups.map((pg) => {
+        if (!pg.lat || !pg.lng) return null;
+        const isSelected = pg.property_id === selectedPropertyId;
         return (
           <Marker
-            key={b.id}
-            position={[markerLat, markerLng]}
-            icon={getBowIcon(b, isSelected)}
-            eventHandlers={{ click: () => onBowSelect(b.id) }}
+            key={pg.property_id}
+            position={[pg.lat, pg.lng]}
+            icon={getPropertyIcon(pg, isSelected)}
+            eventHandlers={{ click: () => onPropertySelect(pg.property_id) }}
             zIndexOffset={isSelected ? 1000 : 0}
           >
             <Popup>
               <div className="text-sm">
-                <div className="font-medium">{b.customer_name}</div>
-                <div className="text-muted-foreground">{b.address}</div>
-                {b.bow_name && <div className="text-xs text-muted-foreground">{b.bow_name}</div>}
+                <div className="font-medium">{pg.customer_name}</div>
+                <div className="text-muted-foreground">{pg.address}</div>
+                {pg.bows.length > 1 && (
+                  <div className="text-xs text-muted-foreground">{pg.bows.length} pools</div>
+                )}
               </div>
             </Popup>
           </Marker>

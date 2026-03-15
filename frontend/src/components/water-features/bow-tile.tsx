@@ -182,9 +182,9 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
 
   if (editing) {
     return (
-      <div className="space-y-3">
+      <div className="rounded-lg border shadow-sm bg-card p-4 space-y-3 border-l-4 border-l-primary">
         {/* BOW Header Bar — edit mode */}
-        <div className="flex items-center gap-3 bg-muted/60 border border-border px-4 py-2.5 rounded-lg border-l-4 border-l-primary">
+        <div className="flex items-center gap-3">
           <Waves className="h-4 w-4 text-primary/60" />
           <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">
             {form.name || form.water_type.replace("_", " ")}
@@ -401,9 +401,9 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
 
   // --- View mode ---
   return (
-    <div className="space-y-3">
+    <div className="rounded-lg border shadow-sm bg-card p-4 space-y-3">
       {/* BOW Header Bar */}
-      <div className="flex items-center gap-3 bg-muted/60 border border-border px-4 py-2.5 rounded-lg">
+      <div className="flex items-center gap-3">
         <Waves className="h-4 w-4 text-primary/60" />
         <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
         {bow.pool_type && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{bow.pool_type}</Badge>}

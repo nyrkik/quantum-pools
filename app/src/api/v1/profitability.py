@@ -82,6 +82,32 @@ async def get_account_detail(
     return await svc.get_account_detail(ctx.organization_id, customer_id)
 
 
+@router.get("/property/{property_id}", response_model=ProfitabilityAccount)
+async def get_property_profitability(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get profitability for a single property."""
+    from src.models.property import Property
+    from sqlalchemy import select
+    result = await db.execute(
+        select(Property).where(
+            Property.id == property_id,
+            Property.organization_id == ctx.organization_id,
+        )
+    )
+    prop = result.scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    svc = ProfitabilityService(db)
+    accounts = await svc.get_account_detail(ctx.organization_id, prop.customer_id)
+    for a in accounts:
+        if a.property_id == property_id:
+            return a
+    raise HTTPException(status_code=404, detail="Profitability data not available")
+
+
 @router.get("/whale-curve", response_model=list[WhaleCurvePoint])
 async def get_whale_curve(
     ctx: OrgUserContext = Depends(get_current_org_user),

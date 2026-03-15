@@ -28,6 +28,18 @@ import {
   Home,
   Route,
   TrendingUp,
+  DollarSign,
+  Clock,
+  Move,
+  Ruler,
+  Wrench,
+  Gauge,
+  FlaskConical,
+  Thermometer,
+  Zap,
+  Dog,
+  Lock,
+  Calendar,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -44,6 +56,7 @@ import type { SatelliteAnalysis, PoolBowWithCoords, BulkAnalysisResponse } from 
 import type { PropertyPhoto } from "@/types/photo";
 import { resizeImage } from "@/lib/image-utils";
 import SatelliteMap from "@/components/maps/satellite-map";
+import { usePermissions } from "@/lib/permissions";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.121.52.15:7061";
 
@@ -59,6 +72,8 @@ const MAP_MODES = [
 export default function MapPage() {
   const searchParams = useSearchParams();
   const initialBowId = searchParams.get("bow");
+  const perms = usePermissions();
+  const canEdit = perms.role !== "technician" && perms.role !== "readonly";
   const [mode, setMode] = useState<MapMode>("pools");
   const [poolBows, setPoolBows] = useState<PoolBowWithCoords[]>([]);
   const [analyses, setAnalyses] = useState<SatelliteAnalysis[]>([]);
@@ -75,6 +90,9 @@ export default function MapPage() {
   const [shouldFlyTo, setShouldFlyTo] = useState(false);
   const [pinDirty, setPinDirty] = useState(false);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
+  const [bowDetail, setBowDetail] = useState<Record<string, unknown> | null>(null);
+  const [propDetail, setPropDetail] = useState<Record<string, unknown> | null>(null);
+  const [profitData, setProfitData] = useState<Record<string, unknown> | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
@@ -179,6 +197,20 @@ export default function MapPage() {
     }
   }, []);
 
+  const loadDetail = useCallback(async (bowId: string, propertyId: string) => {
+    setBowDetail(null);
+    setPropDetail(null);
+    setProfitData(null);
+    const [bow, prop, profit] = await Promise.all([
+      api.get<Record<string, unknown>>(`/v1/bodies-of-water/${bowId}`).catch(() => null),
+      api.get<Record<string, unknown>>(`/v1/properties/${propertyId}`).catch(() => null),
+      api.get<Record<string, unknown>>(`/v1/profitability/property/${propertyId}`).catch(() => null),
+    ]);
+    setBowDetail(bow);
+    setPropDetail(prop);
+    setProfitData(profit);
+  }, []);
+
   const selectBowQuiet = useCallback((bowId: string) => {
     setSelectedBowId(bowId);
     setPinDirty(false);
@@ -191,8 +223,11 @@ export default function MapPage() {
     } else {
       setPinPosition(null);
     }
-    if (bow) loadImages(bow.property_id);
-  }, [poolBows, analyses, loadImages]);
+    if (bow) {
+      loadImages(bow.property_id);
+      loadDetail(bowId, bow.property_id);
+    }
+  }, [poolBows, analyses, loadImages, loadDetail]);
 
   const handleBowSelect = useCallback((bowId: string) => {
     setShouldFlyTo(true);
@@ -204,9 +239,10 @@ export default function MapPage() {
   }, [selectBowQuiet]);
 
   const handlePinPlace = useCallback((lat: number, lng: number) => {
+    if (!canEdit) return;
     setPinPosition({ lat, lng });
     setPinDirty(true);
-  }, []);
+  }, [canEdit]);
 
   const savePin = async () => {
     if (!selectedBowId || !pinPosition) return;
@@ -372,16 +408,18 @@ export default function MapPage() {
             <span className="text-xs text-muted-foreground">
               {analyzedCount}/{totalCount} analyzed
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => runBulkAnalysis(false)}
-              disabled={analyzing}
-            >
-              {analyzing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Satellite className="mr-1 h-3 w-3" />}
-              Analyze New
-            </Button>
+            {canEdit && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground"
+                onClick={() => runBulkAnalysis(false)}
+                disabled={analyzing}
+              >
+                {analyzing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Satellite className="mr-1 h-3 w-3" />}
+                Analyze Unscanned
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -553,18 +591,31 @@ export default function MapPage() {
                 <CardContent className="p-4">
                   <h3 className="text-base font-semibold">{selectedBow.customer_name}</h3>
                   <p className="text-sm text-muted-foreground">{selectedBow.address}</p>
-                  {selectedBow.tech_name && (
-                    <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted-foreground">
-                      <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedBow.tech_color || '#94a3b8' }} />
-                      <span className="font-medium">{selectedBow.tech_name}</span>
-                    </div>
-                  )}
-                  {selectedBow.lat && selectedBow.lng && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      <MapPin className="h-3 w-3 inline mr-1" />
-                      {selectedBow.lat.toFixed(6)}, {selectedBow.lng.toFixed(6)}
-                    </p>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    {selectedBow.tech_name && (
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedBow.tech_color || '#94a3b8' }} />
+                        <span className="font-medium">{selectedBow.tech_name}</span>
+                      </div>
+                    )}
+                    {propDetail && (propDetail as { service_day_pattern?: string }).service_day_pattern && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Calendar className="h-3 w-3" />
+                        {((propDetail as { service_day_pattern: string }).service_day_pattern).split(",").map((d: string) => (
+                          <Badge key={d} variant="outline" className="text-[10px] px-1 py-0">{d.trim()}</Badge>
+                        ))}
+                      </div>
+                    )}
+                    {propDetail && (propDetail as { dog_on_property?: boolean }).dog_on_property && (
+                      <Dog className="h-3.5 w-3.5 text-amber-500" />
+                    )}
+                    {propDetail && (propDetail as { gate_code?: string }).gate_code && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Lock className="h-3 w-3" />
+                        {(propDetail as { gate_code: string }).gate_code}
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 
@@ -578,116 +629,164 @@ export default function MapPage() {
                         <Droplets className="h-3.5 w-3.5 text-blue-500" />
                         <span className="text-sm font-semibold">{selectedBow.bow_name || "Pool"}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                        <Crosshair className="h-3 w-3" />
-                        {pinPosition ? (
-                          <span className="text-green-600 font-medium">
-                            {pinPosition.lat.toFixed(6)}, {pinPosition.lng.toFixed(6)}
-                          </span>
-                        ) : (
-                          <span>Click map to place pin</span>
-                        )}
-                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                          <Crosshair className="h-3 w-3" />
+                          {pinPosition ? (
+                            <span className="text-green-600 font-medium">
+                              {pinPosition.lat.toFixed(6)}, {pinPosition.lng.toFixed(6)}
+                            </span>
+                          ) : (
+                            <span>Click map to place pin</span>
+                          )}
+                        </div>
+                      )}
                     </div>
+                    {canEdit && (
                     <div className="flex gap-1.5">
                       {pinDirty && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs"
-                          disabled={savingPin}
-                          onClick={savePin}
-                        >
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={savingPin} onClick={savePin}>
                           {savingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Pin"}
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        disabled={analyzingOne}
-                        onClick={analyzeOne}
-                      >
-                        {analyzingOne ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <>
-                            {selectedAnalysis?.pool_detected ? <RefreshCw className="mr-1 h-3 w-3" /> : <Satellite className="mr-1 h-3 w-3" />}
-                            {selectedAnalysis?.pool_detected ? "Re-analyze" : "Analyze"}
-                          </>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" disabled={analyzingOne} onClick={analyzeOne}>
+                        {analyzingOne ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
+                          <>{selectedAnalysis?.pool_detected ? <RefreshCw className="mr-1 h-3 w-3" /> : <Satellite className="mr-1 h-3 w-3" />}{selectedAnalysis?.pool_detected ? "Re-analyze" : "Analyze"}</>
                         )}
                       </Button>
                     </div>
+                    )}
                   </div>
 
-                  {/* Analysis results */}
+                  {/* Metric cards — matching client detail */}
+                  {bowDetail && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { icon: Droplets, label: "Volume", value: (bowDetail as { pool_gallons?: number }).pool_gallons ? `${((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()}` : null, unit: "gal", color: "text-blue-500" },
+                        { icon: Move, label: "Surface", value: (bowDetail as { pool_sqft?: number }).pool_sqft ? `${((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()}` : null, unit: "ft²", color: "text-emerald-500" },
+                        { icon: Clock, label: "Service", value: `${(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}`, unit: "min", color: "text-amber-500" },
+                        ...(perms.canViewRates ? [{ icon: DollarSign, label: "Rate", value: (bowDetail as { monthly_rate?: number }).monthly_rate != null ? `${((bowDetail as { monthly_rate: number }).monthly_rate).toFixed(2)}` : null, unit: "/mo", color: "text-violet-500" }] : []),
+                      ].map((m) => (
+                        <div key={m.label} className="bg-muted/50 rounded-md px-2.5 py-2">
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <m.icon className={`h-3 w-3 ${m.color}`} />
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</span>
+                          </div>
+                          {m.value ? (
+                            <p className="text-base font-bold leading-tight">{m.value}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">{m.unit}</span></p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground/50 italic">&mdash;</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Dimensions + Equipment */}
+                  {bowDetail && perms.canViewDimensions && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Dimensions */}
+                      <div className="bg-muted/50 rounded-md overflow-hidden">
+                        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                          <Ruler className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Dimensions</span>
+                        </div>
+                        <div className="px-2.5 py-2 space-y-1">
+                          {[
+                            { label: "Shape", value: (bowDetail as { pool_shape?: string }).pool_shape },
+                            { label: "L × W", value: (bowDetail as { pool_length_ft?: number; pool_width_ft?: number }).pool_length_ft && (bowDetail as { pool_width_ft?: number }).pool_width_ft ? `${(bowDetail as { pool_length_ft: number }).pool_length_ft} × ${(bowDetail as { pool_width_ft: number }).pool_width_ft} ft` : null },
+                            { label: "Depth", value: (bowDetail as { pool_depth_shallow?: number; pool_depth_deep?: number }).pool_depth_shallow && (bowDetail as { pool_depth_deep?: number }).pool_depth_deep ? `${(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow}–${(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft` : (bowDetail as { pool_depth_avg?: number }).pool_depth_avg ? `${(bowDetail as { pool_depth_avg: number }).pool_depth_avg} ft avg` : null },
+                            { label: "Surface", value: (bowDetail as { pool_surface?: string }).pool_surface },
+                          ].map((d) => (
+                            <div key={d.label} className="flex justify-between text-[11px]">
+                              <span className="text-muted-foreground">{d.label}</span>
+                              {d.value ? <span className="font-medium capitalize">{d.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Equipment */}
+                      <div className="bg-muted/50 rounded-md overflow-hidden">
+                        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                          <Wrench className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment</span>
+                        </div>
+                        <div className="px-2.5 py-2 space-y-1">
+                          {[
+                            { icon: Gauge, label: "Pump", value: (bowDetail as { pump_type?: string }).pump_type },
+                            { icon: FlaskConical, label: "Filter", value: (bowDetail as { filter_type?: string }).filter_type },
+                            { icon: Thermometer, label: "Heater", value: (bowDetail as { heater_type?: string }).heater_type },
+                            { icon: FlaskConical, label: "Chlor.", value: (bowDetail as { chlorinator_type?: string }).chlorinator_type },
+                            { icon: Zap, label: "Auto", value: (bowDetail as { automation_system?: string }).automation_system },
+                          ].map((e) => (
+                            <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
+                              <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                              <span className="text-muted-foreground">{e.label}</span>
+                              <span className="truncate ml-auto">
+                                {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Satellite analysis results (collapsible) */}
                   {selectedAnalysis && !selectedAnalysis.error_message && selectedAnalysis.pool_detected && (
-                    <div className="rounded-md bg-muted/50 p-3 space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Pool Found</Badge>
-                        <Badge
-                          className={
-                            selectedAnalysis.pool_confidence >= 0.7
-                              ? "bg-green-100 text-green-800 hover:bg-green-100"
-                              : selectedAnalysis.pool_confidence >= 0.4
-                              ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
-                              : "bg-red-100 text-red-800 hover:bg-red-100"
-                          }
-                        >
+                    <div className="rounded-md bg-muted/50 p-2.5 space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap text-xs">
+                        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 text-[10px]">Aerial</Badge>
+                        <Badge className={`text-[10px] ${selectedAnalysis.pool_confidence >= 0.7 ? "bg-green-100 text-green-800 hover:bg-green-100" : selectedAnalysis.pool_confidence >= 0.4 ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
                           {(selectedAnalysis.pool_confidence * 100).toFixed(0)}%
                         </Badge>
-                        {selectedBow?.pool_sqft && (
-                          <span className="text-sm font-semibold ml-auto">
-                            {selectedBow.pool_sqft.toLocaleString()} ft²
-                          </span>
-                        )}
+                        <span className="text-[10px] text-muted-foreground ml-auto">
+                          Veg {selectedAnalysis.vegetation_pct}% · Canopy {selectedAnalysis.canopy_overhang_pct}% · Shadow {selectedAnalysis.shadow_pct}%
+                        </span>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Vegetation</span>
-                          <span className="font-medium">{selectedAnalysis.vegetation_pct}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Canopy</span>
-                          <span className={`font-medium ${selectedAnalysis.canopy_overhang_pct > 30 ? "text-yellow-600" : ""}`}>
-                            {selectedAnalysis.canopy_overhang_pct}%
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Hardscape</span>
-                          <span className="font-medium">{selectedAnalysis.hardscape_pct}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Shadow</span>
-                          <span className="font-medium">{selectedAnalysis.shadow_pct}%</span>
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground text-right">v{selectedAnalysis.analysis_version}</div>
                     </div>
                   )}
-
-                  {selectedAnalysis && !selectedAnalysis.error_message && !selectedAnalysis.pool_detected && (
-                    <div className="rounded-md bg-muted/50 p-3">
-                      <Badge variant="secondary">No Pool Detected</Badge>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Place the marker directly on the pool and re-analyze.
-                      </p>
-                    </div>
-                  )}
-
                   {selectedAnalysis?.error_message && (
-                    <div className="rounded-md bg-destructive/5 p-3">
-                      <Badge variant="destructive">Error</Badge>
-                      <p className="text-xs text-muted-foreground mt-1">{selectedAnalysis.error_message}</p>
+                    <div className="rounded-md bg-destructive/5 p-2.5">
+                      <Badge variant="destructive" className="text-[10px]">Analysis Error</Badge>
+                      <p className="text-[11px] text-muted-foreground mt-1">{selectedAnalysis.error_message}</p>
                     </div>
                   )}
-
-                  {!selectedAnalysis && (
-                    <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-                      Not yet analyzed. Place the marker on the pool and click Analyze.
-                    </div>
+                  {!selectedAnalysis && canEdit && (
+                    <p className="text-[11px] text-muted-foreground">Not yet analyzed. Place marker on pool and click Analyze.</p>
                   )}
                 </CardContent>
               </Card>
+
+              {/* Profitability mini-card */}
+              {perms.canViewProfitability && profitData && (() => {
+                const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
+                const diff = (profitData as { difficulty_score: number }).difficulty_score;
+                return (
+                  <Card className="shadow-sm">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-sm font-medium">Profitability</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { label: "Revenue", value: `$${cost.revenue.toFixed(0)}`, color: "text-emerald-600" },
+                          { label: "Est. Cost", value: `$${cost.total_cost.toFixed(0)}`, color: "text-muted-foreground" },
+                          { label: "Margin", value: `${cost.margin_pct.toFixed(1)}%`, color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600" },
+                          { label: "Difficulty", value: `${diff.toFixed(1)} / 5`, color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground" },
+                        ].map((m) => (
+                          <div key={m.label} className="bg-muted/50 rounded-md px-2.5 py-2">
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</p>
+                            <p className={`text-base font-bold leading-tight ${m.color}`}>{m.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
               {/* Property photos */}
               <Card className="shadow-sm">
@@ -696,32 +795,36 @@ export default function MapPage() {
                     <p className="text-sm font-medium">Photos</p>
                     <div className="flex items-center gap-2">
                       <p className="text-xs text-muted-foreground">{images.length}/8</p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-xs"
-                        disabled={capturing || images.length >= 8}
-                        onClick={() => document.getElementById("photo-upload")?.click()}
-                      >
-                        {capturing ? (
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        ) : (
-                          <Camera className="mr-1 h-3 w-3" />
-                        )}
-                        Upload
-                      </Button>
-                      <input
-                        id="photo-upload"
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) uploadPhoto(file);
-                          e.target.value = "";
-                        }}
-                      />
+                      {canEdit && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            disabled={capturing || images.length >= 8}
+                            onClick={() => document.getElementById("photo-upload")?.click()}
+                          >
+                            {capturing ? (
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            ) : (
+                              <Camera className="mr-1 h-3 w-3" />
+                            )}
+                            Upload
+                          </Button>
+                          <input
+                            id="photo-upload"
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) uploadPhoto(file);
+                              e.target.value = "";
+                            }}
+                          />
+                        </>
+                      )}
                     </div>
                   </div>
                   {images.length > 0 ? (
@@ -740,6 +843,7 @@ export default function MapPage() {
                               <Star className="h-4 w-4 fill-amber-400 text-amber-400 drop-shadow" />
                             </div>
                           )}
+                          {canEdit && (
                           <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
                             {!img.is_hero && (
                               <Button
@@ -775,6 +879,7 @@ export default function MapPage() {
                               </AlertDialogContent>
                             </AlertDialog>
                           </div>
+                          )}
                           {img.caption && (
                             <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-b-md truncate">
                               {img.caption}
@@ -784,7 +889,7 @@ export default function MapPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground">No photos yet. Upload from the field.</p>
+                    <p className="text-xs text-muted-foreground">No photos yet.</p>
                   )}
                 </CardContent>
               </Card>

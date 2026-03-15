@@ -45,6 +45,7 @@ class PoolBowWithCoordsResponse(BaseModel):
     bow_name: Optional[str] = None
     water_type: str
     address: str
+    customer_id: str
     customer_name: str
     customer_type: str = "residential"
     pool_sqft: Optional[float] = None

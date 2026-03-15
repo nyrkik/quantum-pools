@@ -43,6 +43,7 @@ import {
   ZoomOut,
   ExternalLink,
   AlertTriangle,
+  Pencil,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -61,11 +62,19 @@ import { resizeImage } from "@/lib/image-utils";
 import SatelliteMap from "@/components/maps/satellite-map";
 import type { MapActions } from "@/components/maps/satellite-map";
 import { usePermissions } from "@/lib/permissions";
+import DifficultyModal from "@/components/profitability/difficulty-modal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.121.52.15:7061";
 
 type StatusFilter = "analyzed" | "pinned" | "not_analyzed";
 type MapMode = "pools" | "routes" | "profitability";
+
+interface PortfolioMedians {
+  rate_per_gallon: number | null;
+  cost: number;
+  margin_pct: number;
+  difficulty: number;
+}
 
 interface DimensionComparison {
   estimates: { id: string; source: string; estimated_sqft: number | null; perimeter_ft: number | null; notes: string | null; created_at: string }[];
@@ -130,21 +139,26 @@ export default function MapPage() {
   const [propDetail, setPropDetail] = useState<Record<string, unknown> | null>(null);
   const [profitData, setProfitData] = useState<Record<string, unknown> | null>(null);
   const [dimComparison, setDimComparison] = useState<DimensionComparison | null>(null);
+  const [medians, setMedians] = useState<PortfolioMedians | null>(null);
   const [perimeterInput, setPerimeterInput] = useState("");
   const [perimeterShape, setPerimeterShape] = useState("rectangle");
   const [savingPerimeter, setSavingPerimeter] = useState(false);
+  const [measuringPerimeter, setMeasuringPerimeter] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const mapActionsRef = useRef<MapActions | null>(null);
   const [isZoomedIn, setIsZoomedIn] = useState(false);
+  const [diffModalOpen, setDiffModalOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [bows, allAnalyses] = await Promise.all([
+      const [bows, allAnalyses, med] = await Promise.all([
         api.get<PoolBowWithCoords[]>("/v1/satellite/pool-bows"),
         api.get<SatelliteAnalysis[]>("/v1/satellite/all"),
+        api.get<PortfolioMedians>("/v1/profitability/medians").catch(() => null),
       ]);
       setPoolBows(bows);
       setAnalyses(allAnalyses);
+      if (med) setMedians(med);
     } catch {
       toast.error("Failed to load data");
     } finally {
@@ -261,6 +275,7 @@ export default function MapPage() {
       setPerimeterShape("rectangle");
     }
     setPerimeterInput("");
+    setMeasuringPerimeter(false);
   }, []);
 
   const selectBowQuiet = useCallback((bowId: string) => {
@@ -662,12 +677,36 @@ export default function MapPage() {
               {/* Pool BOW tile */}
               <Card className="shadow-sm border-l-4 border-l-blue-500">
                 <CardContent className="p-4 space-y-3">
-                  {/* Pool header + actions */}
+                  {/* Pool header: name · service time · rate */}
                   <div className="flex items-start justify-between">
                     <div>
-                      <div className="flex items-center gap-2">
-                        <Droplets className="h-3.5 w-3.5 text-blue-500" />
-                        <span className="text-sm font-semibold">{selectedBow.bow_name || "Pool"}</span>
+                      <div className="flex items-baseline gap-3">
+                        <div className="flex items-center gap-2">
+                          <Droplets className="h-3.5 w-3.5 text-blue-500" />
+                          <span className="text-base font-semibold">{selectedBow.bow_name || "Pool"}</span>
+                        </div>
+                        <span className="text-muted-foreground/30">·</span>
+                        {bowDetail && (
+                          <span className="text-base font-bold">{(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">min</span></span>
+                        )}
+                        {perms.canViewRates && (() => {
+                          const bowRate = (bowDetail as { monthly_rate?: number })?.monthly_rate;
+                          const custRate = (profitData as { monthly_rate?: number })?.monthly_rate;
+                          const rate = bowRate || custRate;
+                          const margin = profitData ? (profitData as { cost_breakdown: { margin_pct: number } }).cost_breakdown.margin_pct : null;
+                          return (<>
+                            <span className="text-muted-foreground/30">·</span>
+                            <span className={`text-base font-bold ${
+                              rate
+                                ? margin !== null
+                                  ? margin >= 30 ? "text-emerald-600" : margin >= 0 ? "text-amber-600" : "text-red-600"
+                                  : "text-foreground"
+                                : "text-muted-foreground/40"
+                            }`}>
+                              {rate ? `$${rate.toFixed(0)}` : "$\u2014"}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">/mo</span>
+                            </span>
+                          </>);
+                        })()}
                       </div>
                       {canEdit && (
                         <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
@@ -680,17 +719,6 @@ export default function MapPage() {
                             <span>Click map to place pin</span>
                           )}
                         </div>
-                      )}
-                      {(pinPosition || (selectedBow.lat && selectedBow.lng)) && (
-                        <a
-                          href={`https://www.google.com/maps/@${(pinPosition?.lat ?? selectedBow.lat)},${(pinPosition?.lng ?? selectedBow.lng)},20z/data=!3m1!1e3`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 mt-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <ExternalLink className="h-2.5 w-2.5" />
-                          Measure in Google Maps
-                        </a>
                       )}
                     </div>
                     {canEdit && pinDirty && (
@@ -728,46 +756,204 @@ export default function MapPage() {
                     </div>
                   )}
 
-                  {/* Metric cards — matching client detail */}
-                  {bowDetail && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { icon: Droplets, label: "Volume", value: (bowDetail as { pool_gallons?: number }).pool_gallons ? `${((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()}` : null, unit: "gal", color: "text-blue-500", source: null as string | null },
-                        { icon: Move, label: "Surface", value: (bowDetail as { pool_sqft?: number }).pool_sqft ? `${((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()}` : null, unit: "ft²", color: "text-emerald-500", source: (bowDetail as { dimension_source?: string }).dimension_source || null },
-                        { icon: Clock, label: "Service", value: `${(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}`, unit: "min", color: "text-amber-500", source: null as string | null },
-                        ...(perms.canViewRates ? [{ icon: DollarSign, label: "Rate", value: (bowDetail as { monthly_rate?: number }).monthly_rate != null ? `${((bowDetail as { monthly_rate: number }).monthly_rate).toFixed(2)}` : null, unit: "/mo", color: "text-violet-500", source: null as string | null }] : []),
-                      ].map((m) => (
-                        <div key={m.label} className="bg-muted/50 rounded-md px-2.5 py-2">
-                          <div className="flex items-center gap-1 mb-0.5">
-                            <m.icon className={`h-3 w-3 ${m.color}`} />
-                            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</span>
-                            {m.source && renderSourceBadge(m.source)}
-                          </div>
-                          {m.value ? (
-                            <p className="text-base font-bold leading-tight">{m.value}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">{m.unit}</span></p>
-                          ) : (
-                            <p className="text-xs text-muted-foreground/50 italic">&mdash;</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* Profitability — above measurements */}
+                  {perms.canViewProfitability && profitData && (() => {
+                    const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
+                    const diff = (profitData as { difficulty_score: number }).difficulty_score;
+                    const rpg = (profitData as { rate_per_gallon?: number }).rate_per_gallon;
+                    const m = medians;
 
-                  {/* Dimensions + Equipment */}
+                    // Compare helper: returns arrow + color for "higher is better" or "lower is better"
+                    const compare = (val: number | null, med: number | null | undefined, higherIsGood: boolean) => {
+                      if (val == null || med == null || med === 0) return null;
+                      const pct = ((val - med) / med) * 100;
+                      if (Math.abs(pct) < 5) return { arrow: "~", color: "text-muted-foreground", tip: `median ${med.toFixed(1)}` };
+                      const above = pct > 0;
+                      const good = higherIsGood ? above : !above;
+                      return {
+                        arrow: above ? "↑" : "↓",
+                        color: good ? "text-emerald-600" : "text-red-500",
+                        tip: `${above ? "+" : ""}${pct.toFixed(0)}% vs median`,
+                      };
+                    };
+
+                    const metrics = [
+                      {
+                        label: "Rate/gal",
+                        value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null,
+                        medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null,
+                        color: "text-foreground",
+                        cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true),
+                        editable: false,
+                      },
+                      {
+                        label: "Est. Cost",
+                        value: `$${cost.total_cost.toFixed(0)}`,
+                        medianLabel: m ? `$${m.cost.toFixed(0)}` : null,
+                        color: "text-muted-foreground",
+                        cmp: compare(cost.total_cost, m?.cost, false),
+                        editable: false,
+                      },
+                      {
+                        label: "Margin",
+                        value: `${cost.margin_pct.toFixed(1)}%`,
+                        medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null,
+                        color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600",
+                        cmp: compare(cost.margin_pct, m?.margin_pct, true),
+                        editable: false,
+                      },
+                      {
+                        label: "Difficulty",
+                        value: `${diff.toFixed(1)}`,
+                        medianLabel: m ? `${m.difficulty.toFixed(1)}` : null,
+                        color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground",
+                        cmp: compare(diff, m?.difficulty, false),
+                        editable: true,
+                      },
+                    ];
+
+                    return (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <TrendingUp className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Profitability</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {metrics.map((mt) => (
+                            <div key={mt.label} className="bg-muted/50 rounded-md px-2.5 py-2 relative">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
+                                {mt.editable && canEdit && selectedPropertyId && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 -mr-1 -mt-0.5"
+                                    onClick={() => setDiffModalOpen(true)}
+                                  >
+                                    <Pencil className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="flex items-baseline gap-1.5">
+                                {mt.cmp ? (
+                                  <>
+                                    <p className={`text-lg font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
+                                    <span className={`text-xs font-bold ${mt.cmp.color}`}>
+                                      {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
+                                    </span>
+                                    {mt.medianLabel && (
+                                      <span className="text-xs text-muted-foreground/60">/ {mt.medianLabel}</span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <p className={`text-lg font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Measurements + Equipment */}
                   {bowDetail && perms.canViewDimensions && (
                     <div className="grid grid-cols-2 gap-2">
-                      {/* Dimensions */}
-                      <div className="bg-muted/50 rounded-md overflow-hidden">
+                      {/* Measurements */}
+                      <div className={`bg-muted/50 rounded-md overflow-hidden ${measuringPerimeter ? "border-l-3 border-l-amber-400" : ""}`}>
                         <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
                           <Ruler className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Dimensions</span>
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Measurements</span>
+                          {canEdit && (pinPosition || (selectedBow.lat && selectedBow.lng)) && (
+                            <a
+                              href={`https://www.google.com/maps/@${(pinPosition?.lat ?? selectedBow.lat)},${(pinPosition?.lng ?? selectedBow.lng)},20z/data=!3m1!1e3`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-auto text-muted-foreground hover:text-foreground transition-colors"
+                              onClick={() => setMeasuringPerimeter(true)}
+                              title="Measure in Google Maps"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
                         </div>
                         <div className="px-2.5 py-2 space-y-1">
+                          {/* Area + source */}
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-muted-foreground">Area</span>
+                            <div className="flex items-center gap-1.5">
+                              {(bowDetail as { pool_sqft?: number }).pool_sqft
+                                ? <span className="font-semibold">{((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()} ft²</span>
+                                : <span className="text-muted-foreground/50 italic">—</span>}
+                              {renderSourceBadge((bowDetail as { dimension_source?: string }).dimension_source)}
+                            </div>
+                          </div>
+                          {/* Volume */}
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-muted-foreground">Volume</span>
+                            {(bowDetail as { pool_gallons?: number }).pool_gallons
+                              ? <span className="font-medium">{((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()} gal</span>
+                              : <span className="text-muted-foreground/50 italic">—</span>}
+                          </div>
+                          {/* Shape — editable when measuring */}
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-muted-foreground">Shape</span>
+                            {measuringPerimeter ? (
+                              <select
+                                value={perimeterShape}
+                                onChange={(e) => setPerimeterShape(e.target.value)}
+                                className="h-6 text-[11px] rounded border border-input bg-background px-1.5"
+                              >
+                                {POOL_SHAPES.map((s) => (
+                                  <option key={s.value} value={s.value}>{s.label}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              (bowDetail as { pool_shape?: string }).pool_shape
+                                ? <span className="font-medium capitalize">{(bowDetail as { pool_shape: string }).pool_shape.replace(/_/g, " ")}</span>
+                                : <span className="text-muted-foreground/50 italic">—</span>
+                            )}
+                          </div>
+                          {/* Perimeter — editable when measuring */}
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-muted-foreground">Perimeter</span>
+                            {measuringPerimeter ? (
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  type="number"
+                                  placeholder="ft"
+                                  value={perimeterInput}
+                                  onChange={(e) => setPerimeterInput(e.target.value)}
+                                  className="h-6 w-20 text-[11px] px-1.5"
+                                  min={0}
+                                  step={0.1}
+                                  autoFocus
+                                />
+                                <span className="text-muted-foreground">ft</span>
+                              </div>
+                            ) : (
+                              (bowDetail as { perimeter_ft?: number }).perimeter_ft
+                                ? <span className="font-medium">{(bowDetail as { perimeter_ft: number }).perimeter_ft} ft</span>
+                                : <span className="text-muted-foreground/50 italic">—</span>
+                            )}
+                          </div>
+                          {/* Save button when measuring */}
+                          {measuringPerimeter && canEdit && (
+                            <div className="flex justify-end pt-1">
+                              <Button
+                                size="sm"
+                                className="h-6 px-3 text-[11px]"
+                                disabled={savingPerimeter || !perimeterInput}
+                                onClick={savePerimeter}
+                              >
+                                {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save Perimeter"}
+                              </Button>
+                            </div>
+                          )}
+                          {/* L×W, Depth, Surface */}
                           {[
-                            { label: "Shape", value: (bowDetail as { pool_shape?: string }).pool_shape },
                             { label: "L × W", value: (bowDetail as { pool_length_ft?: number; pool_width_ft?: number }).pool_length_ft && (bowDetail as { pool_width_ft?: number }).pool_width_ft ? `${(bowDetail as { pool_length_ft: number }).pool_length_ft} × ${(bowDetail as { pool_width_ft: number }).pool_width_ft} ft` : null },
                             { label: "Depth", value: (bowDetail as { pool_depth_shallow?: number; pool_depth_deep?: number }).pool_depth_shallow && (bowDetail as { pool_depth_deep?: number }).pool_depth_deep ? `${(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow}–${(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft` : (bowDetail as { pool_depth_avg?: number }).pool_depth_avg ? `${(bowDetail as { pool_depth_avg: number }).pool_depth_avg} ft avg` : null },
-                            { label: "Perimeter", value: (bowDetail as { perimeter_ft?: number }).perimeter_ft ? `${(bowDetail as { perimeter_ft: number }).perimeter_ft} ft` : null },
                             { label: "Surface", value: (bowDetail as { pool_surface?: string }).pool_surface },
                           ].map((d) => (
                             <div key={d.label} className="flex justify-between text-[11px]">
@@ -805,45 +991,7 @@ export default function MapPage() {
                     </div>
                   )}
 
-                  {/* Perimeter input */}
-                  {canEdit && perms.canViewDimensions && (
-                    <div className="rounded-md bg-muted/50 p-2.5 space-y-2">
-                      <div className="flex items-center gap-1.5">
-                        <Ruler className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Perimeter Estimate</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="number"
-                          placeholder="Perimeter (ft)"
-                          value={perimeterInput}
-                          onChange={(e) => setPerimeterInput(e.target.value)}
-                          className="h-7 text-xs flex-1"
-                          min={0}
-                          step={0.1}
-                        />
-                        <select
-                          value={perimeterShape}
-                          onChange={(e) => setPerimeterShape(e.target.value)}
-                          className="h-7 text-xs rounded-md border border-input bg-background px-2"
-                        >
-                          {POOL_SHAPES.map((s) => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                        </select>
-                        <Button
-                          size="sm"
-                          className="h-7 px-3 text-xs"
-                          disabled={savingPerimeter || !perimeterInput}
-                          onClick={savePerimeter}
-                        >
-                          {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Satellite analysis results */}
+                  {/* Aerial analysis */}
                   {selectedAnalysis && !selectedAnalysis.error_message && selectedAnalysis.pool_detected && (
                     <div className="rounded-md bg-muted/50 p-2.5 space-y-1.5">
                       <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -863,33 +1011,6 @@ export default function MapPage() {
                       <p className="text-[11px] text-muted-foreground mt-1">{selectedAnalysis.error_message}</p>
                     </div>
                   )}
-
-                  {/* Profitability */}
-                  {perms.canViewProfitability && profitData && (() => {
-                    const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
-                    const diff = (profitData as { difficulty_score: number }).difficulty_score;
-                    return (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <TrendingUp className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Profitability</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { label: "Revenue", value: `$${cost.revenue.toFixed(0)}`, color: "text-emerald-600" },
-                            { label: "Est. Cost", value: `$${cost.total_cost.toFixed(0)}`, color: "text-muted-foreground" },
-                            { label: "Margin", value: `${cost.margin_pct.toFixed(1)}%`, color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600" },
-                            { label: "Difficulty", value: `${diff.toFixed(1)} / 5`, color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground" },
-                          ].map((m) => (
-                            <div key={m.label} className="bg-muted/50 rounded-md px-2.5 py-2">
-                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</p>
-                              <p className={`text-base font-bold leading-tight ${m.color}`}>{m.value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
 
                   {/* Photos */}
                   <div className="space-y-1.5">
@@ -985,6 +1106,19 @@ export default function MapPage() {
         </div>
       </div>
 
+      {selectedPropertyId && (
+        <DifficultyModal
+          open={diffModalOpen}
+          onOpenChange={setDiffModalOpen}
+          propertyId={selectedPropertyId}
+          bowDetail={bowDetail}
+          onSaved={() => {
+            if (selectedBowId && selectedPropertyId) {
+              loadDetail(selectedBowId, selectedPropertyId);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

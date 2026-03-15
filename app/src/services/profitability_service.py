@@ -424,6 +424,26 @@ class ProfitabilityService:
             ))
         return accounts
 
+    async def get_portfolio_medians(self, org_id: str) -> dict:
+        """Compute median rate/gal, cost, margin, difficulty across all active accounts."""
+        import statistics
+        overview = await self.get_overview(org_id)
+        accounts = overview.accounts
+        if not accounts:
+            return {"rate_per_gallon": None, "cost": 0, "margin_pct": 0, "difficulty": 0}
+
+        rpg = [a.rate_per_gallon for a in accounts if a.rate_per_gallon and a.rate_per_gallon > 0]
+        costs = [a.cost_breakdown.total_cost for a in accounts if a.cost_breakdown.total_cost > 0]
+        margins = [a.margin_pct for a in accounts]
+        diffs = [a.difficulty_score for a in accounts]
+
+        return {
+            "rate_per_gallon": statistics.median(rpg) if rpg else None,
+            "cost": statistics.median(costs) if costs else 0,
+            "margin_pct": statistics.median(margins) if margins else 0,
+            "difficulty": statistics.median(diffs) if diffs else 0,
+        }
+
     async def get_whale_curve(self, org_id: str) -> list[WhaleCurvePoint]:
         overview = await self.get_overview(org_id)
         # Sort by profit descending

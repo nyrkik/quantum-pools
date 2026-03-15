@@ -155,6 +155,13 @@ class ProfitabilityAccount(BaseModel):
     rate_per_gallon: Optional[float] = None
 
 
+class PortfolioMedians(BaseModel):
+    rate_per_gallon: float | None = None
+    cost: float = 0
+    margin_pct: float = 0
+    difficulty: float = 0
+
+
 class ProfitabilityOverview(BaseModel):
     total_accounts: int
     total_revenue: float

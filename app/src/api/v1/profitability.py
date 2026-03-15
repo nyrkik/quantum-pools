@@ -13,6 +13,7 @@ from src.schemas.profitability import (
     PropertyDifficultyUpdate,
     PropertyDifficultyResponse,
     ProfitabilityOverview,
+    PortfolioMedians,
     WhaleCurvePoint,
     PricingSuggestion,
     ProfitabilityAccount,
@@ -70,6 +71,15 @@ async def get_overview(
         min_difficulty=min_difficulty,
         max_difficulty=max_difficulty,
     )
+
+
+@router.get("/medians", response_model=PortfolioMedians)
+async def get_portfolio_medians(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = ProfitabilityService(db)
+    return await svc.get_portfolio_medians(ctx.organization_id)
 
 
 @router.get("/account/{customer_id}", response_model=list[ProfitabilityAccount])

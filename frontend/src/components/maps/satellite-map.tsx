@@ -1,13 +1,20 @@
 "use client";
 
+import { type MutableRefObject } from "react";
 import dynamic from "next/dynamic";
 import type { PoolBowWithCoords } from "@/types/satellite";
+
+export interface MapActions {
+  toggleZoom: () => void;
+  isZoomedIn: boolean;
+}
 
 export interface SatelliteMapProps {
   poolBows: PoolBowWithCoords[];
   selectedBowId: string | null;
   pinPosition: { lat: number; lng: number } | null;
   flyTo: boolean;
+  actionsRef?: MutableRefObject<MapActions | null>;
   onBowSelect: (bowId: string) => void;
   onPinPlace: (lat: number, lng: number) => void;
 }

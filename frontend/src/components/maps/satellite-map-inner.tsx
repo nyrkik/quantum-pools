@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useCallback } from "react";
 import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import type { SatelliteMapProps } from "./satellite-map";
@@ -52,14 +52,54 @@ function FitBounds({ markers }: { markers: [number, number][] }) {
   return null;
 }
 
-function FlyToSelected({ lat, lng, bowId }: { lat: number; lng: number; bowId: string }) {
+function PanToSelected({ lat, lng, bowId }: { lat: number; lng: number; bowId: string }) {
   const map = useMap();
   const prevRef = useRef<string>("");
   useEffect(() => {
     if (bowId === prevRef.current) return;
     prevRef.current = bowId;
-    map.flyTo([lat, lng], 18, { duration: 0.8 });
+    map.panTo([lat, lng], { animate: true, duration: 0.6 });
   }, [lat, lng, bowId, map]);
+  return null;
+}
+
+function MapActionsProvider({ actionsRef, selectedLat, selectedLng, onZoomChange }: {
+  actionsRef?: React.MutableRefObject<{ toggleZoom: () => void; isZoomedIn: boolean } | null>;
+  selectedLat: number | null;
+  selectedLng: number | null;
+  onZoomChange: () => void;
+}) {
+  const map = useMap();
+  const savedZoom = useRef<number | null>(null);
+  const savedCenter = useRef<L.LatLng | null>(null);
+
+  useEffect(() => {
+    if (!actionsRef) return;
+    const update = () => {
+      actionsRef.current = {
+        isZoomedIn: savedZoom.current !== null,
+        toggleZoom: () => {
+          if (savedZoom.current !== null) {
+            // Zoom out — restore previous view
+            map.flyTo(savedCenter.current!, savedZoom.current, { duration: 0.6 });
+            savedZoom.current = null;
+            savedCenter.current = null;
+          } else {
+            // Zoom in — save current view then zoom
+            savedZoom.current = map.getZoom();
+            savedCenter.current = map.getCenter();
+            const lat = selectedLat ?? map.getCenter().lat;
+            const lng = selectedLng ?? map.getCenter().lng;
+            map.flyTo([lat, lng], 18, { duration: 0.6 });
+          }
+          onZoomChange();
+        },
+      };
+    };
+    update();
+    map.on("zoomend", update);
+    return () => { map.off("zoomend", update); };
+  }, [map, actionsRef, selectedLat, selectedLng, onZoomChange]);
   return null;
 }
 
@@ -79,6 +119,7 @@ export default function SatelliteMapInner({
   selectedBowId,
   pinPosition,
   flyTo,
+  actionsRef,
   onBowSelect,
   onPinPlace,
 }: SatelliteMapProps) {
@@ -112,9 +153,15 @@ export default function SatelliteMapInner({
       />
       <FitBounds markers={bounds} />
       <MapClickHandler onPinPlace={onPinPlace} enabled={!!selectedBowId} />
+      <MapActionsProvider
+        actionsRef={actionsRef}
+        selectedLat={selectedBow ? (selectedBow.pool_lat ?? selectedBow.lat) : null}
+        selectedLng={selectedBow ? (selectedBow.pool_lng ?? selectedBow.lng) : null}
+        onZoomChange={() => { /* parent reads ref.current.isZoomedIn */ }}
+      />
 
       {flyTo && selectedBow && selectedBowId && selectedBow.lat && selectedBow.lng && (
-        <FlyToSelected
+        <PanToSelected
           lat={selectedBow.pool_lat ?? selectedBow.lat}
           lng={selectedBow.pool_lng ?? selectedBow.lng}
           bowId={selectedBowId}

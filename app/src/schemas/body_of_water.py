@@ -72,6 +72,9 @@ class BodyOfWaterResponse(BaseModel):
     pool_depth_avg: Optional[float] = None
     pool_shape: Optional[str] = None
     pool_volume_method: Optional[str] = None
+    dimension_source: Optional[str] = None
+    dimension_source_date: Optional[datetime] = None
+    perimeter_ft: Optional[float] = None
     sanitizer_type: Optional[str] = None
     pump_type: Optional[str] = None
     filter_type: Optional[str] = None

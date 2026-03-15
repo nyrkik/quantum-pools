@@ -123,6 +123,9 @@ interface BodyOfWater {
   pool_depth_avg: number | null;
   pool_shape: string | null;
   pool_volume_method: string | null;
+  dimension_source: string | null;
+  dimension_source_date: string | null;
+  perimeter_ft: number | null;
   sanitizer_type: string | null;
   pump_type: string | null;
   filter_type: string | null;
@@ -134,6 +137,22 @@ interface BodyOfWater {
   notes: string | null;
   is_active: boolean;
 }
+
+const DIM_SOURCE_LABELS: Record<string, string> = {
+  inspection: "Inspection",
+  perimeter: "Perimeter",
+  measurement: "Measured",
+  satellite: "Satellite",
+  manual: "Manual",
+};
+
+const DIM_SOURCE_COLORS: Record<string, string> = {
+  inspection: "bg-green-100 text-green-800",
+  perimeter: "bg-green-100 text-green-800",
+  measurement: "bg-blue-100 text-blue-800",
+  satellite: "bg-yellow-100 text-yellow-800",
+  manual: "bg-gray-100 text-gray-600",
+};
 
 interface Property {
   id: string;
@@ -181,6 +200,7 @@ interface BodyOfWaterSummary {
   pool_sqft: number | null;
   estimated_service_minutes: number;
   monthly_rate: number | null;
+  dimension_source?: string | null;
 }
 
 interface Invoice {
@@ -2065,15 +2085,20 @@ export default function CustomerDetailPage({
                             {/* Metric Cards Row */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                               {[
-                                { icon: Droplets, label: "Volume", value: bow.pool_gallons ? `${bow.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500" },
-                                { icon: Move, label: "Surface", value: bow.pool_sqft ? `${bow.pool_sqft.toLocaleString()}` : null, unit: "ft²", color: "text-emerald-500" },
-                                { icon: Clock, label: "Service", value: `${bow.estimated_service_minutes}`, unit: "min", color: "text-amber-500" },
-                                { icon: DollarSign, label: "Rate", value: bow.monthly_rate != null ? `${bow.monthly_rate.toFixed(2)}` : null, unit: "/mo", color: "text-violet-500" },
+                                { icon: Droplets, label: "Volume", value: bow.pool_gallons ? `${bow.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500", source: null as string | null },
+                                { icon: Move, label: "Surface", value: bow.pool_sqft ? `${bow.pool_sqft.toLocaleString()}` : null, unit: "ft²", color: "text-emerald-500", source: bow.dimension_source },
+                                { icon: Clock, label: "Service", value: `${bow.estimated_service_minutes}`, unit: "min", color: "text-amber-500", source: null as string | null },
+                                { icon: DollarSign, label: "Rate", value: bow.monthly_rate != null ? `${bow.monthly_rate.toFixed(2)}` : null, unit: "/mo", color: "text-violet-500", source: null as string | null },
                               ].map((m) => (
                                 <div key={m.label} className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
                                   <div className="flex items-center gap-1.5 mb-1">
                                     <m.icon className={`h-3 w-3 ${m.color}`} />
                                     <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</span>
+                                    {m.source && (
+                                      <Badge className={`${DIM_SOURCE_COLORS[m.source] || "bg-gray-100 text-gray-600"} text-[9px] px-1 py-0 leading-tight font-medium`}>
+                                        {DIM_SOURCE_LABELS[m.source] || m.source}
+                                      </Badge>
+                                    )}
                                   </div>
                                   {m.value ? (
                                     <p className="text-lg font-bold leading-tight">{m.value}<span className="text-xs font-normal text-muted-foreground ml-0.5">{m.unit}</span></p>

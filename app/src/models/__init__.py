@@ -27,6 +27,7 @@ from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.pool_measurement import PoolMeasurement
 from src.models.body_of_water import BodyOfWater
 from src.models.property_photo import PropertyPhoto
+from src.models.dimension_estimate import DimensionEstimate
 
 __all__ = [
     "Base",
@@ -56,4 +57,5 @@ __all__ = [
     "PoolMeasurement",
     "BodyOfWater",
     "PropertyPhoto",
+    "DimensionEstimate",
 ]

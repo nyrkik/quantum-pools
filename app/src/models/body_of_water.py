@@ -34,6 +34,11 @@ class BodyOfWater(Base):
     pool_shape: Mapped[str | None] = mapped_column(String(50))
     pool_volume_method: Mapped[str | None] = mapped_column(String(20))
 
+    # Dimension tracking
+    dimension_source: Mapped[str | None] = mapped_column(String(20))  # inspection, perimeter, measurement, satellite, manual
+    dimension_source_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    perimeter_ft: Mapped[float | None] = mapped_column(Float)
+
     # Sanitizer / chemical method
     sanitizer_type: Mapped[str | None] = mapped_column(String(50))  # tabs, liquid, salt, trichlor, dichlor, cal_hypo
 
@@ -64,3 +69,4 @@ class BodyOfWater(Base):
     measurements = relationship("PoolMeasurement", back_populates="body_of_water", lazy="noload")
     chemical_readings = relationship("ChemicalReading", back_populates="body_of_water", lazy="noload")
     satellite_analysis = relationship("SatelliteAnalysis", back_populates="body_of_water", uselist=False, lazy="noload")
+    dimension_estimates = relationship("DimensionEstimate", back_populates="body_of_water", lazy="noload")

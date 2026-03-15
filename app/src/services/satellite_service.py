@@ -12,8 +12,6 @@ import uuid
 import logging
 from typing import Optional
 
-from pathlib import Path
-
 import aiohttp
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,11 +20,8 @@ from sqlalchemy import select
 from src.core.config import settings
 from src.core.exceptions import NotFoundError
 from src.models.satellite_analysis import SatelliteAnalysis
-from src.models.satellite_image import SatelliteImage
 from src.models.property import Property
 from src.models.body_of_water import BodyOfWater
-
-UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "satellite"
 
 logger = logging.getLogger(__name__)
 
@@ -148,12 +143,38 @@ class SatelliteService:
         return analysis
 
     async def get_pool_bows_with_coords(self, organization_id: str) -> list[dict]:
-        """List all pool BOWs with property coordinates and analysis status."""
+        """List all pool BOWs with property coordinates, analysis status, and assigned tech."""
         from src.models.customer import Customer
+        from src.models.route import Route, RouteStop
+        from src.models.tech import Tech
         from sqlalchemy import func
         from sqlalchemy.orm import aliased
 
         SA = aliased(SatelliteAnalysis)
+
+        # Scalar subqueries for primary tech (first alphabetically) per property
+        tech_name_subq = (
+            select(func.concat(Tech.first_name, ' ', Tech.last_name))
+            .join(Route, Route.tech_id == Tech.id)
+            .join(RouteStop, RouteStop.route_id == Route.id)
+            .where(RouteStop.property_id == Property.id)
+            .order_by(Tech.first_name)
+            .limit(1)
+            .correlate(Property)
+            .scalar_subquery()
+            .label("tech_name")
+        )
+        tech_color_subq = (
+            select(Tech.color)
+            .join(Route, Route.tech_id == Tech.id)
+            .join(RouteStop, RouteStop.route_id == Route.id)
+            .where(RouteStop.property_id == Property.id)
+            .order_by(Tech.first_name)
+            .limit(1)
+            .correlate(Property)
+            .scalar_subquery()
+            .label("tech_color")
+        )
 
         result = await self.db.execute(
             select(
@@ -161,6 +182,7 @@ class SatelliteService:
                 BodyOfWater.property_id,
                 BodyOfWater.name,
                 BodyOfWater.water_type,
+                BodyOfWater.pool_sqft,
                 Property.address,
                 func.concat(Customer.first_name, ' ', Customer.last_name).label("customer_name"),
                 Customer.customer_type,
@@ -169,6 +191,8 @@ class SatelliteService:
                 SA.pool_lat,
                 SA.pool_lng,
                 SA.pool_detected,
+                tech_name_subq,
+                tech_color_subq,
             )
             .join(Property, BodyOfWater.property_id == Property.id)
             .join(Customer, Property.customer_id == Customer.id)
@@ -193,11 +217,14 @@ class SatelliteService:
                 "address": row.address or "",
                 "customer_name": row.customer_name or "",
                 "customer_type": row.customer_type or "residential",
+                "pool_sqft": row.pool_sqft,
                 "lat": row.lat,
                 "lng": row.lng,
                 "pool_lat": row.pool_lat,
                 "pool_lng": row.pool_lng,
                 "has_analysis": bool(row.pool_detected),
+                "tech_name": row.tech_name,
+                "tech_color": row.tech_color,
             }
             for row in rows
         ]
@@ -300,6 +327,7 @@ class SatelliteService:
             image_url=url_z21, image_zoom=21,
             image_width=width, image_height=height,
             raw_results=results,
+            error_message=None,
         )
 
     async def bulk_analyze(
@@ -504,98 +532,3 @@ class SatelliteService:
         await self.db.refresh(analysis)
         return analysis
 
-    # --- Satellite Images (property-keyed, unchanged) ---
-
-    async def list_images(self, organization_id: str, property_id: str) -> list[SatelliteImage]:
-        result = await self.db.execute(
-            select(SatelliteImage).where(
-                SatelliteImage.property_id == property_id,
-                SatelliteImage.organization_id == organization_id,
-            ).order_by(SatelliteImage.created_at.desc())
-        )
-        return list(result.scalars().all())
-
-    async def capture_image(
-        self, organization_id: str, property_id: str,
-        center_lat: float, center_lng: float, zoom: int,
-    ) -> SatelliteImage:
-        if not settings.google_maps_api_key:
-            raise ValueError("Google Maps API key not configured")
-
-        await self._get_property(organization_id, property_id)
-
-        url = self._build_image_url(center_lat, center_lng, zoom, 640, 640)
-        image_bytes = await self._fetch_image(url)
-        if not image_bytes:
-            raise ValueError("Failed to fetch satellite image from Google")
-
-        prop_dir = UPLOAD_DIR / property_id
-        prop_dir.mkdir(parents=True, exist_ok=True)
-        image_id = str(uuid.uuid4())
-        filename = f"{image_id}.png"
-        filepath = prop_dir / filename
-        filepath.write_bytes(image_bytes)
-
-        existing = await self.list_images(organization_id, property_id)
-        is_hero = len(existing) == 0
-
-        img = SatelliteImage(
-            id=image_id,
-            property_id=property_id,
-            organization_id=organization_id,
-            filename=filename,
-            center_lat=center_lat,
-            center_lng=center_lng,
-            zoom=zoom,
-            is_hero=is_hero,
-        )
-        self.db.add(img)
-        await self.db.flush()
-        await self.db.refresh(img)
-        return img
-
-    async def set_hero_image(
-        self, organization_id: str, property_id: str, image_id: str,
-    ) -> SatelliteImage:
-        images = await self.list_images(organization_id, property_id)
-        target = None
-        for img in images:
-            if img.id == image_id:
-                img.is_hero = True
-                target = img
-            else:
-                img.is_hero = False
-        if not target:
-            raise NotFoundError(f"Image {image_id} not found")
-        await self.db.flush()
-        await self.db.refresh(target)
-        return target
-
-    async def delete_image(
-        self, organization_id: str, property_id: str, image_id: str,
-    ) -> None:
-        result = await self.db.execute(
-            select(SatelliteImage).where(
-                SatelliteImage.id == image_id,
-                SatelliteImage.property_id == property_id,
-                SatelliteImage.organization_id == organization_id,
-            )
-        )
-        img = result.scalar_one_or_none()
-        if not img:
-            raise NotFoundError(f"Image {image_id} not found")
-
-        was_hero = img.is_hero
-
-        filepath = UPLOAD_DIR / property_id / img.filename
-        if filepath.exists():
-            filepath.unlink()
-
-        await self.db.delete(img)
-        await self.db.flush()
-
-        if was_hero:
-            remaining = await self.list_images(organization_id, property_id)
-            if remaining:
-                remaining[0].is_hero = True
-                await self.db.flush()

@@ -81,7 +81,7 @@ class Property(Base):
     difficulty = relationship("PropertyDifficulty", back_populates="property", uselist=False, lazy="noload")
     jurisdiction = relationship("PropertyJurisdiction", back_populates="property", uselist=False, lazy="noload")
     satellite_analyses = relationship("SatelliteAnalysis", back_populates="property", lazy="noload")
-    satellite_images = relationship("SatelliteImage", back_populates="property", lazy="noload")
+    photos = relationship("PropertyPhoto", back_populates="property", lazy="noload")
     measurements = relationship("PoolMeasurement", back_populates="property", lazy="noload")
     bodies_of_water = relationship("BodyOfWater", back_populates="property", lazy="noload")
 

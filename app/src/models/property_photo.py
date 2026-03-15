@@ -1,14 +1,14 @@
-"""Satellite image model — stored satellite captures per property."""
+"""PropertyPhoto model — user-uploaded property and pool photos."""
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, Float, Integer, DateTime, ForeignKey
+from sqlalchemy import String, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class SatelliteImage(Base):
-    __tablename__ = "satellite_images"
+class PropertyPhoto(Base):
+    __tablename__ = "property_photos"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     property_id: Mapped[str] = mapped_column(
@@ -17,14 +17,19 @@ class SatelliteImage(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    body_of_water_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    center_lat: Mapped[float] = mapped_column(Float, nullable=False)
-    center_lng: Mapped[float] = mapped_column(Float, nullable=False)
-    zoom: Mapped[int] = mapped_column(Integer, nullable=False)
+    caption: Mapped[str | None] = mapped_column(String(200))
     is_hero: Mapped[bool] = mapped_column(Boolean, default=False)
+    uploaded_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    property = relationship("Property", back_populates="satellite_images", lazy="noload")
+    property = relationship("Property", back_populates="photos", lazy="noload")
+    body_of_water = relationship("BodyOfWater", lazy="noload")
     organization = relationship("Organization", lazy="noload")

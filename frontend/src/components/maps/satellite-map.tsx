@@ -7,6 +7,7 @@ export interface SatelliteMapProps {
   poolBows: PoolBowWithCoords[];
   selectedBowId: string | null;
   pinPosition: { lat: number; lng: number } | null;
+  flyTo: boolean;
   onBowSelect: (bowId: string) => void;
   onPinPlace: (lat: number, lng: number) => void;
 }

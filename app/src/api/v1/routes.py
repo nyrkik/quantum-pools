@@ -257,3 +257,42 @@ async def delete_route(
 ):
     svc = RouteService(db)
     await svc.delete_route(ctx.organization_id, route_id)
+
+
+@router.get("/tech-assignments")
+async def get_tech_assignments(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Map of property_id → list of assigned techs with service days."""
+    from src.models.route import Route, RouteStop
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(
+            RouteStop.property_id,
+            Tech.id.label("tech_id"),
+            func.concat(Tech.first_name, ' ', Tech.last_name).label("tech_name"),
+            Tech.color,
+            Route.service_day,
+        )
+        .join(Route, RouteStop.route_id == Route.id)
+        .join(Tech, Route.tech_id == Tech.id)
+        .where(Route.organization_id == ctx.organization_id)
+    )
+    rows = result.all()
+
+    # Group by property, collapse same tech across days
+    assignments: dict[str, dict[str, dict]] = {}
+    for row in rows:
+        prop = assignments.setdefault(row.property_id, {})
+        tech = prop.setdefault(row.tech_id, {
+            "tech_id": row.tech_id,
+            "tech_name": row.tech_name,
+            "color": row.color,
+            "service_days": [],
+        })
+        if row.service_day and row.service_day not in tech["service_days"]:
+            tech["service_days"].append(row.service_day)
+
+    return {pid: list(techs.values()) for pid, techs in assignments.items()}

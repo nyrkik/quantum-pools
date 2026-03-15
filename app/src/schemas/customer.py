@@ -76,6 +76,7 @@ class CustomerResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     property_count: int = 0
+    first_property_id: Optional[str] = None
     first_property_address: Optional[str] = None
     first_property_pool_type: Optional[str] = None
     bow_summary: Optional[str] = None

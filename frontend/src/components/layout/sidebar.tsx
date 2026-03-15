@@ -29,7 +29,7 @@ import {
   Settings,
   LogOut,
   TrendingUp,
-  Satellite,
+  Map,
   Menu,
   Code2,
 } from "lucide-react";
@@ -42,7 +42,7 @@ const navItems = [
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
   { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
-  { href: "/satellite", label: "Satellite", icon: Satellite, check: "canViewSatellite" as keyof Permissions },
+  { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
@@ -62,7 +62,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <>
       <div className="flex items-center gap-3 border-b px-4 py-4">
         <Image src="/logo.png" alt="QuantumPools" width={72} height={72} />
-        <span className="text-lg font-semibold text-[#2989BE]">QuantumPools</span>
+        <span className="text-lg font-semibold text-primary">QuantumPools</span>
       </div>
 
       <nav className="flex-1 space-y-1 px-2 py-3">
@@ -173,7 +173,7 @@ export function Sidebar() {
             </div>
           </SheetContent>
         </Sheet>
-        <span className="ml-2 text-sm font-semibold text-[#2989BE]">QuantumPools</span>
+        <span className="ml-2 text-sm font-semibold text-primary">QuantumPools</span>
       </div>
 
       {/* Desktop sidebar */}

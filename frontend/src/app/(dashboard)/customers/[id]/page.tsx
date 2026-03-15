@@ -76,7 +76,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePermissions } from "@/lib/permissions";
-import type { SatelliteImageData } from "@/types/satellite";
+import type { PropertyPhoto } from "@/types/photo";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.121.52.15:7061";
 
@@ -982,8 +982,9 @@ export default function CustomerDetailPage({
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [heroImages, setHeroImages] = useState<Record<string, SatelliteImageData>>({});
+  const [heroImages, setHeroImages] = useState<Record<string, PropertyPhoto>>({});
   const [fullBows, setFullBows] = useState<BodyOfWater[]>([]);
+  const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>({});
   const isTech = perms.role === "technician";
   const [viewTab, setViewTab] = useState<"overview" | "service" | "details" | "bows" | "invoices">(isTech ? "service" : "overview");
   const [editingDetails, setEditingDetails] = useState(false);
@@ -1019,7 +1020,7 @@ export default function CustomerDetailPage({
         api.get<Customer>(`/v1/customers/${id}`),
         api.get<{ items: Property[] }>(`/v1/properties?customer_id=${id}`),
         api.get<{ items: Invoice[] }>(`/v1/invoices?customer_id=${id}`),
-        api.get<Record<string, SatelliteImageData>>("/v1/satellite/images/heroes").catch(() => ({})),
+        api.get<Record<string, PropertyPhoto>>("/v1/photos/heroes").catch(() => ({})),
       ]);
       setCustomer(c);
       setCustForm(c);
@@ -1033,12 +1034,15 @@ export default function CustomerDetailPage({
 
   useEffect(() => { load(); }, [load]);
 
-  // Fetch full BOW data (with equipment, dimensions, etc.) for all properties
+  // Fetch full BOW data + tech assignments for all properties
   useEffect(() => {
     if (properties.length === 0) return;
     Promise.all(
       properties.map((p) => api.get<BodyOfWater[]>(`/v1/bodies-of-water/property/${p.id}`).catch(() => []))
     ).then((results) => setFullBows(results.flat()));
+    api.get<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>("/v1/routes/tech-assignments")
+      .then(setTechAssignments)
+      .catch(() => setTechAssignments({}));
   }, [properties]);
 
   const setCustField = (field: string, value: unknown) => {
@@ -1283,11 +1287,11 @@ export default function CustomerDetailPage({
                 onClick={() => setViewTab(nav.key)}
                 className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-medium transition-colors shrink-0 lg:w-full ${
                   viewTab === nav.key
-                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                    ? "bg-accent border-primary/30 shadow-sm font-semibold"
                     : "bg-background hover:bg-muted/50 border-border"
                 }`}
               >
-                <nav.icon className={`h-5 w-5 ${viewTab === nav.key ? "opacity-80" : "text-muted-foreground"}`} />
+                <nav.icon className={`h-5 w-5 ${viewTab === nav.key ? "text-primary" : "text-muted-foreground"}`} />
                 {nav.label}
                 {nav.key === "invoices" && (() => {
                   const outstanding = invoices.reduce((sum, inv) => sum + inv.balance, 0);
@@ -1518,7 +1522,7 @@ export default function CustomerDetailPage({
                             {hero && (
                               <img
                                 src={`${API_BASE}${hero.url}`}
-                                alt="Satellite view"
+                                alt="Property photo"
                                 className="w-full h-28 object-cover rounded-md border mb-2"
                               />
                             )}
@@ -1998,7 +2002,7 @@ export default function CustomerDetailPage({
                             <>
                               <img
                                 src={`${API_BASE}${hero.url}`}
-                                alt="Satellite view"
+                                alt="Property photo"
                                 className="w-full h-40 object-cover"
                               />
                               {properties.length > 1 && (
@@ -2030,21 +2034,27 @@ export default function CustomerDetailPage({
                         return (
                           <div key={bow.id} className="space-y-3">
                             {/* BOW Header Bar */}
-                            <div className="flex items-center gap-3 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg">
-                              <Waves className="h-4 w-4 opacity-70" />
-                              <span className="text-xs font-medium uppercase tracking-wide capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
-                              {bow.pool_type && <Badge className="bg-white/15 text-primary-foreground text-[10px] px-1.5 py-0 capitalize hover:bg-white/15">{bow.pool_type}</Badge>}
+                            <div className="flex items-center gap-3 bg-muted/60 border border-border px-4 py-2.5 rounded-lg">
+                              <Waves className="h-4 w-4 text-primary/60" />
+                              <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
+                              {bow.pool_type && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{bow.pool_type}</Badge>}
+                              {techAssignments[prop.id]?.[0] && (
+                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: techAssignments[prop.id][0].color }} />
+                                  {techAssignments[prop.id][0].tech_name}
+                                </div>
+                              )}
                               <div className="ml-auto flex items-center gap-1">
                                 {bow.water_type === "pool" && (
-                                <Link href={`/satellite?bow=${bow.id}`}>
-                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-primary-foreground/70 hover:text-primary-foreground hover:bg-white/10">
+                                <Link href={`/map?bow=${bow.id}`}>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent">
                                     <Satellite className="h-3.5 w-3.5" />
                                   </Button>
                                 </Link>
                                 )}
                                 {perms.canMeasure && (
                                   <Link href={`/properties/${prop.id}/measure?bow=${bow.id}`}>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-primary-foreground/70 hover:text-primary-foreground hover:bg-white/10">
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent">
                                       <Ruler className="h-3.5 w-3.5" />
                                     </Button>
                                   </Link>

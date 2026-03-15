@@ -30,7 +30,9 @@ async def list_customers(
     for c in customers:
         resp = CustomerResponse.model_validate(c)
         resp.property_count = await svc.get_property_count(c.id)
-        resp.first_property_address = await svc.get_first_property_address(c.id)
+        first_prop = await svc.get_first_property(c.id)
+        resp.first_property_id = first_prop.id if first_prop else None
+        resp.first_property_address = first_prop.address if first_prop else None
         resp.first_property_pool_type = await svc.get_first_property_pool_type(c.id)
         resp.bow_summary = await svc.get_property_bow_summary(c.id)
         results.append(resp)

@@ -26,7 +26,7 @@ from src.models.property_jurisdiction import PropertyJurisdiction
 from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.pool_measurement import PoolMeasurement
 from src.models.body_of_water import BodyOfWater
-from src.models.satellite_image import SatelliteImage
+from src.models.property_photo import PropertyPhoto
 
 __all__ = [
     "Base",
@@ -55,5 +55,5 @@ __all__ = [
     "SatelliteAnalysis",
     "PoolMeasurement",
     "BodyOfWater",
-    "SatelliteImage",
+    "PropertyPhoto",
 ]

@@ -55,6 +55,7 @@ interface Customer {
   first_property_address: string | null;
   first_property_pool_type: string | null;
   bow_summary: string | null;
+  first_property_id: string | null;
 }
 
 type SortKey = "name" | "property" | "company" | "pool" | "rate" | "balance" | "status";
@@ -81,6 +82,7 @@ function ClientTable({
   sortDir,
   toggleSort,
   thClass,
+  techAssignments,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -90,15 +92,16 @@ function ClientTable({
   sortDir: SortDir;
   toggleSort: (key: SortKey) => void;
   thClass: string;
+  techAssignments: Record<string, Array<{ tech_name: string; color: string }>>;
 }) {
-  const colSpan = 5 + (perms.canViewRates ? 1 : 0) + (perms.canViewBalance ? 1 : 0);
+  const colSpan = 6 + (perms.canViewRates ? 1 : 0) + (perms.canViewBalance ? 1 : 0);
   return (
     <div className="rounded-lg border shadow-sm overflow-hidden">
       {/* Section header */}
-      <div className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5">
-        <Icon className="h-4 w-4 opacity-70" />
-        <h2 className="text-xs font-medium uppercase tracking-wide">{title}</h2>
-        <span className="text-xs opacity-70">({items.length})</span>
+      <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-2.5">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{title}</h2>
+        <span className="text-[11px] text-muted-foreground/50">({items.length})</span>
       </div>
       <Table>
         <TableHeader>
@@ -114,6 +117,9 @@ function ClientTable({
             </TableHead>
             <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("pool")}>
               <div className="flex items-center">Pool Type<SortIcon active={sortKey === "pool"} dir={sortDir} /></div>
+            </TableHead>
+            <TableHead className={`hidden lg:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`}>
+              Tech
             </TableHead>
             {perms.canViewRates && (
               <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("rate")}>
@@ -154,6 +160,17 @@ function ClientTable({
                 <TableCell className="hidden sm:table-cell text-sm text-muted-foreground capitalize">
                   {c.bow_summary || c.first_property_pool_type || "\u2014"}
                 </TableCell>
+                <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+                  {(() => {
+                    const tech = c.first_property_id ? techAssignments[c.first_property_id]?.[0] : null;
+                    return tech ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: tech.color }} />
+                        <span className="truncate">{tech.tech_name.split(" ")[0]}</span>
+                      </div>
+                    ) : "\u2014";
+                  })()}
+                </TableCell>
                 {perms.canViewRates && (
                   <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
                 )}
@@ -191,6 +208,7 @@ export default function CustomersPage() {
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_name: string; color: string }>>>({});
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -218,6 +236,11 @@ export default function CustomersPage() {
       setLoading(false);
     }
   }, [search, [...statusFilter].sort().join(",")]);
+
+  useEffect(() => {
+    api.get<Record<string, Array<{ tech_name: string; color: string }>>>("/v1/routes/tech-assignments")
+      .then(setTechAssignments).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetchCustomers();
@@ -516,6 +539,7 @@ export default function CustomersPage() {
                 sortDir={sortDir}
                 toggleSort={toggleSort}
                 thClass={thClass}
+                techAssignments={techAssignments}
               />
             )}
             {typeFilter.has("residential") && (
@@ -528,6 +552,7 @@ export default function CustomersPage() {
                 sortDir={sortDir}
                 toggleSort={toggleSort}
                 thClass={thClass}
+                techAssignments={techAssignments}
               />
             )}
           </div>

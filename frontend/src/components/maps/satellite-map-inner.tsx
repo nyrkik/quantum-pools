@@ -78,6 +78,7 @@ export default function SatelliteMapInner({
   poolBows,
   selectedBowId,
   pinPosition,
+  flyTo,
   onBowSelect,
   onPinPlace,
 }: SatelliteMapProps) {
@@ -112,7 +113,7 @@ export default function SatelliteMapInner({
       <FitBounds markers={bounds} />
       <MapClickHandler onPinPlace={onPinPlace} enabled={!!selectedBowId} />
 
-      {selectedBow && selectedBowId && selectedBow.lat && selectedBow.lng && (
+      {flyTo && selectedBow && selectedBowId && selectedBow.lat && selectedBow.lng && (
         <FlyToSelected
           lat={selectedBow.pool_lat ?? selectedBow.lat}
           lng={selectedBow.pool_lng ?? selectedBow.lng}

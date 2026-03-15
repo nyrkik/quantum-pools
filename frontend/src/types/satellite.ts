@@ -27,23 +27,14 @@ export interface PoolBowWithCoords {
   address: string;
   customer_name: string;
   customer_type: string;
+  pool_sqft: number | null;
   lat: number | null;
   lng: number | null;
   pool_lat: number | null;
   pool_lng: number | null;
   has_analysis: boolean;
-}
-
-export interface SatelliteImageData {
-  id: string;
-  property_id: string;
-  filename: string;
-  url: string;
-  center_lat: number;
-  center_lng: number;
-  zoom: number;
-  is_hero: boolean;
-  created_at: string;
+  tech_name: string | null;
+  tech_color: string | null;
 }
 
 export interface BulkAnalysisRequest {

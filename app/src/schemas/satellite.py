@@ -47,31 +47,14 @@ class PoolBowWithCoordsResponse(BaseModel):
     address: str
     customer_name: str
     customer_type: str = "residential"
+    pool_sqft: Optional[float] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
     pool_lat: Optional[float] = None
     pool_lng: Optional[float] = None
     has_analysis: bool = False
-
-
-class SatelliteImageResponse(BaseModel):
-    id: str
-    property_id: str
-    filename: str
-    url: str
-    center_lat: float
-    center_lng: float
-    zoom: int
-    is_hero: bool
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class CaptureImageRequest(BaseModel):
-    center_lat: float
-    center_lng: float
-    zoom: int = 20
+    tech_name: Optional[str] = None
+    tech_color: Optional[str] = None
 
 
 class BulkAnalysisRequest(BaseModel):

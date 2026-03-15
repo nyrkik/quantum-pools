@@ -8,10 +8,8 @@ from src.api.deps import get_current_org_user, require_roles, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.schemas.satellite import (
     SatelliteAnalysisResponse,
-    SatelliteImageResponse,
     SetPinRequest,
     AnalyzeRequest,
-    CaptureImageRequest,
     PoolBowWithCoordsResponse,
     BulkAnalysisRequest,
     BulkAnalysisResponse,
@@ -113,93 +111,3 @@ async def bulk_analyze(
         failed=result["failed"],
         results=[SatelliteAnalysisResponse.model_validate(r) for r in result["results"]],
     )
-
-
-def _image_to_response(img) -> SatelliteImageResponse:
-    return SatelliteImageResponse(
-        id=img.id,
-        property_id=img.property_id,
-        filename=img.filename,
-        url=f"/uploads/satellite/{img.property_id}/{img.filename}",
-        center_lat=img.center_lat,
-        center_lng=img.center_lng,
-        zoom=img.zoom,
-        is_hero=img.is_hero,
-        created_at=img.created_at,
-    )
-
-
-@router.get("/images/heroes", response_model=dict[str, SatelliteImageResponse])
-async def get_hero_images(
-    ctx: OrgUserContext = Depends(get_current_org_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get all hero images keyed by property_id."""
-    from sqlalchemy import select
-    from src.models.satellite_image import SatelliteImage
-    result = await db.execute(
-        select(SatelliteImage).where(
-            SatelliteImage.organization_id == ctx.organization_id,
-            SatelliteImage.is_hero == True,
-        )
-    )
-    heroes = result.scalars().all()
-    return {img.property_id: _image_to_response(img) for img in heroes}
-
-
-@router.get("/properties/{property_id}/images", response_model=list[SatelliteImageResponse])
-async def list_images(
-    property_id: str,
-    ctx: OrgUserContext = Depends(get_current_org_user),
-    db: AsyncSession = Depends(get_db),
-):
-    svc = SatelliteService(db)
-    images = await svc.list_images(ctx.organization_id, property_id)
-    return [_image_to_response(img) for img in images]
-
-
-@router.post("/properties/{property_id}/images/capture", response_model=SatelliteImageResponse)
-async def capture_image(
-    property_id: str,
-    body: CaptureImageRequest,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
-    db: AsyncSession = Depends(get_db),
-):
-    svc = SatelliteService(db)
-    try:
-        img = await svc.capture_image(
-            ctx.organization_id, property_id,
-            body.center_lat, body.center_lng, body.zoom,
-        )
-    except (ValueError, Exception) as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    return _image_to_response(img)
-
-
-@router.put("/properties/{property_id}/images/{image_id}/hero", response_model=SatelliteImageResponse)
-async def set_hero_image(
-    property_id: str,
-    image_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
-    db: AsyncSession = Depends(get_db),
-):
-    svc = SatelliteService(db)
-    try:
-        img = await svc.set_hero_image(ctx.organization_id, property_id, image_id)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    return _image_to_response(img)
-
-
-@router.delete("/properties/{property_id}/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_image(
-    property_id: str,
-    image_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
-    db: AsyncSession = Depends(get_db),
-):
-    svc = SatelliteService(db)
-    try:
-        await svc.delete_image(ctx.organization_id, property_id, image_id)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

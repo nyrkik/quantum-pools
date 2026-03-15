@@ -126,6 +126,13 @@ class CustomerService:
         )
         return result.scalar() or 0
 
+    async def get_first_property(self, customer_id: str):
+        result = await self.db.execute(
+            select(Property).where(Property.customer_id == customer_id)
+            .order_by(Property.created_at).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_first_property_address(self, customer_id: str) -> Optional[str]:
         result = await self.db.execute(
             select(Property.address).where(Property.customer_id == customer_id)

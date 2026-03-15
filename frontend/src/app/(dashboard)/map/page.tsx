@@ -603,7 +603,7 @@ export default function MapPage() {
           {selectedBowId && (
             <button
               onClick={() => { mapActionsRef.current?.toggleZoom(); setIsZoomedIn((z) => !z); }}
-              className="absolute top-3 right-3 z-[1000] flex items-center gap-1.5 bg-background/90 backdrop-blur-sm rounded-md px-2.5 py-1.5 shadow-md border text-xs font-medium text-foreground hover:bg-background transition-colors"
+              className="absolute top-3 right-3 z-[400] flex items-center gap-1.5 bg-background/90 backdrop-blur-sm rounded-md px-2.5 py-1.5 shadow-md border text-xs font-medium text-foreground hover:bg-background transition-colors"
             >
               {isZoomedIn ? <ZoomOut className="h-3.5 w-3.5" /> : <ZoomIn className="h-3.5 w-3.5" />}
               {isZoomedIn ? "Zoom Out" : "Zoom In"}
@@ -611,7 +611,7 @@ export default function MapPage() {
           )}
 
           {/* Status filter overlay — bottom-left of map */}
-          <div className="absolute bottom-3 left-3 z-[1000] flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-md px-2 py-1.5 shadow-md border">
+          <div className="absolute bottom-3 left-3 z-[400] flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-md px-2 py-1.5 shadow-md border">
             {([
               { value: "analyzed" as StatusFilter, label: "Analyzed", color: "bg-yellow-500" },
               { value: "pinned" as StatusFilter, label: "Pinned", color: "bg-green-500" },
@@ -721,12 +721,15 @@ export default function MapPage() {
                         </div>
                       )}
                     </div>
-                    {canEdit && pinDirty && (
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={savingPin} onClick={savePin}>
+                  </div>
+                  {canEdit && pinDirty && (
+                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 px-3 py-2 flex items-center justify-between">
+                      <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">Pin moved — save to keep new location</span>
+                      <Button size="sm" className="h-7 px-3 text-xs" disabled={savingPin} onClick={savePin}>
                         {savingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Pin"}
                       </Button>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Discrepancy alert */}
                   {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && (

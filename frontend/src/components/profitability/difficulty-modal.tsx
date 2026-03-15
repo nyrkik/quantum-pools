@@ -14,13 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 
 // --- Types ---
@@ -410,19 +403,16 @@ export default function DifficultyModal({
                       {(WEIGHTS.shade_debris * 100).toFixed(0)}%
                     </span>
                   </div>
-                  <Select
+                  <select
                     value={form.shade_exposure ?? ""}
-                    onValueChange={(v) => updateForm("shade_exposure", v || null)}
+                    onChange={(e) => updateForm("shade_exposure", e.target.value || null)}
+                    className="w-36 h-7 text-xs rounded-md border border-input bg-background px-2"
                   >
-                    <SelectTrigger className="w-36 h-7 text-xs">
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="full_sun">Full Sun</SelectItem>
-                      <SelectItem value="partial_shade">Partial Shade</SelectItem>
-                      <SelectItem value="full_shade">Full Shade</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <option value="">Select...</option>
+                    <option value="full_sun">Full Sun</option>
+                    <option value="partial_shade">Partial Shade</option>
+                    <option value="full_shade">Full Shade</option>
+                  </select>
                 </div>
 
                 {/* Debris */}
@@ -430,20 +420,17 @@ export default function DifficultyModal({
                   <div className="flex items-center gap-2 min-w-0">
                     <Label className="text-sm">Debris</Label>
                   </div>
-                  <Select
+                  <select
                     value={form.tree_debris_level ?? ""}
-                    onValueChange={(v) => updateForm("tree_debris_level", v || null)}
+                    onChange={(e) => updateForm("tree_debris_level", e.target.value || null)}
+                    className="w-36 h-7 text-xs rounded-md border border-input bg-background px-2"
                   >
-                    <SelectTrigger className="w-36 h-7 text-xs">
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="moderate">Moderate</SelectItem>
-                      <SelectItem value="heavy">Heavy</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <option value="">Select...</option>
+                    <option value="none">None</option>
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="heavy">Heavy</option>
+                  </select>
                 </div>
 
                 {/* Enclosure */}
@@ -454,19 +441,16 @@ export default function DifficultyModal({
                       {(WEIGHTS.enclosure * 100).toFixed(0)}%
                     </span>
                   </div>
-                  <Select
+                  <select
                     value={form.enclosure_type ?? ""}
-                    onValueChange={(v) => updateForm("enclosure_type", v || null)}
+                    onChange={(e) => updateForm("enclosure_type", e.target.value || null)}
+                    className="w-36 h-7 text-xs rounded-md border border-input bg-background px-2"
                   >
-                    <SelectTrigger className="w-36 h-7 text-xs">
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="indoor">Indoor</SelectItem>
-                      <SelectItem value="screened">Screened</SelectItem>
-                      <SelectItem value="open">Open</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <option value="">Select...</option>
+                    <option value="indoor">Indoor</option>
+                    <option value="screened">Screened</option>
+                    <option value="open">Open</option>
+                  </select>
                 </div>
 
                 {/* Chemical Demand */}

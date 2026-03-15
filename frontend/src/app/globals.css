@@ -124,3 +124,10 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Radix dialog/alert overlays must sit above Leaflet map (z-index 800) */
+[data-slot="dialog-overlay"],
+[data-slot="dialog-content"],
+[role="alertdialog"] {
+  z-index: 1000 !important;
+}

@@ -21,8 +21,6 @@ class BodyOfWater(Base):
     # Identity
     name: Mapped[str | None] = mapped_column(String(100))
     water_type: Mapped[str] = mapped_column(String(20), nullable=False, default="pool")
-    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
-
     # Pool details
     pool_type: Mapped[str | None] = mapped_column(String(50))
     pool_gallons: Mapped[int | None] = mapped_column(Integer)
@@ -65,3 +63,4 @@ class BodyOfWater(Base):
     jurisdiction = relationship("PropertyJurisdiction", back_populates="body_of_water", uselist=False, lazy="noload")
     measurements = relationship("PoolMeasurement", back_populates="body_of_water", lazy="noload")
     chemical_readings = relationship("ChemicalReading", back_populates="body_of_water", lazy="noload")
+    satellite_analysis = relationship("SatelliteAnalysis", back_populates="body_of_water", uselist=False, lazy="noload")

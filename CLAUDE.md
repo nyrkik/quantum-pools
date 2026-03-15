@@ -26,6 +26,62 @@ Enterprise pool service management platform consolidating:
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
+## UI Standards
+
+### Icon Actions (MANDATORY — never deviate)
+
+All inline action icons use `Button variant="ghost" size="icon"`. No text labels on inline actions.
+
+| Action | Icon | Size | Style |
+|--------|------|------|-------|
+| Save/confirm | `Check` | h-4 w-4 | `text-muted-foreground hover:text-green-600` |
+| Cancel/revert | n/a | n/a | Text button (`variant="ghost" size="sm"` label "Cancel") — revert unsaved changes in a section |
+| Close/exit | `X` | h-4 w-4 | `text-muted-foreground hover:text-destructive` — close edit mode, close dialogs |
+| Edit (enter edit) | `Pencil` | h-3.5 w-3.5 | ghost button |
+| Delete | `Trash2` | h-3.5 w-3.5 | `text-destructive`, always behind AlertDialog |
+| Add | `Plus` | h-3.5 w-3.5 | ghost or outline button |
+| Back/navigate up | `ArrowLeft` | h-4 w-4 | ghost button, top-left of page |
+| Loading spinner | `Loader2` | matches context | `animate-spin` |
+| Expand/collapse | `ChevronDown`/`ChevronUp` | h-3.5 w-3.5 | `text-muted-foreground` |
+
+### Edit Mode Pattern
+
+- **No "Edit" in title** — the page title stays the same as view mode
+- **Edit mode indicator**: Cards get `border-l-4 border-primary` left border to signal edit state
+- **Close edit**: `X` icon in top-right of the name/header tile (not in page header)
+- **Dirty section indicator**: When a section has unsaved changes, it gets `border-l-4 border-amber-400` left border and shows Check (save) + X (cancel) icons in the section header
+- **Unsaved changes guard**: If user clicks X to exit edit mode while any section is dirty, show AlertDialog confirming discard
+- **Section-level saves**: Each section (client, property, BOW) saves independently via its own API endpoint. "Save" (variant=default) and "Cancel" (variant=ghost) buttons appear in the section header only when that section is dirty. Buttons use `size="sm"` with text labels — no icon-only save/cancel (too small on mobile).
+
+### Visual Polish (MANDATORY — apply everywhere)
+
+**Cards:**
+- All `<Card>` get `shadow-sm` — subtle depth lift
+- Inner sub-cards (view mode tiles) use `bg-muted/50` with no shadow
+- In edit mode: parent card gets `bg-muted/50`, child edit tiles get `bg-background` (white) — form fields stand out against the shaded parent
+
+**Tables:**
+- Table header row: `bg-slate-100 dark:bg-slate-800` — solid gray, clearly distinct from data rows
+- Table header text: `text-xs font-medium uppercase tracking-wide`
+- Table rows: `hover:bg-blue-50 dark:hover:bg-blue-950` — visible blue tint on hover
+- Alternating rows: odd index `bg-slate-50 dark:bg-slate-900` for scanability
+
+**Section headers** (group titles like "Commercial", "Residential"):
+- `bg-primary text-primary-foreground px-4 py-2.5` with icon + title + count
+- Strong contrast — anchors the section visually
+- Icon and count use `opacity-70` for subtle hierarchy within the header
+
+**Status badges:**
+- Active: `variant="default"` (filled primary)
+- Inactive: `variant="secondary"` (gray)
+- Pending: `variant="outline" className="border-amber-400 text-amber-600"`
+- One-time: `variant="outline" className="border-blue-400 text-blue-600"`
+
+**General:**
+- No gradients, heavy shadows, or heavy rounded corners
+- Color is informational, not decorative
+- `text-muted-foreground` for secondary information, never full black
+
 ## Network
 
 See `~/.claude/CLAUDE.md` for full network topology, port registry, and Tailscale ACL.
@@ -102,6 +158,7 @@ QuantumPools/
 - **Dashboard tiles**: Clickable — link to Customers, Properties, Routes, Invoices respectively.
 - **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`. Uploads bypass the Next.js rewrite proxy (body size limits) and go directly to the backend on port 7061. Photos are resized client-side to max 1600px before upload. CORS allows Tailscale + LAN origins.
 - **BodyOfWater (BOW)**: Each Property has 1+ BodyOfWater records (pool, spa, hot_tub, wading_pool, fountain, water_feature). One is `is_primary=True`. Pool dimensions, equipment, gallons, service minutes all live on BOW. Property still has the old columns for backward compat during transition. Profitability, route optimization, measurements, and chemical readings all aggregate from BOWs. Migration `8c1a65b5a13d` created BOW table and backfilled from properties. API: `/api/v1/bodies-of-water/property/{id}` (list/create), `/api/v1/bodies-of-water/{id}` (get/update/delete).
+- **Satellite analysis per-BOW**: Each pool BOW gets its own satellite analysis and pin (1:1 via `body_of_water_id` on `satellite_analyses`). Spas/fountains excluded from satellite (use measurement tool). `SatelliteImage` stays property-keyed (one set of overhead photos per yard). API: `/v1/satellite/pool-bows` (list pool BOWs), `/v1/satellite/bows/{bow_id}` (get/pin/analyze). Frontend: `/satellite?bow={id}`. Migration `75f82d5141d5` added column + backfilled 73 analyses.
 
 ## Critical Reference Files
 
@@ -159,7 +216,8 @@ Property 1──* Visit *──1 Tech
 Property 1──* ChemicalReading ──? BodyOfWater
 Property 1──1 PropertyDifficulty ──? BodyOfWater
 Property 1──1 PropertyJurisdiction ──1 BatherLoadJurisdiction
-Property 1──1 SatelliteAnalysis
+Property 1──* SatelliteAnalysis (one per pool BOW)
+BodyOfWater 1──1 SatelliteAnalysis (pools only)
 Property 1──* PoolMeasurement ──? BodyOfWater
 Visit 1──* ChemicalReading
 Visit *──* Service (through VisitService)

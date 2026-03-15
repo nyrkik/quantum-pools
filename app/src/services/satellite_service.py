@@ -1,16 +1,18 @@
-"""Satellite analysis service — Google Maps Static API + Claude Vision for pool/vegetation detection.
+"""Satellite analysis service v5 — Per-BOW analysis (pools only).
 
-Two-pass approach:
-  1. LOCATE: Wide zoom (18) image → Claude finds the pool's pixel position → convert to lat/lng
-  2. ANALYZE: Zoomed-in (20) image centered on the pool → Claude measures and analyzes
+Each pool BOW gets its own pin and analysis. Spas/fountains excluded.
+SatelliteImages stay property-keyed (one set of overhead photos per yard).
 """
 
 import base64
 import json
 import math
+import re
 import uuid
 import logging
 from typing import Optional
+
+from pathlib import Path
 
 import aiohttp
 import anthropic
@@ -20,53 +22,44 @@ from sqlalchemy import select
 from src.core.config import settings
 from src.core.exceptions import NotFoundError
 from src.models.satellite_analysis import SatelliteAnalysis
+from src.models.satellite_image import SatelliteImage
 from src.models.property import Property
 from src.models.body_of_water import BodyOfWater
 
+UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "satellite"
+
 logger = logging.getLogger(__name__)
 
-# --- Prompts ---
+MEASURE_PROMPT = """Analyze this satellite image of a swimming pool. The pool is at the CENTER of these images.
 
-LOCATE_PROMPT = """This satellite image is centered on a property address. The property has a swimming pool somewhere in or near this image.
+Image 1 is zoomed in (detail view). Image 2 is a wider context view.
 
-Find the pool and return its pixel coordinates in the image (origin is top-left).
+SCALE (Image 1): {width}x{height} pixels. Each pixel ≈ {ft_per_px_z21:.2f} feet ({sqft_per_px_z21:.3f} sqft/pixel). Full image spans {img_width_ft_z21:.0f} × {img_height_ft_z21:.0f} feet. A car ≈ {car_px_z21:.0f} pixels long.
 
-The image is {width}x{height} pixels. Each pixel is approximately {ft_per_px:.1f} feet.
+SCALE (Image 2): Each pixel ≈ {ft_per_px_z20:.2f} feet ({sqft_per_px_z20:.3f} sqft/pixel). Full image spans {img_width_ft_z20:.0f} × {img_height_ft_z20:.0f} feet.
 
-Return ONLY a JSON object:
-{{
-  "pool_found": true/false,
-  "pool_x": number (center X pixel of the pool),
-  "pool_y": number (center Y pixel of the pool),
-  "notes": "brief description of where you found it"
-}}
-
-Look carefully — the pool may be:
-- Behind buildings (apartment complex pools are often in interior courtyards)
-- Under partial tree canopy
-- A non-standard color (green, dark, covered)
-- Small relative to the property
-
-Return ONLY the JSON object, no other text."""
-
-ANALYSIS_PROMPT = """Analyze this satellite image centered on a swimming pool.
-
-SCALE: This image is {width}x{height} pixels. Each pixel ≈ {ft_per_px:.2f} feet ({sqft_per_px:.3f} sqft/pixel). The full image spans {img_width_ft:.0f} × {img_height_ft:.0f} feet. A car is about {car_px:.0f} pixels long.
-
-MEASURE the pool precisely:
+MEASURE the pool precisely using Image 1:
 1. Estimate the pool's width and height in PIXELS
-2. Calculate sqft = width_px × height_px × {sqft_per_px:.3f}
+2. Calculate sqft = width_px × height_px × {sqft_per_px_z21:.3f}
 3. For non-rectangular shapes (kidney, oval, freeform), multiply by 0.70-0.75
+
+SANITY CHECK:
+- Typical residential pool: 300-800 sqft
+- Large commercial pool: 1000-3000 sqft
+- Olympic pool: ~8000 sqft
+- If your estimate exceeds 5000 sqft, re-examine — you may be measuring the deck or parking lot
+
+Use Image 2 (wider view) to understand the property context, vegetation, and surroundings.
 
 Return ONLY a JSON object:
 {{
   "pool_detected": true/false,
-  "pool_pixel_width": number (pool width in pixels),
-  "pool_pixel_height": number (pool height in pixels),
+  "pool_pixel_width": number (pool width in pixels, Image 1),
+  "pool_pixel_height": number (pool height in pixels, Image 1),
   "estimated_pool_sqft": number (calculated as described above),
   "pool_shape": "rectangle" | "kidney" | "L-shape" | "freeform" | "oval" | "round",
   "pool_confidence": number 0.0-1.0,
-  "vegetation_pct": number 0-100,
+  "vegetation_pct": number 0-100 (property-wide),
   "canopy_overhang_pct": number 0-100 (tree canopy near/over the pool),
   "hardscape_pct": number 0-100,
   "shadow_pct": number 0-100,
@@ -76,7 +69,7 @@ Return ONLY a JSON object:
   "notes": "brief observation relevant to pool service"
 }}
 
-This property HAS a pool — it should be visible near the center of this image.
+This property HAS a pool — it should be visible at the center.
 Return ONLY the JSON object, no other text."""
 
 
@@ -91,23 +84,21 @@ class SatelliteService:
             self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
-    async def get_analysis(self, organization_id: str, property_id: str) -> Optional[SatelliteAnalysis]:
+    async def _get_bow(self, organization_id: str, bow_id: str) -> BodyOfWater:
         result = await self.db.execute(
-            select(SatelliteAnalysis).where(
-                SatelliteAnalysis.property_id == property_id,
-                SatelliteAnalysis.organization_id == organization_id,
+            select(BodyOfWater).where(
+                BodyOfWater.id == bow_id,
+                BodyOfWater.organization_id == organization_id,
             )
         )
-        return result.scalar_one_or_none()
+        bow = result.scalar_one_or_none()
+        if not bow:
+            raise NotFoundError(f"Body of water {bow_id} not found")
+        if bow.water_type != "pool":
+            raise ValueError(f"Satellite analysis only applies to pools, not {bow.water_type}")
+        return bow
 
-    async def analyze_property(
-        self, organization_id: str, property_id: str, force: bool = False
-    ) -> SatelliteAnalysis:
-        if not settings.google_maps_api_key:
-            raise ValueError("Google Maps API key not configured")
-        if not settings.anthropic_api_key:
-            raise ValueError("Anthropic API key not configured")
-
+    async def _get_property(self, organization_id: str, property_id: str) -> Property:
         result = await self.db.execute(
             select(Property).where(
                 Property.id == property_id,
@@ -117,82 +108,185 @@ class SatelliteService:
         prop = result.scalar_one_or_none()
         if not prop:
             raise NotFoundError(f"Property {property_id} not found")
+        return prop
+
+    async def get_analysis(self, organization_id: str, bow_id: str) -> Optional[SatelliteAnalysis]:
+        result = await self.db.execute(
+            select(SatelliteAnalysis).where(
+                SatelliteAnalysis.body_of_water_id == bow_id,
+                SatelliteAnalysis.organization_id == organization_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def set_pool_pin(
+        self, organization_id: str, bow_id: str, pool_lat: float, pool_lng: float
+    ) -> SatelliteAnalysis:
+        bow = await self._get_bow(organization_id, bow_id)
+        prop = await self._get_property(organization_id, bow.property_id)
+
+        existing = await self.get_analysis(organization_id, bow_id)
+        if existing:
+            existing.pool_lat = pool_lat
+            existing.pool_lng = pool_lng
+            await self.db.flush()
+            await self.db.refresh(existing)
+            return existing
+
+        analysis = SatelliteAnalysis(
+            id=str(uuid.uuid4()),
+            organization_id=organization_id,
+            property_id=prop.id,
+            body_of_water_id=bow_id,
+            pool_lat=pool_lat,
+            pool_lng=pool_lng,
+            analysis_version="5.0",
+        )
+        self.db.add(analysis)
+        await self.db.flush()
+        await self.db.refresh(analysis)
+        return analysis
+
+    async def get_pool_bows_with_coords(self, organization_id: str) -> list[dict]:
+        """List all pool BOWs with property coordinates and analysis status."""
+        from src.models.customer import Customer
+        from sqlalchemy import func
+        from sqlalchemy.orm import aliased
+
+        SA = aliased(SatelliteAnalysis)
+
+        result = await self.db.execute(
+            select(
+                BodyOfWater.id,
+                BodyOfWater.property_id,
+                BodyOfWater.name,
+                BodyOfWater.water_type,
+                Property.address,
+                func.concat(Customer.first_name, ' ', Customer.last_name).label("customer_name"),
+                Property.lat,
+                Property.lng,
+                SA.pool_lat,
+                SA.pool_lng,
+                SA.pool_detected,
+            )
+            .join(Property, BodyOfWater.property_id == Property.id)
+            .join(Customer, Property.customer_id == Customer.id)
+            .outerjoin(SA, SA.body_of_water_id == BodyOfWater.id)
+            .where(
+                BodyOfWater.organization_id == organization_id,
+                BodyOfWater.water_type == "pool",
+                BodyOfWater.is_active == True,
+                Property.is_active == True,
+                Property.lat.isnot(None),
+                Property.lng.isnot(None),
+            )
+        )
+        rows = result.all()
+
+        return [
+            {
+                "id": row.id,
+                "property_id": row.property_id,
+                "bow_name": row.name,
+                "water_type": row.water_type,
+                "address": row.address or "",
+                "customer_name": row.customer_name or "",
+                "lat": row.lat,
+                "lng": row.lng,
+                "pool_lat": row.pool_lat,
+                "pool_lng": row.pool_lng,
+                "has_analysis": bool(row.pool_detected),
+            }
+            for row in rows
+        ]
+
+    async def analyze_bow(
+        self, organization_id: str, bow_id: str,
+        force: bool = False,
+        pool_lat: Optional[float] = None, pool_lng: Optional[float] = None,
+    ) -> SatelliteAnalysis:
+        if not settings.google_maps_api_key:
+            raise ValueError("Google Maps API key not configured")
+        if not settings.anthropic_api_key:
+            raise ValueError("Anthropic API key not configured")
+
+        bow = await self._get_bow(organization_id, bow_id)
+        prop = await self._get_property(organization_id, bow.property_id)
 
         if not prop.lat or not prop.lng:
-            raise ValueError(f"Property {property_id} has no coordinates — geocode first")
+            raise ValueError(f"Property {prop.id} has no coordinates — geocode first")
 
-        existing = await self.get_analysis(organization_id, property_id)
+        existing = await self.get_analysis(organization_id, bow_id)
         if existing and not force:
             return existing
 
+        # If pin coords provided in request, save them first
+        if pool_lat is not None and pool_lng is not None:
+            if existing:
+                existing.pool_lat = pool_lat
+                existing.pool_lng = pool_lng
+            else:
+                existing = SatelliteAnalysis(
+                    id=str(uuid.uuid4()),
+                    organization_id=organization_id,
+                    property_id=prop.id,
+                    body_of_water_id=bow_id,
+                    pool_lat=pool_lat,
+                    pool_lng=pool_lng,
+                )
+                self.db.add(existing)
+                await self.db.flush()
+
+        # Determine analysis center: pin > existing pin > property geocode
+        center_lat = pool_lat or (existing.pool_lat if existing else None) or prop.lat
+        center_lng = pool_lng or (existing.pool_lng if existing else None) or prop.lng
+
         width, height = 640, 640
 
-        # --- Pass 1: LOCATE the pool (wide view ~500m across) ---
-        locate_zoom = 17
-        locate_url = self._build_image_url(prop.lat, prop.lng, locate_zoom, width, height)
-        locate_bytes = await self._fetch_image(locate_url)
+        # Fetch two images: zoom 21 (detail) + zoom 20 (context)
+        url_z21 = self._build_image_url(center_lat, center_lng, 21, width, height)
+        url_z20 = self._build_image_url(center_lat, center_lng, 20, width, height)
 
-        if not locate_bytes:
+        bytes_z21 = await self._fetch_image(url_z21)
+        bytes_z20 = await self._fetch_image(url_z20)
+
+        if not bytes_z21 and not bytes_z20:
             return await self._save_error(
-                organization_id, property_id, existing,
-                "Failed to fetch wide satellite image",
-                locate_url, locate_zoom, width, height,
+                organization_id, prop.id, bow_id, existing,
+                "Failed to fetch satellite images",
+                url_z21, 21, width, height,
             )
 
-        pool_lat, pool_lng = prop.lat, prop.lng  # default to property center
+        if not bytes_z21:
+            bytes_z21 = bytes_z20
+            url_z21 = url_z20
+
         try:
-            location = await self._locate_pool(locate_bytes, prop.lat, prop.lng, locate_zoom, width, height)
-            if location:
-                pool_lat, pool_lng = location
-                logger.info(f"Pool located at {pool_lat:.6f},{pool_lng:.6f} (offset from address {prop.lat:.6f},{prop.lng:.6f})")
+            results = await self._measure_pool(
+                bytes_z21, bytes_z20, prop.address,
+                center_lat, width, height,
+            )
         except Exception as e:
-            logger.warning(f"Pool location failed for {property_id}, using address center: {e}")
-
-        # --- Pass 2: ANALYZE — try zoom 21 (best detail), fall back to 20 (wider) ---
-        results = None
-        analyze_url = None
-        analyze_zoom = None
-
-        for zoom_level in [21, 20]:
-            analyze_zoom = zoom_level
-            analyze_url = self._build_image_url(pool_lat, pool_lng, zoom_level, width, height)
-            analyze_bytes = await self._fetch_image(analyze_url)
-            if not analyze_bytes:
-                continue
-            try:
-                results = await self._analyze_pool(
-                    analyze_bytes, prop.address, pool_lat, zoom_level, width, height,
-                )
-                if results["pool_detected"]:
-                    break
-                logger.info(f"Pool not found at zoom {zoom_level} for {prop.address}, trying wider")
-            except Exception as e:
-                logger.warning(f"Analysis at zoom {zoom_level} failed for {property_id}: {e}")
+            logger.error(f"Claude analysis failed for BOW {bow_id}: {e}")
+            return await self._save_error(
+                organization_id, prop.id, bow_id, existing,
+                f"Claude analysis failed: {e}",
+                url_z21, 21, width, height,
+            )
 
         if not results:
             return await self._save_error(
-                organization_id, property_id, existing,
-                "Pool not detected at any zoom level",
-                analyze_url or "", analyze_zoom or 21, width, height,
+                organization_id, prop.id, bow_id, existing,
+                "Pool not detected",
+                url_z21, 21, width, height,
             )
 
-        # Update pool_sqft on primary BOW and property if detected and not already set
-        if results["pool_detected"] and results["estimated_pool_sqft"] and not prop.pool_sqft:
-            prop.pool_sqft = results["estimated_pool_sqft"]
-            # Also write to primary BOW
-            bow_result = await self.db.execute(
-                select(BodyOfWater).where(
-                    BodyOfWater.property_id == property_id,
-                    BodyOfWater.organization_id == organization_id,
-                    BodyOfWater.is_primary == True,
-                )
-            )
-            primary_bow = bow_result.scalar_one_or_none()
-            if primary_bow and not primary_bow.pool_sqft:
-                primary_bow.pool_sqft = results["estimated_pool_sqft"]
+        # Update pool_sqft on this BOW only
+        if results["pool_detected"] and results["estimated_pool_sqft"] and not bow.pool_sqft:
+            bow.pool_sqft = results["estimated_pool_sqft"]
 
         return await self._save_analysis(
-            organization_id, property_id, existing,
+            organization_id, prop.id, bow_id, existing,
             pool_detected=results["pool_detected"],
             estimated_pool_sqft=results["estimated_pool_sqft"],
             pool_contour_points=None,
@@ -201,51 +295,53 @@ class SatelliteService:
             canopy_overhang_pct=results["canopy_overhang_pct"],
             hardscape_pct=results["hardscape_pct"],
             shadow_pct=results["shadow_pct"],
-            image_url=analyze_url, image_zoom=analyze_zoom,
+            image_url=url_z21, image_zoom=21,
             image_width=width, image_height=height,
             raw_results=results,
         )
 
     async def bulk_analyze(
-        self, organization_id: str, property_ids: Optional[list[str]] = None, force: bool = False
+        self, organization_id: str, bow_ids: Optional[list[str]] = None, force: bool = False
     ) -> dict:
-        if property_ids:
+        if bow_ids:
             result = await self.db.execute(
-                select(Property).where(
-                    Property.organization_id == organization_id,
-                    Property.id.in_(property_ids),
-                    Property.is_active == True,
+                select(BodyOfWater).where(
+                    BodyOfWater.organization_id == organization_id,
+                    BodyOfWater.id.in_(bow_ids),
+                    BodyOfWater.water_type == "pool",
+                    BodyOfWater.is_active == True,
                 )
             )
         else:
             result = await self.db.execute(
-                select(Property).where(
-                    Property.organization_id == organization_id,
+                select(BodyOfWater)
+                .join(Property, BodyOfWater.property_id == Property.id)
+                .where(
+                    BodyOfWater.organization_id == organization_id,
+                    BodyOfWater.water_type == "pool",
+                    BodyOfWater.is_active == True,
                     Property.is_active == True,
                     Property.lat.isnot(None),
                     Property.lng.isnot(None),
                 )
             )
-        properties = result.scalars().all()
+        bows = result.scalars().all()
 
         analyzed, skipped, failed = [], 0, 0
-        for prop in properties:
-            if not prop.lat or not prop.lng:
-                skipped += 1
-                continue
+        for bow in bows:
             try:
-                analysis = await self.analyze_property(organization_id, prop.id, force=force)
+                analysis = await self.analyze_bow(organization_id, bow.id, force=force)
                 if analysis.error_message:
                     failed += 1
                 else:
                     analyzed.append(analysis)
             except Exception as e:
-                logger.error(f"Bulk analysis failed for {prop.id}: {e}")
+                logger.error(f"Bulk analysis failed for BOW {bow.id}: {e}")
                 failed += 1
 
         await self.db.flush()
         return {
-            "total": len(properties),
+            "total": len(bows),
             "analyzed": len(analyzed),
             "skipped": skipped,
             "failed": failed,
@@ -291,98 +387,66 @@ class SatelliteService:
             "car_px": 15.0 / ft_per_px,
         }
 
-    def _pixel_to_latlng(
-        self, px_x: int, px_y: int,
-        center_lat: float, center_lng: float,
-        zoom: int, width: int, height: int,
-    ) -> tuple[float, float]:
-        """Convert pixel coordinates in the image to lat/lng."""
-        meters_per_px = 0.149 * (2 ** (20 - zoom)) / math.cos(math.radians(center_lat))
+    # --- Claude call (multi-image) ---
 
-        # Pixel offset from center
-        dx = px_x - width / 2
-        dy = px_y - height / 2
+    def _parse_json(self, text: str) -> dict:
+        s = text.strip()
+        if s.startswith("```"):
+            s = s.split("\n", 1)[1]
+            if s.endswith("```"):
+                s = s[:-3].strip()
+        match = re.search(r"\{[\s\S]*\}", s)
+        if match:
+            s = match.group(0)
+        s = re.sub(r",\s*([}\]])", r"\1", s)
+        return json.loads(s)
 
-        # Convert to meters, then to degrees
-        meters_east = dx * meters_per_px
-        meters_south = dy * meters_per_px
+    async def _call_claude(self, images: list[bytes], text: str) -> dict:
+        content = []
+        for img_bytes in images:
+            image_b64 = base64.b64encode(img_bytes).decode("utf-8")
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+            })
+        content.append({"type": "text", "text": text})
 
-        lat = center_lat - (meters_south / 111320)
-        lng = center_lng + (meters_east / (111320 * math.cos(math.radians(center_lat))))
-
-        return lat, lng
-
-    # --- Claude calls ---
-
-    async def _call_claude(self, image_bytes: bytes, text: str) -> str:
-        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         message = await self.client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
-                    },
-                    {"type": "text", "text": text},
-                ],
-            }],
+            messages=[{"role": "user", "content": content}],
         )
         response = message.content[0].text.strip()
-        if response.startswith("```"):
-            response = response.split("\n", 1)[1]
-            if response.endswith("```"):
-                response = response[:-3].strip()
-        return response
+        return self._parse_json(response)
 
-    async def _locate_pool(
-        self, image_bytes: bytes,
-        center_lat: float, center_lng: float,
-        zoom: int, width: int, height: int,
-    ) -> Optional[tuple[float, float]]:
-        """Pass 1: Find the pool in a wide-angle image, return its lat/lng."""
-        scale = self._scale_info(center_lat, zoom, width, height)
-        prompt = LOCATE_PROMPT.format(
-            width=width, height=height, ft_per_px=scale["ft_per_px"],
-        )
-
-        response = await self._call_claude(image_bytes, prompt)
-        result = json.loads(response)
-
-        if not result.get("pool_found"):
-            return None
-
-        px_x = result.get("pool_x", width // 2)
-        px_y = result.get("pool_y", height // 2)
-
-        # Only use if meaningfully different from center (>30px offset)
-        if abs(px_x - width // 2) < 30 and abs(px_y - height // 2) < 30:
-            return None  # pool is near center anyway, no offset needed
-
-        return self._pixel_to_latlng(px_x, px_y, center_lat, center_lng, zoom, width, height)
-
-    async def _analyze_pool(
-        self, image_bytes: bytes, address: str,
-        lat: float, zoom: int, width: int, height: int,
+    async def _measure_pool(
+        self, image_z21: bytes, image_z20: Optional[bytes],
+        address: str, lat: float, width: int, height: int,
     ) -> dict:
-        """Pass 2: Detailed analysis of zoomed-in pool image."""
-        scale = self._scale_info(lat, zoom, width, height)
-        prompt = ANALYSIS_PROMPT.format(
+        scale_z21 = self._scale_info(lat, 21, width, height)
+        scale_z20 = self._scale_info(lat, 20, width, height)
+
+        prompt = MEASURE_PROMPT.format(
             width=width, height=height,
-            ft_per_px=scale["ft_per_px"],
-            sqft_per_px=scale["sqft_per_px"],
-            img_width_ft=scale["img_width_ft"],
-            img_height_ft=scale["img_height_ft"],
-            car_px=scale["car_px"],
+            ft_per_px_z21=scale_z21["ft_per_px"],
+            sqft_per_px_z21=scale_z21["sqft_per_px"],
+            img_width_ft_z21=scale_z21["img_width_ft"],
+            img_height_ft_z21=scale_z21["img_height_ft"],
+            car_px_z21=scale_z21["car_px"],
+            ft_per_px_z20=scale_z20["ft_per_px"],
+            sqft_per_px_z20=scale_z20["sqft_per_px"],
+            img_width_ft_z20=scale_z20["img_width_ft"],
+            img_height_ft_z20=scale_z20["img_height_ft"],
         )
 
-        response = await self._call_claude(
-            image_bytes,
+        images = [image_z21]
+        if image_z20:
+            images.append(image_z20)
+
+        result = await self._call_claude(
+            images,
             f"Property address: {address}\n\n{prompt}",
         )
-        result = json.loads(response)
 
         return {
             "pool_detected": bool(result.get("pool_detected", False)),
@@ -403,25 +467,25 @@ class SatelliteService:
     # --- Persistence ---
 
     async def _save_error(
-        self, organization_id: str, property_id: str,
+        self, organization_id: str, property_id: str, bow_id: str,
         existing: Optional[SatelliteAnalysis],
         error_message: str, image_url: str, zoom: int, width: int, height: int,
     ) -> SatelliteAnalysis:
         return await self._save_analysis(
-            organization_id, property_id, existing,
+            organization_id, property_id, bow_id, existing,
             error_message=error_message,
             image_url=image_url, image_zoom=zoom,
             image_width=width, image_height=height,
         )
 
     async def _save_analysis(
-        self, organization_id: str, property_id: str,
+        self, organization_id: str, property_id: str, bow_id: str,
         existing: Optional[SatelliteAnalysis], **kwargs
     ) -> SatelliteAnalysis:
         if existing:
             for key, value in kwargs.items():
                 setattr(existing, key, value)
-            existing.analysis_version = "3.0"
+            existing.analysis_version = "5.0"
             await self.db.flush()
             await self.db.refresh(existing)
             return existing
@@ -430,9 +494,106 @@ class SatelliteService:
             id=str(uuid.uuid4()),
             organization_id=organization_id,
             property_id=property_id,
+            body_of_water_id=bow_id,
             **kwargs,
         )
         self.db.add(analysis)
         await self.db.flush()
         await self.db.refresh(analysis)
         return analysis
+
+    # --- Satellite Images (property-keyed, unchanged) ---
+
+    async def list_images(self, organization_id: str, property_id: str) -> list[SatelliteImage]:
+        result = await self.db.execute(
+            select(SatelliteImage).where(
+                SatelliteImage.property_id == property_id,
+                SatelliteImage.organization_id == organization_id,
+            ).order_by(SatelliteImage.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def capture_image(
+        self, organization_id: str, property_id: str,
+        center_lat: float, center_lng: float, zoom: int,
+    ) -> SatelliteImage:
+        if not settings.google_maps_api_key:
+            raise ValueError("Google Maps API key not configured")
+
+        await self._get_property(organization_id, property_id)
+
+        url = self._build_image_url(center_lat, center_lng, zoom, 640, 640)
+        image_bytes = await self._fetch_image(url)
+        if not image_bytes:
+            raise ValueError("Failed to fetch satellite image from Google")
+
+        prop_dir = UPLOAD_DIR / property_id
+        prop_dir.mkdir(parents=True, exist_ok=True)
+        image_id = str(uuid.uuid4())
+        filename = f"{image_id}.png"
+        filepath = prop_dir / filename
+        filepath.write_bytes(image_bytes)
+
+        existing = await self.list_images(organization_id, property_id)
+        is_hero = len(existing) == 0
+
+        img = SatelliteImage(
+            id=image_id,
+            property_id=property_id,
+            organization_id=organization_id,
+            filename=filename,
+            center_lat=center_lat,
+            center_lng=center_lng,
+            zoom=zoom,
+            is_hero=is_hero,
+        )
+        self.db.add(img)
+        await self.db.flush()
+        await self.db.refresh(img)
+        return img
+
+    async def set_hero_image(
+        self, organization_id: str, property_id: str, image_id: str,
+    ) -> SatelliteImage:
+        images = await self.list_images(organization_id, property_id)
+        target = None
+        for img in images:
+            if img.id == image_id:
+                img.is_hero = True
+                target = img
+            else:
+                img.is_hero = False
+        if not target:
+            raise NotFoundError(f"Image {image_id} not found")
+        await self.db.flush()
+        await self.db.refresh(target)
+        return target
+
+    async def delete_image(
+        self, organization_id: str, property_id: str, image_id: str,
+    ) -> None:
+        result = await self.db.execute(
+            select(SatelliteImage).where(
+                SatelliteImage.id == image_id,
+                SatelliteImage.property_id == property_id,
+                SatelliteImage.organization_id == organization_id,
+            )
+        )
+        img = result.scalar_one_or_none()
+        if not img:
+            raise NotFoundError(f"Image {image_id} not found")
+
+        was_hero = img.is_hero
+
+        filepath = UPLOAD_DIR / property_id / img.filename
+        if filepath.exists():
+            filepath.unlink()
+
+        await self.db.delete(img)
+        await self.db.flush()
+
+        if was_hero:
+            remaining = await self.list_images(organization_id, property_id)
+            if remaining:
+                remaining[0].is_hero = True
+                await self.db.flush()

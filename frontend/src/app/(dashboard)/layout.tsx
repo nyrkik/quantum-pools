@@ -3,7 +3,9 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { DevModeProvider, useDevMode } from "@/lib/dev-mode";
 import { Sidebar } from "@/components/layout/sidebar";
+import { Code2 } from "lucide-react";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -25,12 +27,22 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 
   if (!user) return null;
 
+  const dev = useDevMode();
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 pt-16 sm:pt-6">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {dev.isActive && (
+          <div className="flex items-center justify-center gap-2 bg-amber-500 text-white text-xs font-medium py-1 px-4 shrink-0">
+            <Code2 className="h-3 w-3" />
+            <span>Dev Mode — Viewing as <span className="font-bold uppercase">{dev.effectiveRole}</span></span>
+          </div>
+        )}
+        <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 pt-16 sm:pt-6">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
@@ -42,7 +54,9 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthProvider>
-      <AuthenticatedLayout>{children}</AuthenticatedLayout>
+      <DevModeProvider>
+        <AuthenticatedLayout>{children}</AuthenticatedLayout>
+      </DevModeProvider>
     </AuthProvider>
   );
 }

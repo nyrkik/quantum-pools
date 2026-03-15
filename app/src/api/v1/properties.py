@@ -42,7 +42,7 @@ async def list_properties(
     for p in properties:
         resp = PropertyResponse.model_validate(p)
         resp.bodies_of_water = [
-            {"id": b.id, "name": b.name, "water_type": b.water_type, "is_primary": b.is_primary,
+            {"id": b.id, "name": b.name, "water_type": b.water_type,
              "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
              "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
             for b in await bow_svc.list_for_property(ctx.organization_id, p.id)
@@ -75,7 +75,7 @@ async def get_property(
     prop = await svc.get(ctx.organization_id, property_id)
     resp = PropertyResponse.model_validate(prop)
     resp.bodies_of_water = [
-        {"id": b.id, "name": b.name, "water_type": b.water_type, "is_primary": b.is_primary,
+        {"id": b.id, "name": b.name, "water_type": b.water_type,
          "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
          "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
         for b in await bow_svc.list_for_property(ctx.organization_id, prop.id)

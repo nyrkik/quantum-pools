@@ -12,10 +12,13 @@ class SatelliteAnalysis(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     property_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+        String(36), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
     )
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    body_of_water_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), nullable=True, unique=True, index=True
     )
 
     # Pool detection
@@ -31,6 +34,10 @@ class SatelliteAnalysis(Base):
 
     # Shadow analysis
     shadow_pct: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # User-placed pin coordinates (override geocode center)
+    pool_lat: Mapped[float | None] = mapped_column(Float)
+    pool_lng: Mapped[float | None] = mapped_column(Float)
 
     # Image data
     image_url: Mapped[str | None] = mapped_column(Text)
@@ -50,5 +57,6 @@ class SatelliteAnalysis(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    property = relationship("Property", back_populates="satellite_analysis", lazy="noload")
+    property = relationship("Property", back_populates="satellite_analyses", lazy="noload")
+    body_of_water = relationship("BodyOfWater", back_populates="satellite_analysis", lazy="noload")
     organization = relationship("Organization", lazy="noload")

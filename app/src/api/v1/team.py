@@ -1,0 +1,199 @@
+"""Team management endpoints."""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+
+from src.core.database import get_db
+from src.core.security import get_password_hash
+from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.models.organization_user import OrganizationUser, OrgRole
+from src.models.user import User
+from src.schemas.team import (
+    TeamMemberResponse,
+    TeamMemberUpdate,
+    TeamDeveloperToggle,
+    TeamInviteRequest,
+)
+
+router = APIRouter(prefix="/team", tags=["team"])
+
+VALID_ROLES = {r.value for r in OrgRole}
+
+
+def _to_response(ou: OrganizationUser) -> TeamMemberResponse:
+    return TeamMemberResponse(
+        id=ou.id,
+        user_id=ou.user_id,
+        email=ou.user.email,
+        first_name=ou.user.first_name,
+        last_name=ou.user.last_name,
+        role=ou.role.value,
+        is_developer=ou.is_developer,
+        is_active=ou.is_active,
+        created_at=ou.created_at,
+    )
+
+
+@router.get("", response_model=list[TeamMemberResponse])
+async def list_team(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(OrganizationUser)
+        .options(joinedload(OrganizationUser.user))
+        .where(OrganizationUser.organization_id == ctx.organization_id)
+        .order_by(OrganizationUser.created_at)
+    )
+    members = result.unique().scalars().all()
+    return [_to_response(m) for m in members]
+
+
+@router.post("/invite", response_model=TeamMemberResponse, status_code=status.HTTP_201_CREATED)
+async def invite_member(
+    body: TeamInviteRequest,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}")
+    if body.role == "owner" and ctx.role != OrgRole.owner:
+        raise HTTPException(status_code=403, detail="Only owner can assign owner role")
+
+    # Check if user already exists
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user:
+        # Check if already a member
+        result = await db.execute(
+            select(OrganizationUser).where(
+                OrganizationUser.user_id == user.id,
+                OrganizationUser.organization_id == ctx.organization_id,
+            )
+        )
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="User is already a team member")
+    else:
+        user = User(
+            email=body.email,
+            hashed_password=get_password_hash(body.password),
+            first_name=body.first_name,
+            last_name=body.last_name,
+        )
+        db.add(user)
+        await db.flush()
+
+    org_user = OrganizationUser(
+        user_id=user.id,
+        organization_id=ctx.organization_id,
+        role=OrgRole(body.role),
+    )
+    db.add(org_user)
+    await db.commit()
+
+    # Reload with user relationship
+    result = await db.execute(
+        select(OrganizationUser)
+        .options(joinedload(OrganizationUser.user))
+        .where(OrganizationUser.id == org_user.id)
+    )
+    org_user = result.unique().scalar_one()
+    return _to_response(org_user)
+
+
+@router.put("/{member_id}", response_model=TeamMemberResponse)
+async def update_member(
+    member_id: str,
+    body: TeamMemberUpdate,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(OrganizationUser)
+        .options(joinedload(OrganizationUser.user))
+        .where(
+            OrganizationUser.id == member_id,
+            OrganizationUser.organization_id == ctx.organization_id,
+        )
+    )
+    member = result.unique().scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    # Can't modify owner unless you are owner
+    if member.role == OrgRole.owner and ctx.role != OrgRole.owner:
+        raise HTTPException(status_code=403, detail="Only owner can modify owner accounts")
+
+    # Can't demote yourself from owner (prevent lockout)
+    if member.user_id == ctx.user.id and member.role == OrgRole.owner and body.role and body.role != "owner":
+        raise HTTPException(status_code=400, detail="Cannot demote yourself from owner")
+
+    if body.role is not None:
+        if body.role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}")
+        if body.role == "owner" and ctx.role != OrgRole.owner:
+            raise HTTPException(status_code=403, detail="Only owner can assign owner role")
+        member.role = OrgRole(body.role)
+
+    if body.is_active is not None:
+        if member.user_id == ctx.user.id:
+            raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+        member.is_active = body.is_active
+
+    await db.commit()
+    await db.refresh(member)
+    return _to_response(member)
+
+
+@router.put("/{member_id}/developer", response_model=TeamMemberResponse)
+async def toggle_developer(
+    member_id: str,
+    body: TeamDeveloperToggle,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(OrganizationUser)
+        .options(joinedload(OrganizationUser.user))
+        .where(
+            OrganizationUser.id == member_id,
+            OrganizationUser.organization_id == ctx.organization_id,
+        )
+    )
+    member = result.unique().scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    member.is_developer = body.is_developer
+    await db.commit()
+    await db.refresh(member)
+    return _to_response(member)
+
+
+@router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_member(
+    member_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(OrganizationUser).where(
+            OrganizationUser.id == member_id,
+            OrganizationUser.organization_id == ctx.organization_id,
+        )
+    )
+    member = result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if member.role == OrgRole.owner:
+        raise HTTPException(status_code=400, detail="Cannot remove owner")
+
+    if member.user_id == ctx.user.id:
+        raise HTTPException(status_code=400, detail="Cannot remove yourself")
+
+    await db.delete(member)
+    await db.commit()

@@ -8,7 +8,6 @@ from datetime import datetime
 class BodyOfWaterCreate(BaseModel):
     name: Optional[str] = None
     water_type: str = "pool"
-    is_primary: bool = False
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
@@ -34,7 +33,6 @@ class BodyOfWaterCreate(BaseModel):
 class BodyOfWaterUpdate(BaseModel):
     name: Optional[str] = None
     water_type: Optional[str] = None
-    is_primary: Optional[bool] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
@@ -63,7 +61,6 @@ class BodyOfWaterResponse(BaseModel):
     property_id: str
     name: Optional[str] = None
     water_type: str
-    is_primary: bool
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None

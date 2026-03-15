@@ -1,7 +1,7 @@
 """Customer service — CRUD operations scoped by organization."""
 
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -19,12 +19,16 @@ class CustomerService:
 
     async def list(
         self, org_id: str, search: Optional[str] = None, is_active: Optional[bool] = None,
+        status: Optional[List[str]] = None,
         skip: int = 0, limit: int = 50,
     ) -> tuple[List[Customer], int]:
         query = select(Customer).where(Customer.organization_id == org_id)
         count_query = select(func.count(Customer.id)).where(Customer.organization_id == org_id)
 
-        if is_active is not None:
+        if status:
+            query = query.where(Customer.status.in_(status))
+            count_query = count_query.where(Customer.status.in_(status))
+        elif is_active is not None:
             query = query.where(Customer.is_active == is_active)
             count_query = count_query.where(Customer.is_active == is_active)
         if search:
@@ -69,6 +73,9 @@ class CustomerService:
         for key, value in kwargs.items():
             if value is not None:
                 setattr(customer, key, value)
+        # Keep is_active in sync with status
+        if "status" in kwargs and kwargs["status"] is not None:
+            customer.is_active = kwargs["status"] == "active"
         await self.db.flush()
         await self.db.refresh(customer)
         return customer
@@ -77,6 +84,41 @@ class CustomerService:
         customer = await self.get(org_id, customer_id)
         await self.db.delete(customer)
         await self.db.flush()
+
+    async def create_with_property(
+        self, org_id: str,
+        customer_data: dict,
+        property_data: dict,
+        bow_data: dict,
+    ) -> Tuple[Customer, Property]:
+        """Atomically create customer + property + primary BOW."""
+        customer_id = str(uuid.uuid4())
+        property_id = str(uuid.uuid4())
+        bow_id = str(uuid.uuid4())
+
+        customer = Customer(id=customer_id, organization_id=org_id, **customer_data)
+        self.db.add(customer)
+
+        prop = Property(
+            id=property_id,
+            organization_id=org_id,
+            customer_id=customer_id,
+            **property_data,
+        )
+        self.db.add(prop)
+
+        bow = BodyOfWater(
+            id=bow_id,
+            organization_id=org_id,
+            property_id=property_id,
+            **bow_data,
+        )
+        self.db.add(bow)
+
+        await self.db.flush()
+        await self.db.refresh(customer)
+        await self.db.refresh(prop)
+        return customer, prop
 
     async def get_property_count(self, customer_id: str) -> int:
         result = await self.db.execute(
@@ -92,18 +134,16 @@ class CustomerService:
         return result.scalar_one_or_none()
 
     async def get_first_property_pool_type(self, customer_id: str) -> Optional[str]:
-        # Try to get pool_type from primary BOW first
         result = await self.db.execute(
             select(BodyOfWater.pool_type)
             .join(Property, Property.id == BodyOfWater.property_id)
-            .where(Property.customer_id == customer_id, BodyOfWater.is_primary == True)
+            .where(Property.customer_id == customer_id)
             .order_by(Property.created_at)
             .limit(1)
         )
         bow_type = result.scalar_one_or_none()
         if bow_type:
             return bow_type
-        # Fall back to property
         result = await self.db.execute(
             select(Property.pool_type).where(Property.customer_id == customer_id)
             .order_by(Property.created_at).limit(1)
@@ -123,7 +163,7 @@ class CustomerService:
             select(BodyOfWater.water_type).where(
                 BodyOfWater.property_id == prop_id,
                 BodyOfWater.is_active == True,
-            ).order_by(BodyOfWater.is_primary.desc())
+            ).order_by(BodyOfWater.water_type)
         )
         types = [r[0] for r in bow_result.all()]
         if not types:

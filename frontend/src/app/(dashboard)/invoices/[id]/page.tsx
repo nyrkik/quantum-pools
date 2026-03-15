@@ -510,8 +510,8 @@ export default function InvoiceDetailPage({
                   </TableCell>
                 </TableRow>
               ) : (
-                invoice.line_items.map((li) => (
-                  <TableRow key={li.id}>
+                invoice.line_items.map((li, i) => (
+                  <TableRow key={li.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                     <TableCell>{li.description}</TableCell>
                     <TableCell className="text-right">{li.quantity}</TableCell>
                     <TableCell className="text-right">
@@ -576,8 +576,8 @@ export default function InvoiceDetailPage({
                   </TableCell>
                 </TableRow>
               ) : (
-                payments.map((p) => (
-                  <TableRow key={p.id}>
+                payments.map((p, i) => (
+                  <TableRow key={p.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                     <TableCell>{p.payment_date}</TableCell>
                     <TableCell className="capitalize">
                       {p.payment_method.replace("_", " ")}

@@ -33,6 +33,7 @@ class OrganizationUser(Base):
         Enum(OrgRole, name="org_role", native_enum=False), nullable=False, default=OrgRole.readonly,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_developer: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     organization = relationship("Organization", back_populates="members")

@@ -73,6 +73,7 @@ async def register(body: RegisterRequest, response: Response, db: AsyncSession =
         organization_id=org.id,
         organization_name=org.name,
         role="owner",
+        is_developer=False,
     )
 
 
@@ -106,6 +107,7 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
         organization_id=org_user.organization_id if org_user else "",
         organization_name=org_user.organization.name if org_user and org_user.organization else "",
         role=org_user.role.value if org_user else "",
+        is_developer=org_user.is_developer if org_user else False,
     )
 
 
@@ -149,6 +151,7 @@ async def get_me(ctx: OrgUserContext = Depends(get_current_org_user)):
         organization_id=ctx.organization_id,
         organization_name=ctx.organization_name,
         role=ctx.role.value,
+        is_developer=ctx.org_user.is_developer,
     )
 
 

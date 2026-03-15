@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Plus, Search, Building2, Home, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { usePermissions } from "@/lib/permissions";
 
 interface Customer {
   id: string;
@@ -48,6 +49,7 @@ interface Customer {
   phone: string | null;
   monthly_rate: number;
   balance: number;
+  status: string;
   is_active: boolean;
   property_count: number;
   first_property_address: string | null;
@@ -70,7 +72,113 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
     : <ArrowDown className="h-3.5 w-3.5 ml-1" />;
 }
 
+function ClientTable({
+  title,
+  icon: Icon,
+  items,
+  perms,
+  sortKey,
+  sortDir,
+  toggleSort,
+  thClass,
+}: {
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  items: Customer[];
+  perms: ReturnType<typeof usePermissions>;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  toggleSort: (key: SortKey) => void;
+  thClass: string;
+}) {
+  const colSpan = 5 + (perms.canViewRates ? 1 : 0) + (perms.canViewBalance ? 1 : 0);
+  return (
+    <div className="rounded-lg border shadow-sm overflow-hidden">
+      {/* Section header */}
+      <div className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5">
+        <Icon className="h-4 w-4 opacity-70" />
+        <h2 className="text-xs font-medium uppercase tracking-wide">{title}</h2>
+        <span className="text-xs opacity-70">({items.length})</span>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-slate-100 dark:bg-slate-800">
+            <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("name")}>
+              <div className="flex items-center">Name<SortIcon active={sortKey === "name"} dir={sortDir} /></div>
+            </TableHead>
+            <TableHead className={`hidden md:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("property")}>
+              <div className="flex items-center">Property<SortIcon active={sortKey === "property"} dir={sortDir} /></div>
+            </TableHead>
+            <TableHead className={`hidden lg:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("company")}>
+              <div className="flex items-center">Mgmt Company<SortIcon active={sortKey === "company"} dir={sortDir} /></div>
+            </TableHead>
+            <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("pool")}>
+              <div className="flex items-center">Pool Type<SortIcon active={sortKey === "pool"} dir={sortDir} /></div>
+            </TableHead>
+            {perms.canViewRates && (
+              <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("rate")}>
+                <div className="flex items-center">Rate<SortIcon active={sortKey === "rate"} dir={sortDir} /></div>
+              </TableHead>
+            )}
+            {perms.canViewBalance && (
+              <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("balance")}>
+                <div className="flex items-center">Balance<SortIcon active={sortKey === "balance"} dir={sortDir} /></div>
+              </TableHead>
+            )}
+            <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("status")}>
+              <div className="flex items-center">Status<SortIcon active={sortKey === "status"} dir={sortDir} /></div>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={colSpan} className="text-center py-6 text-muted-foreground text-sm">
+                No {title.toLowerCase()} clients
+              </TableCell>
+            </TableRow>
+          ) : (
+            items.map((c, i) => (
+              <TableRow key={c.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                <TableCell>
+                  <Link href={`/customers/${c.id}`} className="font-medium hover:underline">
+                    {customerDisplayName(c)}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
+                  {c.first_property_address || "\u2014"}
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
+                  {c.company_name || "\u2014"}
+                </TableCell>
+                <TableCell className="hidden sm:table-cell text-sm text-muted-foreground capitalize">
+                  {c.bow_summary || c.first_property_pool_type || "\u2014"}
+                </TableCell>
+                {perms.canViewRates && (
+                  <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
+                )}
+                {perms.canViewBalance && (
+                  <TableCell className={`hidden sm:table-cell ${c.balance > 0 ? "text-red-600 font-medium" : ""}`}>
+                    ${c.balance.toFixed(2)}
+                  </TableCell>
+                )}
+                <TableCell>
+                  <Badge variant={c.status === "active" ? "default" : c.status === "pending" ? "outline" : "secondary"}
+                    className={c.status === "pending" ? "border-amber-400 text-amber-600" : c.status === "one_time" ? "border-blue-400 text-blue-600" : ""}>
+                    {c.status === "one_time" ? "One-time" : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export default function CustomersPage() {
+  const perms = usePermissions();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -79,7 +187,8 @@ export default function CustomersPage() {
   const [newType, setNewType] = useState("residential");
   const [newCompany, setNewCompany] = useState("");
   const [newCompanyCustom, setNewCompanyCustom] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"commercial" | "residential" | null>(null);
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(["active"]));
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -97,6 +206,7 @@ export default function CustomersPage() {
     try {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
+      statusFilter.forEach(s => params.append("status", s));
       const data = await api.get<{ items: Customer[]; total: number }>(
         `/v1/customers?${params}`
       );
@@ -107,7 +217,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, [...statusFilter].sort().join(",")]);
 
   useEffect(() => {
     fetchCustomers();
@@ -135,9 +245,15 @@ export default function CustomersPage() {
       email: (form.get("email") as string) || undefined,
       phone: (form.get("phone") as string) || undefined,
       monthly_rate: parseFloat(form.get("monthly_rate") as string) || 0,
+      address: form.get("address") as string,
+      city: form.get("city") as string,
+      state: form.get("state") as string,
+      zip_code: form.get("zip_code") as string,
+      water_type: "pool",
+      pool_type: isCommercial ? "commercial" : "residential",
     };
     try {
-      await api.post("/v1/customers", body);
+      await api.post("/v1/customers/with-property", body);
       toast.success("Client created");
       setDialogOpen(false);
       setNewType("residential");
@@ -149,42 +265,36 @@ export default function CustomersPage() {
     }
   };
 
-  const commercialCount = customers.filter(c => c.customer_type === "commercial").length;
-  const residentialCount = customers.filter(c => c.customer_type === "residential").length;
-  const hasCommercial = commercialCount > 0;
-  const hasResidential = residentialCount > 0;
+  const sortFn = useCallback((a: Customer, b: Customer) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    switch (sortKey) {
+      case "name":
+        return dir * customerDisplayName(a).localeCompare(customerDisplayName(b));
+      case "property":
+        return dir * (a.first_property_address ?? "").localeCompare(b.first_property_address ?? "");
+      case "company":
+        return dir * (a.company_name ?? "").localeCompare(b.company_name ?? "");
+      case "pool":
+        return dir * (a.bow_summary ?? a.first_property_pool_type ?? "").localeCompare(b.bow_summary ?? b.first_property_pool_type ?? "");
+      case "rate":
+        return dir * (a.monthly_rate - b.monthly_rate);
+      case "balance":
+        return dir * (a.balance - b.balance);
+      case "status":
+        return dir * (a.status ?? "").localeCompare(b.status ?? "");
+      default:
+        return 0;
+    }
+  }, [sortKey, sortDir]);
 
-  const sorted = useMemo(() => {
-    const filtered = typeFilter ? customers.filter(c => c.customer_type === typeFilter) : customers;
-    return [...filtered].sort((a, b) => {
-      // Commercial always first, then sort within groups
-      const typeOrder = (a.customer_type === "commercial" ? 0 : 1) - (b.customer_type === "commercial" ? 0 : 1);
-      if (typeOrder !== 0) return typeOrder;
-
-      const dir = sortDir === "asc" ? 1 : -1;
-      switch (sortKey) {
-        case "name":
-          return dir * customerDisplayName(a).localeCompare(customerDisplayName(b));
-        case "property":
-          return dir * (a.first_property_address ?? "").localeCompare(b.first_property_address ?? "");
-        case "company":
-          return dir * (a.company_name ?? "").localeCompare(b.company_name ?? "");
-        case "pool":
-          return dir * (a.bow_summary ?? a.first_property_pool_type ?? "").localeCompare(b.bow_summary ?? b.first_property_pool_type ?? "");
-        case "rate":
-          return dir * (a.monthly_rate - b.monthly_rate);
-        case "balance":
-          return dir * (a.balance - b.balance);
-        case "status": {
-          const av = a.is_active ? 0 : 1;
-          const bv = b.is_active ? 0 : 1;
-          return dir * (av - bv);
-        }
-        default:
-          return 0;
-      }
-    });
-  }, [customers, typeFilter, sortKey, sortDir]);
+  const commercialList = useMemo(() =>
+    customers.filter(c => c.customer_type === "commercial").sort(sortFn),
+    [customers, sortFn]
+  );
+  const residentialList = useMemo(() =>
+    customers.filter(c => c.customer_type === "residential").sort(sortFn),
+    [customers, sortFn]
+  );
 
   const existingCompanies = useMemo(() => {
     const names = new Set<string>();
@@ -202,13 +312,15 @@ export default function CustomersPage() {
           <p className="text-muted-foreground text-sm">{total} total</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              <span className="hidden sm:inline">Add Client</span>
-              <span className="sm:hidden">Add</span>
-            </Button>
-          </DialogTrigger>
+          {perms.canCreateCustomers && (
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                <span className="hidden sm:inline">Add Client</span>
+                <span className="sm:hidden">Add</span>
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent>
             <DialogHeader>
               <DialogTitle>New Client</DialogTitle>
@@ -293,6 +405,26 @@ export default function CustomersPage() {
                   <Input id="phone" name="phone" />
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="address">Service Address</Label>
+                <Input id="address" name="address" placeholder="123 Main St" required />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-2">
+                  <Label htmlFor="city">City</Label>
+                  <Input id="city" name="city" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="state">State</Label>
+                  <Input id="state" name="state" defaultValue="CA" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="zip_code">Zip</Label>
+                  <Input id="zip_code" name="zip_code" required />
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="monthly_rate">Monthly Rate</Label>
                 <Input
@@ -321,129 +453,86 @@ export default function CustomersPage() {
         />
       </div>
 
-      {hasCommercial && hasResidential && (
-        <div className="flex items-center gap-2">
-          <Button
-            variant={typeFilter === null ? "default" : "outline"}
-            size="sm"
-            onClick={() => setTypeFilter(null)}
-          >
-            All
-          </Button>
-          <Button
-            variant={typeFilter === "commercial" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setTypeFilter("commercial")}
-          >
-            <Building2 className="h-3.5 w-3.5 mr-1.5" />
-            Commercial ({commercialCount})
-          </Button>
-          <Button
-            variant={typeFilter === "residential" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setTypeFilter("residential")}
-          >
-            <Home className="h-3.5 w-3.5 mr-1.5" />
-            Residential ({residentialCount})
-          </Button>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {[
+            { value: "commercial", label: "Commercial", icon: Building2 },
+            { value: "residential", label: "Residential", icon: Home },
+          ].map((t) => (
+            <Button
+              key={t.value}
+              variant={typeFilter.has(t.value) ? "default" : "outline"}
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={() => setTypeFilter(prev => {
+                const next = new Set(prev);
+                if (next.has(t.value)) next.delete(t.value);
+                else next.add(t.value);
+                return next;
+              })}
+            >
+              <t.icon className="h-3.5 w-3.5 mr-1" />{t.label}
+            </Button>
+          ))}
         </div>
-      )}
+        <div className="flex-1" />
+        <div className="flex items-center gap-1.5">
+          {[
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Inactive" },
+            { value: "pending", label: "Pending" },
+            { value: "one_time", label: "One-time" },
+          ].map((s) => (
+            <Button
+              key={s.value}
+              variant={statusFilter.has(s.value) ? "default" : "outline"}
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={() => setStatusFilter(prev => {
+                const next = new Set(prev);
+                if (next.has(s.value)) next.delete(s.value);
+                else next.add(s.value);
+                return next;
+              })}
+            >
+              {s.label}
+            </Button>
+          ))}
+        </div>
+      </div>
 
-      <TooltipProvider>
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-8"></TableHead>
-                <TableHead className={thClass} onClick={() => toggleSort("name")}>
-                  <div className="flex items-center">Name<SortIcon active={sortKey === "name"} dir={sortDir} /></div>
-                </TableHead>
-                <TableHead className={`hidden md:table-cell ${thClass}`} onClick={() => toggleSort("property")}>
-                  <div className="flex items-center">Property<SortIcon active={sortKey === "property"} dir={sortDir} /></div>
-                </TableHead>
-                <TableHead className={`hidden lg:table-cell ${thClass}`} onClick={() => toggleSort("company")}>
-                  <div className="flex items-center">Mgmt Company<SortIcon active={sortKey === "company"} dir={sortDir} /></div>
-                </TableHead>
-                <TableHead className={`hidden sm:table-cell ${thClass}`} onClick={() => toggleSort("pool")}>
-                  <div className="flex items-center">Pool Type<SortIcon active={sortKey === "pool"} dir={sortDir} /></div>
-                </TableHead>
-                <TableHead className={thClass} onClick={() => toggleSort("rate")}>
-                  <div className="flex items-center">Rate<SortIcon active={sortKey === "rate"} dir={sortDir} /></div>
-                </TableHead>
-                <TableHead className={`hidden sm:table-cell ${thClass}`} onClick={() => toggleSort("balance")}>
-                  <div className="flex items-center">Balance<SortIcon active={sortKey === "balance"} dir={sortDir} /></div>
-                </TableHead>
-                <TableHead className={thClass} onClick={() => toggleSort("status")}>
-                  <div className="flex items-center">Status<SortIcon active={sortKey === "status"} dir={sortDir} /></div>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8">
-                    Loading...
-                  </TableCell>
-                </TableRow>
-              ) : customers.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={8}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    No clients found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sorted.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="pr-0">
-                      <Tooltip>
-                        <TooltipTrigger>
-                          {c.customer_type === "commercial" ? (
-                            <Building2 className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <Home className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </TooltipTrigger>
-                        <TooltipContent>{c.customer_type}</TooltipContent>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/customers/${c.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {customerDisplayName(c)}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
-                      {c.first_property_address || "\u2014"}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
-                      {c.company_name || "\u2014"}
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground capitalize">
-                      {c.bow_summary || c.first_property_pool_type || "\u2014"}
-                    </TableCell>
-                    <TableCell>${c.monthly_rate.toFixed(2)}</TableCell>
-                    <TableCell
-                      className={`hidden sm:table-cell ${c.balance > 0 ? "text-red-600 font-medium" : ""}`}
-                    >
-                      ${c.balance.toFixed(2)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={c.is_active ? "default" : "secondary"}>
-                        {c.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </TooltipProvider>
+      {loading ? (
+        <div className="text-center py-8 text-muted-foreground">Loading...</div>
+      ) : (
+        <TooltipProvider>
+          <div className="space-y-6">
+            {typeFilter.has("commercial") && (
+              <ClientTable
+                title="Commercial"
+                icon={Building2}
+                items={commercialList}
+                perms={perms}
+                sortKey={sortKey}
+                sortDir={sortDir}
+                toggleSort={toggleSort}
+                thClass={thClass}
+              />
+            )}
+            {typeFilter.has("residential") && (
+              <ClientTable
+                title="Residential"
+                icon={Home}
+                items={residentialList}
+                perms={perms}
+                sortKey={sortKey}
+                sortDir={sortDir}
+                toggleSort={toggleSort}
+                thClass={thClass}
+              />
+            )}
+          </div>
+        </TooltipProvider>
+      )}
     </div>
   );
 }

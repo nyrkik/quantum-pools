@@ -830,8 +830,8 @@ export default function InvoicesPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              invoices.map((inv) => (
-                <TableRow key={inv.id}>
+              invoices.map((inv, i) => (
+                <TableRow key={inv.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                   <TableCell>
                     <StatusBadge status={inv.status} />
                   </TableCell>

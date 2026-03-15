@@ -22,7 +22,7 @@ class BodyOfWaterService:
                 BodyOfWater.organization_id == org_id,
                 BodyOfWater.property_id == property_id,
             )
-            .order_by(BodyOfWater.is_primary.desc(), BodyOfWater.water_type, BodyOfWater.name)
+            .order_by(BodyOfWater.water_type, BodyOfWater.name)
         )
         return list(result.scalars().all())
 
@@ -43,19 +43,7 @@ class BodyOfWaterService:
         if not prop_result.scalar_one_or_none():
             raise NotFoundError("Property not found")
 
-        # If this is set as primary, unset any existing primary
-        if kwargs.get("is_primary"):
-            await self._clear_primary(org_id, property_id)
-
-        # If first BOW for property, make it primary
-        count_result = await self.db.execute(
-            select(func.count(BodyOfWater.id)).where(
-                BodyOfWater.property_id == property_id,
-                BodyOfWater.organization_id == org_id,
-            )
-        )
-        if (count_result.scalar() or 0) == 0:
-            kwargs["is_primary"] = True
+        kwargs.pop("is_primary", None)
 
         bow = BodyOfWater(
             id=str(uuid.uuid4()),
@@ -70,10 +58,7 @@ class BodyOfWaterService:
 
     async def update(self, org_id: str, bow_id: str, **kwargs) -> BodyOfWater:
         bow = await self.get(org_id, bow_id)
-
-        # If setting as primary, unset existing primary
-        if kwargs.get("is_primary"):
-            await self._clear_primary(org_id, bow.property_id, exclude_id=bow_id)
+        kwargs.pop("is_primary", None)
 
         for key, value in kwargs.items():
             if value is not None:
@@ -84,36 +69,8 @@ class BodyOfWaterService:
 
     async def delete(self, org_id: str, bow_id: str) -> None:
         bow = await self.get(org_id, bow_id)
-        was_primary = bow.is_primary
-        property_id = bow.property_id
         await self.db.delete(bow)
         await self.db.flush()
-
-        # If deleted was primary, promote another BOW if one exists
-        if was_primary:
-            result = await self.db.execute(
-                select(BodyOfWater)
-                .where(
-                    BodyOfWater.property_id == property_id,
-                    BodyOfWater.organization_id == org_id,
-                )
-                .order_by(BodyOfWater.created_at)
-                .limit(1)
-            )
-            next_bow = result.scalar_one_or_none()
-            if next_bow:
-                next_bow.is_primary = True
-                await self.db.flush()
-
-    async def get_primary_for_property(self, org_id: str, property_id: str) -> Optional[BodyOfWater]:
-        result = await self.db.execute(
-            select(BodyOfWater).where(
-                BodyOfWater.property_id == property_id,
-                BodyOfWater.organization_id == org_id,
-                BodyOfWater.is_primary == True,
-            )
-        )
-        return result.scalar_one_or_none()
 
     async def get_bow_summary(self, org_id: str, property_id: str) -> str:
         """Return a human-readable summary like 'Pool, Spa' or '2 Pools'."""
@@ -158,16 +115,3 @@ class BodyOfWaterService:
             )
         )
         return result.scalar()
-
-    async def _clear_primary(self, org_id: str, property_id: str, exclude_id: Optional[str] = None) -> None:
-        query = select(BodyOfWater).where(
-            BodyOfWater.property_id == property_id,
-            BodyOfWater.organization_id == org_id,
-            BodyOfWater.is_primary == True,
-        )
-        if exclude_id:
-            query = query.where(BodyOfWater.id != exclude_id)
-        result = await self.db.execute(query)
-        for bow in result.scalars().all():
-            bow.is_primary = False
-        await self.db.flush()

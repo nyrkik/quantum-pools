@@ -49,6 +49,7 @@ class OrgUserResponse(BaseModel):
     organization_id: str
     organization_name: str
     role: str
+    is_developer: bool = False
 
 
 class MessageResponse(BaseModel):

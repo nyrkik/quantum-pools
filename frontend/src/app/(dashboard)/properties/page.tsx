@@ -20,7 +20,6 @@ interface BodyOfWaterSummary {
   id: string;
   name: string | null;
   water_type: string;
-  is_primary: boolean;
   pool_type: string | null;
   pool_gallons: number | null;
   pool_sqft: number | null;
@@ -80,7 +79,7 @@ export default function PropertiesPage() {
               <TableHead>Address</TableHead>
               <TableHead>Pool</TableHead>
               <TableHead>Gallons</TableHead>
-              <TableHead>Bodies of Water</TableHead>
+              <TableHead>Water Features</TableHead>
               <TableHead>Service Time</TableHead>
               <TableHead>Status</TableHead>
               <TableHead></TableHead>
@@ -103,8 +102,8 @@ export default function PropertiesPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              properties.map((p) => (
-                <TableRow key={p.id}>
+              properties.map((p, i) => (
+                <TableRow key={p.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground" />

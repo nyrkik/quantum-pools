@@ -147,7 +147,25 @@ async def get_current_org_user(
         )
 
     org_name = org_user.organization.name if org_user.organization else ""
-    return OrgUserContext(user=user, org_user=org_user, org_name=org_name)
+    ctx = OrgUserContext(user=user, org_user=org_user, org_name=org_name)
+
+    # Developer view-as override
+    view_as = request.headers.get("X-View-As-Role")
+    if view_as:
+        if not org_user.is_developer:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": "not_developer", "message": "Developer mode required for view-as."},
+            )
+        try:
+            ctx.role = OrgRole(view_as)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": "invalid_role", "message": f"Invalid role: {view_as}"},
+            )
+
+    return ctx
 
 
 def require_roles(*roles: OrgRole):

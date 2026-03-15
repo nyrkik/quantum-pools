@@ -125,7 +125,6 @@ class BodyOfWaterSummary(BaseModel):
     id: str
     name: Optional[str] = None
     water_type: str
-    is_primary: bool
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None

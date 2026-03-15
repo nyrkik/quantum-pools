@@ -127,7 +127,7 @@ export default function MeasurePage() {
       setStep("analyze");
       setAnalyzing(true);
 
-      const analyzed = await api.post<MeasurementData>(
+      const analyzed = await api.postDirect<MeasurementData>(
         `/v1/measurements/${uploaded.id}/analyze`
       );
 
@@ -139,10 +139,11 @@ export default function MeasurePage() {
         toast.success("Analysis complete");
       }
     } catch (e: unknown) {
+      console.error("Measure upload/analyze error:", e);
       const msg =
         typeof e === "object" && e && "message" in e
           ? (e as { message: string }).message
-          : "Upload failed";
+          : typeof e === "string" ? e : "Upload failed";
       toast.error(msg);
     } finally {
       setUploading(false);

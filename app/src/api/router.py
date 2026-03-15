@@ -13,6 +13,7 @@ from src.api.v1.profitability import router as profitability_router
 from src.api.v1.satellite import router as satellite_router
 from src.api.v1.measurements import router as measurements_router
 from src.api.v1.bodies_of_water import router as bodies_of_water_router
+from src.api.v1.team import router as team_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -27,3 +28,4 @@ api_router.include_router(profitability_router)
 api_router.include_router(satellite_router)
 api_router.include_router(measurements_router)
 api_router.include_router(bodies_of_water_router)
+api_router.include_router(team_router)

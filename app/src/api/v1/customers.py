@@ -1,14 +1,15 @@
 """Customer endpoints — all org-scoped."""
 
-from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from typing import Optional, List
+from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_db
+from src.core.database import get_db, get_db_context
 from src.core.exceptions import NotFoundError
 from src.api.deps import get_current_org_user, OrgUserContext
-from src.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
+from src.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse, CustomerCreateWithProperty
 from src.services.customer_service import CustomerService
+from src.services.geocoding_service import GeocodingService
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -17,13 +18,14 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 async def list_customers(
     search: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
+    status: Optional[List[str]] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     svc = CustomerService(db)
-    customers, total = await svc.list(ctx.organization_id, search=search, is_active=is_active, skip=skip, limit=limit)
+    customers, total = await svc.list(ctx.organization_id, search=search, is_active=is_active, status=status, skip=skip, limit=limit)
     results = []
     for c in customers:
         resp = CustomerResponse.model_validate(c)
@@ -33,6 +35,46 @@ async def list_customers(
         resp.bow_summary = await svc.get_property_bow_summary(c.id)
         results.append(resp)
     return {"items": results, "total": total}
+
+
+async def _geocode_property(property_id: str, address: str):
+    """Background task to geocode a property."""
+    from src.services.property_service import PropertyService
+    async with get_db_context() as db:
+        geo_svc = GeocodingService(db)
+        result = await geo_svc.geocode(address)
+        if result:
+            prop_svc = PropertyService(db)
+            await prop_svc.update_geocode(property_id, result[0], result[1], result[2])
+
+
+@router.post("/with-property", response_model=CustomerResponse, status_code=201)
+async def create_customer_with_property(
+    body: CustomerCreateWithProperty,
+    background_tasks: BackgroundTasks,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = CustomerService(db)
+    data = body.model_dump()
+    # Split into customer, property, and BOW fields
+    property_fields = {k: data.pop(k) for k in ["address", "city", "state", "zip_code", "gate_code", "access_instructions", "dog_on_property"]}
+    bow_fields = {k: data.pop(k) for k in ["water_type", "pool_type"]}
+    # Set billing address from service address if not provided
+    if not data.get("billing_address"):
+        data["billing_address"] = property_fields["address"]
+        data["billing_city"] = property_fields["city"]
+        data["billing_state"] = property_fields["state"]
+        data["billing_zip"] = property_fields["zip_code"]
+    customer, prop = await svc.create_with_property(
+        ctx.organization_id, data, property_fields, bow_fields,
+    )
+    full_addr = f"{prop.address}, {prop.city}, {prop.state} {prop.zip_code}"
+    background_tasks.add_task(_geocode_property, prop.id, full_addr)
+    resp = CustomerResponse.model_validate(customer)
+    resp.property_count = 1
+    resp.first_property_address = prop.address
+    return resp
 
 
 @router.post("", response_model=CustomerResponse, status_code=201)

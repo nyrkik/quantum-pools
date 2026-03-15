@@ -6,12 +6,23 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
+import { usePermissions, type Permissions } from "@/lib/permissions";
+import { useDevMode } from "@/lib/dev-mode";
+import type { Role } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   LayoutDashboard,
   Users,
-  MapPin,
+  UsersRound,
   Route,
   FileText,
   Shield,
@@ -20,22 +31,32 @@ import {
   TrendingUp,
   Satellite,
   Menu,
+  Code2,
 } from "lucide-react";
 
+const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
+
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/customers", label: "Clients", icon: Users },
-  { href: "/routes", label: "Routes", icon: Route },
-  { href: "/invoices", label: "Invoices", icon: FileText },
-  { href: "/profitability", label: "Profitability", icon: TrendingUp },
-  { href: "/satellite", label: "Satellite", icon: Satellite },
-  { href: "/emd", label: "EMD Intel", icon: Shield },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
+  { href: "/customers", label: "Clients", icon: Users, check: null },
+  { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
+  { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
+  { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
+  { href: "/satellite", label: "Satellite", icon: Satellite, check: "canViewSatellite" as keyof Permissions },
+  { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
+  { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
+  { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { user, organizationName, logout } = useAuth();
+  const perms = usePermissions();
+  const dev = useDevMode();
+
+  const visibleNav = navItems.filter(
+    (item) => item.check === null || perms[item.check] === true
+  );
 
   return (
     <>
@@ -45,7 +66,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="flex-1 space-y-1 px-2 py-3">
-        {navItems.map((item) => {
+        {visibleNav.map((item) => {
           const active = pathname.startsWith(item.href);
           return (
             <Link
@@ -65,6 +86,40 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
+
+      {/* Dev mode panel */}
+      {dev.isDeveloper && (
+        <div className="border-t border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+              <Code2 className="h-3.5 w-3.5" />
+              Dev Mode
+            </div>
+            <Switch
+              checked={dev.isActive}
+              onCheckedChange={dev.toggle}
+              className="scale-75"
+            />
+          </div>
+          {dev.isActive && (
+            <Select
+              value={dev.viewAsRole ?? dev.realRole}
+              onValueChange={(v) => dev.setViewAs(v === dev.realRole ? null : v as Role)}
+            >
+              <SelectTrigger className="h-7 text-xs bg-white dark:bg-background">
+                <SelectValue placeholder="View as..." />
+              </SelectTrigger>
+              <SelectContent>
+                {ALL_ROLES.map((r) => (
+                  <SelectItem key={r} value={r} className="text-xs">
+                    {r === dev.realRole ? `${r} (you)` : r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
 
       <div className="border-t p-4">
         <Link

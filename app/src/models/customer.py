@@ -8,6 +8,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
+class CustomerStatus(str, enum.Enum):
+    active = "active"
+    inactive = "inactive"
+    pending = "pending"
+    one_time = "one_time"
+
+
 class CustomerType(str, enum.Enum):
     residential = "residential"
     commercial = "commercial"
@@ -59,6 +66,7 @@ class Customer(Base):
     autopay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
 
+    status: Mapped[str] = mapped_column(String(20), default=CustomerStatus.active.value)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

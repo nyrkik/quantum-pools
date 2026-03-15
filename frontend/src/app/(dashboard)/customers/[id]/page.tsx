@@ -15,7 +15,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Select,
   SelectContent,
@@ -51,15 +50,35 @@ import {
   Building2,
   Home,
   Pencil,
-  Save,
   X,
   Trash2,
   Loader2,
   ChevronDown,
   ChevronUp,
   Droplets,
+  ClipboardList,
+  Receipt,
+  LayoutDashboard,
+  Calendar,
+  DollarSign,
+  Clock,
+  ClipboardCheck,
+  History,
+  Waves,
+  Gauge,
+  Wrench,
+  Thermometer,
+  Zap,
+  FlaskConical,
+  Move,
+  StickyNote,
+  Satellite,
 } from "lucide-react";
 import Link from "next/link";
+import { usePermissions } from "@/lib/permissions";
+import type { SatelliteImageData } from "@/types/satellite";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.121.52.15:7061";
 
 interface Customer {
   id: string;
@@ -81,6 +100,7 @@ interface Customer {
   payment_method: string | null;
   payment_terms_days: number;
   difficulty_rating: number;
+  status: string;
   notes: string | null;
   is_active: boolean;
   property_count: number;
@@ -92,7 +112,6 @@ interface BodyOfWater {
   property_id: string;
   name: string | null;
   water_type: string;
-  is_primary: boolean;
   pool_type: string | null;
   pool_gallons: number | null;
   pool_sqft: number | null;
@@ -157,7 +176,6 @@ interface BodyOfWaterSummary {
   id: string;
   name: string | null;
   water_type: string;
-  is_primary: boolean;
   pool_type: string | null;
   pool_gallons: number | null;
   pool_sqft: number | null;
@@ -204,7 +222,6 @@ function BowEditCard({
       await onSave({
         name: form.name || null,
         water_type: form.water_type,
-        is_primary: form.is_primary,
         pool_type: form.pool_type || null,
         pool_gallons: form.pool_gallons,
         pool_sqft: form.pool_sqft,
@@ -231,27 +248,36 @@ function BowEditCard({
     }
   };
 
+  const handleCancel = () => {
+    setForm({ ...bow });
+    setDirty(false);
+  };
+
   const typeLabel = form.name || form.water_type.replace("_", " ");
 
   return (
-    <div className="border rounded-lg">
+    <div className={`border rounded-lg ${dirty ? "border-l-4 border-l-amber-400" : ""}`}>
       <div className="flex items-center justify-between px-3 py-2">
         <button className="flex items-center gap-2 min-w-0 flex-1 text-left" onClick={() => setExpanded(!expanded)}>
           <Droplets className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="text-sm font-medium capitalize truncate">{typeLabel}</span>
-          {form.is_primary && <Badge variant="outline" className="text-[10px] px-1 py-0">Primary</Badge>}
           {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         </button>
-        <div className="flex gap-1 shrink-0 ml-2">
+        <div className="flex gap-1.5 shrink-0 ml-2">
           {dirty && (
-            <Button variant="default" size="icon" className="h-7 w-7" onClick={handleSave} disabled={saving}>
-              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-            </Button>
+            <>
+              <Button variant="default" size="sm" className="h-7 px-2.5 text-xs" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={handleCancel}>
+                Cancel
+              </Button>
+            </>
           )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
-                <Trash2 className="h-3 w-3" />
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -407,11 +433,6 @@ function BowEditCard({
               <Input type="number" step="0.01" value={form.monthly_rate ?? ""} onChange={(e) => set("monthly_rate", numOrNull(e.target.value))} className="h-8 text-sm" />
             </div>
           </div>
-          {dirty && (
-            <Button onClick={handleSave} disabled={saving} size="sm" className="w-full h-8">
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Save className="h-3.5 w-3.5 mr-1" />Save</>}
-            </Button>
-          )}
         </div>
       )}
     </div>
@@ -486,8 +507,14 @@ function PropertyEditCard({
     }
   };
 
+  const handleCancel = () => {
+    setForm({ ...property });
+    setDirty(false);
+    setShowOverrides(hasOverrides);
+  };
+
   return (
-    <Card>
+    <Card className={dirty ? "border-l-4 border-l-amber-400" : ""}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <button
@@ -501,11 +528,16 @@ function PropertyEditCard({
             </div>
             {expanded ? <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />}
           </button>
-          <div className="flex gap-1 shrink-0 ml-2">
+          <div className="flex gap-1.5 shrink-0 ml-2">
             {dirty && (
-              <Button variant="default" size="icon" className="h-8 w-8" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              </Button>
+              <>
+                <Button variant="default" size="sm" className="h-8 px-3 text-xs" onClick={handleSave} disabled={saving}>
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs" onClick={handleCancel}>
+                  Undo
+                </Button>
+              </>
             )}
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -597,10 +629,10 @@ function PropertyEditCard({
             <Label className="text-xs">Active</Label>
           </div>
 
-          {/* Bodies of Water */}
+          {/* Water Features */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bodies of Water</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Water Features</p>
               <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setAddingBow(!addingBow)}>
                 <Plus className="h-3 w-3 mr-1" />Add
               </Button>
@@ -673,12 +705,6 @@ function PropertyEditCard({
             )}
           </div>
 
-          {/* Save button at bottom of expanded card */}
-          {dirty && (
-            <Button onClick={handleSave} disabled={saving} className="w-full h-10">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="h-4 w-4 mr-1.5" />Save Property</>}
-            </Button>
-          )}
         </CardContent>
       )}
     </Card>
@@ -692,6 +718,7 @@ function BowViewRow({ bow, propertyId, property, customer }: {
   property: Property;
   customer: Customer;
 }) {
+  const perms = usePermissions();
   const [expanded, setExpanded] = useState(false);
   const [showFull, setShowFull] = useState(false);
   const [detail, setDetail] = useState<BodyOfWater | null>(null);
@@ -743,11 +770,13 @@ function BowViewRow({ bow, propertyId, property, customer }: {
           </span>
           {expanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground ml-1" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground ml-1" />}
         </button>
-        <Link href={`/properties/${propertyId}/measure?bow=${bow.id}`} onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 mr-1">
-            <Ruler className="h-3.5 w-3.5" />
-          </Button>
-        </Link>
+        {perms.canMeasure && (
+          <Link href={`/properties/${propertyId}/measure?bow=${bow.id}`} onClick={(e) => e.stopPropagation()}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 mr-1">
+              <Ruler className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        )}
       </div>
       {expanded && d && (
         <div className="px-3 pb-3 pt-2 border-t space-y-2.5 text-sm">
@@ -777,7 +806,7 @@ function BowViewRow({ bow, propertyId, property, customer }: {
           )}
 
           {/* Full details — manager/owner view */}
-          {showFull && (
+          {perms.canViewDimensions && showFull && (
             <div className="space-y-3 pt-2 border-t">
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Pool Info</p>
@@ -806,25 +835,137 @@ function BowViewRow({ bow, propertyId, property, customer }: {
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Service & Billing</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5">
                   <div><span className="text-muted-foreground">Service Time: </span>{d.estimated_service_minutes} min</div>
-                  <div><span className="text-muted-foreground">Monthly Rate: </span>{d.monthly_rate != null ? `$${d.monthly_rate.toFixed(2)}` : "— (uses client rate)"}</div>
+                  {perms.canViewRates && <div><span className="text-muted-foreground">Monthly Rate: </span>{d.monthly_rate != null ? `$${d.monthly_rate.toFixed(2)}` : "— (uses client rate)"}</div>}
                   <div><span className="text-muted-foreground">Status: </span>{d.is_active ? "Active" : "Inactive"}</div>
                 </div>
               </div>
             </div>
           )}
 
-          <button
-            type="button"
-            className="text-xs text-muted-foreground hover:text-foreground underline"
-            onClick={() => setShowFull(!showFull)}
-          >
-            {showFull ? "Hide details" : "Show full details"}
-          </button>
+          {perms.canViewDimensions && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+              onClick={() => setShowFull(!showFull)}
+            >
+              {showFull ? "Hide details" : "Show full details"}
+            </button>
+          )}
         </div>
       )}
       {expanded && !detail && (
         <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin" /></div>
       )}
+    </div>
+  );
+}
+
+// --- Single Property BOW Section (for edit mode) ---
+function SinglePropertyBowSection({ propertyId, onBowChange }: { propertyId: string; onBowChange: () => void }) {
+  const [bows, setBows] = useState<BodyOfWater[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addingBow, setAddingBow] = useState(false);
+
+  const loadBows = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<BodyOfWater[]>(`/v1/bodies-of-water/property/${propertyId}`);
+      setBows(data);
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, [propertyId]);
+
+  useEffect(() => { loadBows(); }, [loadBows]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Water Features</p>
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setAddingBow(!addingBow)}>
+          <Plus className="h-3 w-3 mr-1" />Add
+        </Button>
+      </div>
+      {addingBow && (
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          try {
+            await api.post(`/v1/bodies-of-water/property/${propertyId}`, {
+              name: fd.get("bow_name") || undefined,
+              water_type: fd.get("bow_water_type") || "pool",
+              estimated_service_minutes: parseInt(fd.get("bow_minutes") as string) || 30,
+            });
+            toast.success("Added");
+            setAddingBow(false);
+            loadBows();
+            onBowChange();
+          } catch { toast.error("Failed to add"); }
+        }} className="border rounded-lg p-3 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Name</Label>
+              <Input name="bow_name" placeholder="e.g. Spa" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Type</Label>
+              <select name="bow_water_type" defaultValue="pool" className="h-8 w-full rounded-md border px-2 text-sm">
+                <option value="pool">Pool</option>
+                <option value="spa">Spa</option>
+                <option value="hot_tub">Hot Tub</option>
+                <option value="fountain">Fountain</option>
+                <option value="water_feature">Water Feature</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Minutes</Label>
+              <Input name="bow_minutes" type="number" defaultValue="30" className="h-8 text-sm" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" className="flex-1 h-7" onClick={() => setAddingBow(false)}>Cancel</Button>
+            <Button type="submit" size="sm" className="flex-1 h-7">Add</Button>
+          </div>
+        </form>
+      )}
+      {loading ? (
+        <div className="flex justify-center py-2"><Loader2 className="h-4 w-4 animate-spin" /></div>
+      ) : (
+        bows.map((bow) => (
+          <BowEditCard
+            key={bow.id}
+            bow={bow}
+            onSave={async (data) => {
+              await api.put(`/v1/bodies-of-water/${bow.id}`, data);
+              toast.success("Saved");
+              loadBows();
+              onBowChange();
+            }}
+            onDelete={async () => {
+              try {
+                await api.delete(`/v1/bodies-of-water/${bow.id}`);
+                toast.success("Deleted");
+                loadBows();
+                onBowChange();
+              } catch { toast.error("Failed to delete"); }
+            }}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+// --- Site Details (gate, dog, access) ---
+function SiteDetails({ property, className }: { property: Property; className?: string }) {
+  const items: string[] = [];
+  if (property.gate_code) items.push(`Gate: ${property.gate_code}`);
+  if (property.dog_on_property) items.push("Dog on property");
+  if (property.access_instructions) items.push(property.access_instructions);
+  if (items.length === 0) return null;
+  return (
+    <div className={`flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground ${className || ""}`}>
+      {items.map((item, i) => (
+        <span key={i} className={item === "Dog on property" ? "text-amber-600 font-medium" : ""}>{item}</span>
+      ))}
     </div>
   );
 }
@@ -837,11 +978,18 @@ export default function CustomerDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const perms = usePermissions();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [editing, setEditing] = useState(false);
-  const [invoicesOpen, setInvoicesOpen] = useState(false);
+  const [heroImages, setHeroImages] = useState<Record<string, SatelliteImageData>>({});
+  const [fullBows, setFullBows] = useState<BodyOfWater[]>([]);
+  const isTech = perms.role === "technician";
+  const [viewTab, setViewTab] = useState<"overview" | "service" | "details" | "bows" | "invoices">(isTech ? "service" : "overview");
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editingBows, setEditingBows] = useState(false);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<"details" | "bows" | null>(null);
 
   // Customer edit form state
   const [custForm, setCustForm] = useState<Customer | null>(null);
@@ -851,23 +999,47 @@ export default function CustomerDetailPage({
   // Add property
   const [addingProp, setAddingProp] = useState(false);
 
+  // Single-property inline edit state
+  const singleProp = properties.length <= 1 ? properties[0] ?? null : null;
+  const [propForm, setPropForm] = useState<Property | null>(null);
+  const [propDirty, setPropDirty] = useState(false);
+
+  useEffect(() => {
+    if (singleProp) setPropForm(singleProp);
+  }, [singleProp?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setPropField = (field: string, value: unknown) => {
+    setPropForm((f) => f ? { ...f, [field]: value } : f);
+    setPropDirty(true);
+  };
+
   const load = useCallback(async () => {
     try {
-      const [c, p, inv] = await Promise.all([
+      const [c, p, inv, heroes] = await Promise.all([
         api.get<Customer>(`/v1/customers/${id}`),
         api.get<{ items: Property[] }>(`/v1/properties?customer_id=${id}`),
         api.get<{ items: Invoice[] }>(`/v1/invoices?customer_id=${id}`),
+        api.get<Record<string, SatelliteImageData>>("/v1/satellite/images/heroes").catch(() => ({})),
       ]);
       setCustomer(c);
       setCustForm(c);
       setProperties(p.items);
       setInvoices(inv.items);
+      setHeroImages(heroes);
     } catch {
       toast.error("Failed to load client");
     }
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Fetch full BOW data (with equipment, dimensions, etc.) for all properties
+  useEffect(() => {
+    if (properties.length === 0) return;
+    Promise.all(
+      properties.map((p) => api.get<BodyOfWater[]>(`/v1/bodies-of-water/property/${p.id}`).catch(() => []))
+    ).then((results) => setFullBows(results.flat()));
+  }, [properties]);
 
   const setCustField = (field: string, value: unknown) => {
     setCustForm((f) => f ? { ...f, [field]: value } : f);
@@ -878,20 +1050,33 @@ export default function CustomerDetailPage({
     if (!custForm) return;
     setCustSaving(true);
     try {
-      await api.put(`/v1/customers/${id}`, {
-        first_name: custForm.first_name, last_name: custForm.last_name,
-        company_name: custForm.company_name || null, customer_type: custForm.customer_type,
-        email: custForm.email || null, phone: custForm.phone || null,
-        billing_address: custForm.billing_address || null, billing_city: custForm.billing_city || null,
-        billing_state: custForm.billing_state || null, billing_zip: custForm.billing_zip || null,
-        service_frequency: custForm.service_frequency || null, preferred_day: custForm.preferred_day || null,
-        billing_frequency: custForm.billing_frequency, monthly_rate: custForm.monthly_rate,
-        payment_method: custForm.payment_method || null, payment_terms_days: custForm.payment_terms_days,
-        difficulty_rating: custForm.difficulty_rating, notes: custForm.notes || null,
-        is_active: custForm.is_active,
-      });
+      const promises: Promise<unknown>[] = [
+        api.put(`/v1/customers/${id}`, {
+          first_name: custForm.first_name, last_name: custForm.last_name,
+          company_name: custForm.company_name || null, customer_type: custForm.customer_type,
+          email: custForm.email || null, phone: custForm.phone || null,
+          billing_address: custForm.billing_address || null, billing_city: custForm.billing_city || null,
+          billing_state: custForm.billing_state || null, billing_zip: custForm.billing_zip || null,
+          service_frequency: custForm.service_frequency || null, preferred_day: custForm.preferred_day || null,
+          billing_frequency: custForm.billing_frequency, monthly_rate: custForm.monthly_rate,
+          payment_method: custForm.payment_method || null, payment_terms_days: custForm.payment_terms_days,
+          difficulty_rating: custForm.difficulty_rating, notes: custForm.notes || null,
+          status: custForm.status,
+          is_active: custForm.status === "active",
+        }),
+      ];
+      if (propForm && propDirty && singleProp) {
+        promises.push(api.put(`/v1/properties/${singleProp.id}`, {
+          address: propForm.address, city: propForm.city, state: propForm.state, zip_code: propForm.zip_code,
+          gate_code: propForm.gate_code || null, access_instructions: propForm.access_instructions || null,
+          dog_on_property: propForm.dog_on_property, is_locked_to_day: propForm.is_locked_to_day,
+          service_day_pattern: propForm.service_day_pattern || null, notes: propForm.notes || null,
+        }));
+      }
+      await Promise.all(promises);
       toast.success("Client updated");
       setCustDirty(false);
+      setPropDirty(false);
       load();
     } catch {
       toast.error("Failed to update client");
@@ -948,396 +1133,1154 @@ export default function CustomerDetailPage({
     ? customer.first_name
     : `${customer.first_name} ${customer.last_name}`.trim();
 
-  // --- EDIT MODE ---
-  if (editing) {
-    return (
-      <div className="space-y-4 sm:space-y-6 pb-20 sm:pb-6">
-        {/* Edit header */}
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => { setEditing(false); setCustDirty(false); load(); }}>
-            <X className="h-4 w-4" />
-          </Button>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
-            Edit {displayName}
-          </h1>
-        </div>
+  const handleCancelCustomer = () => {
+    setCustForm(customer);
+    setCustDirty(false);
+  };
 
-        {/* Customer fields */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Client</CardTitle>
-              {custDirty && (
-                <Button size="sm" onClick={handleSaveCustomer} disabled={custSaving} className="h-8">
-                  {custSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Save className="h-3.5 w-3.5 mr-1" />Save</>}
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Identity */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Type</Label>
-                <Select value={custForm.customer_type} onValueChange={(v) => setCustField("customer_type", v)}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="residential">Residential</SelectItem>
-                    <SelectItem value="commercial">Commercial</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Company</Label>
-                <Input value={custForm.company_name ?? ""} onChange={(e) => setCustField("company_name", e.target.value)} className="h-9" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">{custForm.customer_type === "commercial" ? "Name" : "First Name"}</Label>
-                <Input value={custForm.first_name} onChange={(e) => setCustField("first_name", e.target.value)} className="h-9" />
-              </div>
-              {custForm.customer_type !== "commercial" && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Last Name</Label>
-                  <Input value={custForm.last_name} onChange={(e) => setCustField("last_name", e.target.value)} className="h-9" />
-                </div>
-              )}
-            </div>
+  const handleCancelProperty = () => {
+    if (singleProp) setPropForm(singleProp);
+    setPropDirty(false);
+  };
 
-            {/* Contact */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Email</Label>
-                <Input type="email" value={custForm.email ?? ""} onChange={(e) => setCustField("email", e.target.value)} className="h-9" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Phone</Label>
-                <Input value={custForm.phone ?? ""} onChange={(e) => setCustField("phone", e.target.value)} className="h-9" />
-              </div>
-            </div>
+  const handleExitDetails = () => {
+    if (custDirty || propDirty) {
+      setDiscardTarget("details");
+      setShowDiscardDialog(true);
+    } else {
+      setEditingDetails(false);
+    }
+  };
 
-            {/* Billing */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Monthly Rate ($)</Label>
-                <Input type="number" step="0.01" value={custForm.monthly_rate} onChange={(e) => setCustField("monthly_rate", parseFloat(e.target.value) || 0)} className="h-9" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Payment Terms (days)</Label>
-                <Input type="number" value={custForm.payment_terms_days} onChange={(e) => setCustField("payment_terms_days", parseInt(e.target.value) || 30)} className="h-9" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Billing Frequency</Label>
-                <Select value={custForm.billing_frequency} onValueChange={(v) => setCustField("billing_frequency", v)}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="annually">Annually</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Payment Method</Label>
-                <Input value={custForm.payment_method ?? ""} onChange={(e) => setCustField("payment_method", e.target.value)} placeholder="check, cc, ach..." className="h-9" />
-              </div>
-            </div>
+  const handleExitBows = () => {
+    setEditingBows(false);
+  };
 
-            {/* Billing address */}
-            <div className="space-y-1.5">
-              <Label className="text-xs">Billing Address</Label>
-              <Input value={custForm.billing_address ?? ""} onChange={(e) => setCustField("billing_address", e.target.value)} className="h-9" />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">City</Label>
-                <Input value={custForm.billing_city ?? ""} onChange={(e) => setCustField("billing_city", e.target.value)} className="h-9" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">State</Label>
-                <Input value={custForm.billing_state ?? ""} onChange={(e) => setCustField("billing_state", e.target.value)} className="h-9" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Zip</Label>
-                <Input value={custForm.billing_zip ?? ""} onChange={(e) => setCustField("billing_zip", e.target.value)} className="h-9" />
-              </div>
-            </div>
-
-            {/* Service */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Service Frequency</Label>
-                <Select value={custForm.service_frequency ?? "weekly"} onValueChange={(v) => setCustField("service_frequency", v)}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="biweekly">Biweekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="on_call">On Call</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Service Days</Label>
-                <div className="flex flex-wrap gap-1">
-                  {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].map((day) => {
-                    const days = (custForm.preferred_day ?? "").split(",").filter(Boolean);
-                    const active = days.includes(day);
-                    return (
-                      <Button
-                        key={day}
-                        type="button"
-                        variant={active ? "default" : "outline"}
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => {
-                          const next = active ? days.filter(d => d !== day) : [...days, day];
-                          setCustField("preferred_day", next.length ? next.join(",") : null);
-                        }}
-                      >
-                        {day.slice(0, 3).charAt(0).toUpperCase() + day.slice(1, 3)}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Notes + Active */}
-            <div className="space-y-1.5">
-              <Label className="text-xs">Notes</Label>
-              <Textarea value={custForm.notes ?? ""} onChange={(e) => setCustField("notes", e.target.value)} rows={2} />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={custForm.is_active} onCheckedChange={(v) => setCustField("is_active", v)} />
-              <Label className="text-xs">Active</Label>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Properties */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">Properties ({properties.length})</h2>
-            <Button variant="outline" size="sm" className="h-8" onClick={() => setAddingProp(!addingProp)}>
-              <Plus className="h-3.5 w-3.5 mr-1" />Add
-            </Button>
-          </div>
-
-          {addingProp && (
-            <Card>
-              <CardContent className="pt-4">
-                <form onSubmit={handleAddProperty} className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Address</Label>
-                    <Input name="address" required className="h-9" />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">City</Label>
-                      <Input name="city" required className="h-9" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">State</Label>
-                      <Input name="state" required className="h-9" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Zip</Label>
-                      <Input name="zip_code" required className="h-9" />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button type="button" variant="outline" className="flex-1 h-9" onClick={() => setAddingProp(false)}>Cancel</Button>
-                    <Button type="submit" className="flex-1 h-9">Add Property</Button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-          )}
-
-          {properties.map((p) => (
-            <PropertyEditCard
-              key={p.id}
-              property={p}
-              customer={customer}
-              onSave={(data) => handleSaveProperty(p.id, data)}
-              onDelete={() => handleDeleteProperty(p.id)}
-              onBowChange={load}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // --- VIEW MODE ---
+  const handleDiscardAndExit = () => {
+    if (discardTarget === "details") {
+      setCustDirty(false);
+      setPropDirty(false);
+      setCustForm(customer);
+      if (singleProp) setPropForm(singleProp);
+      setEditingDetails(false);
+    }
+    setShowDiscardDialog(false);
+    setDiscardTarget(null);
+    load();
+  };
+  // --- RENDER ---
   return (
-    <div className="space-y-4 sm:space-y-6 pb-20 sm:pb-0 max-w-2xl">
-      {/* Header */}
-      <div className="flex items-center gap-2">
+    <div className="pb-20 sm:pb-0">
+      {/* Unsaved changes guard */}
+      <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>You have unsaved changes. Discard them?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDiscardAndExit} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Back button */}
+      <div className="mb-4">
         <Button variant="ghost" size="sm" className="shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div className="flex-1" />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setEditing(true)}
-        >
-          <Pencil className="h-3.5 w-3.5 mr-1.5" />
-          Edit
-        </Button>
       </div>
 
-      {/* Client card */}
-      <Card>
-        <CardContent className="pt-5 pb-4 space-y-4">
-          <div className="flex items-start gap-3">
-            <TypeIcon className="h-6 w-6 text-muted-foreground shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate flex-1">
+      {/* Two-column layout: sidebar + main */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Sidebar */}
+        <div className="lg:w-72 lg:shrink-0 space-y-4">
+          {/* Client card — identity + address + contact + billing */}
+          <Card className="shadow-sm">
+            <CardContent className="pt-4 pb-4 space-y-3">
+              {/* Name + badges */}
+              <div className="flex items-center gap-3">
+                <TypeIcon className="h-6 w-6 text-muted-foreground shrink-0" />
+                <h1 className="text-xl font-bold tracking-tight truncate flex-1">
                   {displayName}
                 </h1>
-                <Badge variant={customer.is_active ? "default" : "secondary"} className="shrink-0">
-                  {customer.is_active ? "Active" : "Inactive"}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {customer.company_name && (
+                  <Badge variant="outline" className="text-xs">{customer.company_name}</Badge>
+                )}
+                <Badge
+                  variant={customer.status === "active" ? "default" : customer.status === "pending" ? "outline" : "secondary"}
+                  className={customer.status === "pending" ? "border-amber-400 text-amber-600" : customer.status === "one_time" ? "border-blue-400 text-blue-600" : ""}
+                >
+                  {customer.status === "one_time" ? "One-time" : (customer.status ?? "active").charAt(0).toUpperCase() + (customer.status ?? "active").slice(1)}
                 </Badge>
               </div>
-              {customer.company_name && (
-                <p className="text-muted-foreground text-sm truncate">{customer.company_name}</p>
-              )}
-            </div>
-          </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Card className="bg-muted/50">
-              <CardContent className="pt-3 pb-3 space-y-1.5 text-sm">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</p>
-                <div><span className="text-muted-foreground">Email: </span>{customer.email || "\u2014"}</div>
-                <div><span className="text-muted-foreground">Phone: </span>{customer.phone || "\u2014"}</div>
-              </CardContent>
-            </Card>
-            <Card className="bg-muted/50">
-              <CardContent className="pt-3 pb-3 space-y-1.5 text-sm">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Billing</p>
-                <div><span className="text-muted-foreground">Rate: </span>${customer.monthly_rate.toFixed(2)}/mo</div>
-                <div>
-                  <span className="text-muted-foreground">Balance: </span>
-                  <span className={customer.balance > 0 ? "text-red-600 font-medium" : ""}>${customer.balance.toFixed(2)}</span>
+              {/* Address */}
+              {properties.length >= 1 && (
+                <div className="text-sm space-y-0.5 pt-1 border-t">
+                  <div className="flex items-start gap-1.5 pt-1.5">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground" />
+                    <span>{properties[0].address}, {properties[0].city}, {properties[0].state} {properties[0].zip_code}</span>
+                  </div>
+                  {!isTech && <SiteDetails property={properties[0]} className="ml-5" />}
                 </div>
-                {customer.billing_address && (
-                  <div><span className="text-muted-foreground">Address: </span>{customer.billing_address}, {customer.billing_city}, {customer.billing_state} {customer.billing_zip}</div>
+              )}
+
+              {/* Site access — prominent for techs */}
+              {isTech && properties.length >= 1 && (
+                <div className="text-sm space-y-1.5 pt-1 border-t">
+                  <div className="pt-1.5 grid grid-cols-2 gap-x-3 gap-y-1">
+                    <div><span className="text-muted-foreground">Gate: </span><span className="font-medium">{properties[0].gate_code || "None"}</span></div>
+                    <div>{properties[0].dog_on_property ? <span className="text-amber-600 font-medium">Dog on property</span> : <span className="text-muted-foreground">No dog</span>}</div>
+                  </div>
+                  {properties[0].access_instructions && (
+                    <div><span className="text-muted-foreground">Access: </span>{properties[0].access_instructions}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Contact */}
+              <div className="text-sm space-y-1 pt-1 border-t">
+                <div className="pt-1.5"><span className="text-muted-foreground">Email: </span>{customer.email || "\u2014"}</div>
+                <div><span className="text-muted-foreground">Phone: </span>{customer.phone || "\u2014"}</div>
+              </div>
+
+              {/* Billing summary */}
+              {perms.canViewRates && (
+                <div className="text-sm space-y-1 pt-1 border-t">
+                  <div className="pt-1.5"><span className="text-muted-foreground">Rate: </span>${customer.monthly_rate.toFixed(2)}/mo</div>
+                  <div>
+                    <span className="text-muted-foreground">Balance: </span>
+                    <span className={customer.balance > 0 ? "text-red-600 font-medium" : ""}>${customer.balance.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Nav tiles — desktop: vertical stack, mobile: horizontal scroll */}
+          <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0">
+            {[
+              ...(isTech
+                ? [
+                    { key: "service" as const, icon: ClipboardCheck, label: "Service" },
+                    { key: "bows" as const, icon: Droplets, label: "Water Features" },
+                    { key: "details" as const, icon: History, label: "History" },
+                  ]
+                : [
+                    { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
+                    { key: "details" as const, icon: ClipboardList, label: "Details" },
+                    { key: "bows" as const, icon: Droplets, label: "Water Features" },
+                    ...(perms.canViewInvoices ? [{ key: "invoices" as const, icon: Receipt, label: "Invoices" }] : []),
+                  ]
+              ),
+            ].map((nav) => (
+              <button
+                key={nav.key}
+                onClick={() => setViewTab(nav.key)}
+                className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-medium transition-colors shrink-0 lg:w-full ${
+                  viewTab === nav.key
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                    : "bg-background hover:bg-muted/50 border-border"
+                }`}
+              >
+                <nav.icon className={`h-5 w-5 ${viewTab === nav.key ? "opacity-80" : "text-muted-foreground"}`} />
+                {nav.label}
+                {nav.key === "invoices" && (() => {
+                  const outstanding = invoices.reduce((sum, inv) => sum + inv.balance, 0);
+                  return outstanding > 0
+                    ? <span className={`ml-auto text-xs ${viewTab === "invoices" ? "opacity-80" : "text-red-600"}`}>${outstanding.toFixed(2)}</span>
+                    : invoices.length > 0 ? <span className={`ml-auto text-xs ${viewTab === "invoices" ? "opacity-80" : "text-muted-foreground"}`}>({invoices.length})</span> : null;
+                })()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0 space-y-4">
+
+      {/* ===== SERVICE (tech default) ===== */}
+      {viewTab === "service" && (() => {
+        const allBows = properties.flatMap(p => p.bodies_of_water || []);
+        const sanitizerLabels: Record<string, string> = {
+          liquid: "Liquid Chlorine", tabs: "Tabs (Trichlor)", granular: "Granular (Dichlor)",
+          cal_hypo: "Cal-Hypo", salt: "Salt (SWG)", bromine: "Bromine", uv_ozone: "UV / Ozone",
+        };
+        return (
+          <div className="space-y-4">
+            {/* Service schedule */}
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Today&apos;s Service</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                  <div><span className="text-muted-foreground">Frequency: </span><span className="capitalize">{customer.service_frequency || "weekly"}</span></div>
+                  <div>
+                    <span className="text-muted-foreground">Days: </span>
+                    {customer.preferred_day
+                      ? customer.preferred_day.split(",").map(d => d.trim().charAt(0).toUpperCase() + d.trim().slice(1, 3)).join(", ")
+                      : "Any"}
+                  </div>
+                </div>
+                {customer.notes && (
+                  <div className="text-sm pt-1.5 border-t">
+                    <span className="text-muted-foreground">Notes: </span>{customer.notes}
+                  </div>
                 )}
               </CardContent>
             </Card>
-          </div>
 
-          {customer.notes && (
-            <Card className="bg-muted/50">
-              <CardContent className="pt-3 pb-3 text-sm">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Notes</p>
-                <p className="whitespace-pre-wrap">{customer.notes}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Properties */}
-          {properties.length === 0 ? (
-            <p className="text-center text-muted-foreground py-2 text-sm">No properties yet</p>
-          ) : (
-            properties.map((p) => (
-              <Card key={p.id} className="bg-background">
-                <CardContent className="pt-3 pb-3 space-y-2">
-                  <div className="flex items-start justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-sm font-medium">
-                        <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate">{p.address}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground ml-5.5 pl-0.5">{p.city}, {p.state} {p.zip_code}</p>
+            {/* Pool info for each BOW — what the tech needs to know */}
+            {allBows.map((bow) => (
+              <Card key={bow.id} className="shadow-sm">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <Droplets className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm capitalize">{bow.name || bow.water_type.replace("_", " ")}</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="text-sm space-y-2">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Gallons</p>
+                      <p className="font-medium">{bow.pool_gallons ? bow.pool_gallons.toLocaleString() : "\u2014"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Service Time</p>
+                      <p className="font-medium">{bow.estimated_service_minutes} min</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Type</p>
+                      <p className="font-medium capitalize">{bow.pool_type || "\u2014"}</p>
                     </div>
                   </div>
-                  {(p.bodies_of_water?.length > 0) ? (
-                    <div className="space-y-1">
-                      {p.bodies_of_water.map((bow) => (
-                        <BowViewRow key={bow.id} bow={bow} propertyId={p.id} property={p} customer={customer} />
-                      ))}
+                </CardContent>
+              </Card>
+            ))}
+            {allBows.length === 0 && (
+              <Card className="shadow-sm">
+                <CardContent className="py-6 text-center text-sm text-muted-foreground">
+                  No water features
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Chemical reading entry — placeholder */}
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Chemical Reading</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                  Chemical reading entry coming soon
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Service checklist — placeholder */}
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Service Checklist</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                  Service checklist coming soon
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Complete visit — placeholder */}
+            <Button className="w-full h-12 text-base" disabled>
+              Complete Visit
+            </Button>
+          </div>
+        );
+      })()}
+
+      {/* ===== OVERVIEW ===== */}
+      {viewTab === "overview" && (() => {
+        const unpaidInvoices = invoices.filter(inv => inv.balance > 0);
+        const outstandingTotal = unpaidInvoices.reduce((sum, inv) => sum + inv.balance, 0);
+        const paidInvoices = invoices.filter(inv => inv.status === "paid");
+        const ytdRevenue = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
+        const allBows = properties.flatMap(p => p.bodies_of_water || []);
+
+        return (
+          <div className="space-y-4">
+            {/* Metric cards */}
+            <div className={`grid grid-cols-2 ${perms.canViewRates ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3`}>
+              {perms.canViewRates && (
+                <Card className="shadow-sm">
+                  <CardContent className="pt-3 pb-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Monthly Rate</p>
                     </div>
+                    <p className="text-2xl font-bold">${customer.monthly_rate.toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+              )}
+              {perms.canViewBalance && (
+                <Card className={`shadow-sm ${outstandingTotal > 0 ? "border-red-200" : ""}`}>
+                  <CardContent className="pt-3 pb-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Receipt className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Balance</p>
+                    </div>
+                    <p className={`text-2xl font-bold ${outstandingTotal > 0 ? "text-red-600" : ""}`}>
+                      ${customer.balance.toFixed(2)}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+              <Card className="shadow-sm">
+                <CardContent className="pt-3 pb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Service</p>
+                  </div>
+                  <p className="text-2xl font-bold text-muted-foreground">&mdash;</p>
+                  <p className="text-xs text-muted-foreground">No visits recorded</p>
+                </CardContent>
+              </Card>
+              <Card className="shadow-sm">
+                <CardContent className="pt-3 pb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Next Service</p>
+                  </div>
+                  <p className="text-2xl font-bold text-muted-foreground">&mdash;</p>
+                  <p className="text-xs text-muted-foreground">No schedule set</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Two-column: outstanding invoices + pools */}
+            <div className={`grid grid-cols-1 ${perms.canViewInvoices ? "lg:grid-cols-2" : ""} gap-4`}>
+              {/* Outstanding invoices */}
+              {perms.canViewInvoices && (
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Outstanding Invoices</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {unpaidInvoices.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-3">No outstanding invoices</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {unpaidInvoices.slice(0, 5).map((inv) => (
+                          <div key={inv.id} className="flex items-center justify-between text-sm">
+                            <div>
+                              <Link href={`/invoices/${inv.id}`} className="font-medium hover:underline">{inv.invoice_number}</Link>
+                              <span className="text-muted-foreground ml-2">{inv.issue_date}</span>
+                            </div>
+                            <span className="text-red-600 font-medium">${inv.balance.toFixed(2)}</span>
+                          </div>
+                        ))}
+                        {unpaidInvoices.length > 5 && (
+                          <button onClick={() => setViewTab("invoices")} className="text-xs text-muted-foreground hover:text-foreground">
+                            +{unpaidInvoices.length - 5} more
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Water Features summary */}
+              <Card className="shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Water Features</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {allBows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-3">No water features</p>
                   ) : (
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground ml-5.5 pl-0.5">
-                      {p.pool_type && <span>Pool: {p.pool_type}</span>}
-                      {p.pool_gallons && <span>{p.pool_gallons.toLocaleString()} gal</span>}
-                      {p.pool_sqft && <span>{p.pool_sqft.toLocaleString()} sqft</span>}
-                      {p.has_spa && <Badge variant="outline">Spa</Badge>}
+                    <div className="space-y-3">
+                      {properties.map((prop) => {
+                        const bows = prop.bodies_of_water || [];
+                        if (bows.length === 0) return null;
+                        const hero = heroImages[prop.id];
+                        return (
+                          <div key={prop.id}>
+                            {properties.length > 1 && (
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <MapPin className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-xs font-medium text-muted-foreground">{prop.name || prop.address}</span>
+                              </div>
+                            )}
+                            {hero && (
+                              <img
+                                src={`${API_BASE}${hero.url}`}
+                                alt="Satellite view"
+                                className="w-full h-28 object-cover rounded-md border mb-2"
+                              />
+                            )}
+                            <div className="space-y-2">
+                              {bows.map((bow) => (
+                                <div key={bow.id} className="bg-muted/50 rounded-md p-2.5">
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <Droplets className="h-3.5 w-3.5 text-blue-500" />
+                                    <span className="font-medium text-sm capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
+                                    {bow.pool_type && (
+                                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 capitalize ml-auto">{bow.pool_type}</Badge>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-x-3 text-xs">
+                                    <div>
+                                      <span className="text-muted-foreground">Gallons</span>
+                                      <p className="font-medium">{bow.pool_gallons ? bow.pool_gallons.toLocaleString() : "\u2014"}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Service</span>
+                                      <p className="font-medium">{bow.estimated_service_minutes} min</p>
+                                    </div>
+                                    {bow.monthly_rate != null ? (
+                                      <div>
+                                        <span className="text-muted-foreground">Rate</span>
+                                        <p className="font-medium">${bow.monthly_rate.toFixed(2)}</p>
+                                      </div>
+                                    ) : bow.pool_sqft ? (
+                                      <div>
+                                        <span className="text-muted-foreground">Size</span>
+                                        <p className="font-medium">{bow.pool_sqft.toLocaleString()} ft²</p>
+                                      </div>
+                                    ) : (
+                                      <div />
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
               </Card>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Invoices — collapsible accordion */}
-      <Collapsible open={invoicesOpen} onOpenChange={setInvoicesOpen}>
-        <CollapsibleTrigger asChild>
-          <button className="w-full flex items-center justify-between rounded-lg border px-4 py-3 hover:bg-muted/50 transition-colors">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              Invoices ({invoices.length})
-              {(() => {
-                const outstanding = invoices.reduce((sum, inv) => sum + inv.balance, 0);
-                return outstanding > 0
-                  ? <span className="text-xs font-normal text-red-600">${outstanding.toFixed(2)} outstanding</span>
-                  : null;
-              })()}
             </div>
-            {invoicesOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          {invoices.length === 0 ? (
-            <p className="text-center text-muted-foreground py-4 text-sm">No invoices yet</p>
-          ) : (
-            <div className="rounded-md border mt-2">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Invoice #</TableHead>
-                    <TableHead className="hidden sm:table-cell">Subject</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="hidden sm:table-cell">Issue Date</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right">Balance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoices.map((inv) => (
-                    <TableRow key={inv.id}>
-                      <TableCell>
-                        <Link href={`/invoices/${inv.id}`} className="font-medium hover:underline">{inv.invoice_number}</Link>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground hidden sm:table-cell">{inv.subject || "\u2014"}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={inv.status === "paid" ? "default" : inv.status === "overdue" ? "destructive" : "secondary"}
-                          className={inv.status === "paid" ? "bg-green-600" : inv.status === "sent" ? "border-blue-400 text-blue-600" : ""}
-                        >{inv.status.replace("_", " ")}</Badge>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">{inv.issue_date}</TableCell>
-                      <TableCell className="text-right">${inv.total.toFixed(2)}</TableCell>
-                      <TableCell className={`text-right ${inv.balance > 0 ? "text-red-600 font-medium" : ""}`}>${inv.balance.toFixed(2)}</TableCell>
+
+            {/* Visit history placeholder */}
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Visit History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                  Visit history will appear after 3+ service visits
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Chemical trends placeholder */}
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Chemical Trends</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                  Chemical trends will appear after readings are recorded
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
+
+      {/* ===== DETAILS TAB ===== */}
+      {viewTab === "details" && (
+        <Card className={`shadow-sm ${editingDetails ? `bg-muted/50 ${custDirty || propDirty ? "border-l-4 border-l-amber-400" : "border-l-4 border-l-primary"}` : ""}`}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Details</CardTitle>
+              {!editingDetails && perms.canEditCustomers && (
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingDetails(true)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {editingDetails && (
+                <div className="flex gap-1.5">
+                  {(custDirty || propDirty) && (
+                    <>
+                      <Button variant="default" size="sm" className="h-8 px-3 text-xs" onClick={handleSaveCustomer} disabled={custSaving}>
+                        {custSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs" onClick={() => { handleCancelCustomer(); handleCancelProperty(); }}>
+                        Cancel
+                      </Button>
+                    </>
+                  )}
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={handleExitDetails}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!editingDetails ? (
+              /* --- Details View --- */
+              <div className="space-y-4">
+                {/* Top row: billing + service side by side on desktop */}
+                <div className={`grid grid-cols-1 ${perms.canViewRates ? "lg:grid-cols-2" : ""} gap-4`}>
+                  {/* Billing — only for roles that can see rates */}
+                  {perms.canViewRates && (
+                    <Card className="shadow-sm">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Billing</CardTitle>
+                      </CardHeader>
+                      <CardContent className="text-sm space-y-2">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                          <div><span className="text-muted-foreground">Rate: </span>${customer.monthly_rate.toFixed(2)}/mo</div>
+                          <div><span className="text-muted-foreground">Terms: </span>{customer.payment_terms_days} days</div>
+                          <div><span className="text-muted-foreground">Frequency: </span><span className="capitalize">{customer.billing_frequency}</span></div>
+                          <div><span className="text-muted-foreground">Payment: </span>{customer.payment_method || "\u2014"}</div>
+                        </div>
+                        <div className="pt-1.5 border-t">
+                          <p className="text-xs text-muted-foreground mb-1">Billing Address</p>
+                          <p>{customer.billing_address ? `${customer.billing_address}, ${customer.billing_city}, ${customer.billing_state} ${customer.billing_zip}` : "Same as service address"}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Service */}
+                  <Card className="shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Service</CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-sm space-y-2">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        <div><span className="text-muted-foreground">Frequency: </span><span className="capitalize">{customer.service_frequency || "weekly"}</span></div>
+                        <div>
+                          <span className="text-muted-foreground">Days: </span>
+                          {customer.preferred_day
+                            ? customer.preferred_day.split(",").map(d => d.trim().charAt(0).toUpperCase() + d.trim().slice(1, 3)).join(", ")
+                            : "Any"}
+                        </div>
+                      </div>
+                      {singleProp && (
+                        <div className="pt-1.5 border-t space-y-1">
+                          <p className="text-xs text-muted-foreground">Site Access</p>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                            <div><span className="text-muted-foreground">Gate: </span>{properties[0].gate_code || "\u2014"}</div>
+                            <div>{properties[0].dog_on_property ? <span className="text-amber-600 font-medium">Dog on property</span> : <span className="text-muted-foreground">No dog</span>}</div>
+                          </div>
+                          {properties[0].access_instructions && (
+                            <div><span className="text-muted-foreground">Access: </span>{properties[0].access_instructions}</div>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Notes — always present */}
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Notes</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {customer.notes ? (
+                      <p className="text-sm whitespace-pre-wrap">{customer.notes}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No notes</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              /* --- Details Edit --- */
+              <div className="space-y-4">
+                {/* Client tile — identity + address */}
+                <Card className="bg-background">
+                  <CardContent className="pt-3 pb-3 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Client</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Type</Label>
+                        <Select value={custForm.customer_type} onValueChange={(v) => setCustField("customer_type", v)}>
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="residential">Residential</SelectItem>
+                            <SelectItem value="commercial">Commercial</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Status</Label>
+                        <Select value={custForm.status ?? "active"} onValueChange={(v) => setCustField("status", v)}>
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                            <SelectItem value="pending">Pending</SelectItem>
+                            <SelectItem value="one_time">One-time</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">{custForm.customer_type === "commercial" ? "Name" : "First Name"}</Label>
+                        <Input value={custForm.first_name} onChange={(e) => setCustField("first_name", e.target.value)} className="h-9" />
+                      </div>
+                      {custForm.customer_type !== "commercial" ? (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Last Name</Label>
+                          <Input value={custForm.last_name} onChange={(e) => setCustField("last_name", e.target.value)} className="h-9" />
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Company</Label>
+                          <Input value={custForm.company_name ?? ""} onChange={(e) => setCustField("company_name", e.target.value)} className="h-9" />
+                        </div>
+                      )}
+                    </div>
+                    {/* Service address inline */}
+                    {singleProp && propForm && (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Address</Label>
+                          <Input value={propForm.address} onChange={(e) => setPropField("address", e.target.value)} className="h-9" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">City</Label>
+                            <Input value={propForm.city} onChange={(e) => setPropField("city", e.target.value)} className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">State</Label>
+                            <Input value={propForm.state} onChange={(e) => setPropField("state", e.target.value)} className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Zip</Label>
+                            <Input value={propForm.zip_code} onChange={(e) => setPropField("zip_code", e.target.value)} className="h-9" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Contact tile */}
+                <Card className="bg-background">
+                  <CardContent className="pt-3 pb-3 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contact</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Email</Label>
+                        <Input type="email" value={custForm.email ?? ""} onChange={(e) => setCustField("email", e.target.value)} className="h-9" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Phone</Label>
+                        <Input value={custForm.phone ?? ""} onChange={(e) => setCustField("phone", e.target.value)} className="h-9" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Billing tile — only for roles that can see rates */}
+                {perms.canViewRates && <Card className="bg-background">
+                  <CardContent className="pt-3 pb-3 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Billing</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Monthly Rate ($)</Label>
+                        <Input type="number" step="0.01" value={custForm.monthly_rate} onChange={(e) => setCustField("monthly_rate", parseFloat(e.target.value) || 0)} className="h-9" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Payment Terms (days)</Label>
+                        <Input type="number" value={custForm.payment_terms_days} onChange={(e) => setCustField("payment_terms_days", parseInt(e.target.value) || 30)} className="h-9" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Billing Frequency</Label>
+                        <Select value={custForm.billing_frequency} onValueChange={(v) => setCustField("billing_frequency", v)}>
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="monthly">Monthly</SelectItem>
+                            <SelectItem value="quarterly">Quarterly</SelectItem>
+                            <SelectItem value="annually">Annually</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Payment Method</Label>
+                        <Input value={custForm.payment_method ?? ""} onChange={(e) => setCustField("payment_method", e.target.value)} placeholder="check, cc, ach..." className="h-9" />
+                      </div>
+                    </div>
+                    {/* Billing address with "same as" toggle */}
+                    {singleProp && propForm && (() => {
+                      const sameAddr = custForm.billing_address === propForm.address
+                        && custForm.billing_city === propForm.city
+                        && custForm.billing_state === propForm.state
+                        && custForm.billing_zip === propForm.zip_code;
+                      const isSame = !custForm.billing_address || sameAddr;
+                      return (
+                        <>
+                          <div className="flex items-center gap-2 pt-1">
+                            <Switch checked={isSame} onCheckedChange={(v) => {
+                              if (v) {
+                                setCustField("billing_address", propForm.address);
+                                setCustField("billing_city", propForm.city);
+                                setCustField("billing_state", propForm.state);
+                                setCustField("billing_zip", propForm.zip_code);
+                              }
+                            }} />
+                            <Label className="text-xs">Same as service address</Label>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Billing Address</Label>
+                            <Input value={isSame ? propForm.address : (custForm.billing_address ?? "")} onChange={(e) => setCustField("billing_address", e.target.value)} className="h-9" disabled={isSame} />
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">City</Label>
+                              <Input value={isSame ? propForm.city : (custForm.billing_city ?? "")} onChange={(e) => setCustField("billing_city", e.target.value)} className="h-9" disabled={isSame} />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">State</Label>
+                              <Input value={isSame ? propForm.state : (custForm.billing_state ?? "")} onChange={(e) => setCustField("billing_state", e.target.value)} className="h-9" disabled={isSame} />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Zip</Label>
+                              <Input value={isSame ? propForm.zip_code : (custForm.billing_zip ?? "")} onChange={(e) => setCustField("billing_zip", e.target.value)} className="h-9" disabled={isSame} />
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                    {/* Fallback: no property, show billing address fields directly */}
+                    {!singleProp && (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Billing Address</Label>
+                          <Input value={custForm.billing_address ?? ""} onChange={(e) => setCustField("billing_address", e.target.value)} className="h-9" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">City</Label>
+                            <Input value={custForm.billing_city ?? ""} onChange={(e) => setCustField("billing_city", e.target.value)} className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">State</Label>
+                            <Input value={custForm.billing_state ?? ""} onChange={(e) => setCustField("billing_state", e.target.value)} className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Zip</Label>
+                            <Input value={custForm.billing_zip ?? ""} onChange={(e) => setCustField("billing_zip", e.target.value)} className="h-9" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>}
+
+                {/* Service tile — schedule + access details */}
+                <Card className="bg-background">
+                  <CardContent className="pt-3 pb-3 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Service</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Frequency</Label>
+                        <Select value={custForm.service_frequency ?? "weekly"} onValueChange={(v) => setCustField("service_frequency", v)}>
+                          <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="weekly">Weekly</SelectItem>
+                            <SelectItem value="biweekly">Biweekly</SelectItem>
+                            <SelectItem value="monthly">Monthly</SelectItem>
+                            <SelectItem value="on_call">On Call</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Service Days</Label>
+                        <div className="flex flex-wrap gap-1">
+                          {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].map((day) => {
+                            const days = (custForm.preferred_day ?? "").split(",").filter(Boolean);
+                            const active = days.includes(day);
+                            return (
+                              <Button key={day} type="button" variant={active ? "default" : "outline"} size="sm" className="h-7 px-2 text-xs"
+                                onClick={() => { const next = active ? days.filter(d => d !== day) : [...days, day]; setCustField("preferred_day", next.length ? next.join(",") : null); }}>
+                                {day.slice(0, 3).charAt(0).toUpperCase() + day.slice(1, 3)}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Access details from property */}
+                    {singleProp && propForm && (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Gate Code</Label>
+                            <Input value={propForm.gate_code ?? ""} onChange={(e) => setPropField("gate_code", e.target.value)} className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Access Instructions</Label>
+                            <Input value={propForm.access_instructions ?? ""} onChange={(e) => setPropField("access_instructions", e.target.value)} className="h-9" />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-x-6 gap-y-2">
+                          <div className="flex items-center gap-2">
+                            <Switch checked={propForm.dog_on_property} onCheckedChange={(v) => setPropField("dog_on_property", v)} />
+                            <Label className="text-xs">Dog on Property</Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Switch checked={propForm.is_locked_to_day} onCheckedChange={(v) => setPropField("is_locked_to_day", v)} />
+                            <Label className="text-xs">Locked to Day</Label>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Notes</Label>
+                      <Textarea value={custForm.notes ?? ""} onChange={(e) => setCustField("notes", e.target.value)} rows={2} />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== BOWS TAB ===== */}
+      {viewTab === "bows" && (
+        <Card className={`shadow-sm ${editingBows ? "border-l-4 border-l-primary" : ""}`}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Water Features</CardTitle>
+              {!editingBows && perms.canEditCustomers && (
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingBows(true)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {editingBows && (
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={handleExitBows}>
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {!editingBows ? (
+              /* --- BOW View --- */
+              <div className="space-y-6">
+                {properties.length === 0 && (
+                  <p className="text-center text-muted-foreground py-6 text-sm">No service location yet</p>
+                )}
+                {properties.map((prop) => {
+                  const propBows = fullBows.filter((b) => b.property_id === prop.id);
+                  const summaryBows = prop.bodies_of_water || [];
+                  const bows = propBows.length > 0 ? propBows : summaryBows;
+                  const hero = heroImages[prop.id];
+                  if (bows.length === 0 && properties.length === 1) {
+                    return <p key={prop.id} className="text-center text-muted-foreground py-6 text-sm">No water features</p>;
+                  }
+                  if (bows.length === 0) return null;
+                  return (
+                    <div key={prop.id} className="space-y-4">
+                      {/* Property header with satellite */}
+                      {(properties.length > 1 || hero) && (
+                        <div className="relative rounded-lg overflow-hidden border">
+                          {hero ? (
+                            <>
+                              <img
+                                src={`${API_BASE}${hero.url}`}
+                                alt="Satellite view"
+                                className="w-full h-40 object-cover"
+                              />
+                              {properties.length > 1 && (
+                                <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-4 py-3">
+                                  <div className="flex items-center gap-2 text-white">
+                                    <MapPin className="h-3.5 w-3.5" />
+                                    <span className="text-sm font-medium">{prop.name || prop.address}, {prop.city}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : properties.length > 1 ? (
+                            <div className="bg-muted/30 px-4 py-3">
+                              <div className="flex items-center gap-2 text-sm font-medium">
+                                <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>{prop.name || prop.address}, {prop.city}</span>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+
+                      {bows.map((bow) => {
+                        const isFull = "pump_type" in bow;
+                        const fb = isFull ? (bow as BodyOfWater) : null;
+                        const v = (val: string | number | null | undefined, suffix = "") =>
+                          val != null && val !== "" ? <span className="font-medium">{val}{suffix}</span> : <span className="text-muted-foreground/50 italic">Not set</span>;
+
+                        return (
+                          <div key={bow.id} className="space-y-3">
+                            {/* BOW Header Bar */}
+                            <div className="flex items-center gap-3 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg">
+                              <Waves className="h-4 w-4 opacity-70" />
+                              <span className="text-xs font-medium uppercase tracking-wide capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
+                              {bow.pool_type && <Badge className="bg-white/15 text-primary-foreground text-[10px] px-1.5 py-0 capitalize hover:bg-white/15">{bow.pool_type}</Badge>}
+                              <div className="ml-auto flex items-center gap-1">
+                                {bow.water_type === "pool" && (
+                                <Link href={`/satellite?bow=${bow.id}`}>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 text-primary-foreground/70 hover:text-primary-foreground hover:bg-white/10">
+                                    <Satellite className="h-3.5 w-3.5" />
+                                  </Button>
+                                </Link>
+                                )}
+                                {perms.canMeasure && (
+                                  <Link href={`/properties/${prop.id}/measure?bow=${bow.id}`}>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-primary-foreground/70 hover:text-primary-foreground hover:bg-white/10">
+                                      <Ruler className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </Link>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Metric Cards Row */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {[
+                                { icon: Droplets, label: "Volume", value: bow.pool_gallons ? `${bow.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500" },
+                                { icon: Move, label: "Surface", value: bow.pool_sqft ? `${bow.pool_sqft.toLocaleString()}` : null, unit: "ft²", color: "text-emerald-500" },
+                                { icon: Clock, label: "Service", value: `${bow.estimated_service_minutes}`, unit: "min", color: "text-amber-500" },
+                                { icon: DollarSign, label: "Rate", value: bow.monthly_rate != null ? `${bow.monthly_rate.toFixed(2)}` : null, unit: "/mo", color: "text-violet-500" },
+                              ].map((m) => (
+                                <div key={m.label} className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
+                                  <div className="flex items-center gap-1.5 mb-1">
+                                    <m.icon className={`h-3 w-3 ${m.color}`} />
+                                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</span>
+                                  </div>
+                                  {m.value ? (
+                                    <p className="text-lg font-bold leading-tight">{m.value}<span className="text-xs font-normal text-muted-foreground ml-0.5">{m.unit}</span></p>
+                                  ) : (
+                                    <p className="text-sm text-muted-foreground/50 italic leading-tight mt-0.5">\u2014</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Two-column grid for category tiles */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {/* Dimensions Tile */}
+                              <div className="bg-background border rounded-lg shadow-sm overflow-hidden">
+                                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
+                                  <Ruler className="h-3 w-3 text-muted-foreground" />
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Dimensions</span>
+                                </div>
+                                <div className="px-3 py-2.5 space-y-1.5">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">Shape</span>
+                                    {fb?.pool_shape ? <span className="font-medium capitalize">{fb.pool_shape}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">L × W</span>
+                                    {fb?.pool_length_ft && fb?.pool_width_ft
+                                      ? <span className="font-medium">{fb.pool_length_ft} × {fb.pool_width_ft} ft</span>
+                                      : <span className="text-muted-foreground/50 italic">Not set</span>}
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">Depth</span>
+                                    {fb?.pool_depth_shallow && fb?.pool_depth_deep
+                                      ? <span className="font-medium">{fb.pool_depth_shallow}–{fb.pool_depth_deep} ft</span>
+                                      : fb?.pool_depth_avg
+                                      ? <span className="font-medium">{fb.pool_depth_avg} ft avg</span>
+                                      : <span className="text-muted-foreground/50 italic">Not set</span>}
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">Surface</span>
+                                    {fb?.pool_surface ? <span className="font-medium capitalize">{fb.pool_surface}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Chemistry Tile */}
+                              <div className="bg-background border rounded-lg shadow-sm overflow-hidden">
+                                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
+                                  <FlaskConical className="h-3 w-3 text-muted-foreground" />
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Chemistry</span>
+                                </div>
+                                <div className="px-3 py-2.5 space-y-1.5">
+                                  <div className="flex justify-between items-center text-xs">
+                                    <span className="text-muted-foreground">Sanitizer</span>
+                                    {fb?.sanitizer_type
+                                      ? <Badge variant="outline" className="text-[10px] capitalize px-1.5 py-0">{fb.sanitizer_type.replace(/_/g, " ")}</Badge>
+                                      : <span className="text-muted-foreground/50 italic">Not set</span>}
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">Last Reading</span>
+                                    <span className="text-muted-foreground/50 italic">None</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Equipment Tile — always show, full width */}
+                              <div className="sm:col-span-2 bg-background border rounded-lg shadow-sm overflow-hidden">
+                                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
+                                  <Wrench className="h-3 w-3 text-muted-foreground" />
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment</span>
+                                </div>
+                                <div className="px-3 py-2.5">
+                                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                                    {[
+                                      { icon: Gauge, label: "Pump", value: fb?.pump_type },
+                                      { icon: FlaskConical, label: "Filter", value: fb?.filter_type },
+                                      { icon: Thermometer, label: "Heater", value: fb?.heater_type },
+                                      { icon: FlaskConical, label: "Chlorinator", value: fb?.chlorinator_type },
+                                      { icon: Zap, label: "Automation", value: fb?.automation_system },
+                                    ].map((e) => (
+                                      <div key={e.label} className="flex items-center gap-2 text-xs">
+                                        <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
+                                        <span className="text-muted-foreground">{e.label}</span>
+                                        <span className="truncate ml-auto">
+                                          {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Notes Tile — always show */}
+                              <div className="sm:col-span-2 bg-background border rounded-lg shadow-sm overflow-hidden">
+                                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
+                                  <StickyNote className="h-3 w-3 text-muted-foreground" />
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Notes</span>
+                                </div>
+                                <div className="px-3 py-2.5">
+                                  {fb?.notes
+                                    ? <p className="text-xs text-muted-foreground whitespace-pre-wrap">{fb.notes}</p>
+                                    : <p className="text-xs text-muted-foreground/50 italic">No notes</p>}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* --- BOW Edit --- */
+              <div className="space-y-3">
+                {singleProp && (
+                  <SinglePropertyBowSection propertyId={singleProp.id} onBowChange={load} />
+                )}
+                {properties.length > 1 && (
+                  properties.map((p) => (
+                    <PropertyEditCard
+                      key={p.id}
+                      property={p}
+                      customer={customer}
+                      onSave={(data) => handleSaveProperty(p.id, data)}
+                      onDelete={() => handleDeleteProperty(p.id)}
+                      onBowChange={load}
+                    />
+                  ))
+                )}
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setAddingProp(!addingProp)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" />{properties.length <= 1 ? "Add another location" : "Add location"}
+                </Button>
+                {addingProp && (
+                  <Card>
+                    <CardContent className="pt-4">
+                      <form onSubmit={handleAddProperty} className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Address</Label>
+                          <Input name="address" required className="h-9" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">City</Label>
+                            <Input name="city" required className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">State</Label>
+                            <Input name="state" required className="h-9" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Zip</Label>
+                            <Input name="zip_code" required className="h-9" />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" className="flex-1 h-9" onClick={() => setAddingProp(false)}>Cancel</Button>
+                          <Button type="submit" className="flex-1 h-9">Add Location</Button>
+                        </div>
+                      </form>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== INVOICES TAB ===== */}
+      {viewTab === "invoices" && perms.canViewInvoices && (
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Invoices</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {invoices.length === 0 ? (
+              <p className="text-center text-muted-foreground py-4 text-sm">No invoices yet</p>
+            ) : (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-100 dark:bg-slate-800">
+                      <TableHead className="text-xs font-medium uppercase tracking-wide">Invoice #</TableHead>
+                      <TableHead className="hidden sm:table-cell text-xs font-medium uppercase tracking-wide">Subject</TableHead>
+                      <TableHead className="text-xs font-medium uppercase tracking-wide">Status</TableHead>
+                      <TableHead className="hidden sm:table-cell text-xs font-medium uppercase tracking-wide">Issue Date</TableHead>
+                      <TableHead className="text-right text-xs font-medium uppercase tracking-wide">Total</TableHead>
+                      <TableHead className="text-right text-xs font-medium uppercase tracking-wide">Balance</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
-
+                  </TableHeader>
+                  <TableBody>
+                    {invoices.map((inv, i) => (
+                      <TableRow key={inv.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                        <TableCell>
+                          <Link href={`/invoices/${inv.id}`} className="font-medium hover:underline">{inv.invoice_number}</Link>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground hidden sm:table-cell">{inv.subject || "\u2014"}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={inv.status === "paid" ? "default" : inv.status === "overdue" ? "destructive" : "secondary"}
+                            className={inv.status === "paid" ? "bg-green-600" : inv.status === "sent" ? "border-blue-400 text-blue-600" : ""}
+                          >{inv.status.replace("_", " ")}</Badge>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell">{inv.issue_date}</TableCell>
+                        <TableCell className="text-right">${inv.total.toFixed(2)}</TableCell>
+                        <TableCell className={`text-right ${inv.balance > 0 ? "text-red-600 font-medium" : ""}`}>${inv.balance.toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+        </div>
+      </div>
     </div>
   );
 }

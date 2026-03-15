@@ -8,9 +8,14 @@ export interface ApiError {
 class ApiClient {
   private baseUrl: string;
   private refreshPromise: Promise<boolean> | null = null;
+  private viewAsRole: string | null = null;
 
   constructor(baseUrl = "/api") {
     this.baseUrl = baseUrl;
+  }
+
+  setViewAsRole(role: string | null) {
+    this.viewAsRole = role;
   }
 
   private async request<T>(
@@ -22,6 +27,9 @@ class ApiClient {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
+    if (this.viewAsRole) {
+      headers["X-View-As-Role"] = this.viewAsRole;
+    }
 
     const response = await fetch(url, {
       ...options,
@@ -96,13 +104,51 @@ class ApiClient {
     return this.request<T>(path, { method: "DELETE" });
   }
 
+  async postDirect<T>(path: string, body?: unknown): Promise<T> {
+    // POST directly to the backend, bypassing Next.js rewrite proxy
+    const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api${path}`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.viewAsRole) headers["X-View-As-Role"] = this.viewAsRole;
+    const response = await fetch(backendUrl, {
+      method: "POST",
+      body: body ? JSON.stringify(body) : undefined,
+      headers,
+      credentials: "include",
+    });
+
+    if (response.status === 401) {
+      const refreshed = await this.tryRefresh();
+      if (refreshed) {
+        const retryResponse = await fetch(backendUrl, {
+          method: "POST",
+          body: body ? JSON.stringify(body) : undefined,
+          headers,
+          credentials: "include",
+        });
+        if (retryResponse.ok) return retryResponse.json();
+      }
+      throw { error: "unauthorized", message: "Session expired" } as ApiError;
+    }
+
+    if (!response.ok) {
+      const b = await response.json().catch(() => ({}));
+      throw (b.detail || b) as ApiError;
+    }
+    return response.json();
+  }
+
   async upload<T>(path: string, formData: FormData): Promise<T> {
     // Upload directly to the backend, bypassing Next.js rewrite proxy
     // which has body size limits that reject large photo uploads
     const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api${path}`;
+    const uploadHeaders: Record<string, string> = {};
+    if (this.viewAsRole) {
+      uploadHeaders["X-View-As-Role"] = this.viewAsRole;
+    }
     const response = await fetch(backendUrl, {
       method: "POST",
       body: formData,
+      headers: uploadHeaders,
       credentials: "include",
     });
 

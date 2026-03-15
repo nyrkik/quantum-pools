@@ -304,8 +304,8 @@ export default function ProfitabilityPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {overview.accounts.map((account) => (
-                <TableRow key={`${account.customer_id}-${account.property_id}`}>
+              {overview.accounts.map((account, i) => (
+                <TableRow key={`${account.customer_id}-${account.property_id}`} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                   <TableCell>
                     <Link
                       href={`/profitability/${account.customer_id}`}

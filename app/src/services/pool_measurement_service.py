@@ -133,18 +133,17 @@ class PoolMeasurementService:
         if not prop:
             raise NotFoundError(f"Property {property_id} not found")
 
-        # If no BOW specified, use primary
+        # If no BOW specified, use the first one
         if not body_of_water_id:
             bow_result = await self.db.execute(
                 select(BodyOfWater).where(
                     BodyOfWater.property_id == property_id,
                     BodyOfWater.organization_id == org_id,
-                    BodyOfWater.is_primary == True,
-                )
+                ).order_by(BodyOfWater.created_at).limit(1)
             )
-            primary_bow = bow_result.scalar_one_or_none()
-            if primary_bow:
-                body_of_water_id = primary_bow.id
+            first_bow = bow_result.scalar_one_or_none()
+            if first_bow:
+                body_of_water_id = first_bow.id
 
         measurement = PoolMeasurement(
             id=str(uuid.uuid4()),

@@ -23,6 +23,7 @@ class CustomerCreate(BaseModel):
     payment_method: Optional[str] = None
     payment_terms_days: int = 30
     difficulty_rating: int = 1
+    status: str = "active"
     notes: Optional[str] = None
 
 
@@ -44,6 +45,7 @@ class CustomerUpdate(BaseModel):
     payment_method: Optional[str] = None
     payment_terms_days: Optional[int] = None
     difficulty_rating: Optional[int] = None
+    status: Optional[str] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -68,6 +70,7 @@ class CustomerResponse(BaseModel):
     payment_terms_days: int
     balance: float
     difficulty_rating: int
+    status: str
     notes: Optional[str] = None
     is_active: bool
     created_at: datetime
@@ -78,3 +81,16 @@ class CustomerResponse(BaseModel):
     bow_summary: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class CustomerCreateWithProperty(CustomerCreate):
+    """Create customer + property + primary BOW in one call."""
+    address: str = Field(..., min_length=1)
+    city: str = Field(..., min_length=1)
+    state: str = Field(..., min_length=1)
+    zip_code: str = Field(..., min_length=1)
+    gate_code: Optional[str] = None
+    access_instructions: Optional[str] = None
+    dog_on_property: bool = False
+    water_type: str = "pool"
+    pool_type: Optional[str] = None

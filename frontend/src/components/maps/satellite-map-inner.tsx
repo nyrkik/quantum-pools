@@ -33,6 +33,53 @@ const dotYellow = createDot("#eab308");
 const dotRed = createDot("#ef4444");
 const dotSelected = createDot("#3B82F6", 16);
 
+// Saved pool pin — small blue diamond, visible when zoomed in on selected property
+function createPoolPin(label?: string): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      position:relative;
+      width:14px;height:14px;
+      background:#3B82F6;
+      border:2px solid white;
+      border-radius:3px;
+      transform:rotate(45deg);
+      box-shadow:0 1px 4px rgba(0,0,0,.4);
+    ">${label ? `<span style="
+      position:absolute;
+      top:50%;left:50%;
+      transform:translate(-50%,-50%) rotate(-45deg);
+      font-size:8px;
+      font-weight:700;
+      color:white;
+      line-height:1;
+    ">${label}</span>` : ""}</div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+
+// Active placement pin — red crosshair
+const pinIcon = L.divIcon({
+  className: "",
+  html: `<div style="
+    width:20px;height:20px;
+    border:3px solid #ef4444;
+    border-radius:50%;
+    background:rgba(239,68,68,0.2);
+    box-shadow:0 0 0 2px white, 0 2px 8px rgba(0,0,0,.4);
+  "><div style="
+    width:4px;height:4px;
+    background:#ef4444;
+    border-radius:50%;
+    position:absolute;
+    top:50%;left:50%;
+    transform:translate(-50%,-50%);
+  "></div></div>`,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+});
+
 function getPropertyIcon(pg: PropertyGroup, isSelected: boolean) {
   if (isSelected) return dotSelected;
   if (pg.best_status === "pinned") return dotGreen;
@@ -163,6 +210,33 @@ export default function SatelliteMapInner({
           lat={selectedGroup.lat}
           lng={selectedGroup.lng}
           propertyId={selectedPropertyId}
+        />
+      )}
+
+      {/* Saved pool pins for selected property */}
+      {selectedGroup && selectedGroup.bows.map((bow, idx) => {
+        if (!bow.pool_lat || !bow.pool_lng) return null;
+        const label = selectedGroup.bows.length > 1 ? String(idx + 1) : undefined;
+        return (
+          <Marker
+            key={`pin-${bow.id}`}
+            position={[bow.pool_lat, bow.pool_lng]}
+            icon={createPoolPin(label)}
+            zIndexOffset={1500}
+          >
+            <Popup>
+              <div className="text-xs font-medium">{bow.bow_name || bow.water_type}</div>
+            </Popup>
+          </Marker>
+        );
+      })}
+
+      {/* Active placement pin — red crosshair */}
+      {pinPosition && (
+        <Marker
+          position={[pinPosition.lat, pinPosition.lng]}
+          icon={pinIcon}
+          zIndexOffset={2000}
         />
       )}
 

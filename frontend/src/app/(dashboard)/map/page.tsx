@@ -140,6 +140,7 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [activeBowId, setActiveBowId] = useState<string | null>(null);
+  const [highlightedBowId, setHighlightedBowId] = useState<string | null>(null);
   const [pinPosition, setPinPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [savingPin, setSavingPin] = useState(false);
   const [search, setSearch] = useState("");
@@ -354,17 +355,30 @@ export default function MapPage() {
 
   const selectPropertyQuiet = useCallback((propertyId: string) => {
     setSelectedPropertyId(propertyId);
-    setActiveBowId(null);
     setPinDirty(false);
     setPinPosition(null);
     setIsZoomedIn(false);
+    setHighlightedBowId(null);
 
     const group = propertyGroups.find((g) => g.property_id === propertyId);
     if (group) {
+      // Auto-activate pin for single-BOW properties
+      if (group.bows.length === 1) {
+        const bow = group.bows[0];
+        setActiveBowId(bow.id);
+        const analysis = analyses.find((a) => a.body_of_water_id === bow.id);
+        if (analysis?.pool_lat && analysis?.pool_lng) {
+          setPinPosition({ lat: analysis.pool_lat, lng: analysis.pool_lng });
+        } else if (bow.pool_lat && bow.pool_lng) {
+          setPinPosition({ lat: bow.pool_lat, lng: bow.pool_lng });
+        }
+      } else {
+        setActiveBowId(null);
+      }
       loadImages(propertyId);
       loadPropertyDetail(propertyId, group.bows);
     }
-  }, [propertyGroups, loadImages, loadPropertyDetail]);
+  }, [propertyGroups, analyses, loadImages, loadPropertyDetail]);
 
   const handlePropertySelect = useCallback((propertyId: string) => {
     setShouldFlyTo(true);
@@ -376,10 +390,17 @@ export default function MapPage() {
   }, [selectPropertyQuiet]);
 
   const handlePinPlace = useCallback((lat: number, lng: number) => {
-    if (!canEdit || !activeBowId) return;
+    if (!canEdit || !selectedPropertyId) return;
+    // Auto-pick BOW: highlighted > active > first in group
+    const group = propertyGroups.find((g) => g.property_id === selectedPropertyId);
+    if (!group) return;
+    const targetBow = highlightedBowId || activeBowId || group.bows[0]?.id;
+    if (!targetBow) return;
+    setActiveBowId(targetBow);
+    setHighlightedBowId(targetBow);
     setPinPosition({ lat, lng });
     setPinDirty(true);
-  }, [canEdit, activeBowId]);
+  }, [canEdit, selectedPropertyId, propertyGroups, highlightedBowId, activeBowId]);
 
   const savePin = async () => {
     if (!activeBowId || !pinPosition) return;
@@ -535,7 +556,7 @@ export default function MapPage() {
     const isMeasuring = measuringPerimeterBow === bow.id;
 
     return (
-      <Card key={bow.id} className={`shadow-sm border-l-4 ${isBowActive ? "border-l-primary" : "border-l-blue-500"}`}>
+      <Card key={bow.id} id={`bow-tile-${bow.id}`} className={`shadow-sm border-l-4 cursor-pointer ${isBowActive ? "border-l-primary" : highlightedBowId === bow.id ? "border-l-amber-400" : "border-l-blue-500"}`} onClick={() => setHighlightedBowId(bow.id)}>
         <CardContent className="p-4 space-y-3">
           {/* Pool header */}
           <div className="flex items-start justify-between">
@@ -883,50 +904,77 @@ export default function MapPage() {
                   {section.items.map((g) => {
                     const isSelected = g.property_id === selectedPropertyId;
                     return (
-                      <button
-                        key={g.property_id}
-                        id={`prop-${g.property_id}`}
-                        onClick={() => handlePropertySelect(g.property_id)}
-                        className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors ${
-                          isSelected
-                            ? "bg-accent border-l-3 border-l-primary font-medium"
-                            : "hover:bg-muted"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                              g.best_status === "pinned"
-                                ? "bg-green-500"
-                                : g.best_status === "analyzed"
-                                ? "bg-yellow-500"
-                                : "bg-red-500"
-                            }`}
-                          />
-                          <span className="font-medium truncate flex-1">
-                            {g.customer_name}
-                          </span>
-                          {g.bows.length > 1 && (
-                            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0">
-                              {g.bows.length}
-                            </Badge>
+                      <div key={g.property_id}>
+                        <button
+                          id={`prop-${g.property_id}`}
+                          onClick={() => { handlePropertySelect(g.property_id); setHighlightedBowId(null); }}
+                          className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors ${
+                            isSelected
+                              ? "bg-accent border-l-3 border-l-primary font-medium"
+                              : "hover:bg-muted"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                                g.best_status === "pinned"
+                                  ? "bg-green-500"
+                                  : g.best_status === "analyzed"
+                                  ? "bg-yellow-500"
+                                  : "bg-red-500"
+                              }`}
+                            />
+                            <span className="font-medium truncate flex-1">
+                              {g.customer_name}
+                            </span>
+                            {g.bows.length > 1 && (
+                              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0">
+                                {g.bows.length}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-xs truncate ml-4 text-muted-foreground">
+                            {g.address}
+                          </div>
+                          {g.city && (
+                            <div className="text-xs truncate ml-4 text-muted-foreground/70">
+                              {g.city}
+                            </div>
                           )}
-                        </div>
-                        <div className="text-xs truncate ml-4 text-muted-foreground">
-                          {g.address}
-                        </div>
-                        {g.city && (
-                          <div className="text-xs truncate ml-4 text-muted-foreground/70">
-                            {g.city}
+                          {g.tech_name && (
+                            <div className="text-xs truncate ml-4 text-muted-foreground flex items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.tech_color || '#94a3b8' }} />
+                              {g.tech_name}
+                            </div>
+                          )}
+                        </button>
+                        {/* Child BOW entries — show when selected and multi-BOW */}
+                        {isSelected && g.bows.length > 1 && (
+                          <div className="ml-6 border-l-2 border-border pl-2 py-1 space-y-0.5">
+                            {g.bows.map((b) => (
+                              <button
+                                key={b.id}
+                                onClick={() => {
+                                  setHighlightedBowId(b.id);
+                                  setTimeout(() => {
+                                    document.getElementById(`bow-tile-${b.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                                  }, 50);
+                                }}
+                                className={`w-full text-left rounded px-2 py-1 text-xs transition-colors ${
+                                  highlightedBowId === b.id
+                                    ? "bg-accent font-medium"
+                                    : "hover:bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <Droplets className="h-2.5 w-2.5 text-blue-500 shrink-0" />
+                                  <span className="truncate">{b.bow_name || b.water_type.replace("_", " ")}</span>
+                                </div>
+                              </button>
+                            ))}
                           </div>
                         )}
-                        {g.tech_name && (
-                          <div className="text-xs truncate ml-4 text-muted-foreground flex items-center gap-1.5">
-                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.tech_color || '#94a3b8' }} />
-                            {g.tech_name}
-                          </div>
-                        )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

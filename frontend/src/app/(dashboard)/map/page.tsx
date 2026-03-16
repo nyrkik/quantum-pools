@@ -49,6 +49,8 @@ import {
   AlertTriangle,
   Pencil,
   X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -173,6 +175,8 @@ export default function MapPage() {
   const mapActionsRef = useRef<MapActions | null>(null);
   const [mapZoom, setMapZoom] = useState(12);
   const [diffModalOpen, setDiffModalOpen] = useState(false);
+  const [chemicalCosts, setChemicalCosts] = useState<Map<string, { sanitizer_cost: number; acid_cost: number; cya_cost: number; salt_cost: number; cell_cost: number; insurance_cost: number; total_monthly: number; source: string }>>(new Map());
+  const [costExpanded, setCostExpanded] = useState(false);
   const [dismissedDiscrepancies, setDismissedDiscrepancies] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem("qp_dismissed_discrepancies");
@@ -325,6 +329,8 @@ export default function MapPage() {
     setProfitData(null);
     setDimComparisons(new Map());
     setRateAllocation({});
+    setChemicalCosts(new Map());
+    setCostExpanded(false);
 
     const bowPromises = bows.map(async (b) => {
       const [bow, comparison] = await Promise.all([
@@ -344,6 +350,19 @@ export default function MapPage() {
     setPropDetail(prop);
     setProfitData(profit);
     setRateAllocation(allocation || {});
+
+    // Fetch chemical costs for each BOW in parallel
+    const chemCostResults = await Promise.all(
+      bows.map(async (b) => {
+        const cc = await api.get<{ sanitizer_cost: number; acid_cost: number; cya_cost: number; salt_cost: number; cell_cost: number; insurance_cost: number; total_monthly: number; source: string }>(`/v1/chemical-costs/bows/${b.id}`).catch(() => null);
+        return { bowId: b.id, cc };
+      })
+    );
+    const newChemCosts = new Map<string, { sanitizer_cost: number; acid_cost: number; cya_cost: number; salt_cost: number; cell_cost: number; insurance_cost: number; total_monthly: number; source: string }>();
+    for (const r of chemCostResults) {
+      if (r.cc) newChemCosts.set(r.bowId, r.cc);
+    }
+    setChemicalCosts(newChemCosts);
 
     const newBowDetails = new Map<string, Record<string, unknown>>();
     const newDimComps = new Map<string, DimensionComparison>();
@@ -1283,7 +1302,7 @@ export default function MapPage() {
                         </div>
                       )}
                       {perms.canViewProfitability && profitData && (() => {
-                        const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
+                        const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number; chemical_cost: number; labor_cost: number; travel_cost: number; overhead_cost: number } }).cost_breakdown;
                         if (!cost) return null;
                         const diff = (profitData as { difficulty_score: number }).difficulty_score;
                         const rpg = (profitData as { rate_per_gallon?: number }).rate_per_gallon;
@@ -1303,41 +1322,88 @@ export default function MapPage() {
                         };
 
                         const metrics = [
-                          { label: "Rate/gal", value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null, medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null, color: "text-foreground", cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true), editable: false },
-                          { label: "Cost", value: `$${cost.total_cost.toFixed(0)}`, medianLabel: m ? `$${m.cost.toFixed(0)}` : null, color: "text-muted-foreground", cmp: compare(cost.total_cost, m?.cost, false), editable: false },
-                          { label: "Margin", value: `${cost.margin_pct.toFixed(1)}%`, medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null, color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600", cmp: compare(cost.margin_pct, m?.margin_pct, true), editable: false },
-                          { label: "Diff", value: `${diff.toFixed(1)}`, medianLabel: m ? `${m.difficulty.toFixed(1)}` : null, color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground", cmp: compare(diff, m?.difficulty, false), editable: true },
+                          { label: "Rate/gal", value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null, medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null, color: "text-foreground", cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true), editable: false, expandable: false },
+                          { label: "Est. Cost", value: `$${cost.total_cost.toFixed(0)}`, medianLabel: m ? `$${m.cost.toFixed(0)}` : null, color: "text-muted-foreground", cmp: compare(cost.total_cost, m?.cost, false), editable: false, expandable: true },
+                          { label: "Margin", value: `${cost.margin_pct.toFixed(1)}%`, medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null, color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600", cmp: compare(cost.margin_pct, m?.margin_pct, true), editable: false, expandable: false },
+                          { label: "Diff", value: `${diff.toFixed(1)}`, medianLabel: m ? `${m.difficulty.toFixed(1)}` : null, color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground", cmp: compare(diff, m?.difficulty, false), editable: true, expandable: false },
                         ];
 
+                        // Sum chemical costs across all BOWs
+                        const chemSum = { sanitizer: 0, acid: 0, insurance: 0, salt_cell: 0, total: 0 };
+                        let hasSalt = false;
+                        for (const [, cc] of chemicalCosts) {
+                          chemSum.sanitizer += cc.sanitizer_cost;
+                          chemSum.acid += cc.acid_cost;
+                          chemSum.insurance += cc.insurance_cost;
+                          chemSum.salt_cell += cc.salt_cost + cc.cell_cost;
+                          chemSum.total += cc.total_monthly;
+                          if (cc.salt_cost > 0 || cc.cell_cost > 0) hasSalt = true;
+                        }
+
                         return (
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {metrics.map((mt) => (
-                              <div key={mt.label} className="bg-muted/50 rounded px-2 py-1.5">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
-                                  {mt.editable && canEdit && selectedPropertyId && (
-                                    <button className="text-muted-foreground hover:text-foreground" onClick={() => setDiffModalOpen(true)}>
-                                      <Pencil className="h-2.5 w-2.5" />
-                                    </button>
-                                  )}
+                          <div className="space-y-1.5">
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {metrics.map((mt) => (
+                                <div
+                                  key={mt.label}
+                                  className={`bg-muted/50 rounded px-2 py-1.5 ${mt.expandable ? "cursor-pointer hover:bg-muted/80 transition-colors" : ""}`}
+                                  onClick={mt.expandable ? () => setCostExpanded(!costExpanded) : undefined}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
+                                    {mt.expandable && (
+                                      costExpanded
+                                        ? <ChevronUp className="h-2.5 w-2.5 text-muted-foreground" />
+                                        : <ChevronDown className="h-2.5 w-2.5 text-muted-foreground" />
+                                    )}
+                                    {mt.editable && canEdit && selectedPropertyId && (
+                                      <button className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); setDiffModalOpen(true); }}>
+                                        <Pencil className="h-2.5 w-2.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="flex items-baseline gap-1">
+                                    {mt.cmp ? (
+                                      <>
+                                        <p className={`text-sm font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
+                                        <span className={`text-[10px] font-bold ${mt.cmp.color}`}>
+                                          {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
+                                        </span>
+                                        {mt.medianLabel && (
+                                          <span className="text-[9px] text-muted-foreground/50">/ {mt.medianLabel}</span>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <p className={`text-sm font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="flex items-baseline gap-1">
-                                  {mt.cmp ? (
-                                    <>
-                                      <p className={`text-sm font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
-                                      <span className={`text-[10px] font-bold ${mt.cmp.color}`}>
-                                        {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
-                                      </span>
-                                      {mt.medianLabel && (
-                                        <span className="text-[9px] text-muted-foreground/50">/ {mt.medianLabel}</span>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <p className={`text-sm font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
-                                  )}
+                              ))}
+                            </div>
+                            {costExpanded && (
+                              <div className="bg-muted/50 rounded px-3 py-2 space-y-1">
+                                <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1.5">Cost Breakdown</p>
+                                {[
+                                  { label: "Sanitizer", value: chemSum.sanitizer },
+                                  { label: "Acid", value: chemSum.acid },
+                                  { label: "Insurance", value: chemSum.insurance },
+                                  ...(hasSalt ? [{ label: "Salt/Cell", value: chemSum.salt_cell }] : []),
+                                  { label: "Total Chemical", value: chemSum.total, bold: true },
+                                  { label: "Labor", value: cost.labor_cost },
+                                  { label: "Travel", value: cost.travel_cost },
+                                  { label: "Overhead", value: cost.overhead_cost },
+                                ].map((row) => (
+                                  <div key={row.label} className={`flex justify-between text-[11px] ${(row as { bold?: boolean }).bold ? "border-t border-border/50 pt-1 font-medium" : ""}`}>
+                                    <span className="text-muted-foreground">{row.label}</span>
+                                    <span className={`${(row as { bold?: boolean }).bold ? "text-foreground" : "text-foreground/80"}`}>${row.value.toFixed(2)}</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between text-[11px] border-t border-border pt-1 font-bold">
+                                  <span className="text-foreground">Total</span>
+                                  <span className="text-foreground">${cost.total_cost.toFixed(2)}</span>
                                 </div>
                               </div>
-                            ))}
+                            )}
                           </div>
                         );
                       })()}

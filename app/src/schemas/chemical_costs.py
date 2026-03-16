@@ -20,6 +20,8 @@ class RegionalDefaultResponse(BaseModel):
     salt_price_per_bag: float
     cya_usage_lb_per_month_per_10k: float
     salt_bags_per_year_per_10k: float
+    salt_cell_replacement_cost: float = 0
+    insurance_chemicals_monthly: float = 0
     source: Optional[str] = None
     last_updated: Optional[datetime] = None
 
@@ -65,6 +67,8 @@ class ChemicalCostProfileResponse(BaseModel):
     acid_cost: float
     cya_cost: float
     salt_cost: float
+    cell_cost: float = 0
+    insurance_cost: float = 0
     total_monthly: float
     source: str
     overrides: Optional[dict] = None

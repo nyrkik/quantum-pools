@@ -23,6 +23,8 @@ class ChemicalCostProfile(Base):
     acid_cost: Mapped[float] = mapped_column(Float, default=0.0)
     cya_cost: Mapped[float] = mapped_column(Float, default=0.0)
     salt_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    cell_cost: Mapped[float] = mapped_column(Float, default=0.0)  # SWG cell amortization
+    insurance_cost: Mapped[float] = mapped_column(Float, default=0.0)  # phosphate remover, enzyme, algaecide
     total_monthly: Mapped[float] = mapped_column(Float, default=0.0)
 
     # Tracking

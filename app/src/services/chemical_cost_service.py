@@ -363,17 +363,11 @@ class ChemicalCostService:
             * VISITS_PER_MONTH
         )
 
-        # CYA: monthly lb * price * (gallons/10000)
-        # CYA stabilizes chlorine — applies to liquid, cal_hypo, salt pools
-        # Tabs (trichlor/dichlor) contain CYA already — reduced need
+        # CYA: near-zero for established pools
+        # Tabs/dichlor add CYA with every dose — $0 standalone CYA cost
         # Bromine doesn't use CYA
-        if sanitizer_type in ("bromine",):
-            cya_cost = 0.0
-        elif sanitizer_type in ("tabs", "dichlor"):
-            # Tabs/dichlor contain CYA; reduced supplemental need
-            cya_cost = regional.cya_usage_lb_per_month_per_10k * prices["cya_price"] * units_10k * 0.25
-        else:
-            cya_cost = regional.cya_usage_lb_per_month_per_10k * prices["cya_price"] * units_10k
+        # Liquid/cal_hypo/salt: one-time establishment, ~$0-2/mo amortized for top-offs
+        cya_cost = 0.0  # Established pools don't need ongoing CYA
 
         # Salt: only applies to salt-system pools
         if sanitizer_type == "salt":
@@ -381,7 +375,13 @@ class ChemicalCostService:
         else:
             salt_cost = 0.0
 
-        total_monthly = sanitizer_cost + acid_cost + cya_cost + salt_cost
+        # Salt cell amortization: only for salt pools
+        cell_cost = regional.salt_cell_replacement_cost if sanitizer_type == "salt" else 0.0
+
+        # Insurance chemicals (phosphate remover, enzyme, algaecide): per 10k gal/month
+        insurance_cost = regional.insurance_chemicals_monthly * units_10k
+
+        total_monthly = sanitizer_cost + acid_cost + cya_cost + salt_cost + cell_cost + insurance_cost
 
         # 7. Save/update profile, respecting user overrides
         overrides = {}
@@ -396,7 +396,7 @@ class ChemicalCostService:
                 cya_cost = existing.cya_cost
             if overrides.get("salt_cost") and existing.source == "user_override":
                 salt_cost = existing.salt_cost
-            total_monthly = sanitizer_cost + acid_cost + cya_cost + salt_cost
+            total_monthly = sanitizer_cost + acid_cost + cya_cost + salt_cost + cell_cost + insurance_cost
 
         now = datetime.now(timezone.utc)
 
@@ -405,6 +405,8 @@ class ChemicalCostService:
             existing.acid_cost = round(acid_cost, 2)
             existing.cya_cost = round(cya_cost, 2)
             existing.salt_cost = round(salt_cost, 2)
+            existing.cell_cost = round(cell_cost, 2)
+            existing.insurance_cost = round(insurance_cost, 2)
             existing.total_monthly = round(total_monthly, 2)
             existing.adjustments_applied = adj.get("adjustments") or None
             existing.last_computed = now
@@ -422,6 +424,8 @@ class ChemicalCostService:
                 acid_cost=round(acid_cost, 2),
                 cya_cost=round(cya_cost, 2),
                 salt_cost=round(salt_cost, 2),
+                cell_cost=round(cell_cost, 2),
+                insurance_cost=round(insurance_cost, 2),
                 total_monthly=round(total_monthly, 2),
                 source="computed",
                 adjustments_applied=adj.get("adjustments") or None,

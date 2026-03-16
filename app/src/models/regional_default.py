@@ -26,8 +26,10 @@ class RegionalDefault(Base):
     salt_price_per_bag: Mapped[float] = mapped_column(Float, default=7.0)
 
     # Monthly amortized costs
-    cya_usage_lb_per_month_per_10k: Mapped[float] = mapped_column(Float, default=1.0)
+    cya_usage_lb_per_month_per_10k: Mapped[float] = mapped_column(Float, default=0.0)  # 0 for established pools
     salt_bags_per_year_per_10k: Mapped[float] = mapped_column(Float, default=2.0)
+    salt_cell_replacement_cost: Mapped[float] = mapped_column(Float, default=0.0)  # amortized monthly
+    insurance_chemicals_monthly: Mapped[float] = mapped_column(Float, default=0.0)  # phosphate remover, enzyme, algaecide per 10k gal
 
     # Metadata
     source: Mapped[str | None] = mapped_column(String(20))  # ai_estimated, verified

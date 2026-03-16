@@ -203,6 +203,7 @@ class SatelliteService:
                 BodyOfWater.organization_id == organization_id,
                 BodyOfWater.water_type == "pool",
                 BodyOfWater.is_active == True,
+                Customer.is_active == True,
                 Property.is_active == True,
                 Property.lat.isnot(None),
                 Property.lng.isnot(None),

@@ -82,11 +82,19 @@ class DimensionService:
         bow_id: str,
         perimeter_ft: float,
         pool_shape: str,
+        area_sqft: Optional[float] = None,
         user_id: Optional[str] = None,
     ) -> DimensionEstimate:
-        """Add a perimeter-based dimension estimate and potentially update BOW."""
+        """Add a perimeter-based dimension estimate and potentially update BOW.
+        If area_sqft is provided (e.g. from Google Maps), use it directly instead of calculating.
+        """
         bow = await self._get_bow(org_id, bow_id)
-        estimated_sqft = self.calculate_sqft_from_perimeter(perimeter_ft, pool_shape)
+        if area_sqft and area_sqft > 0:
+            estimated_sqft = round(area_sqft, 1)
+            notes = f"Perimeter {perimeter_ft} ft, area {estimated_sqft} sqft (measured), shape {pool_shape}"
+        else:
+            estimated_sqft = self.calculate_sqft_from_perimeter(perimeter_ft, pool_shape)
+            notes = f"Perimeter {perimeter_ft} ft, shape {pool_shape}, estimated {estimated_sqft} sqft"
 
         estimate = DimensionEstimate(
             id=str(uuid.uuid4()),
@@ -95,8 +103,8 @@ class DimensionService:
             source="perimeter",
             estimated_sqft=estimated_sqft,
             perimeter_ft=perimeter_ft,
-            raw_data={"pool_shape": pool_shape, "perimeter_ft": perimeter_ft},
-            notes=f"Perimeter {perimeter_ft} ft, shape {pool_shape}, estimated {estimated_sqft} sqft",
+            raw_data={"pool_shape": pool_shape, "perimeter_ft": perimeter_ft, "area_sqft_measured": area_sqft},
+            notes=notes,
             created_by=user_id,
         )
         self.db.add(estimate)

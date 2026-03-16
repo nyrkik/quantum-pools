@@ -29,6 +29,7 @@ async def add_perimeter_measurement(
         bow_id=bow_id,
         perimeter_ft=body.perimeter_ft,
         pool_shape=body.pool_shape,
+        area_sqft=body.area_sqft,
         user_id=ctx.user.id,
     )
     return DimensionEstimateResponse.model_validate(estimate)

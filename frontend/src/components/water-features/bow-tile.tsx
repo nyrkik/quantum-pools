@@ -44,6 +44,10 @@ import {
   StickyNote,
   Wrench,
   Satellite,
+  Shield,
+  Pipette,
+  CircleDot,
+  MapPin,
 } from "lucide-react";
 import Link from "next/link";
 import type { Permissions } from "@/lib/permissions";
@@ -73,6 +77,22 @@ export interface BodyOfWater {
   heater_type: string | null;
   chlorinator_type: string | null;
   automation_system: string | null;
+  fill_method: string | null;
+  drain_type: string | null;
+  drain_method: string | null;
+  drain_count: number | null;
+  drain_cover_compliant: boolean | null;
+  drain_cover_install_date: string | null;
+  drain_cover_expiry_date: string | null;
+  equalizer_cover_compliant: boolean | null;
+  equalizer_cover_install_date: string | null;
+  equalizer_cover_expiry_date: string | null;
+  plumbing_size_inches: number | null;
+  pool_cover_type: string | null;
+  turnover_hours: number | null;
+  skimmer_count: number | null;
+  equipment_year: number | null;
+  equipment_pad_location: string | null;
   estimated_service_minutes: number;
   monthly_rate: number | null;
   notes: string | null;
@@ -147,6 +167,22 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
         heater_type: form.heater_type || null,
         chlorinator_type: form.chlorinator_type || null,
         automation_system: form.automation_system || null,
+        fill_method: form.fill_method || null,
+        drain_type: form.drain_type || null,
+        drain_method: form.drain_method || null,
+        drain_count: form.drain_count,
+        drain_cover_compliant: form.drain_cover_compliant,
+        drain_cover_install_date: form.drain_cover_install_date || null,
+        drain_cover_expiry_date: form.drain_cover_expiry_date || null,
+        equalizer_cover_compliant: form.equalizer_cover_compliant,
+        equalizer_cover_install_date: form.equalizer_cover_install_date || null,
+        equalizer_cover_expiry_date: form.equalizer_cover_expiry_date || null,
+        plumbing_size_inches: form.plumbing_size_inches,
+        pool_cover_type: form.pool_cover_type || null,
+        turnover_hours: form.turnover_hours,
+        skimmer_count: form.skimmer_count,
+        equipment_year: form.equipment_year,
+        equipment_pad_location: form.equipment_pad_location || null,
         estimated_service_minutes: form.estimated_service_minutes,
         monthly_rate: form.monthly_rate,
         notes: form.notes || null,
@@ -360,9 +396,141 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
                   <Input value={form.chlorinator_type ?? ""} onChange={(e) => set("chlorinator_type", e.target.value)} className="h-8 text-sm bg-background" />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Automation</Label>
+                  <Input value={form.automation_system ?? ""} onChange={(e) => set("automation_system", e.target.value)} className="h-8 text-sm bg-background" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Equipment Year</Label>
+                  <Input type="number" value={form.equipment_year ?? ""} onChange={(e) => set("equipment_year", intOrNull(e.target.value))} className="h-8 text-sm bg-background" placeholder="e.g. 2020" />
+                </div>
+              </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Automation</Label>
-                <Input value={form.automation_system ?? ""} onChange={(e) => set("automation_system", e.target.value)} className="h-8 text-sm bg-background" />
+                <Label className="text-xs">Equipment Pad Location</Label>
+                <Input value={form.equipment_pad_location ?? ""} onChange={(e) => set("equipment_pad_location", e.target.value)} className="h-8 text-sm bg-background" placeholder="e.g. East side of pool" />
+              </div>
+            </div>
+          </div>
+
+          {/* Infrastructure */}
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Infrastructure</p>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Pool Cover</Label>
+                  <Select value={form.pool_cover_type ?? ""} onValueChange={(v) => set("pool_cover_type", v || null)}>
+                    <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="automatic">Automatic</SelectItem>
+                      <SelectItem value="manual">Manual</SelectItem>
+                      <SelectItem value="safety_net">Safety Net</SelectItem>
+                      <SelectItem value="none">None</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Skimmers</Label>
+                  <Input type="number" value={form.skimmer_count ?? ""} onChange={(e) => set("skimmer_count", intOrNull(e.target.value))} className="h-8 text-sm bg-background" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Fill Method</Label>
+                  <Select value={form.fill_method ?? ""} onValueChange={(v) => set("fill_method", v || null)}>
+                    <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tap">Tap</SelectItem>
+                      <SelectItem value="ro_system">RO System</SelectItem>
+                      <SelectItem value="truck">Truck</SelectItem>
+                      <SelectItem value="recycled">Recycled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Plumbing Size (in)</Label>
+                  <Input type="number" step="0.25" value={form.plumbing_size_inches ?? ""} onChange={(e) => set("plumbing_size_inches", numOrNull(e.target.value))} className="h-8 text-sm bg-background" />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Drain Type</Label>
+                  <Select value={form.drain_type ?? ""} onValueChange={(v) => set("drain_type", v || null)}>
+                    <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="main_drain">Main Drain</SelectItem>
+                      <SelectItem value="surge">Surge</SelectItem>
+                      <SelectItem value="circulation">Circulation</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Drain Method</Label>
+                  <Select value={form.drain_method ?? ""} onValueChange={(v) => set("drain_method", v || null)}>
+                    <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sewer">Sewer</SelectItem>
+                      <SelectItem value="catch_basin">Catch Basin</SelectItem>
+                      <SelectItem value="storm_drain">Storm Drain</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Drain Count</Label>
+                  <Input type="number" value={form.drain_count ?? ""} onChange={(e) => set("drain_count", intOrNull(e.target.value))} className="h-8 text-sm bg-background" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Turnover (hours)</Label>
+                <Input type="number" step="0.5" value={form.turnover_hours ?? ""} onChange={(e) => set("turnover_hours", numOrNull(e.target.value))} className="h-8 text-sm bg-background" />
+              </div>
+            </div>
+          </div>
+
+          {/* Drain Covers (Compliance) */}
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Drain Cover Compliance</p>
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Drain Cover Compliant</Label>
+                  <Select value={form.drain_cover_compliant == null ? "" : form.drain_cover_compliant ? "yes" : "no"} onValueChange={(v) => set("drain_cover_compliant", v === "" ? null : v === "yes")}>
+                    <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Install Date</Label>
+                  <Input type="date" value={form.drain_cover_install_date ? form.drain_cover_install_date.slice(0, 10) : ""} onChange={(e) => set("drain_cover_install_date", e.target.value ? new Date(e.target.value).toISOString() : null)} className="h-8 text-sm bg-background" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Expiry Date</Label>
+                  <Input type="date" value={form.drain_cover_expiry_date ? form.drain_cover_expiry_date.slice(0, 10) : ""} onChange={(e) => set("drain_cover_expiry_date", e.target.value ? new Date(e.target.value).toISOString() : null)} className="h-8 text-sm bg-background" />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Equalizer Compliant</Label>
+                  <Select value={form.equalizer_cover_compliant == null ? "" : form.equalizer_cover_compliant ? "yes" : "no"} onValueChange={(v) => set("equalizer_cover_compliant", v === "" ? null : v === "yes")}>
+                    <SelectTrigger className="h-8 text-sm bg-background"><SelectValue placeholder="..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Install Date</Label>
+                  <Input type="date" value={form.equalizer_cover_install_date ? form.equalizer_cover_install_date.slice(0, 10) : ""} onChange={(e) => set("equalizer_cover_install_date", e.target.value ? new Date(e.target.value).toISOString() : null)} className="h-8 text-sm bg-background" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Expiry Date</Label>
+                  <Input type="date" value={form.equalizer_cover_expiry_date ? form.equalizer_cover_expiry_date.slice(0, 10) : ""} onChange={(e) => set("equalizer_cover_expiry_date", e.target.value ? new Date(e.target.value).toISOString() : null)} className="h-8 text-sm bg-background" />
+                </div>
               </div>
             </div>
           </div>
@@ -517,29 +685,121 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
           </div>
         </div>
 
-        {/* Equipment Tile */}
+        {/* Pool & Equipment Tile */}
         <div className="sm:col-span-2 bg-background border rounded-lg shadow-sm overflow-hidden">
           <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
             <Wrench className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pool & Equipment</span>
           </div>
-          <div className="px-3 py-2.5">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-              {[
-                { icon: Gauge, label: "Pump", value: fb.pump_type },
-                { icon: FlaskConical, label: "Filter", value: fb.filter_type },
-                { icon: Thermometer, label: "Heater", value: fb.heater_type },
-                { icon: FlaskConical, label: "Chlorinator", value: fb.chlorinator_type },
-                { icon: Zap, label: "Automation", value: fb.automation_system },
-              ].map((e) => (
-                <div key={e.label} className="flex items-center gap-2 text-xs">
-                  <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="text-muted-foreground">{e.label}</span>
-                  <span className="truncate ml-auto">
-                    {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
-                  </span>
-                </div>
-              ))}
+          <div className="px-3 py-2.5 space-y-3">
+            {/* Surface & Structure */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Surface & Structure</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                {[
+                  { icon: Droplets, label: "Surface", value: fb.pool_surface },
+                  { icon: Shield, label: "Cover", value: fb.pool_cover_type },
+                  { icon: CircleDot, label: "Skimmers", value: fb.skimmer_count != null ? String(fb.skimmer_count) : null },
+                ].map((e) => (
+                  <div key={e.label} className="flex items-center gap-2 text-xs">
+                    <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground">{e.label}</span>
+                    <span className="truncate ml-auto">
+                      {e.value ? <span className="font-medium capitalize">{e.value.replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Plumbing & Drains */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Plumbing & Drains</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                {[
+                  { icon: Pipette, label: "Plumbing", value: fb.plumbing_size_inches != null ? `${fb.plumbing_size_inches} in` : null },
+                  { icon: Droplets, label: "Fill", value: fb.fill_method },
+                  { icon: CircleDot, label: "Drain type", value: fb.drain_type },
+                  { icon: CircleDot, label: "Drain method", value: fb.drain_method },
+                  { icon: CircleDot, label: "Drains", value: fb.drain_count != null ? String(fb.drain_count) : null },
+                  { icon: Clock, label: "Turnover", value: fb.turnover_hours != null ? `${fb.turnover_hours} hrs` : null },
+                ].map((e) => (
+                  <div key={e.label} className="flex items-center gap-2 text-xs">
+                    <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground">{e.label}</span>
+                    <span className="truncate ml-auto">
+                      {e.value ? <span className="font-medium capitalize">{e.value.replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Drain Covers */}
+            {(fb.drain_cover_compliant != null || fb.equalizer_cover_compliant != null) && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Drain Covers</p>
+                {fb.drain_cover_compliant != null && (
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground">Drain covers</span>
+                      <Badge className={`ml-auto text-[10px] px-1.5 py-0 ${fb.drain_cover_compliant ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
+                        {fb.drain_cover_compliant ? "Compliant" : "Non-compliant"}
+                      </Badge>
+                    </div>
+                    {(fb.drain_cover_install_date || fb.drain_cover_expiry_date) && (
+                      <p className="text-[10px] text-muted-foreground pl-5">
+                        {fb.drain_cover_install_date && `Installed: ${new Date(fb.drain_cover_install_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                        {fb.drain_cover_install_date && fb.drain_cover_expiry_date && " \u00b7 "}
+                        {fb.drain_cover_expiry_date && `Expires: ${new Date(fb.drain_cover_expiry_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {fb.equalizer_cover_compliant != null && (
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground">Equalizer covers</span>
+                      <Badge className={`ml-auto text-[10px] px-1.5 py-0 ${fb.equalizer_cover_compliant ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
+                        {fb.equalizer_cover_compliant ? "Compliant" : "Non-compliant"}
+                      </Badge>
+                    </div>
+                    {(fb.equalizer_cover_install_date || fb.equalizer_cover_expiry_date) && (
+                      <p className="text-[10px] text-muted-foreground pl-5">
+                        {fb.equalizer_cover_install_date && `Installed: ${new Date(fb.equalizer_cover_install_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                        {fb.equalizer_cover_install_date && fb.equalizer_cover_expiry_date && " \u00b7 "}
+                        {fb.equalizer_cover_expiry_date && `Expires: ${new Date(fb.equalizer_cover_expiry_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Equipment */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Equipment</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                {[
+                  { icon: Gauge, label: "Pump", value: fb.pump_type },
+                  { icon: FlaskConical, label: "Filter", value: fb.filter_type },
+                  { icon: Thermometer, label: "Heater", value: fb.heater_type },
+                  { icon: FlaskConical, label: "Chlorinator", value: fb.chlorinator_type },
+                  { icon: Zap, label: "Automation", value: fb.automation_system },
+                  { icon: Clock, label: "Year", value: fb.equipment_year != null ? String(fb.equipment_year) : null },
+                  { icon: MapPin, label: "Location", value: fb.equipment_pad_location },
+                ].map((e) => (
+                  <div key={e.label} className="flex items-center gap-2 text-xs">
+                    <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground">{e.label}</span>
+                    <span className="truncate ml-auto">
+                      {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

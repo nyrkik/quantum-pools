@@ -19,6 +19,7 @@ class DimensionEstimateResponse(BaseModel):
 class PerimeterMeasurementRequest(BaseModel):
     perimeter_ft: float = Field(..., gt=0)
     pool_shape: str  # round, oval, irregular_oval, rectangle, kidney, L-shape, freeform
+    area_sqft: Optional[float] = None  # if provided, use directly instead of calculating from perimeter
 
 
 class DimensionComparisonResponse(BaseModel):

@@ -5,8 +5,9 @@ import dynamic from "next/dynamic";
 import type { PoolBowWithCoords } from "@/types/satellite";
 
 export interface MapActions {
-  toggleZoom: () => void;
-  isZoomedIn: boolean;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  getZoom: () => number;
 }
 
 export interface PropertyGroup {
@@ -32,6 +33,7 @@ export interface SatelliteMapProps {
   actionsRef?: MutableRefObject<MapActions | null>;
   onPropertySelect: (propertyId: string) => void;
   onPinPlace: (lat: number, lng: number) => void;
+  onZoomChange?: (zoom: number) => void;
 }
 
 const SatelliteMapInner = dynamic(

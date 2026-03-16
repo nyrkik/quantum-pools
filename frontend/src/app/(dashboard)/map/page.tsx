@@ -39,11 +39,15 @@ import {
   Dog,
   Lock,
   Calendar,
+  Shield,
+  Pipette,
+  CircleDot,
   ZoomIn,
   ZoomOut,
   ExternalLink,
   AlertTriangle,
   Pencil,
+  X,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -140,6 +144,9 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [activeBowId, setActiveBowId] = useState<string | null>(null);
+  const [movingProperty, setMovingProperty] = useState(false);
+  const [propertyPinPosition, setPropertyPinPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [savingPropertyPin, setSavingPropertyPin] = useState(false);
   const [highlightedBowId, setHighlightedBowId] = useState<string | null>(null);
   const [pinPosition, setPinPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [savingPin, setSavingPin] = useState(false);
@@ -157,12 +164,13 @@ export default function MapPage() {
   const [dimComparisons, setDimComparisons] = useState<Map<string, DimensionComparison>>(new Map());
   const [medians, setMedians] = useState<PortfolioMedians | null>(null);
   const [perimeterInputs, setPerimeterInputs] = useState<Map<string, string>>(new Map());
+  const [areaInputs, setAreaInputs] = useState<Map<string, string>>(new Map());
   const [perimeterShapes, setPerimeterShapes] = useState<Map<string, string>>(new Map());
   const [savingPerimeter, setSavingPerimeter] = useState(false);
   const [measuringPerimeterBow, setMeasuringPerimeterBow] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mapActionsRef = useRef<MapActions | null>(null);
-  const [isZoomedIn, setIsZoomedIn] = useState(false);
+  const [mapZoom, setMapZoom] = useState(12);
   const [diffModalOpen, setDiffModalOpen] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -350,6 +358,7 @@ export default function MapPage() {
     }
     setPerimeterShapes(newShapes);
     setPerimeterInputs(new Map());
+    setAreaInputs(new Map());
     setMeasuringPerimeterBow(null);
   }, []);
 
@@ -357,24 +366,15 @@ export default function MapPage() {
     setSelectedPropertyId(propertyId);
     setPinDirty(false);
     setPinPosition(null);
-    setIsZoomedIn(false);
+    setMapZoom(12);
     setHighlightedBowId(null);
+    setMovingProperty(false);
+    setPropertyPinPosition(null);
 
     const group = propertyGroups.find((g) => g.property_id === propertyId);
     if (group) {
-      // Auto-activate pin for single-BOW properties
-      if (group.bows.length === 1) {
-        const bow = group.bows[0];
-        setActiveBowId(bow.id);
-        const analysis = analyses.find((a) => a.body_of_water_id === bow.id);
-        if (analysis?.pool_lat && analysis?.pool_lng) {
-          setPinPosition({ lat: analysis.pool_lat, lng: analysis.pool_lng });
-        } else if (bow.pool_lat && bow.pool_lng) {
-          setPinPosition({ lat: bow.pool_lat, lng: bow.pool_lng });
-        }
-      } else {
-        setActiveBowId(null);
-      }
+      // Auto-activate BOW for single-pool properties (enables map click to place pin)
+      setActiveBowId(group.bows.length === 1 ? group.bows[0].id : null);
       loadImages(propertyId);
       loadPropertyDetail(propertyId, group.bows);
     }
@@ -391,7 +391,14 @@ export default function MapPage() {
 
   const handlePinPlace = useCallback((lat: number, lng: number) => {
     if (!canEdit || !selectedPropertyId) return;
-    // Auto-pick BOW: highlighted > active > first in group
+
+    // Property move mode
+    if (movingProperty) {
+      setPropertyPinPosition({ lat, lng });
+      return;
+    }
+
+    // Pool pin mode — auto-pick BOW: highlighted > active > first in group
     const group = propertyGroups.find((g) => g.property_id === selectedPropertyId);
     if (!group) return;
     const targetBow = highlightedBowId || activeBowId || group.bows[0]?.id;
@@ -400,7 +407,7 @@ export default function MapPage() {
     setHighlightedBowId(targetBow);
     setPinPosition({ lat, lng });
     setPinDirty(true);
-  }, [canEdit, selectedPropertyId, propertyGroups, highlightedBowId, activeBowId]);
+  }, [canEdit, selectedPropertyId, propertyGroups, highlightedBowId, activeBowId, movingProperty]);
 
   const savePin = async () => {
     if (!activeBowId || !pinPosition) return;
@@ -423,11 +430,38 @@ export default function MapPage() {
         )
       );
       setPinDirty(false);
+      setPinPosition(null);
       toast.success("Pin saved");
     } catch {
       toast.error("Failed to save pin");
     } finally {
       setSavingPin(false);
+    }
+  };
+
+  const savePropertyLocation = async () => {
+    if (!selectedPropertyId || !propertyPinPosition) return;
+    setSavingPropertyPin(true);
+    try {
+      await api.put(`/v1/properties/${selectedPropertyId}`, {
+        lat: propertyPinPosition.lat,
+        lng: propertyPinPosition.lng,
+      });
+      // Update local state
+      setPoolBows((prev) =>
+        prev.map((b) =>
+          b.property_id === selectedPropertyId
+            ? { ...b, lat: propertyPinPosition.lat, lng: propertyPinPosition.lng }
+            : b
+        )
+      );
+      setMovingProperty(false);
+      setPropertyPinPosition(null);
+      toast.success("Property location updated");
+    } catch {
+      toast.error("Failed to update location");
+    } finally {
+      setSavingPropertyPin(false);
     }
   };
 
@@ -440,14 +474,18 @@ export default function MapPage() {
       toast.error("Enter a valid perimeter in feet");
       return;
     }
+    const areaInput = areaInputs.get(bowId) || "";
+    const areaSqft = areaInput ? parseFloat(areaInput) : undefined;
     setSavingPerimeter(true);
     try {
       await api.post(`/v1/dimensions/bows/${bowId}/perimeter`, {
         perimeter_ft: ft,
         pool_shape: perimeterShape,
+        ...(areaSqft && areaSqft > 0 ? { area_sqft: areaSqft } : {}),
       });
-      toast.success("Perimeter estimate saved");
+      toast.success(areaSqft ? "Measurements saved" : "Perimeter estimate saved");
       setPerimeterInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setAreaInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       // Refresh detail
       if (selectedGroup) {
         await loadPropertyDetail(selectedPropertyId!, selectedGroup.bows);
@@ -666,39 +704,56 @@ export default function MapPage() {
           {bowDetail && perms.canViewDimensions && (
             <div className="grid grid-cols-2 gap-2">
               {/* Measurements */}
-              <div className={`bg-muted/50 rounded-md overflow-hidden ${isMeasuring ? "border-l-3 border-l-amber-400" : ""}`}>
+              <div className={`bg-muted/50 rounded-md overflow-hidden ${isMeasuring ? "border-l-3 border-l-primary" : ""}`}>
                 <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
                   <Ruler className="h-3 w-3 text-muted-foreground" />
                   <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Measurements</span>
-                  {canEdit && (bow.pool_lat || (bow.lat && bow.lng)) && (
-                    <a
-                      href={`https://www.google.com/maps/@${(bow.pool_lat ?? bow.lat)},${(bow.pool_lng ?? bow.lng)},20z/data=!3m1!1e3`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-auto text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => setMeasuringPerimeterBow(bow.id)}
-                      title="Measure in Google Maps"
+                  {canEdit && (
+                    <button
+                      className={`ml-auto transition-colors ${isMeasuring ? "text-primary" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
+                      onClick={() => setMeasuringPerimeterBow(isMeasuring ? null : bow.id)}
+                      title={isMeasuring ? "Close edit" : "Edit measurements"}
                     >
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
+                      {isMeasuring ? <X className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                    </button>
                   )}
                 </div>
                 <div className="px-2.5 py-2 space-y-1">
+                  {/* Area + source */}
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-muted-foreground">Area</span>
                     <div className="flex items-center gap-1.5">
-                      {(bowDetail as { pool_sqft?: number }).pool_sqft
-                        ? <span className="font-semibold">{((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()} ft²</span>
-                        : <span className="text-muted-foreground/50 italic">—</span>}
-                      {renderSourceBadge((bowDetail as { dimension_source?: string }).dimension_source)}
+                      {isMeasuring ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            placeholder="ft²"
+                            value={areaInputs.get(bow.id) ?? ((bowDetail as { pool_sqft?: number }).pool_sqft?.toString() || "")}
+                            onChange={(e) => setAreaInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                            className="h-6 w-20 text-[11px] px-1.5"
+                            min={0}
+                            step={1}
+                          />
+                          <span className="text-muted-foreground">ft²</span>
+                        </div>
+                      ) : (
+                        <>
+                          {(bowDetail as { pool_sqft?: number }).pool_sqft
+                            ? <span className="font-semibold">{((bowDetail as { pool_sqft: number }).pool_sqft).toLocaleString()} ft²</span>
+                            : <span className="text-muted-foreground/50 italic">—</span>}
+                          {renderSourceBadge((bowDetail as { dimension_source?: string }).dimension_source)}
+                        </>
+                      )}
                     </div>
                   </div>
+                  {/* Volume */}
                   <div className="flex justify-between text-[11px]">
                     <span className="text-muted-foreground">Volume</span>
                     {(bowDetail as { pool_gallons?: number }).pool_gallons
                       ? <span className="font-medium">{((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()} gal</span>
                       : <span className="text-muted-foreground/50 italic">—</span>}
                   </div>
+                  {/* Shape */}
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-muted-foreground">Shape</span>
                     {isMeasuring ? (
@@ -717,6 +772,7 @@ export default function MapPage() {
                         : <span className="text-muted-foreground/50 italic">—</span>
                     )}
                   </div>
+                  {/* Perimeter */}
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-muted-foreground">Perimeter</span>
                     {isMeasuring ? (
@@ -724,12 +780,11 @@ export default function MapPage() {
                         <Input
                           type="number"
                           placeholder="ft"
-                          value={perimeterInput}
+                          value={perimeterInput || ((bowDetail as { perimeter_ft?: number }).perimeter_ft?.toString() || "")}
                           onChange={(e) => setPerimeterInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
                           className="h-6 w-20 text-[11px] px-1.5"
                           min={0}
                           step={0.1}
-                          autoFocus
                         />
                         <span className="text-muted-foreground">ft</span>
                       </div>
@@ -739,53 +794,153 @@ export default function MapPage() {
                         : <span className="text-muted-foreground/50 italic">—</span>
                     )}
                   </div>
-                  {isMeasuring && canEdit && (
-                    <div className="flex justify-end pt-1">
-                      <Button
-                        size="sm"
-                        className="h-6 px-3 text-[11px]"
-                        disabled={savingPerimeter || !perimeterInput}
-                        onClick={() => savePerimeter(bow.id)}
-                      >
-                        {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save Perimeter"}
-                      </Button>
-                    </div>
-                  )}
+                  {/* L×W, Depth, Surface — read only */}
                   {[
                     { label: "L × W", value: (bowDetail as { pool_length_ft?: number; pool_width_ft?: number }).pool_length_ft && (bowDetail as { pool_width_ft?: number }).pool_width_ft ? `${(bowDetail as { pool_length_ft: number }).pool_length_ft} × ${(bowDetail as { pool_width_ft: number }).pool_width_ft} ft` : null },
                     { label: "Depth", value: (bowDetail as { pool_depth_shallow?: number; pool_depth_deep?: number }).pool_depth_shallow && (bowDetail as { pool_depth_deep?: number }).pool_depth_deep ? `${(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow}–${(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft` : (bowDetail as { pool_depth_avg?: number }).pool_depth_avg ? `${(bowDetail as { pool_depth_avg: number }).pool_depth_avg} ft avg` : null },
-                    { label: "Surface", value: (bowDetail as { pool_surface?: string }).pool_surface },
                   ].map((d) => (
                     <div key={d.label} className="flex justify-between text-[11px]">
                       <span className="text-muted-foreground">{d.label}</span>
                       {d.value ? <span className="font-medium capitalize">{d.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
                     </div>
                   ))}
+                  {/* Edit mode: Save + Google Maps link */}
+                  {isMeasuring && canEdit && (
+                    <div className="flex items-center justify-between pt-1.5 border-t border-border/50 mt-1.5">
+                      {(bow.pool_lat || (bow.lat && bow.lng)) ? (
+                        <a
+                          href={`https://www.google.com/maps/@${(bow.pool_lat ?? bow.lat)},${(bow.pool_lng ?? bow.lng)},20z/data=!3m1!1e3`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <ExternalLink className="h-2.5 w-2.5" />
+                          Measure in Google Maps
+                        </a>
+                      ) : <span />}
+                      <Button
+                        size="sm"
+                        className="h-6 px-3 text-[11px]"
+                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(bow.id))}
+                        onClick={() => savePerimeter(bow.id)}
+                      >
+                        {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Equipment */}
+              {/* Pool & Equipment */}
               <div className="bg-muted/50 rounded-md overflow-hidden">
                 <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
                   <Wrench className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment</span>
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pool & Equipment</span>
                 </div>
-                <div className="px-2.5 py-2 space-y-1">
-                  {[
-                    { icon: Gauge, label: "Pump", value: (bowDetail as { pump_type?: string }).pump_type },
-                    { icon: FlaskConical, label: "Filter", value: (bowDetail as { filter_type?: string }).filter_type },
-                    { icon: Thermometer, label: "Heater", value: (bowDetail as { heater_type?: string }).heater_type },
-                    { icon: FlaskConical, label: "Chlor.", value: (bowDetail as { chlorinator_type?: string }).chlorinator_type },
-                    { icon: Zap, label: "Auto", value: (bowDetail as { automation_system?: string }).automation_system },
-                  ].map((e) => (
-                    <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
-                      <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
-                      <span className="text-muted-foreground">{e.label}</span>
-                      <span className="truncate ml-auto">
-                        {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
-                      </span>
+                <div className="px-2.5 py-2 space-y-3">
+                  {/* Surface & Structure */}
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">Surface & Structure</p>
+                    {[
+                      { icon: Droplets, label: "Surface", value: (bowDetail as Record<string, unknown>).pool_surface as string | undefined },
+                      { icon: Shield, label: "Cover", value: (bowDetail as Record<string, unknown>).pool_cover_type as string | undefined },
+                      { icon: CircleDot, label: "Skimmers", value: (bowDetail as Record<string, unknown>).skimmer_count != null ? String((bowDetail as Record<string, unknown>).skimmer_count) : undefined },
+                    ].map((e) => (
+                      <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
+                        <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                        <span className="text-muted-foreground">{e.label}</span>
+                        <span className="truncate ml-auto">
+                          {e.value ? <span className="font-medium capitalize">{String(e.value).replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Plumbing & Drains */}
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">Plumbing & Drains</p>
+                    {[
+                      { icon: Pipette, label: "Plumbing", value: (bowDetail as Record<string, unknown>).plumbing_size_inches != null ? `${(bowDetail as Record<string, unknown>).plumbing_size_inches} in` : undefined },
+                      { icon: Droplets, label: "Fill", value: (bowDetail as Record<string, unknown>).fill_method as string | undefined },
+                      { icon: CircleDot, label: "Drain type", value: (bowDetail as Record<string, unknown>).drain_type as string | undefined },
+                      { icon: CircleDot, label: "Drain method", value: (bowDetail as Record<string, unknown>).drain_method as string | undefined },
+                      { icon: CircleDot, label: "Drains", value: (bowDetail as Record<string, unknown>).drain_count != null ? String((bowDetail as Record<string, unknown>).drain_count) : undefined },
+                      { icon: Clock, label: "Turnover", value: (bowDetail as Record<string, unknown>).turnover_hours != null ? `${(bowDetail as Record<string, unknown>).turnover_hours} hrs` : undefined },
+                    ].map((e) => (
+                      <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
+                        <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                        <span className="text-muted-foreground">{e.label}</span>
+                        <span className="truncate ml-auto">
+                          {e.value ? <span className="font-medium capitalize">{e.value.replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Drain Covers */}
+                  {((bowDetail as Record<string, unknown>).drain_cover_compliant != null || (bowDetail as Record<string, unknown>).equalizer_cover_compliant != null) && (
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">Drain Covers</p>
+                      {(bowDetail as Record<string, unknown>).drain_cover_compliant != null && (
+                        <div className="text-[11px] space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <Shield className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                            <span className="text-muted-foreground">Drain covers</span>
+                            <Badge className={`ml-auto text-[9px] px-1 py-0 ${(bowDetail as Record<string, unknown>).drain_cover_compliant ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
+                              {(bowDetail as Record<string, unknown>).drain_cover_compliant ? "Compliant" : "Non-compliant"}
+                            </Badge>
+                          </div>
+                          {!!((bowDetail as Record<string, unknown>).drain_cover_install_date || (bowDetail as Record<string, unknown>).drain_cover_expiry_date) && (
+                            <p className="text-[10px] text-muted-foreground pl-4">
+                              {!!(bowDetail as Record<string, unknown>).drain_cover_install_date && `Installed: ${new Date(String((bowDetail as Record<string, unknown>).drain_cover_install_date)).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                              {!!(bowDetail as Record<string, unknown>).drain_cover_install_date && !!(bowDetail as Record<string, unknown>).drain_cover_expiry_date && " · "}
+                              {!!(bowDetail as Record<string, unknown>).drain_cover_expiry_date && `Expires: ${new Date(String((bowDetail as Record<string, unknown>).drain_cover_expiry_date)).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {(bowDetail as Record<string, unknown>).equalizer_cover_compliant != null && (
+                        <div className="text-[11px] space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <Shield className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                            <span className="text-muted-foreground">Equalizer covers</span>
+                            <Badge className={`ml-auto text-[9px] px-1 py-0 ${(bowDetail as Record<string, unknown>).equalizer_cover_compliant ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
+                              {(bowDetail as Record<string, unknown>).equalizer_cover_compliant ? "Compliant" : "Non-compliant"}
+                            </Badge>
+                          </div>
+                          {!!((bowDetail as Record<string, unknown>).equalizer_cover_install_date || (bowDetail as Record<string, unknown>).equalizer_cover_expiry_date) && (
+                            <p className="text-[10px] text-muted-foreground pl-4">
+                              {!!(bowDetail as Record<string, unknown>).equalizer_cover_install_date && `Installed: ${new Date(String((bowDetail as Record<string, unknown>).equalizer_cover_install_date)).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                              {!!(bowDetail as Record<string, unknown>).equalizer_cover_install_date && !!(bowDetail as Record<string, unknown>).equalizer_cover_expiry_date && " · "}
+                              {!!(bowDetail as Record<string, unknown>).equalizer_cover_expiry_date && `Expires: ${new Date(String((bowDetail as Record<string, unknown>).equalizer_cover_expiry_date)).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )}
+
+                  {/* Equipment */}
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">Equipment</p>
+                    {[
+                      { icon: Gauge, label: "Pump", value: (bowDetail as Record<string, unknown>).pump_type as string | undefined },
+                      { icon: FlaskConical, label: "Filter", value: (bowDetail as Record<string, unknown>).filter_type as string | undefined },
+                      { icon: Thermometer, label: "Heater", value: (bowDetail as Record<string, unknown>).heater_type as string | undefined },
+                      { icon: FlaskConical, label: "Chlor.", value: (bowDetail as Record<string, unknown>).chlorinator_type as string | undefined },
+                      { icon: Zap, label: "Auto", value: (bowDetail as Record<string, unknown>).automation_system as string | undefined },
+                      { icon: Calendar, label: "Year", value: (bowDetail as Record<string, unknown>).equipment_year != null ? String((bowDetail as Record<string, unknown>).equipment_year) : undefined },
+                      { icon: MapPin, label: "Location", value: (bowDetail as Record<string, unknown>).equipment_pad_location as string | undefined },
+                    ].map((e) => (
+                      <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
+                        <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                        <span className="text-muted-foreground">{e.label}</span>
+                        <span className="truncate ml-auto">
+                          {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">—</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1000,21 +1155,32 @@ export default function MapPage() {
             <SatelliteMap
               propertyGroups={filteredGroups}
               selectedPropertyId={selectedPropertyId}
-              pinPosition={pinPosition}
+              pinPosition={movingProperty ? propertyPinPosition : pinPosition}
               flyTo={shouldFlyTo}
               actionsRef={mapActionsRef}
               onPropertySelect={handlePropertySelect}
               onPinPlace={handlePinPlace}
+              onZoomChange={setMapZoom}
             />
           </Card>
           {/* Zoom overlay */}
           {selectedPropertyId && (
             <button
-              onClick={() => { mapActionsRef.current?.toggleZoom(); setIsZoomedIn((z) => !z); }}
+              onClick={() => {
+                const zoom = mapActionsRef.current?.getZoom() ?? 12;
+                if (zoom >= 17) {
+                  mapActionsRef.current?.zoomOut();
+                  if (!pinDirty) {
+                    setPinPosition(null);
+                  }
+                } else {
+                  mapActionsRef.current?.zoomIn();
+                }
+              }}
               className="absolute top-3 right-3 z-[400] flex items-center gap-1.5 bg-background/90 backdrop-blur-sm rounded-md px-2.5 py-1.5 shadow-md border text-xs font-medium text-foreground hover:bg-background transition-colors"
             >
-              {isZoomedIn ? <ZoomOut className="h-3.5 w-3.5" /> : <ZoomIn className="h-3.5 w-3.5" />}
-              {isZoomedIn ? "Zoom Out" : "Zoom In"}
+              {mapZoom >= 17 ? <ZoomOut className="h-3.5 w-3.5" /> : <ZoomIn className="h-3.5 w-3.5" />}
+              {mapZoom >= 17 ? "Zoom Out" : "Zoom In"}
             </button>
           )}
 
@@ -1049,146 +1215,149 @@ export default function MapPage() {
             </div>
           ) : selectedGroup ? (
             <div className="space-y-3">
-              {/* Property header */}
-              <Card className="shadow-sm">
+              {/* Property header + Profitability combined */}
+              <Card className={`shadow-sm ${movingProperty ? "border-l-4 border-l-primary" : ""}`}>
                 <CardContent className="p-4">
-                  <h3 className="text-base font-semibold">{selectedGroup.customer_name}</h3>
-                  <p className="text-sm text-muted-foreground">{selectedGroup.address}</p>
-                  {selectedGroup.city && (
-                    <p className="text-xs text-muted-foreground/70">{selectedGroup.city}</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {selectedGroup.tech_name && (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedGroup.tech_color || '#94a3b8' }} />
-                        <span className="font-medium">{selectedGroup.tech_name}</span>
+                  <div className="flex gap-4">
+                    {/* Left: Identity */}
+                    <div className="w-1/3 shrink-0 min-w-0">
+                      <h3 className="text-sm font-semibold truncate">{selectedGroup.customer_name}</h3>
+                      <p className="text-xs text-muted-foreground truncate">{selectedGroup.address}</p>
+                      {selectedGroup.city && (
+                        <p className="text-[10px] text-muted-foreground/70 truncate">{selectedGroup.city}</p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {selectedGroup.tech_name && (
+                          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedGroup.tech_color || '#94a3b8' }} />
+                            <span className="font-medium truncate">{selectedGroup.tech_name}</span>
+                          </div>
+                        )}
+                        {propDetail && (propDetail as { service_day_pattern?: string }).service_day_pattern && (
+                          <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                            <Calendar className="h-2.5 w-2.5" />
+                            {((propDetail as { service_day_pattern: string }).service_day_pattern).split(",").map((d: string) => (
+                              <Badge key={d} variant="outline" className="text-[9px] px-0.5 py-0">{d.trim().slice(0, 3)}</Badge>
+                            ))}
+                          </div>
+                        )}
+                        {propDetail && (propDetail as { dog_on_property?: boolean }).dog_on_property && (
+                          <Dog className="h-3 w-3 text-amber-500" />
+                        )}
+                        {propDetail && (propDetail as { gate_code?: string }).gate_code && (
+                          <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                            <Lock className="h-2.5 w-2.5" />
+                            {(propDetail as { gate_code: string }).gate_code}
+                          </div>
+                        )}
+                        {selectedGroup.bows.length > 1 && (
+                          <Badge variant="secondary" className="text-[9px] px-1 py-0">{selectedGroup.bows.length} pools</Badge>
+                        )}
                       </div>
-                    )}
-                    {propDetail && (propDetail as { service_day_pattern?: string }).service_day_pattern && (
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Calendar className="h-3 w-3" />
-                        {((propDetail as { service_day_pattern: string }).service_day_pattern).split(",").map((d: string) => (
-                          <Badge key={d} variant="outline" className="text-[10px] px-1 py-0">{d.trim()}</Badge>
-                        ))}
-                      </div>
-                    )}
-                    {propDetail && (propDetail as { dog_on_property?: boolean }).dog_on_property && (
-                      <Dog className="h-3.5 w-3.5 text-amber-500" />
-                    )}
-                    {propDetail && (propDetail as { gate_code?: string }).gate_code && (
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Lock className="h-3 w-3" />
-                        {(propDetail as { gate_code: string }).gate_code}
-                      </div>
-                    )}
-                    {selectedGroup.bows.length > 1 && (
-                      <Badge variant="secondary" className="text-[10px]">{selectedGroup.bows.length} pools</Badge>
-                    )}
+                      {canEdit && (
+                        <button
+                          onClick={() => { setMovingProperty(!movingProperty); setPropertyPinPosition(null); setPinPosition(null); setPinDirty(false); }}
+                          className={`flex items-center gap-1 mt-1.5 text-[10px] transition-colors ${
+                            movingProperty ? "text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground"
+                          }`}
+                        >
+                          <MapPin className="h-2.5 w-2.5" />
+                          {movingProperty ? "Placing marker..." : "Move marker"}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Right: Profitability metrics */}
+                    <div className="flex-1 min-w-0">
+                      {/* Property move banner */}
+                      {movingProperty && (
+                        <div className={`rounded px-2 py-1.5 mb-2 flex items-center justify-between text-[11px] ${
+                          propertyPinPosition
+                            ? "bg-amber-50 dark:bg-amber-950/30 border border-amber-300"
+                            : "bg-muted/50 border border-border"
+                        }`}>
+                          {propertyPinPosition ? (
+                            <>
+                              <span className="text-amber-700 dark:text-amber-400 font-medium">
+                                {propertyPinPosition.lat.toFixed(6)}, {propertyPinPosition.lng.toFixed(6)}
+                              </span>
+                              <div className="flex gap-1">
+                                <Button size="sm" className="h-5 px-2 text-[10px]" disabled={savingPropertyPin} onClick={savePropertyLocation}>
+                                  {savingPropertyPin ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-5 px-2 text-[10px]" onClick={() => { setMovingProperty(false); setPropertyPinPosition(null); }}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">Click map to set property location</span>
+                          )}
+                        </div>
+                      )}
+                      {perms.canViewProfitability && profitData && (() => {
+                        const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
+                        if (!cost) return null;
+                        const diff = (profitData as { difficulty_score: number }).difficulty_score;
+                        const rpg = (profitData as { rate_per_gallon?: number }).rate_per_gallon;
+                        const m = medians;
+
+                        const compare = (val: number | null, med: number | null | undefined, higherIsGood: boolean) => {
+                          if (val == null || med == null || med === 0) return null;
+                          const pct = ((val - med) / med) * 100;
+                          if (Math.abs(pct) < 5) return { arrow: "~", color: "text-muted-foreground", tip: `median ${med.toFixed(1)}` };
+                          const above = pct > 0;
+                          const good = higherIsGood ? above : !above;
+                          return {
+                            arrow: above ? "↑" : "↓",
+                            color: good ? "text-emerald-600" : "text-red-500",
+                            tip: `${above ? "+" : ""}${pct.toFixed(0)}% vs median`,
+                          };
+                        };
+
+                        const metrics = [
+                          { label: "Rate/gal", value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null, medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null, color: "text-foreground", cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true), editable: false },
+                          { label: "Cost", value: `$${cost.total_cost.toFixed(0)}`, medianLabel: m ? `$${m.cost.toFixed(0)}` : null, color: "text-muted-foreground", cmp: compare(cost.total_cost, m?.cost, false), editable: false },
+                          { label: "Margin", value: `${cost.margin_pct.toFixed(1)}%`, medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null, color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600", cmp: compare(cost.margin_pct, m?.margin_pct, true), editable: false },
+                          { label: "Diff", value: `${diff.toFixed(1)}`, medianLabel: m ? `${m.difficulty.toFixed(1)}` : null, color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground", cmp: compare(diff, m?.difficulty, false), editable: true },
+                        ];
+
+                        return (
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {metrics.map((mt) => (
+                              <div key={mt.label} className="bg-muted/50 rounded px-2 py-1.5">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
+                                  {mt.editable && canEdit && selectedPropertyId && (
+                                    <button className="text-muted-foreground hover:text-foreground" onClick={() => setDiffModalOpen(true)}>
+                                      <Pencil className="h-2.5 w-2.5" />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-baseline gap-1">
+                                  {mt.cmp ? (
+                                    <>
+                                      <p className={`text-sm font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
+                                      <span className={`text-[10px] font-bold ${mt.cmp.color}`}>
+                                        {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
+                                      </span>
+                                      {mt.medianLabel && (
+                                        <span className="text-[9px] text-muted-foreground/50">/ {mt.medianLabel}</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <p className={`text-sm font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
-
-              {/* Profitability — property-level */}
-              {perms.canViewProfitability && profitData && (() => {
-                const cost = (profitData as { cost_breakdown: { revenue: number; total_cost: number; profit: number; margin_pct: number } }).cost_breakdown;
-                if (!cost) return null;
-                const diff = (profitData as { difficulty_score: number }).difficulty_score;
-                const rpg = (profitData as { rate_per_gallon?: number }).rate_per_gallon;
-                const m = medians;
-
-                const compare = (val: number | null, med: number | null | undefined, higherIsGood: boolean) => {
-                  if (val == null || med == null || med === 0) return null;
-                  const pct = ((val - med) / med) * 100;
-                  if (Math.abs(pct) < 5) return { arrow: "~", color: "text-muted-foreground", tip: `median ${med.toFixed(1)}` };
-                  const above = pct > 0;
-                  const good = higherIsGood ? above : !above;
-                  return {
-                    arrow: above ? "↑" : "↓",
-                    color: good ? "text-emerald-600" : "text-red-500",
-                    tip: `${above ? "+" : ""}${pct.toFixed(0)}% vs median`,
-                  };
-                };
-
-                const metrics = [
-                  {
-                    label: "Rate/gal",
-                    value: rpg ? `${(rpg * 100).toFixed(1)}¢` : null,
-                    medianLabel: m?.rate_per_gallon ? `${(m.rate_per_gallon * 100).toFixed(1)}¢` : null,
-                    color: "text-foreground",
-                    cmp: compare(rpg ? rpg * 100 : null, m?.rate_per_gallon ? m.rate_per_gallon * 100 : null, true),
-                    editable: false,
-                  },
-                  {
-                    label: "Est. Cost",
-                    value: `$${cost.total_cost.toFixed(0)}`,
-                    medianLabel: m ? `$${m.cost.toFixed(0)}` : null,
-                    color: "text-muted-foreground",
-                    cmp: compare(cost.total_cost, m?.cost, false),
-                    editable: false,
-                  },
-                  {
-                    label: "Margin",
-                    value: `${cost.margin_pct.toFixed(1)}%`,
-                    medianLabel: m ? `${m.margin_pct.toFixed(1)}%` : null,
-                    color: cost.margin_pct >= 30 ? "text-emerald-600" : cost.margin_pct >= 0 ? "text-amber-600" : "text-red-600",
-                    cmp: compare(cost.margin_pct, m?.margin_pct, true),
-                    editable: false,
-                  },
-                  {
-                    label: "Difficulty",
-                    value: `${diff.toFixed(1)}`,
-                    medianLabel: m ? `${m.difficulty.toFixed(1)}` : null,
-                    color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground",
-                    cmp: compare(diff, m?.difficulty, false),
-                    editable: true,
-                  },
-                ];
-
-                return (
-                  <Card className="shadow-sm">
-                    <CardContent className="p-4 space-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <TrendingUp className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Profitability</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {metrics.map((mt) => (
-                          <div key={mt.label} className="bg-muted/50 rounded-md px-2.5 py-2 relative">
-                            <div className="flex items-center justify-between">
-                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{mt.label}</p>
-                              {mt.editable && canEdit && selectedPropertyId && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-5 w-5 -mr-1 -mt-0.5"
-                                  onClick={() => setDiffModalOpen(true)}
-                                >
-                                  <Pencil className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-                                </Button>
-                              )}
-                            </div>
-                            <div className="flex items-baseline gap-1.5">
-                              {mt.cmp ? (
-                                <>
-                                  <p className={`text-lg font-bold leading-tight ${mt.cmp.color}`}>{mt.value ?? "—"}</p>
-                                  <span className={`text-xs font-bold ${mt.cmp.color}`}>
-                                    {mt.cmp.arrow === "~" ? "·" : mt.cmp.arrow === "↑" ? "▲" : "▼"}
-                                  </span>
-                                  {mt.medianLabel && (
-                                    <span className="text-xs text-muted-foreground/60">/ {mt.medianLabel}</span>
-                                  )}
-                                </>
-                              ) : (
-                                <p className={`text-lg font-bold leading-tight ${mt.color}`}>{mt.value ?? "—"}</p>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })()}
 
               {/* BOW tiles — one per pool at this property */}
               {selectedGroup.bows.map((bow) =>

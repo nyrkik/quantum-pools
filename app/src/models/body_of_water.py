@@ -49,6 +49,24 @@ class BodyOfWater(Base):
     chlorinator_type: Mapped[str | None] = mapped_column(String(100))
     automation_system: Mapped[str | None] = mapped_column(String(100))
 
+    # Infrastructure
+    fill_method: Mapped[str | None] = mapped_column(String(50))  # tap, ro_system, truck, recycled
+    drain_type: Mapped[str | None] = mapped_column(String(50))  # main_drain, surge, circulation
+    drain_method: Mapped[str | None] = mapped_column(String(50))  # sewer, catch_basin, storm_drain
+    drain_count: Mapped[int | None] = mapped_column(Integer)
+    drain_cover_compliant: Mapped[bool | None] = mapped_column(Boolean)  # VGB/anti-vortex
+    drain_cover_install_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    drain_cover_expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    equalizer_cover_compliant: Mapped[bool | None] = mapped_column(Boolean)
+    equalizer_cover_install_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    equalizer_cover_expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    plumbing_size_inches: Mapped[float | None] = mapped_column(Float)
+    pool_cover_type: Mapped[str | None] = mapped_column(String(50))  # automatic, manual, safety_net, none
+    turnover_hours: Mapped[float | None] = mapped_column(Float)
+    skimmer_count: Mapped[int | None] = mapped_column(Integer)
+    equipment_year: Mapped[int | None] = mapped_column(Integer)
+    equipment_pad_location: Mapped[str | None] = mapped_column(String(100))
+
     # Service
     estimated_service_minutes: Mapped[int] = mapped_column(Integer, default=30)
     monthly_rate: Mapped[float | None] = mapped_column(Float)

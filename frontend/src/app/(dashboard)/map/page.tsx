@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -172,6 +173,12 @@ export default function MapPage() {
   const mapActionsRef = useRef<MapActions | null>(null);
   const [mapZoom, setMapZoom] = useState(12);
   const [diffModalOpen, setDiffModalOpen] = useState(false);
+  const [dismissedDiscrepancies, setDismissedDiscrepancies] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem("qp_dismissed_discrepancies");
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
 
   const loadData = useCallback(async () => {
     try {
@@ -633,32 +640,6 @@ export default function MapPage() {
                   </>);
                 })()}
               </div>
-              {canEdit && (
-                <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                  <Button
-                    variant={isBowActive ? "default" : "ghost"}
-                    size="sm"
-                    className="h-5 px-2 text-[10px] gap-1"
-                    onClick={() => handleBowPinActivate(bow.id)}
-                  >
-                    <Crosshair className="h-3 w-3" />
-                    {isBowActive ? "Placing pin..." : "Place pin"}
-                  </Button>
-                  {isBowActive && pinPosition && (
-                    <span className="text-green-600 font-medium text-[11px]">
-                      {pinPosition.lat.toFixed(6)}, {pinPosition.lng.toFixed(6)}
-                    </span>
-                  )}
-                  {!isBowActive && bow.pool_lat && bow.pool_lng && (
-                    <span className="text-green-600 font-medium text-[11px]">
-                      {bow.pool_lat.toFixed(6)}, {bow.pool_lng.toFixed(6)}
-                    </span>
-                  )}
-                  {!isBowActive && !bow.pool_lat && (
-                    <span className="text-muted-foreground/50 text-[11px]">No pin</span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
@@ -673,32 +654,38 @@ export default function MapPage() {
           )}
 
           {/* Discrepancy alert */}
-          {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && (
-            <div className={`rounded-md p-2.5 flex items-start gap-2 ${
-              dimComparison.discrepancy_level === "alert"
-                ? "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
-                : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800"
-            }`}>
-              <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${
-                dimComparison.discrepancy_level === "alert" ? "text-red-600" : "text-amber-600"
-              }`} />
-              <div className="text-[11px]">
-                {dimComparison.discrepancy_level === "alert" ? (
-                  <span className="text-red-700 dark:text-red-400 font-medium">
-                    Significant discrepancy ({dimComparison.discrepancy_pct?.toFixed(0)}%) — verify measurements
+          {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && !dismissedDiscrepancies.has(bow.id) && (() => {
+            const e1 = dimComparison.estimates[0];
+            const e2 = dimComparison.estimates[1];
+            const desc = e1 && e2
+              ? `${e1.estimated_sqft?.toLocaleString() ?? "?"} ft² (${SOURCE_LABELS[e1.source] || e1.source}) vs ${e2.estimated_sqft?.toLocaleString() ?? "?"} ft² (${SOURCE_LABELS[e2.source] || e2.source})`
+              : "estimates";
+            const isAlert = dimComparison.discrepancy_level === "alert";
+            return (
+              <div className={`rounded-md p-2.5 flex items-start gap-2 ${
+                isAlert
+                  ? "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
+                  : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800"
+              }`}>
+                <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${isAlert ? "text-red-600" : "text-amber-600"}`} />
+                <div className="flex-1 text-[11px]">
+                  <span className={`font-medium ${isAlert ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
+                    {dimComparison.discrepancy_pct?.toFixed(0)}% discrepancy — {desc}
                   </span>
-                ) : (
-                  <span className="text-amber-700 dark:text-amber-400 font-medium">
-                    {dimComparison.discrepancy_pct?.toFixed(0)}% discrepancy between {
-                      dimComparison.estimates.length >= 2
-                        ? `${SOURCE_LABELS[dimComparison.estimates[0]?.source] || dimComparison.estimates[0]?.source} and ${SOURCE_LABELS[dimComparison.estimates[1]?.source] || dimComparison.estimates[1]?.source}`
-                        : "estimates"
-                    }
-                  </span>
-                )}
+                </div>
+                <button
+                  onClick={() => setDismissedDiscrepancies((prev) => {
+                    const next = new Set(prev).add(bow.id);
+                    try { localStorage.setItem("qp_dismissed_discrepancies", JSON.stringify([...next])); } catch {}
+                    return next;
+                  })}
+                  className={`shrink-0 ${isAlert ? "text-red-400 hover:text-red-600" : "text-amber-400 hover:text-amber-600"}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Measurements + Equipment */}
           {bowDetail && perms.canViewDimensions && (
@@ -1221,7 +1208,7 @@ export default function MapPage() {
                   <div className="flex gap-4">
                     {/* Left: Identity */}
                     <div className="w-1/3 shrink-0 min-w-0">
-                      <h3 className="text-sm font-semibold truncate">{selectedGroup.customer_name}</h3>
+                      <Link href={`/customers/${selectedGroup.customer_id}`} className="text-sm font-semibold truncate hover:underline">{selectedGroup.customer_name}</Link>
                       <p className="text-xs text-muted-foreground truncate">{selectedGroup.address}</p>
                       {selectedGroup.city && (
                         <p className="text-[10px] text-muted-foreground/70 truncate">{selectedGroup.city}</p>

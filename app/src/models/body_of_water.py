@@ -88,3 +88,4 @@ class BodyOfWater(Base):
     chemical_readings = relationship("ChemicalReading", back_populates="body_of_water", lazy="noload")
     satellite_analysis = relationship("SatelliteAnalysis", back_populates="body_of_water", uselist=False, lazy="noload")
     dimension_estimates = relationship("DimensionEstimate", back_populates="body_of_water", lazy="noload")
+    chemical_cost_profile = relationship("ChemicalCostProfile", back_populates="body_of_water", uselist=False, lazy="noload")

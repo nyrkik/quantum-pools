@@ -3,7 +3,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, Integer, Float, ForeignKey, Enum
+from sqlalchemy import String, Boolean, DateTime, Text, Integer, Float, ForeignKey, Enum, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -66,6 +66,9 @@ class Customer(Base):
     autopay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
 
+    # Computed display name — single source of truth for all queries
+    display_name_col: Mapped[str | None] = mapped_column("display_name", String(200), index=True)
+
     status: Mapped[str] = mapped_column(String(20), default=CustomerStatus.active.value)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -88,4 +91,15 @@ class Customer(Base):
     def display_name(self) -> str:
         if self.customer_type == "commercial":
             return self.first_name
-        return self.full_name
+        return self.full_name.strip()
+
+    def _compute_display_name(self) -> str:
+        if self.customer_type == "commercial":
+            return self.first_name.strip()
+        return f"{self.first_name} {self.last_name}".strip()
+
+
+@event.listens_for(Customer, "before_insert")
+@event.listens_for(Customer, "before_update")
+def _set_display_name(mapper, connection, target):
+    target.display_name_col = target._compute_display_name()

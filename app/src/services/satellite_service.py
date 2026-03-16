@@ -185,7 +185,7 @@ class SatelliteService:
                 BodyOfWater.pool_sqft,
                 Property.address,
                 Property.city,
-                func.concat(Customer.first_name, ' ', Customer.last_name).label("customer_name"),
+                Customer.display_name_col.label("customer_name"),
                 Customer.id.label("customer_id"),
                 Customer.customer_type,
                 Property.lat,

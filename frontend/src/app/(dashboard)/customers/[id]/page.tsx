@@ -328,9 +328,7 @@ export default function CustomerDetailPage({
   }
 
   const TypeIcon = customer.customer_type === "commercial" ? Building2 : Home;
-  const displayName = customer.customer_type === "commercial"
-    ? customer.first_name
-    : `${customer.first_name} ${customer.last_name}`.trim();
+  const displayName = (customer as { display_name?: string }).display_name || customer.first_name;
 
   const handleCancelCustomer = () => {
     setCustForm(customer);
@@ -417,7 +415,9 @@ export default function CustomerDetailPage({
               {properties.length >= 1 && (
                 <div className="text-sm space-y-0.5 pt-1 border-t">
                   <div className="flex items-start gap-1.5 pt-1.5">
-                    <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground" />
+                    <Link href={`/map?bow=${(properties[0].bodies_of_water?.[0]?.id) || ""}`} title="View on map">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground hover:text-primary transition-colors" />
+                    </Link>
                     <span>{properties[0].address}, {properties[0].city}, {properties[0].state} {properties[0].zip_code}</span>
                   </div>
                   {!isTech && <SiteDetails property={properties[0]} className="ml-5" />}

@@ -20,6 +20,7 @@ from src.schemas.profitability import (
     PropertyDifficultyResponse,
 )
 from src.core.exceptions import NotFoundError
+from src.models.chemical_cost_profile import ChemicalCostProfile
 
 
 # Difficulty score weights
@@ -193,18 +194,33 @@ class ProfitabilityService:
         difficulty_score: float,
         total_accounts: int,
         bows: Optional[list[BodyOfWater]] = None,
+        chemical_profiles: Optional[dict[str, ChemicalCostProfile]] = None,
     ) -> CostBreakdown:
         multiplier = self.difficulty_to_multiplier(difficulty_score)
         visits_per_month = 4.0  # Standard weekly service
 
-        # Chemical cost — aggregate gallons from BOWs
+        # Chemical cost — use chemical cost profiles if available
         if bows:
             gallons = sum(b.pool_gallons or 0 for b in bows) or 15000
             service_minutes = sum(b.estimated_service_minutes or 0 for b in bows) or 30
         else:
             gallons = prop.pool_gallons or 15000
             service_minutes = prop.estimated_service_minutes or 30
-        chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits_per_month
+
+        # Try to use per-BOW chemical cost profiles
+        chemical_cost = None
+        if chemical_profiles and bows:
+            bow_costs = []
+            for bow in bows:
+                profile = chemical_profiles.get(bow.id)
+                if profile and profile.total_monthly > 0:
+                    bow_costs.append(profile.total_monthly)
+            if bow_costs:
+                chemical_cost = sum(bow_costs)
+
+        # Fallback to flat calculation if no profiles
+        if chemical_cost is None:
+            chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits_per_month
 
         # Labor cost
         labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits_per_month * multiplier
@@ -283,6 +299,12 @@ class ProfitabilityService:
         )
         difficulties = {d.property_id: d for d in diff_result.scalars().all()}
 
+        # Load all chemical cost profiles indexed by bow_id
+        chem_result = await self.db.execute(
+            select(ChemicalCostProfile).where(ChemicalCostProfile.organization_id == org_id)
+        )
+        chem_profiles_by_bow = {p.body_of_water_id: p for p in chem_result.scalars().all()}
+
         accounts: list[ProfitabilityAccount] = []
         for customer in customers:
             for prop in (customer.properties or []):
@@ -293,7 +315,10 @@ class ProfitabilityService:
                 diff = difficulties.get(prop.id)
                 score = self.compute_composite_score(prop, diff, bows=prop_bows)
                 multiplier = self.difficulty_to_multiplier(score)
-                cost = self.compute_cost_breakdown(settings, prop, customer, score, total_accounts, bows=prop_bows)
+                cost = self.compute_cost_breakdown(
+                    settings, prop, customer, score, total_accounts,
+                    bows=prop_bows, chemical_profiles=chem_profiles_by_bow,
+                )
 
                 # Apply filters
                 if min_margin is not None and cost.margin_pct < min_margin:
@@ -389,6 +414,17 @@ class ProfitabilityService:
             for bow in bow_result.scalars().all():
                 bows_by_property.setdefault(bow.property_id, []).append(bow)
 
+        # Load chemical cost profiles for this customer's BOWs
+        all_bow_ids = [bow.id for bows in bows_by_property.values() for bow in bows]
+        chem_profiles_by_bow: dict[str, ChemicalCostProfile] = {}
+        if all_bow_ids:
+            chem_result = await self.db.execute(
+                select(ChemicalCostProfile).where(
+                    ChemicalCostProfile.body_of_water_id.in_(all_bow_ids)
+                )
+            )
+            chem_profiles_by_bow = {p.body_of_water_id: p for p in chem_result.scalars().all()}
+
         accounts = []
         for prop in (customer.properties or []):
             if not prop.is_active:
@@ -397,7 +433,10 @@ class ProfitabilityService:
             diff = difficulties.get(prop.id)
             score = self.compute_composite_score(prop, diff, bows=prop_bows)
             multiplier = self.difficulty_to_multiplier(score)
-            cost = self.compute_cost_breakdown(settings, prop, customer, score, total_accounts, bows=prop_bows)
+            cost = self.compute_cost_breakdown(
+                settings, prop, customer, score, total_accounts,
+                bows=prop_bows, chemical_profiles=chem_profiles_by_bow,
+            )
 
             total_gallons = sum(b.pool_gallons or 0 for b in prop_bows) if prop_bows else prop.pool_gallons
             total_sqft = sum(b.pool_sqft or 0 for b in prop_bows) if prop_bows else prop.pool_sqft

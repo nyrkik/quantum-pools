@@ -28,6 +28,9 @@ from src.models.pool_measurement import PoolMeasurement
 from src.models.body_of_water import BodyOfWater
 from src.models.property_photo import PropertyPhoto
 from src.models.dimension_estimate import DimensionEstimate
+from src.models.regional_default import RegionalDefault
+from src.models.org_chemical_prices import OrgChemicalPrices
+from src.models.chemical_cost_profile import ChemicalCostProfile
 
 __all__ = [
     "Base",
@@ -58,4 +61,7 @@ __all__ = [
     "BodyOfWater",
     "PropertyPhoto",
     "DimensionEstimate",
+    "RegionalDefault",
+    "OrgChemicalPrices",
+    "ChemicalCostProfile",
 ]

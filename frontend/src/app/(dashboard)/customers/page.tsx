@@ -43,6 +43,7 @@ interface Customer {
   id: string;
   first_name: string;
   last_name: string;
+  display_name: string | null;
   company_name: string | null;
   customer_type: string;
   email: string | null;
@@ -62,8 +63,7 @@ type SortKey = "name" | "property" | "company" | "pool" | "rate" | "balance" | "
 type SortDir = "asc" | "desc";
 
 function customerDisplayName(c: Customer) {
-  if (c.customer_type === "commercial") return c.first_name;
-  return `${c.first_name} ${c.last_name}`.trim();
+  return c.display_name || c.first_name;
 }
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {

@@ -54,6 +54,7 @@ class CustomerResponse(BaseModel):
     id: str
     first_name: str
     last_name: str
+    display_name: Optional[str] = None
     company_name: Optional[str] = None
     customer_type: str
     email: Optional[str] = None

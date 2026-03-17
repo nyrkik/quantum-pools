@@ -24,6 +24,9 @@ import {
   Users,
   Ban,
   Target,
+  TrendingUp,
+  Bell,
+  ArrowUpRight,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -32,6 +35,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const VIOLATION_LABELS: Record<string, string> = {
   "1a": "Gate Self-Close/Latch",
@@ -89,6 +99,8 @@ function getViolationLabel(code: string | null, title: string | null): string {
   }
   return title || "Violation";
 }
+
+// --- Types ---
 
 interface EMDFacilityListItem {
   id: string;
@@ -194,6 +206,40 @@ interface EMDFacilityDetail {
   matched_customer_id?: string | null;
 }
 
+interface DashboardData {
+  my_inspections_this_week: {
+    facility_name: string;
+    facility_id: string;
+    inspection_date: string | null;
+    total_violations: number;
+    major_violations: number;
+    closure_required: boolean;
+    is_matched: boolean;
+  }[];
+  season_alerts: {
+    facility_name: string;
+    facility_id: string;
+    alert_type: string;
+    description: string;
+    last_inspection_date: string | null;
+  }[];
+  fresh_leads: {
+    facility_name: string;
+    facility_id: string;
+    address: string;
+    inspection_date: string | null;
+    total_violations: number;
+    closure_required: boolean;
+  }[];
+  trending_worse: {
+    facility_name: string;
+    facility_id: string;
+    recent_violations: number;
+    previous_violations: number;
+    trend: string;
+  }[];
+}
+
 type FacilityStatus = "compliant" | "violations" | "reinspection" | "closure";
 
 function getFacilityStatus(inspections: EMDInspection[]): FacilityStatus {
@@ -206,7 +252,6 @@ function getFacilityStatus(inspections: EMDInspection[]): FacilityStatus {
 }
 
 function getListItemStatus(f: EMDFacilityListItem): "green" | "amber" | "red" {
-  // Heuristic from list data: high violations = red, some = amber, none = green
   if (f.total_violations > 10) return "red";
   if (f.total_violations > 0) return "amber";
   return "green";
@@ -238,6 +283,8 @@ function getTimelineDotColor(insp: EMDInspection): string {
   return "bg-green-500";
 }
 
+type DashboardTile = "inspections" | "alerts" | "leads" | "trending" | null;
+
 export default function EMDPage() {
   const [facilities, setFacilities] = useState<EMDFacilityListItem[]>([]);
   const [search, setSearch] = useState("");
@@ -249,6 +296,9 @@ export default function EMDPage() {
   const [showMine, setShowMine] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "violations" | "high_risk" | "clean">("all");
   const [matchFilter, setMatchFilter] = useState<"all" | "matched" | "unmatched">("all");
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [expandedTile, setExpandedTile] = useState<DashboardTile>(null);
   const [backfillStatus, setBackfillStatus] = useState<{
     state?: string;
     current_date?: string;
@@ -272,12 +322,20 @@ export default function EMDPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch dashboard data
+  useEffect(() => {
+    api.get<DashboardData>("/v1/emd/dashboard")
+      .then(setDashboard)
+      .catch(() => setDashboard(null));
+  }, []);
+
   const fetchFacilities = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
       params.set("limit", "5000");
+      params.set("sort", sortBy);
       const data = await api.get<EMDFacilityListItem[]>(
         `/v1/emd/facilities?${params.toString()}`
       );
@@ -287,7 +345,7 @@ export default function EMDPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, sortBy]);
 
   useEffect(() => {
     const timer = setTimeout(fetchFacilities, 300);
@@ -321,25 +379,6 @@ export default function EMDPage() {
     });
   };
 
-  // Computed summary metrics
-  const summaryMetrics = useMemo(() => {
-    const now = new Date();
-    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-
-    // These are approximations from list data
-    const totalFacilities = facilities.length;
-    const withViolations = facilities.filter(f => f.total_violations > 0).length;
-    const highViolation = facilities.filter(f => f.total_violations > 10).length;
-    const potentialLeads = facilities.filter(f => f.total_violations >= 3 && !f.matched_property_id).length;
-
-    return {
-      totalFacilities,
-      activeViolations: withViolations,
-      closuresRequired: highViolation,
-      potentialLeads,
-    };
-  }, [facilities]);
-
   const facilityStatus = selectedFacility ? getFacilityStatus(selectedFacility.inspections) : null;
 
   const filteredFacilities = useMemo(() => {
@@ -354,93 +393,318 @@ export default function EMDPage() {
     });
   }, [facilities, showMine, statusFilter, matchFilter]);
 
+  const handleTileClick = (tile: DashboardTile) => {
+    setExpandedTile(expandedTile === tile ? null : tile);
+  };
+
+  const handleDashboardItemClick = (facilityId: string) => {
+    selectFacility(facilityId);
+    setExpandedTile(null);
+  };
+
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col gap-3 overflow-hidden">
-      {/* Summary Dashboard — 4 metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
-        {/* Total Facilities — with backfill status */}
-        <Card className="shadow-sm">
-          <CardContent className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Total Facilities</p>
-                <p className="text-2xl font-bold leading-tight mt-0.5 text-primary">{summaryMetrics.totalFacilities}</p>
-              </div>
-              <div className="text-right">
-                {backfillStatus?.state === "running" ? (
-                  <div className="space-y-0.5 text-right">
-                    <div className="flex items-center gap-1 justify-end">
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      <span className="text-[10px] text-green-600 font-medium">Scraping</span>
-                    </div>
-                    {backfillStatus.oldest_date && backfillStatus.newest_date && (
-                      <p className="text-[10px] text-muted-foreground">
-                        {new Date(backfillStatus.oldest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
-                        {" — "}
-                        {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
-                      </p>
-                    )}
-                    <p className="text-[10px] text-muted-foreground">
-                      {backfillStatus.total_new ? `${backfillStatus.total_new} new` : ""}
-                      {backfillStatus.total_new && backfillStatus.total_pdfs ? " · " : ""}
-                      {backfillStatus.total_pdfs ? `${backfillStatus.total_pdfs} PDFs` : ""}
-                      {!backfillStatus.total_new && !backfillStatus.total_pdfs ? "Scanning..." : ""}
-                    </p>
-                  </div>
-                ) : backfillStatus?.state === "stopped" && backfillStatus.days_completed ? (
-                  <div className="space-y-0.5 text-right">
-                    <span className="text-[10px] text-muted-foreground">Paused</span>
-                    {backfillStatus.oldest_date && backfillStatus.newest_date && (
-                      <p className="text-[10px] text-muted-foreground">
-                        {new Date(backfillStatus.oldest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
-                        {" — "}
-                        {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <Building2 className="h-5 w-5 text-primary opacity-40" />
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ===== OPERATIONS DASHBOARD ===== */}
+      <div className="shrink-0 space-y-2">
+        {/* Backfill status bar */}
+        {backfillStatus?.state === "running" && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950/30 border border-green-200/50 dark:border-green-800/50 rounded-md text-xs">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-green-700 dark:text-green-400 font-medium">Scraping</span>
+            {backfillStatus.oldest_date && backfillStatus.newest_date && (
+              <span className="text-muted-foreground">
+                {new Date(backfillStatus.oldest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+                {" -- "}
+                {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+              </span>
+            )}
+            {backfillStatus.total_new ? <span className="text-muted-foreground">{backfillStatus.total_new} new</span> : null}
+            {backfillStatus.total_pdfs ? <span className="text-muted-foreground">{backfillStatus.total_pdfs} PDFs</span> : null}
+          </div>
+        )}
+        {backfillStatus?.state === "stopped" && backfillStatus.days_completed && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-md text-xs text-muted-foreground">
+            <span>Scraper paused</span>
+            {backfillStatus.oldest_date && backfillStatus.newest_date && (
+              <span>
+                {new Date(backfillStatus.oldest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+                {" -- "}
+                {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Other metric cards */}
-        {[
-          { label: "With Violations", value: summaryMetrics.activeViolations, Icon: AlertTriangle, color: "text-amber-600" },
-          { label: "High Risk", value: summaryMetrics.closuresRequired, Icon: Ban, color: "text-red-600" },
-          { label: "Potential Leads", value: summaryMetrics.potentialLeads, Icon: Target, color: "text-green-600" },
-        ].map((m) => (
-          <Card key={m.label} className="shadow-sm">
+        {/* 4 Dashboard Tiles */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Tile 1: My Inspections */}
+          <Card
+            className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "inspections" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
+            onClick={() => handleTileClick("inspections")}
+          >
             <CardContent className="p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{m.label}</p>
-                  <p className={`text-2xl font-bold leading-tight mt-0.5 ${m.color}`}>{m.value}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">My Inspections</p>
+                  {dashboard ? (
+                    dashboard.my_inspections_this_week.length > 0 ? (
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-2xl font-bold leading-tight text-primary">{dashboard.my_inspections_this_week.length}</p>
+                        {dashboard.my_inspections_this_week.some(i => i.closure_required) ? (
+                          <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+                        ) : (
+                          <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground mt-1">No inspections this week</p>
+                    )
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-1" />
+                  )}
                 </div>
-                <m.Icon className={`h-5 w-5 ${m.color} opacity-40`} />
+                <ClipboardCheck className="h-5 w-5 text-primary opacity-40" />
               </div>
             </CardContent>
           </Card>
-        ))}
+
+          {/* Tile 2: Alerts */}
+          <Card
+            className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "alerts" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
+            onClick={() => handleTileClick("alerts")}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Alerts</p>
+                  {dashboard ? (
+                    dashboard.season_alerts.length > 0 ? (
+                      <div>
+                        <p className="text-2xl font-bold leading-tight mt-0.5 text-amber-600">{dashboard.season_alerts.length}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {dashboard.season_alerts.filter(a => a.alert_type === "recent_closure").length > 0
+                            ? `${dashboard.season_alerts.filter(a => a.alert_type === "recent_closure").length} closures`
+                            : `${dashboard.season_alerts.filter(a => a.alert_type === "repeat_violation").length} repeat violations`}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground mt-1">No active alerts</p>
+                    )
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-1" />
+                  )}
+                </div>
+                <Bell className="h-5 w-5 text-amber-600 opacity-40" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tile 3: Fresh Leads */}
+          <Card
+            className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "leads" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
+            onClick={() => handleTileClick("leads")}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Fresh Leads</p>
+                  {dashboard ? (
+                    <div>
+                      <p className="text-2xl font-bold leading-tight mt-0.5 text-green-600">{dashboard.fresh_leads.length}</p>
+                      <p className="text-[10px] text-muted-foreground">inspected this week</p>
+                    </div>
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-1" />
+                  )}
+                </div>
+                <Target className="h-5 w-5 text-green-600 opacity-40" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tile 4: Trending Worse */}
+          <Card
+            className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "trending" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
+            onClick={() => handleTileClick("trending")}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Trending Worse</p>
+                  {dashboard ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <p className="text-2xl font-bold leading-tight text-red-600">{dashboard.trending_worse.length}</p>
+                      <ArrowUpRight className="h-4 w-4 text-red-500" />
+                    </div>
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-1" />
+                  )}
+                </div>
+                <TrendingUp className="h-5 w-5 text-red-600 opacity-40" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Expanded Alert Panel */}
+        {expandedTile && dashboard && (
+          <Card className="shadow-sm border-l-4 border-primary">
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  {expandedTile === "inspections" && "My Inspections This Week"}
+                  {expandedTile === "alerts" && "Season Alerts"}
+                  {expandedTile === "leads" && "Fresh Leads"}
+                  {expandedTile === "trending" && "Trending Worse"}
+                </span>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setExpandedTile(null)}>
+                  <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                </Button>
+              </div>
+
+              {/* Inspections panel */}
+              {expandedTile === "inspections" && (
+                dashboard.my_inspections_this_week.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No inspections for matched facilities this week.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {dashboard.my_inspections_this_week.map((item, idx) => (
+                      <button
+                        key={idx}
+                        className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-accent text-sm transition-colors"
+                        onClick={() => handleDashboardItemClick(item.facility_id)}
+                      >
+                        <div className="min-w-0 flex items-center gap-2">
+                          <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${item.closure_required ? "bg-red-500" : item.total_violations > 0 ? "bg-amber-500" : "bg-green-500"}`} />
+                          <span className="font-medium truncate">{item.facility_name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs text-muted-foreground">{formatDate(item.inspection_date)}</span>
+                          {item.total_violations > 0 && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{item.total_violations} viol</Badge>
+                          )}
+                          {item.closure_required && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Closure</Badge>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {/* Alerts panel */}
+              {expandedTile === "alerts" && (
+                dashboard.season_alerts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No active alerts.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {dashboard.season_alerts.map((alert, idx) => (
+                      <button
+                        key={idx}
+                        className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-accent text-sm transition-colors"
+                        onClick={() => handleDashboardItemClick(alert.facility_id)}
+                      >
+                        <div className="min-w-0 flex items-center gap-2">
+                          <Badge
+                            variant={alert.alert_type === "recent_closure" ? "destructive" : "outline"}
+                            className={`text-[10px] px-1.5 py-0 shrink-0 ${alert.alert_type === "repeat_violation" ? "border-amber-400 text-amber-600" : ""}`}
+                          >
+                            {alert.alert_type === "recent_closure" ? "Closure" : alert.alert_type === "repeat_violation" ? "Repeat" : "Unresolved"}
+                          </Badge>
+                          <span className="font-medium truncate">{alert.facility_name}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground shrink-0 max-w-[40%] truncate">{alert.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {/* Leads panel */}
+              {expandedTile === "leads" && (
+                dashboard.fresh_leads.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No new leads this week.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {dashboard.fresh_leads.map((lead, idx) => (
+                      <button
+                        key={idx}
+                        className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-accent text-sm transition-colors"
+                        onClick={() => handleDashboardItemClick(lead.facility_id)}
+                      >
+                        <div className="min-w-0">
+                          <span className="font-medium truncate block">{lead.facility_name}</span>
+                          <span className="text-xs text-muted-foreground truncate block">{lead.address}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{lead.total_violations} viol</Badge>
+                          {lead.closure_required && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Closure</Badge>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {/* Trending panel */}
+              {expandedTile === "trending" && (
+                dashboard.trending_worse.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">No facilities trending worse.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {dashboard.trending_worse.map((item, idx) => (
+                      <button
+                        key={idx}
+                        className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-accent text-sm transition-colors"
+                        onClick={() => handleDashboardItemClick(item.facility_id)}
+                      >
+                        <span className="font-medium truncate">{item.facility_name}</span>
+                        <div className="flex items-center gap-1 shrink-0 text-xs">
+                          <span className="text-muted-foreground">{item.previous_violations}</span>
+                          <ArrowUpRight className="h-3 w-3 text-red-500" />
+                          <span className="text-red-600 font-medium">{item.recent_violations}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Main content: list + detail */}
+      {/* ===== RESEARCH SECTION ===== */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
         {/* Left: Facility list */}
         <div className={`${selectedFacility ? "lg:col-span-4" : "lg:col-span-12"} min-h-0 flex flex-col`}>
           <Card className="shadow-sm flex-1 flex flex-col min-h-0">
-            {/* Search + filters */}
+            {/* Search + sort + filters */}
             <div className="p-3 pb-0 shrink-0 space-y-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search facilities..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9"
-                />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search facilities..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name</SelectItem>
+                    <SelectItem value="violations">Violations</SelectItem>
+                    <SelectItem value="last_inspection">Last Inspected</SelectItem>
+                    <SelectItem value="status">Status</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Button
@@ -488,7 +752,7 @@ export default function EMDPage() {
               </div>
             </div>
 
-            {/* Facility list — table-like layout */}
+            {/* Facility list -- table-like layout */}
             <div className="flex-1 flex flex-col min-h-0">
               {/* Column headers */}
               <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground shrink-0 sticky top-0 z-10">
@@ -686,7 +950,7 @@ export default function EMDPage() {
                   </CardContent>
                 </Card>
 
-                {/* Stats row — 3 metric tiles */}
+                {/* Stats row -- 3 metric tiles */}
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     { label: "Inspections", value: String(selectedFacility.total_inspections), color: "" },
@@ -710,7 +974,7 @@ export default function EMDPage() {
                         <div className="flex-1 border-t border-border ml-1" />
                       </div>
 
-                      {/* Pool specs — headline numbers */}
+                      {/* Pool specs -- headline numbers */}
                       <div className="grid grid-cols-3 gap-2 mb-3">
                         {[
                           { label: "Capacity", value: selectedEquipment.pool_capacity_gallons ? `${selectedEquipment.pool_capacity_gallons.toLocaleString()}` : null, unit: "gal" },
@@ -943,7 +1207,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
         </div>
       )}
 
-      {/* Water Chemistry — blue tinted row */}
+      {/* Water Chemistry -- blue tinted row */}
       {inspection.water_chemistry && (
         <div className="bg-blue-50 dark:bg-blue-950/30 rounded-md p-2.5 border border-blue-200/50 dark:border-blue-800/50">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-1">Chemistry</p>

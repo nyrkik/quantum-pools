@@ -19,6 +19,16 @@ from src.models.customer import Customer
 
 logger = logging.getLogger(__name__)
 
+VIOLATION_LABELS = {
+    "1a": "Gate Self-Close/Latch", "1b": "Gate Hardware", "1c": "Emergency Exit Gate",
+    "2a": "Pool Enclosure", "2b": "Non-Climbable Enclosure",
+    "3": "Safety Signs", "4": "Safety Equipment",
+    "10a": "Low Chlorine", "10b": "High Chlorine",
+    "12a": "Low pH", "12b": "High pH", "13": "High CYA",
+    "16": "Water Clarity", "24": "VGB Suction Covers",
+    "37": "Electrical Hazards", "43": "EMD Approval Required", "46": "Other",
+}
+
 UPLOADS_EMD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "emd")
 
 
@@ -291,6 +301,7 @@ class EMDService:
         matched_only: bool = False,
         limit: int = 50,
         offset: int = 0,
+        sort: str = "name",
     ) -> tuple[list[dict], int]:
         """List EMD facilities with summary stats including closure info."""
         # Count subqueries
@@ -334,8 +345,18 @@ class EMDService:
         count_query = select(func.count()).select_from(query.subquery())
         total = (await self.db.execute(count_query)).scalar() or 0
 
-        # Fetch page
-        query = query.order_by(desc(last_inspection)).limit(limit).offset(offset)
+        # Fetch page with sort
+        if sort == "violations":
+            query = query.order_by(desc(violation_count), EMDFacility.name)
+        elif sort == "last_inspection":
+            query = query.order_by(desc(last_inspection))
+        elif sort == "status":
+            # Closed facilities first (approximated by high violations), then by name
+            query = query.order_by(desc(violation_count), EMDFacility.name)
+        else:
+            # Default: name
+            query = query.order_by(EMDFacility.name)
+        query = query.limit(limit).offset(offset)
         result = await self.db.execute(query)
         rows = result.all()
 
@@ -497,6 +518,181 @@ class EMDService:
             .order_by(desc(EMDInspection.inspection_date))
         )
         return result.scalars().all()
+
+    # --- Dashboard ---
+
+    async def get_dashboard(self) -> dict:
+        """Build the operations dashboard: inspections this week, alerts, fresh leads, trending worse."""
+        now = date.today()
+        seven_days_ago = now - timedelta(days=7)
+        ninety_days_ago = now - timedelta(days=90)
+
+        # --- my_inspections_this_week: matched facilities inspected in last 7 days ---
+        my_insp_result = await self.db.execute(
+            select(EMDInspection, EMDFacility)
+            .join(EMDFacility, EMDInspection.facility_id == EMDFacility.id)
+            .where(
+                EMDFacility.matched_property_id.isnot(None),
+                EMDInspection.inspection_date >= seven_days_ago,
+            )
+            .order_by(desc(EMDInspection.inspection_date))
+        )
+        my_inspections = []
+        for insp, fac in my_insp_result.all():
+            my_inspections.append({
+                "facility_name": fac.name,
+                "facility_id": fac.id,
+                "inspection_date": str(insp.inspection_date) if insp.inspection_date else None,
+                "total_violations": insp.total_violations or 0,
+                "major_violations": insp.major_violations or 0,
+                "closure_required": insp.closure_required or False,
+                "is_matched": True,
+            })
+
+        # --- season_alerts: repeat violations, closures, unresolved from last season ---
+        season_alerts = []
+
+        # Get all matched facility IDs
+        matched_result = await self.db.execute(
+            select(EMDFacility.id, EMDFacility.name)
+            .where(EMDFacility.matched_property_id.isnot(None))
+        )
+        matched_facilities = {row.id: row.name for row in matched_result.all()}
+
+        if matched_facilities:
+            matched_ids = list(matched_facilities.keys())
+
+            # Recent closures (last 90 days) for matched facilities
+            closure_result = await self.db.execute(
+                select(EMDInspection.facility_id, EMDInspection.inspection_date)
+                .where(
+                    EMDInspection.facility_id.in_(matched_ids),
+                    EMDInspection.closure_required == True,
+                    EMDInspection.inspection_date >= ninety_days_ago,
+                )
+                .order_by(desc(EMDInspection.inspection_date))
+            )
+            for row in closure_result.all():
+                fac_name = matched_facilities.get(row.facility_id, "Unknown")
+                season_alerts.append({
+                    "facility_name": fac_name,
+                    "facility_id": row.facility_id,
+                    "alert_type": "recent_closure",
+                    "description": f"Closure required on {row.inspection_date}",
+                    "last_inspection_date": str(row.inspection_date) if row.inspection_date else None,
+                })
+
+            # Repeat violations: same violation_code in 2+ of last 3 inspections per matched facility
+            for fac_id in matched_ids:
+                last3_result = await self.db.execute(
+                    select(EMDInspection.id)
+                    .where(EMDInspection.facility_id == fac_id)
+                    .order_by(desc(EMDInspection.inspection_date))
+                    .limit(3)
+                )
+                last3_ids = [r.id for r in last3_result.all()]
+                if len(last3_ids) < 2:
+                    continue
+
+                viol_result = await self.db.execute(
+                    select(
+                        EMDViolation.violation_code,
+                        func.count(EMDViolation.id).label("cnt"),
+                    )
+                    .where(
+                        EMDViolation.inspection_id.in_(last3_ids),
+                        EMDViolation.violation_code.isnot(None),
+                    )
+                    .group_by(EMDViolation.violation_code)
+                    .having(func.count(EMDViolation.id) >= 2)
+                )
+                for vrow in viol_result.all():
+                    code = (vrow.violation_code or "").strip().lower()
+                    label = VIOLATION_LABELS.get(code, vrow.violation_code or "Violation")
+                    fac_name = matched_facilities.get(fac_id, "Unknown")
+                    # Get last inspection date for context
+                    last_insp = await self.db.execute(
+                        select(func.max(EMDInspection.inspection_date))
+                        .where(EMDInspection.facility_id == fac_id)
+                    )
+                    last_date = last_insp.scalar()
+                    season_alerts.append({
+                        "facility_name": fac_name,
+                        "facility_id": fac_id,
+                        "alert_type": "repeat_violation",
+                        "description": f"{label} flagged in {vrow.cnt} of last {len(last3_ids)} inspections",
+                        "last_inspection_date": str(last_date) if last_date else None,
+                    })
+
+        # --- fresh_leads: unmatched facilities inspected in last 7 days with violations ---
+        leads_result = await self.db.execute(
+            select(EMDFacility, EMDInspection)
+            .join(EMDInspection, EMDInspection.facility_id == EMDFacility.id)
+            .where(
+                EMDFacility.matched_property_id.is_(None),
+                EMDInspection.inspection_date >= seven_days_ago,
+                EMDInspection.total_violations > 0,
+            )
+            .order_by(desc(EMDInspection.total_violations))
+        )
+        fresh_leads = []
+        seen_lead_ids = set()
+        for fac, insp in leads_result.all():
+            if fac.id in seen_lead_ids:
+                continue
+            seen_lead_ids.add(fac.id)
+            fresh_leads.append({
+                "facility_name": fac.name,
+                "facility_id": fac.id,
+                "address": f"{fac.street_address or ''}{', ' + fac.city if fac.city else ''}",
+                "inspection_date": str(insp.inspection_date) if insp.inspection_date else None,
+                "total_violations": insp.total_violations or 0,
+                "closure_required": insp.closure_required or False,
+            })
+
+        # --- trending_worse: facilities where most recent inspection has MORE violations than previous ---
+        trending_worse = []
+        # Get all facilities with at least 2 inspections
+        fac_with_multi = await self.db.execute(
+            select(EMDInspection.facility_id)
+            .group_by(EMDInspection.facility_id)
+            .having(func.count(EMDInspection.id) >= 2)
+        )
+        for row in fac_with_multi.all():
+            fac_id = row.facility_id
+            last2_result = await self.db.execute(
+                select(EMDInspection.total_violations, EMDInspection.inspection_date)
+                .where(EMDInspection.facility_id == fac_id)
+                .order_by(desc(EMDInspection.inspection_date))
+                .limit(2)
+            )
+            last2 = last2_result.all()
+            if len(last2) < 2:
+                continue
+            recent_v = last2[0].total_violations or 0
+            previous_v = last2[1].total_violations or 0
+            if recent_v > previous_v and recent_v > 0:
+                # Get facility name
+                fac_result = await self.db.execute(
+                    select(EMDFacility.name).where(EMDFacility.id == fac_id)
+                )
+                fac_name = fac_result.scalar() or "Unknown"
+                trending_worse.append({
+                    "facility_name": fac_name,
+                    "facility_id": fac_id,
+                    "recent_violations": recent_v,
+                    "previous_violations": previous_v,
+                    "trend": "increasing",
+                })
+
+        trending_worse.sort(key=lambda x: x["recent_violations"] - x["previous_violations"], reverse=True)
+
+        return {
+            "my_inspections_this_week": my_inspections,
+            "season_alerts": season_alerts,
+            "fresh_leads": fresh_leads,
+            "trending_worse": trending_worse,
+        }
 
     # --- Lead generation ---
 

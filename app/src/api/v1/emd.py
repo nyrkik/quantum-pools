@@ -23,10 +23,21 @@ from src.services.emd.service import EMDService
 router = APIRouter(prefix="/emd", tags=["emd"])
 
 
+@router.get("/dashboard")
+async def get_dashboard(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get operations dashboard: inspections this week, alerts, fresh leads, trending worse."""
+    svc = EMDService(db)
+    return await svc.get_dashboard()
+
+
 @router.get("/facilities", response_model=list[EMDFacilityListResponse])
 async def list_facilities(
     search: Optional[str] = Query(None),
     matched_only: bool = Query(False),
+    sort: str = Query("name"),
     limit: int = Query(2000, le=5000),
     offset: int = Query(0),
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -35,7 +46,7 @@ async def list_facilities(
     """List all EMD facilities with summary stats."""
     svc = EMDService(db)
     facilities, total = await svc.list_facilities(
-        search=search, matched_only=matched_only, limit=limit, offset=offset
+        search=search, matched_only=matched_only, limit=limit, offset=offset, sort=sort
     )
     return [EMDFacilityListResponse(**f) for f in facilities]
 

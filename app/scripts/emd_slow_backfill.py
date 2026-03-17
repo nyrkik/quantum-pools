@@ -269,8 +269,10 @@ async def run_backfill():
             # Advance date
             current = chunk_end - timedelta(days=1)
 
-            # Pace ourselves — longer pause after off-season batch
-            if start_str != end_str:
+            # Pace ourselves — short pause if nothing found, longer if we did work
+            if day_found == 0:
+                await asyncio.sleep(10)  # Quick move past empty periods
+            elif start_str != end_str:
                 logger.info(f"  Off-season batch done, pausing {PAUSE_BETWEEN_WEEKS}s...")
                 await asyncio.sleep(PAUSE_BETWEEN_WEEKS)
             elif current.weekday() == 6:  # Sunday = week boundary

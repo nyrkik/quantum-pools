@@ -131,10 +131,16 @@ async def run_backfill():
             date_str = current.strftime("%Y-%m-%d")
             status["current_date"] = date_str
 
-            # Skip if already done
-            if date_str in status.get("daily_log", {}):
-                current -= timedelta(days=1)
-                continue
+            # Skip if already done AND fully accounted for
+            existing_day = status.get("daily_log", {}).get(date_str)
+            if existing_day:
+                found = existing_day.get("found", 0)
+                accounted = existing_day.get("pdfs", 0) + existing_day.get("skipped", 0)
+                if found == 0 or accounted >= found:
+                    current -= timedelta(days=1)
+                    continue
+                # Has gaps — retry this day
+                logger.info(f"Retrying {date_str} (found={found}, accounted={accounted}, gap={found - accounted})")
 
             logger.info(f"Scraping {date_str}...")
 
@@ -229,12 +235,13 @@ async def run_backfill():
 
             if "daily_log" not in status:
                 status["daily_log"] = {}
+            prev = status["daily_log"].get(date_str, {})
             status["daily_log"][date_str] = {
-                "found": day_found,
-                "new": day_new,
-                "pdfs": day_pdfs,
-                "failed": day_failed,
-                "skipped": day_skipped,
+                "found": max(day_found, prev.get("found", 0)),
+                "new": prev.get("new", 0) + day_new,
+                "pdfs": prev.get("pdfs", 0) + day_pdfs,
+                "failed": day_failed,  # Reset failed count on retry
+                "skipped": prev.get("skipped", 0) + day_skipped,
             }
 
             save_status(status)

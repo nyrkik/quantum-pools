@@ -300,7 +300,12 @@ export default function EMDPage() {
                         {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
                       </p>
                     )}
-                    <p className="text-[10px] text-muted-foreground">{backfillStatus.total_found} found · {backfillStatus.total_pdfs} PDFs</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {backfillStatus.total_new ? `${backfillStatus.total_new} new` : ""}
+                      {backfillStatus.total_new && backfillStatus.total_pdfs ? " · " : ""}
+                      {backfillStatus.total_pdfs ? `${backfillStatus.total_pdfs} PDFs` : ""}
+                      {!backfillStatus.total_new && !backfillStatus.total_pdfs ? "Scanning..." : ""}
+                    </p>
                   </div>
                 ) : backfillStatus?.state === "stopped" && backfillStatus.days_completed ? (
                   <div className="space-y-0.5 text-right">

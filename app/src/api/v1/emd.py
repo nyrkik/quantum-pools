@@ -196,3 +196,17 @@ async def sync_equipment_to_bow(
             detail="Facility not matched or no equipment data",
         )
     return result
+
+
+@router.get("/backfill-status")
+async def get_backfill_status(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+):
+    """Get the current EMD backfill scraper status."""
+    import json
+    status_file = "/tmp/emd_backfill_status.json"
+    try:
+        with open(status_file) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"state": "idle"}

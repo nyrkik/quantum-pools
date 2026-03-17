@@ -181,6 +181,26 @@ export default function EMDPage() {
   const [selectedEquipment, setSelectedEquipment] = useState<EMDEquipment | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [expandedInspection, setExpandedInspection] = useState<string | null>(null);
+  const [backfillStatus, setBackfillStatus] = useState<{
+    state?: string;
+    current_date?: string;
+    days_completed?: number;
+    total_found?: number;
+    total_new?: number;
+    total_pdfs?: number;
+  } | null>(null);
+
+  // Poll backfill status every 30s
+  useEffect(() => {
+    const fetchStatus = () => {
+      api.get<Record<string, unknown>>("/v1/emd/backfill-status")
+        .then((d) => setBackfillStatus(d as typeof backfillStatus))
+        .catch(() => setBackfillStatus(null));
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const fetchFacilities = useCallback(async () => {
     setLoading(true);
@@ -256,8 +276,39 @@ export default function EMDPage() {
     <div className="h-[calc(100vh-4rem)] flex flex-col gap-3 overflow-hidden">
       {/* Summary Dashboard — 4 metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+        {/* Total Facilities — with backfill status */}
+        <Card className="shadow-sm">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Total Facilities</p>
+                <p className="text-2xl font-bold leading-tight mt-0.5 text-primary">{summaryMetrics.totalFacilities}</p>
+              </div>
+              <div className="text-right">
+                {backfillStatus?.state === "running" ? (
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1 justify-end">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <span className="text-[10px] text-green-600 font-medium">Scraping</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{backfillStatus.current_date}</p>
+                    <p className="text-[10px] text-muted-foreground">{backfillStatus.days_completed} days · {backfillStatus.total_pdfs} PDFs</p>
+                  </div>
+                ) : backfillStatus?.state === "stopped" && backfillStatus.days_completed ? (
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-muted-foreground">Backfill paused</span>
+                    <p className="text-[10px] text-muted-foreground">{backfillStatus.days_completed} days done</p>
+                  </div>
+                ) : (
+                  <Building2 className="h-5 w-5 text-primary opacity-40" />
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Other metric cards */}
         {[
-          { label: "Total Facilities", value: summaryMetrics.totalFacilities, Icon: Building2, color: "text-primary" },
           { label: "With Violations", value: summaryMetrics.activeViolations, Icon: AlertTriangle, color: "text-amber-600" },
           { label: "High Risk", value: summaryMetrics.closuresRequired, Icon: Ban, color: "text-red-600" },
           { label: "Potential Leads", value: summaryMetrics.potentialLeads, Icon: Target, color: "text-green-600" },

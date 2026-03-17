@@ -126,23 +126,40 @@ async def run_backfill():
     scraper = EMDScraper(rate_limit_seconds=PAUSE_BETWEEN_REQUESTS)
     consecutive_errors = 0
 
+    def is_off_season(d: date) -> bool:
+        """Oct-Mar = off season, Apr-Sep = pool season."""
+        return d.month >= 10 or d.month <= 3
+
+    def get_chunk_end(d: date) -> date:
+        """Off-season: scrape full month at once. Pool season: one day at a time."""
+        if is_off_season(d):
+            # Go to first of this month
+            first_of_month = d.replace(day=1)
+            return max(first_of_month, TARGET_START)
+        return d
+
     try:
         while current >= TARGET_START:
-            date_str = current.strftime("%Y-%m-%d")
-            status["current_date"] = date_str
+            chunk_end = get_chunk_end(current)
+            start_str = chunk_end.strftime("%Y-%m-%d")
+            end_str = current.strftime("%Y-%m-%d")
+            date_key = f"{start_str}_to_{end_str}" if start_str != end_str else start_str
+            status["current_date"] = start_str
 
             # Skip if already done AND fully accounted for
-            existing_day = status.get("daily_log", {}).get(date_str)
+            existing_day = status.get("daily_log", {}).get(date_key)
             if existing_day:
                 found = existing_day.get("found", 0)
                 accounted = existing_day.get("pdfs", 0) + existing_day.get("skipped", 0)
                 if found == 0 or accounted >= found:
-                    current -= timedelta(days=1)
+                    current = chunk_end - timedelta(days=1)
                     continue
-                # Has gaps — retry this day
-                logger.info(f"Retrying {date_str} (found={found}, accounted={accounted}, gap={found - accounted})")
+                logger.info(f"Retrying {date_key} (found={found}, accounted={accounted}, gap={found - accounted})")
 
-            logger.info(f"Scraping {date_str}...")
+            if start_str == end_str:
+                logger.info(f"Scraping {start_str}...")
+            else:
+                logger.info(f"Scraping {start_str} to {end_str} (off-season batch)...")
 
             day_found = 0
             day_new = 0
@@ -151,9 +168,9 @@ async def run_backfill():
             day_skipped = 0
 
             try:
-                facilities = await scraper.scrape_date_range(date_str, date_str, max_load_more=20)
+                facilities = await scraper.scrape_date_range(start_str, end_str, max_load_more=20)
                 day_found = len(facilities)
-                logger.info(f"  {date_str}: found {day_found} facilities")
+                logger.info(f"  {date_key}: found {day_found} facilities")
 
                 if day_found > 0:
                     async with get_db_context() as db:
@@ -235,8 +252,8 @@ async def run_backfill():
 
             if "daily_log" not in status:
                 status["daily_log"] = {}
-            prev = status["daily_log"].get(date_str, {})
-            status["daily_log"][date_str] = {
+            prev = status["daily_log"].get(date_key, {})
+            status["daily_log"][date_key] = {
                 "found": max(day_found, prev.get("found", 0)),
                 "new": prev.get("new", 0) + day_new,
                 "pdfs": prev.get("pdfs", 0) + day_pdfs,
@@ -247,12 +264,16 @@ async def run_backfill():
             save_status(status)
 
             if day_found > 0:
-                logger.info(f"  {date_str}: new={day_new}, pdfs={day_pdfs}, failed={day_failed}, skipped={day_skipped}")
+                logger.info(f"  {date_key}: new={day_new}, pdfs={day_pdfs}, failed={day_failed}, skipped={day_skipped}")
 
-            # Pace ourselves
-            current -= timedelta(days=1)
-            is_week_boundary = current.weekday() == 6  # Sunday
-            if is_week_boundary:
+            # Advance date
+            current = chunk_end - timedelta(days=1)
+
+            # Pace ourselves — longer pause after off-season batch
+            if start_str != end_str:
+                logger.info(f"  Off-season batch done, pausing {PAUSE_BETWEEN_WEEKS}s...")
+                await asyncio.sleep(PAUSE_BETWEEN_WEEKS)
+            elif current.weekday() == 6:  # Sunday = week boundary
                 logger.info(f"  Week boundary, pausing {PAUSE_BETWEEN_WEEKS}s...")
                 await asyncio.sleep(PAUSE_BETWEEN_WEEKS)
             else:

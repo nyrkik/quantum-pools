@@ -27,7 +27,7 @@ router = APIRouter(prefix="/emd", tags=["emd"])
 async def list_facilities(
     search: Optional[str] = Query(None),
     matched_only: bool = Query(False),
-    limit: int = Query(50, le=200),
+    limit: int = Query(2000, le=5000),
     offset: int = Query(0),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),

@@ -209,7 +209,7 @@ export default function EMDPage() {
     try {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
-      params.set("limit", "100");
+      params.set("limit", "5000");
       const data = await api.get<EMDFacilityListItem[]>(
         `/v1/emd/facilities?${params.toString()}`
       );

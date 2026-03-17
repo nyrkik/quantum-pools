@@ -21,6 +21,7 @@ class DimensionService:
         "oval": 0.85,
         "irregular_oval": 0.78,
         "rectangle": None,  # special: A = P^2/12 (assumes 2:1 L:W ratio)
+        "irregular_rectangle": None,  # same formula, ~0.9 of rectangle result
         "kidney": 0.72,
         "freeform": 0.75,
         "L-shape": 0.70,
@@ -42,11 +43,10 @@ class DimensionService:
     def calculate_sqft_from_perimeter(perimeter_ft: float, shape: str) -> float:
         """Calculate estimated pool area from perimeter measurement and shape."""
         if shape == "rectangle":
-            # Assumes 2:1 length-to-width ratio: P = 2(L+W), L=2W => P = 6W => W = P/6, L = P/3
-            # A = L * W = (P/3)(P/6) = P^2/18... but 2:1 gives P^2/12 for "typical" rectangles
-            # Standard formula: A = P^2 / (4 * (r+1)^2 / r) where r=2 => A = P^2 * 2 / (4*9) = P^2/18
-            # Using P^2/12 as specified (closer to 1.5:1 ratio which is more common for pools)
             return round((perimeter_ft ** 2) / 12, 1)
+        if shape == "irregular_rectangle":
+            # ~90% of rectangle area (cut corners, stepped entries, bench seats)
+            return round((perimeter_ft ** 2) / 12 * 0.9, 1)
 
         factor = DimensionService.SHAPE_FACTORS.get(shape, 0.75)
         if factor is None:

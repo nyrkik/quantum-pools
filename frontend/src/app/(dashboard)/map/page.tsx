@@ -109,6 +109,7 @@ const SOURCE_COLORS: Record<string, string> = {
 
 const POOL_SHAPES = [
   { value: "rectangle", label: "Rectangle" },
+  { value: "irregular_rectangle", label: "Irregular Rectangle" },
   { value: "round", label: "Round" },
   { value: "oval", label: "Oval" },
   { value: "irregular_oval", label: "Irregular Oval" },

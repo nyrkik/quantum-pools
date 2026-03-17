@@ -43,7 +43,7 @@ class EMDFacilityListResponse(BaseModel):
 
 
 class EMDFacilityDetailResponse(EMDFacilityResponse):
-    inspections: list["EMDInspectionResponse"] = []
+    inspections: list["EMDInspectionDetailResponse"] = []
     total_inspections: int = 0
     total_violations: int = 0
     last_inspection_date: Optional[date] = None
@@ -67,6 +67,9 @@ class EMDInspectionResponse(BaseModel):
     pdf_path: Optional[str] = None
     report_notes: Optional[str] = None
     closure_status: Optional[str] = None
+    closure_required: bool = False
+    reinspection_required: bool = False
+    water_chemistry: Optional[dict] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -106,16 +109,33 @@ class EMDEquipmentResponse(BaseModel):
     filter_pump_1_make: Optional[str] = None
     filter_pump_1_model: Optional[str] = None
     filter_pump_1_hp: Optional[str] = None
+    filter_pump_2_make: Optional[str] = None
+    filter_pump_2_model: Optional[str] = None
+    filter_pump_2_hp: Optional[str] = None
+    filter_pump_3_make: Optional[str] = None
+    filter_pump_3_model: Optional[str] = None
+    filter_pump_3_hp: Optional[str] = None
+    jet_pump_1_make: Optional[str] = None
+    jet_pump_1_model: Optional[str] = None
+    jet_pump_1_hp: Optional[str] = None
     filter_1_type: Optional[str] = None
     filter_1_make: Optional[str] = None
     filter_1_model: Optional[str] = None
+    filter_1_capacity_gpm: Optional[int] = None
     sanitizer_1_type: Optional[str] = None
     sanitizer_1_details: Optional[str] = None
+    sanitizer_2_type: Optional[str] = None
+    sanitizer_2_details: Optional[str] = None
     main_drain_type: Optional[str] = None
     main_drain_model: Optional[str] = None
     main_drain_install_date: Optional[str] = None
     equalizer_model: Optional[str] = None
     equalizer_install_date: Optional[str] = None
+    pump_notes: Optional[str] = None
+    filter_notes: Optional[str] = None
+    sanitizer_notes: Optional[str] = None
+    main_drain_notes: Optional[str] = None
+    equalizer_notes: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

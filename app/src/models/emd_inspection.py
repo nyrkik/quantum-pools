@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone, date
-from sqlalchemy import String, Integer, DateTime, Date, Text, ForeignKey
+from sqlalchemy import String, Integer, Boolean, DateTime, Date, Text, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -27,6 +27,9 @@ class EMDInspection(Base):
     pdf_path: Mapped[str | None] = mapped_column(String(500))
     report_notes: Mapped[str | None] = mapped_column(Text)
     closure_status: Mapped[str | None] = mapped_column(String(50))
+    closure_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    reinspection_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    water_chemistry: Mapped[dict | None] = mapped_column(JSON)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

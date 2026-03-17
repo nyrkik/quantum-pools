@@ -69,7 +69,7 @@ async def get_facility_detail(
         matched_at=facility.matched_at,
         created_at=facility.created_at,
         updated_at=facility.updated_at,
-        inspections=[EMDInspectionResponse.model_validate(i) for i in detail["inspections"]],
+        inspections=[EMDInspectionDetailResponse.model_validate(i) for i in detail["inspections"]],
         total_inspections=detail["total_inspections"],
         total_violations=detail["total_violations"],
         last_inspection_date=detail["last_inspection_date"],

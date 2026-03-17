@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -22,19 +22,33 @@ class EMDEquipment(Base):
     pool_capacity_gallons: Mapped[int | None] = mapped_column(Integer)
     flow_rate_gpm: Mapped[int | None] = mapped_column(Integer)
 
-    # Pumps
+    # Filter Pumps (up to 3)
     filter_pump_1_make: Mapped[str | None] = mapped_column(String(100))
     filter_pump_1_model: Mapped[str | None] = mapped_column(String(100))
     filter_pump_1_hp: Mapped[str | None] = mapped_column(String(50))
+    filter_pump_2_make: Mapped[str | None] = mapped_column(String(100))
+    filter_pump_2_model: Mapped[str | None] = mapped_column(String(100))
+    filter_pump_2_hp: Mapped[str | None] = mapped_column(String(50))
+    filter_pump_3_make: Mapped[str | None] = mapped_column(String(100))
+    filter_pump_3_model: Mapped[str | None] = mapped_column(String(100))
+    filter_pump_3_hp: Mapped[str | None] = mapped_column(String(50))
+
+    # Jet Pump
+    jet_pump_1_make: Mapped[str | None] = mapped_column(String(100))
+    jet_pump_1_model: Mapped[str | None] = mapped_column(String(100))
+    jet_pump_1_hp: Mapped[str | None] = mapped_column(String(50))
 
     # Filter
     filter_1_type: Mapped[str | None] = mapped_column(String(50))
     filter_1_make: Mapped[str | None] = mapped_column(String(100))
     filter_1_model: Mapped[str | None] = mapped_column(String(100))
+    filter_1_capacity_gpm: Mapped[int | None] = mapped_column(Integer)
 
     # Sanitizer
     sanitizer_1_type: Mapped[str | None] = mapped_column(String(50))
     sanitizer_1_details: Mapped[str | None] = mapped_column(String(200))
+    sanitizer_2_type: Mapped[str | None] = mapped_column(String(50))
+    sanitizer_2_details: Mapped[str | None] = mapped_column(String(200))
 
     # Drains
     main_drain_type: Mapped[str | None] = mapped_column(String(100))
@@ -42,6 +56,13 @@ class EMDEquipment(Base):
     main_drain_install_date: Mapped[str | None] = mapped_column(String(50))
     equalizer_model: Mapped[str | None] = mapped_column(String(100))
     equalizer_install_date: Mapped[str | None] = mapped_column(String(50))
+
+    # Notes
+    pump_notes: Mapped[str | None] = mapped_column(Text)
+    filter_notes: Mapped[str | None] = mapped_column(Text)
+    sanitizer_notes: Mapped[str | None] = mapped_column(Text)
+    main_drain_notes: Mapped[str | None] = mapped_column(Text)
+    equalizer_notes: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

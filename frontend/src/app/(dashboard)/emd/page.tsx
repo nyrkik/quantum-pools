@@ -61,6 +61,9 @@ interface EMDInspection {
   pdf_path: string | null;
   report_notes: string | null;
   closure_status: string | null;
+  closure_required: boolean;
+  reinspection_required: boolean;
+  water_chemistry: { free_chlorine?: number; combined_chlorine?: number; ph?: number; cyanuric_acid_ppm?: number } | null;
   created_at: string;
   violations?: EMDViolation[];
 }
@@ -82,16 +85,33 @@ interface EMDEquipment {
   filter_pump_1_make: string | null;
   filter_pump_1_model: string | null;
   filter_pump_1_hp: string | null;
+  filter_pump_2_make: string | null;
+  filter_pump_2_model: string | null;
+  filter_pump_2_hp: string | null;
+  filter_pump_3_make: string | null;
+  filter_pump_3_model: string | null;
+  filter_pump_3_hp: string | null;
+  jet_pump_1_make: string | null;
+  jet_pump_1_model: string | null;
+  jet_pump_1_hp: string | null;
   filter_1_type: string | null;
   filter_1_make: string | null;
   filter_1_model: string | null;
+  filter_1_capacity_gpm: number | null;
   sanitizer_1_type: string | null;
   sanitizer_1_details: string | null;
+  sanitizer_2_type: string | null;
+  sanitizer_2_details: string | null;
   main_drain_type: string | null;
   main_drain_model: string | null;
   main_drain_install_date: string | null;
   equalizer_model: string | null;
   equalizer_install_date: string | null;
+  pump_notes: string | null;
+  filter_notes: string | null;
+  sanitizer_notes: string | null;
+  main_drain_notes: string | null;
+  equalizer_notes: string | null;
 }
 
 interface EMDFacilityDetail {
@@ -392,52 +412,84 @@ export default function EMDPage() {
                         Equipment (Latest)
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                    <CardContent className="space-y-3">
+                      {/* Pool specs */}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                         {selectedEquipment.pool_capacity_gallons && (
-                          <div>
-                            <span className="text-muted-foreground">Pool Capacity</span>
-                            <p className="font-medium">{selectedEquipment.pool_capacity_gallons.toLocaleString()} gal</p>
-                          </div>
+                          <span><span className="text-muted-foreground">Capacity: </span><span className="font-medium">{selectedEquipment.pool_capacity_gallons.toLocaleString()} gal</span></span>
                         )}
                         {selectedEquipment.flow_rate_gpm && (
-                          <div>
-                            <span className="text-muted-foreground">Flow Rate</span>
-                            <p className="font-medium">{selectedEquipment.flow_rate_gpm} GPM</p>
+                          <span><span className="text-muted-foreground">Flow: </span><span className="font-medium">{selectedEquipment.flow_rate_gpm} GPM</span></span>
+                        )}
+                        {selectedEquipment.filter_1_capacity_gpm && (
+                          <span><span className="text-muted-foreground">Filter cap: </span><span className="font-medium">{selectedEquipment.filter_1_capacity_gpm} GPM</span></span>
+                        )}
+                      </div>
+
+                      {/* Pumps */}
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pumps</p>
+                        {[
+                          { label: "Filter Pump 1", make: selectedEquipment.filter_pump_1_make, model: selectedEquipment.filter_pump_1_model, hp: selectedEquipment.filter_pump_1_hp },
+                          { label: "Filter Pump 2", make: selectedEquipment.filter_pump_2_make, model: selectedEquipment.filter_pump_2_model, hp: selectedEquipment.filter_pump_2_hp },
+                          { label: "Filter Pump 3", make: selectedEquipment.filter_pump_3_make, model: selectedEquipment.filter_pump_3_model, hp: selectedEquipment.filter_pump_3_hp },
+                          { label: "Jet Pump", make: selectedEquipment.jet_pump_1_make, model: selectedEquipment.jet_pump_1_model, hp: selectedEquipment.jet_pump_1_hp },
+                        ].filter(p => p.make).map((p) => (
+                          <div key={p.label} className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">{p.label}</span>
+                            <span className="font-medium">{p.make} {p.model || ""} {p.hp ? `(${p.hp} HP)` : ""}</span>
+                          </div>
+                        ))}
+                        {selectedEquipment.pump_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.pump_notes}</p>}
+                      </div>
+
+                      {/* Filter */}
+                      {(selectedEquipment.filter_1_make || selectedEquipment.filter_1_type) && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Filter</p>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Type</span>
+                            <span className="font-medium">{[selectedEquipment.filter_1_type, selectedEquipment.filter_1_make, selectedEquipment.filter_1_model].filter(Boolean).join(" ")}</span>
+                          </div>
+                          {selectedEquipment.filter_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.filter_notes}</p>}
+                        </div>
+                      )}
+
+                      {/* Sanitizer */}
+                      {(selectedEquipment.sanitizer_1_type || selectedEquipment.sanitizer_1_details) && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Sanitizer</p>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Primary</span>
+                            <span className="font-medium">{selectedEquipment.sanitizer_1_type}{selectedEquipment.sanitizer_1_details ? ` — ${selectedEquipment.sanitizer_1_details}` : ""}</span>
+                          </div>
+                          {selectedEquipment.sanitizer_2_type && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-muted-foreground">Secondary</span>
+                              <span className="font-medium">{selectedEquipment.sanitizer_2_type}{selectedEquipment.sanitizer_2_details ? ` — ${selectedEquipment.sanitizer_2_details}` : ""}</span>
+                            </div>
+                          )}
+                          {selectedEquipment.sanitizer_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.sanitizer_notes}</p>}
+                        </div>
+                      )}
+
+                      {/* Drains */}
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Drains</p>
+                        {selectedEquipment.main_drain_install_date && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Main drain cover</span>
+                            <span className="font-medium">{selectedEquipment.main_drain_install_date}</span>
                           </div>
                         )}
-                        {selectedEquipment.filter_pump_1_make && (
-                          <div>
-                            <span className="text-muted-foreground">Pump</span>
-                            <p className="font-medium">
-                              {selectedEquipment.filter_pump_1_make}
-                              {selectedEquipment.filter_pump_1_model ? ` ${selectedEquipment.filter_pump_1_model}` : ""}
-                              {selectedEquipment.filter_pump_1_hp ? ` (${selectedEquipment.filter_pump_1_hp} HP)` : ""}
-                            </p>
+                        {selectedEquipment.equalizer_install_date && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Equalizer cover</span>
+                            <span className="font-medium">{selectedEquipment.equalizer_install_date}</span>
                           </div>
                         )}
-                        {selectedEquipment.filter_1_make && (
-                          <div>
-                            <span className="text-muted-foreground">Filter</span>
-                            <p className="font-medium">
-                              {selectedEquipment.filter_1_make}
-                              {selectedEquipment.filter_1_model ? ` ${selectedEquipment.filter_1_model}` : ""}
-                              {selectedEquipment.filter_1_type ? ` (${selectedEquipment.filter_1_type})` : ""}
-                            </p>
-                          </div>
-                        )}
-                        {selectedEquipment.sanitizer_1_details && (
-                          <div>
-                            <span className="text-muted-foreground">Sanitizer</span>
-                            <p className="font-medium">{selectedEquipment.sanitizer_1_details}</p>
-                          </div>
-                        )}
-                        {selectedEquipment.main_drain_model && (
-                          <div>
-                            <span className="text-muted-foreground">Main Drain</span>
-                            <p className="font-medium">{selectedEquipment.main_drain_model}</p>
-                          </div>
-                        )}
+                        {selectedEquipment.main_drain_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.main_drain_notes}</p>}
+                        {selectedEquipment.equalizer_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.equalizer_notes}</p>}
                       </div>
                     </CardContent>
                   </Card>
@@ -485,9 +537,14 @@ export default function EMDPage() {
                                   {insp.total_violations} violations
                                 </Badge>
                               )}
-                              {insp.closure_status && insp.closure_status !== "operational" && (
+                              {insp.closure_required && (
                                 <Badge variant="destructive" className="text-xs">
-                                  {insp.closure_status}
+                                  Closure Required
+                                </Badge>
+                              )}
+                              {insp.reinspection_required && (
+                                <Badge variant="outline" className="text-xs border-amber-400 text-amber-600">
+                                  Reinspection
                                 </Badge>
                               )}
                               {expandedInspection === insp.id ? (
@@ -539,26 +596,65 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
 
   return (
     <div className="px-4 pb-4 space-y-3">
-      {/* Pool specs */}
-      {(inspection.pool_capacity_gallons || inspection.flow_rate_gpm) && (
-        <div className="flex gap-4 text-xs">
-          {inspection.pool_capacity_gallons && (
-            <span className="text-muted-foreground">
-              Capacity: <span className="font-medium text-foreground">{inspection.pool_capacity_gallons.toLocaleString()} gal</span>
-            </span>
-          )}
-          {inspection.flow_rate_gpm && (
-            <span className="text-muted-foreground">
-              Flow: <span className="font-medium text-foreground">{inspection.flow_rate_gpm} GPM</span>
-            </span>
-          )}
+      {/* Pool specs + Chemistry */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {inspection.pool_capacity_gallons && (
+          <span className="text-muted-foreground">
+            Capacity: <span className="font-medium text-foreground">{inspection.pool_capacity_gallons.toLocaleString()} gal</span>
+          </span>
+        )}
+        {inspection.flow_rate_gpm && (
+          <span className="text-muted-foreground">
+            Flow: <span className="font-medium text-foreground">{inspection.flow_rate_gpm} GPM</span>
+          </span>
+        )}
+      </div>
+
+      {/* Water Chemistry */}
+      {inspection.water_chemistry && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 rounded-md p-3 border border-blue-200 dark:border-blue-800">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-blue-700 dark:text-blue-400 mb-1.5">Chemical Readings</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {inspection.water_chemistry.free_chlorine != null && (
+              <span>
+                <span className="text-muted-foreground">FC: </span>
+                <span className={`font-medium ${inspection.water_chemistry.free_chlorine < 1 || inspection.water_chemistry.free_chlorine > 10 ? "text-red-600" : "text-foreground"}`}>
+                  {inspection.water_chemistry.free_chlorine} ppm
+                </span>
+              </span>
+            )}
+            {inspection.water_chemistry.combined_chlorine != null && (
+              <span>
+                <span className="text-muted-foreground">CC: </span>
+                <span className={`font-medium ${inspection.water_chemistry.combined_chlorine > 0.5 ? "text-red-600" : "text-foreground"}`}>
+                  {inspection.water_chemistry.combined_chlorine} ppm
+                </span>
+              </span>
+            )}
+            {inspection.water_chemistry.ph != null && (
+              <span>
+                <span className="text-muted-foreground">pH: </span>
+                <span className={`font-medium ${inspection.water_chemistry.ph < 7.2 || inspection.water_chemistry.ph > 7.8 ? "text-red-600" : "text-foreground"}`}>
+                  {inspection.water_chemistry.ph}
+                </span>
+              </span>
+            )}
+            {inspection.water_chemistry.cyanuric_acid_ppm != null && (
+              <span>
+                <span className="text-muted-foreground">CYA: </span>
+                <span className={`font-medium ${inspection.water_chemistry.cyanuric_acid_ppm > 100 ? "text-red-600" : inspection.water_chemistry.cyanuric_acid_ppm > 70 ? "text-amber-600" : "text-foreground"}`}>
+                  {inspection.water_chemistry.cyanuric_acid_ppm} ppm
+                </span>
+              </span>
+            )}
+          </div>
         </div>
       )}
 
       {/* Notes */}
       {inspection.report_notes && (
         <div className="bg-muted/50 rounded-md p-3">
-          <p className="text-xs text-muted-foreground whitespace-pre-line line-clamp-4">
+          <p className="text-xs text-muted-foreground whitespace-pre-line line-clamp-6">
             {inspection.report_notes}
           </p>
         </div>

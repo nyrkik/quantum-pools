@@ -262,13 +262,17 @@ class EMDScraper:
         try:
             # Step 1: Navigate to inspection detail page
             logger.info(f"Navigating to inspection page: {full_url}")
-            await page.goto(full_url, timeout=30000, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
+            await page.goto(full_url, timeout=60000, wait_until="domcontentloaded")
+
+            # Wait for the PDF link to appear (JS rendering)
+            try:
+                await page.wait_for_selector('a:has-text("View Original Inspection PDF")', timeout=15000)
+            except Exception:
+                await asyncio.sleep(5)  # Extra wait if selector times out
 
             # Step 2: Find the "View Original Inspection PDF" link
             pdf_link = await page.query_selector('a:has-text("View Original Inspection PDF")')
             if not pdf_link:
-                # Try partial match
                 pdf_link = await page.query_selector('a:has-text("PDF")')
             if not pdf_link:
                 logger.warning(f"No PDF link found on inspection page: {full_url}")
@@ -326,6 +330,11 @@ class EMDScraper:
             return False
         except Exception as e:
             logger.error(f"PDF download error: {e}")
+            # Restart browser on errors to clear stale state
+            try:
+                await self.close()
+            except Exception:
+                pass
             return False
         finally:
             await page.close()

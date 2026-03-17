@@ -88,6 +88,10 @@ async def run_backfill(start_date: date, end_date: date, rate_limit: int = 5):
 
                         except Exception as e:
                             logger.warning(f"  Error processing {facility_data.get('name')}: {e}")
+                            try:
+                                await db.rollback()
+                            except Exception:
+                                pass
                             continue
 
             except Exception as e:

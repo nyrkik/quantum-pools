@@ -568,10 +568,9 @@ export default function EMDPage() {
                                     </span>
                                   </TooltipTrigger>
                                   <TooltipContent side="left" className="max-w-xs">
-                                    <p className="font-semibold text-xs mb-1">Closure Reasons:</p>
                                     <ul className="text-xs space-y-0.5">
                                       {f.closure_reasons.map((r, i) => (
-                                        <li key={i} className="text-muted-foreground">{r}</li>
+                                        <li key={i}>{r}</li>
                                       ))}
                                     </ul>
                                   </TooltipContent>

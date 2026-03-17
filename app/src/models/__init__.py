@@ -31,6 +31,10 @@ from src.models.dimension_estimate import DimensionEstimate
 from src.models.regional_default import RegionalDefault
 from src.models.org_chemical_prices import OrgChemicalPrices
 from src.models.chemical_cost_profile import ChemicalCostProfile
+from src.models.emd_facility import EMDFacility
+from src.models.emd_inspection import EMDInspection
+from src.models.emd_violation import EMDViolation
+from src.models.emd_equipment import EMDEquipment
 
 __all__ = [
     "Base",
@@ -64,4 +68,8 @@ __all__ = [
     "RegionalDefault",
     "OrgChemicalPrices",
     "ChemicalCostProfile",
+    "EMDFacility",
+    "EMDInspection",
+    "EMDViolation",
+    "EMDEquipment",
 ]

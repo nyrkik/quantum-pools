@@ -158,6 +158,7 @@ QuantumPools/
 - **Dashboard tiles**: Clickable — link to Customers, Properties, Routes, Invoices respectively.
 - **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`. Uploads bypass the Next.js rewrite proxy (body size limits) and go directly to the backend on port 7061. Photos are resized client-side to max 1600px before upload. CORS allows Tailscale + LAN origins.
 - **BodyOfWater (BOW)**: Each Property has 1+ BodyOfWater records (pool, spa, hot_tub, wading_pool, fountain, water_feature). One is `is_primary=True`. Pool dimensions, equipment, gallons, service minutes all live on BOW. Property still has the old columns for backward compat during transition. Profitability, route optimization, measurements, and chemical readings all aggregate from BOWs. Migration `8c1a65b5a13d` created BOW table and backfilled from properties. API: `/api/v1/bodies-of-water/property/{id}` (list/create), `/api/v1/bodies-of-water/{id}` (get/update/delete).
+- **EMD Inspection Intelligence**: Sacramento County health department inspection data. 4 models: `EMDFacility`, `EMDInspection`, `EMDViolation`, `EMDEquipment`. Migration `2f849d9d94e2`. 908 facilities, 1386 inspections, 8505 violations migrated from Pool Scout Pro SQLite. Playwright scraper at `app/src/services/emd/scraper.py`. PyMuPDF PDF extractor at `app/src/services/emd/pdf_extractor.py`. API: `/api/v1/emd/facilities` (list/detail), `/api/v1/emd/leads` (high-violation), `/api/v1/emd/scrape` (trigger scrape, admin only), `/api/v1/emd/match/{id}` (link to property). Frontend: `/emd` — searchable facility list + detail panel with inspection timeline, violations, equipment. PDFs stored in `./uploads/emd/`.
 - **Satellite analysis per-BOW**: Each pool BOW gets its own satellite analysis and pin (1:1 via `body_of_water_id` on `satellite_analyses`). Spas/fountains excluded from satellite (use measurement tool). `SatelliteImage` stays property-keyed (one set of overhead photos per yard). API: `/v1/satellite/pool-bows` (list pool BOWs), `/v1/satellite/bows/{bow_id}` (get/pin/analyze). Frontend: `/satellite?bow={id}`. Migration `75f82d5141d5` added column + backfilled 73 analyses.
 
 ## Critical Reference Files
@@ -222,7 +223,9 @@ Property 1──* PoolMeasurement ──? BodyOfWater
 Visit 1──* ChemicalReading
 Visit *──* Service (through VisitService)
 Tech 1──* Route 1──* RouteStop ──1 Property
-EMDFacility 1──* EMDInspectionReport 1──* EMDViolation
+EMDFacility 1──* EMDInspection 1──* EMDViolation
+EMDFacility 1──* EMDInspection 1──1 EMDEquipment
+EMDFacility ──? Property (matched via address)
 ```
 
 ## Phase Status
@@ -237,5 +240,5 @@ EMDFacility 1──* EMDInspectionReport 1──* EMDViolation
 - [ ] Phase 3c: Complete Invoicing (email, PDF, Stripe, AutoPay, background worker)
 - [ ] Phase 3d: Core Pool Ops (LSI/dosing, workflows)
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
-- [ ] Phase 5: EMD Inspection Intelligence (Playwright scraping, PDF extraction, AI summaries)
+- [x] Phase 5: EMD Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities migrated, frontend)
 - [ ] Phase 6: Advanced Features (Stripe, equipment tracking, SMS, PWA)

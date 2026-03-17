@@ -231,7 +231,7 @@ async def run_backfill():
                 consecutive_errors = 0
 
             except Exception as e:
-                logger.error(f"  Scrape error for {date_str}: {e}")
+                logger.error(f"  Scrape error for {date_key}: {e}")
                 status["errors"] = status.get("errors", 0) + 1
                 consecutive_errors += 1
 

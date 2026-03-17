@@ -38,6 +38,8 @@ class EMDFacilityListResponse(BaseModel):
     total_inspections: int = 0
     total_violations: int = 0
     last_inspection_date: Optional[date] = None
+    is_closed: bool = False
+    closure_reasons: list[str] = []
 
     model_config = {"from_attributes": True}
 

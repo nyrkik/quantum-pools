@@ -292,7 +292,7 @@ class EMDService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
-        """List EMD facilities with summary stats."""
+        """List EMD facilities with summary stats including closure info."""
         # Count subqueries
         inspection_count = (
             select(func.count(EMDInspection.id))
@@ -339,6 +339,58 @@ class EMDService:
         result = await self.db.execute(query)
         rows = result.all()
 
+        # Collect facility IDs for batch closure lookup
+        facility_ids = [row[0].id for row in rows]
+
+        # Batch lookup: for each facility, get the most recent inspection's closure_required
+        closure_map: dict[str, bool] = {}
+        closure_reasons_map: dict[str, list[str]] = {}
+        if facility_ids:
+            # Subquery: latest inspection date per facility
+            latest_insp_sq = (
+                select(
+                    EMDInspection.facility_id,
+                    func.max(EMDInspection.inspection_date).label("max_date"),
+                )
+                .where(EMDInspection.facility_id.in_(facility_ids))
+                .group_by(EMDInspection.facility_id)
+                .subquery()
+            )
+            # Join back to get the actual inspection rows
+            latest_inspections_result = await self.db.execute(
+                select(EMDInspection)
+                .join(
+                    latest_insp_sq,
+                    and_(
+                        EMDInspection.facility_id == latest_insp_sq.c.facility_id,
+                        EMDInspection.inspection_date == latest_insp_sq.c.max_date,
+                    ),
+                )
+            )
+            latest_inspections = latest_inspections_result.scalars().all()
+
+            closed_inspection_ids = []
+            for insp in latest_inspections:
+                if insp.closure_required:
+                    closure_map[insp.facility_id] = True
+                    closed_inspection_ids.append(insp.id)
+
+            # For closed inspections, fetch closure reasons from violations
+            if closed_inspection_ids:
+                violation_result = await self.db.execute(
+                    select(EMDViolation.facility_id, EMDViolation.observations)
+                    .where(
+                        EMDViolation.inspection_id.in_(closed_inspection_ids),
+                        EMDViolation.observations.ilike("MAJOR VIOLATION - CLOSURE:%"),
+                    )
+                )
+                for vrow in violation_result.all():
+                    obs = vrow.observations or ""
+                    # Extract the reason after "MAJOR VIOLATION - CLOSURE:"
+                    reason = obs.split("CLOSURE:", 1)[-1].strip() if "CLOSURE:" in obs else obs
+                    if reason:
+                        closure_reasons_map.setdefault(vrow.facility_id, []).append(reason)
+
         facilities = []
         for row in rows:
             fac = row[0]
@@ -353,6 +405,8 @@ class EMDService:
                 "total_inspections": row.total_inspections or 0,
                 "total_violations": row.total_violations or 0,
                 "last_inspection_date": row.last_inspection_date,
+                "is_closed": closure_map.get(fac.id, False),
+                "closure_reasons": closure_reasons_map.get(fac.id, []),
             })
 
         return facilities, total

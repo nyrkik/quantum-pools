@@ -26,6 +26,69 @@ import {
   Target,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+const VIOLATION_LABELS: Record<string, string> = {
+  "1a": "Gate Self-Close/Latch",
+  "1b": "Gate Hardware",
+  "1c": "Emergency Exit Gate",
+  "2a": "Pool Enclosure",
+  "2b": "Non-Climbable Enclosure",
+  "3": "Safety Signs",
+  "4": "Safety Equipment",
+  "5": "Restrooms/Showers",
+  "6": "Hose Bibb Anti-Siphon",
+  "7": "Pool Deck",
+  "8": "Pool/Deck Lighting",
+  "9": "Ladders/Handrails",
+  "10a": "Low Chlorine",
+  "10b": "High Chlorine",
+  "12a": "Low pH",
+  "12b": "High pH",
+  "13": "High CYA",
+  "14": "Test Kit",
+  "15": "Records",
+  "16": "Water Clarity",
+  "17": "Cleanliness",
+  "18": "Pool Shell/Tile",
+  "19": "Depth Markers",
+  "20": "Depth Line",
+  "21": "Water Level",
+  "22": "Skimmer Assembly",
+  "23": "Inlets/Outlets",
+  "24": "VGB Suction Covers",
+  "25": "Spa Emergency Switch",
+  "26": "Spa Temperature",
+  "27": "Equipment Room",
+  "28": "Safety Vacuum Release",
+  "29": "Recirculation System",
+  "30": "Equipment/Plumbing",
+  "31": "Disinfectant Feeders",
+  "32": "Chemical Control System",
+  "33": "Turnover Time",
+  "34": "Flow Rate",
+  "35": "Flow Meters",
+  "36": "Pressure/Vacuum Gauges",
+  "37": "Electrical Hazards",
+  "38": "Filter Maintenance",
+  "39": "Wastewater Disposal",
+  "43": "EMD Approval Required",
+  "44": "Lifeguard Certification",
+  "46": "Other",
+};
+
+function getViolationLabel(code: string | null, title: string | null): string {
+  if (code) {
+    const clean = code.replace(/\.$/, "").trim().toLowerCase();
+    if (VIOLATION_LABELS[clean]) return VIOLATION_LABELS[clean];
+  }
+  return title || "Violation";
+}
 
 interface EMDFacilityListItem {
   id: string;
@@ -38,6 +101,8 @@ interface EMDFacilityListItem {
   total_inspections: number;
   total_violations: number;
   last_inspection_date: string | null;
+  is_closed: boolean;
+  closure_reasons: string[];
 }
 
 interface EMDInspection {
@@ -423,57 +488,109 @@ export default function EMDPage() {
               </div>
             </div>
 
-            {/* Facility list */}
-            <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 min-h-0">
-              {loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : filteredFacilities.length === 0 ? (
-                <div className="text-center py-8 text-sm text-muted-foreground">No facilities found</div>
-              ) : (
-                filteredFacilities.map((f) => {
-                  const isSelected = selectedFacility?.id === f.id;
-                  const status = getListItemStatus(f);
-                  return (
-                    <button
-                      key={f.id}
-                      onClick={() => selectFacility(f.id)}
-                      className={`w-full text-left rounded-md px-3 py-2.5 text-sm transition-colors ${
-                        isSelected
-                          ? "bg-accent border-l-3 border-l-primary font-medium"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${getStatusDotColor(status)}`} />
-                        <span className="font-medium truncate flex-1">{f.name}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {f.matched_property_id && (
-                            <Link2 className="h-3 w-3 text-green-500" />
-                          )}
-                          {f.total_violations > 0 && (
-                            <Badge
-                              variant={f.total_violations > 10 ? "destructive" : "secondary"}
-                              className="text-[10px] px-1.5 py-0"
-                            >
-                              {f.total_violations}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-xs truncate ml-4 text-muted-foreground">
-                        {f.street_address}{f.city ? `, ${f.city}` : ""}
-                      </div>
-                      {f.last_inspection_date && (
-                        <div className="text-[10px] truncate ml-4 text-muted-foreground/70">
-                          Last: {formatDate(f.last_inspection_date)}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })
-              )}
+            {/* Facility list — table-like layout */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Column headers */}
+              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground shrink-0 sticky top-0 z-10">
+                <span>Facility</span>
+                <span className="w-12 text-center">Viol</span>
+                <span className="w-20 text-center">Last Insp</span>
+                <span className="w-16 text-center">Status</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {loading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : filteredFacilities.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-muted-foreground">No facilities found</div>
+                ) : (
+                  <TooltipProvider delayDuration={200}>
+                    {filteredFacilities.map((f) => {
+                      const isSelected = selectedFacility?.id === f.id;
+                      const status = getListItemStatus(f);
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => selectFacility(f.id)}
+                          className={`w-full text-left grid grid-cols-[1fr_auto_auto_auto] gap-x-2 items-center px-3 py-2 text-sm transition-colors border-b border-border/40 ${
+                            isSelected
+                              ? "bg-accent border-l-3 border-l-primary font-medium"
+                              : "hover:bg-blue-50 dark:hover:bg-blue-950"
+                          }`}
+                        >
+                          {/* Facility name + address */}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${getStatusDotColor(status)}`} />
+                              <span className="font-medium truncate">{f.name}</span>
+                              {f.matched_property_id && (
+                                <Link2 className="h-3 w-3 text-green-500 shrink-0" />
+                              )}
+                            </div>
+                            <div className="text-xs truncate ml-4 text-muted-foreground">
+                              {f.street_address}{f.city ? `, ${f.city}` : ""}
+                            </div>
+                          </div>
+
+                          {/* Violation count */}
+                          <div className="w-12 text-center">
+                            {f.total_violations > 0 ? (
+                              <Badge
+                                variant={f.total_violations > 10 ? "destructive" : "secondary"}
+                                className="text-[10px] px-1.5 py-0"
+                              >
+                                {f.total_violations}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">0</span>
+                            )}
+                          </div>
+
+                          {/* Last inspection date */}
+                          <div className="w-20 text-center">
+                            <span className="text-[11px] text-muted-foreground">
+                              {f.last_inspection_date ? formatDate(f.last_inspection_date) : "--"}
+                            </span>
+                          </div>
+
+                          {/* Status: OPEN / CLOSED */}
+                          <div className="w-16 text-center">
+                            {f.is_closed ? (
+                              f.closure_reasons.length > 0 ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span>
+                                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
+                                        CLOSED
+                                      </Badge>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="left" className="max-w-xs">
+                                    <p className="font-semibold text-xs mb-1">Closure Reasons:</p>
+                                    <ul className="text-xs space-y-0.5">
+                                      {f.closure_reasons.map((r, i) => (
+                                        <li key={i} className="text-muted-foreground">{r}</li>
+                                      ))}
+                                    </ul>
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : (
+                                <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                  CLOSED
+                                </Badge>
+                              )
+                            ) : (
+                              <span className="text-[10px] font-semibold text-green-600">OPEN</span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </TooltipProvider>
+                )}
+              </div>
             </div>
 
             {/* Footer count */}
@@ -901,7 +1018,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
                     {v.violation_code && (
                       <span className="text-muted-foreground mr-1">{v.violation_code}.</span>
                     )}
-                    {v.shorthand_summary || v.violation_title || "Violation"}
+                    {getViolationLabel(v.violation_code, v.violation_title)}
                   </p>
                   {v.observations && (
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">

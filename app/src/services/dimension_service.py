@@ -89,6 +89,17 @@ class DimensionService:
         If area_sqft is provided (e.g. from Google Maps), use it directly instead of calculating.
         """
         bow = await self._get_bow(org_id, bow_id)
+
+        # Delete previous perimeter estimates for this BOW — re-measurement replaces old one
+        old_result = await self.db.execute(
+            select(DimensionEstimate).where(
+                DimensionEstimate.body_of_water_id == bow_id,
+                DimensionEstimate.source == "perimeter",
+            )
+        )
+        for old in old_result.scalars().all():
+            await self.db.delete(old)
+
         if area_sqft and area_sqft > 0:
             estimated_sqft = round(area_sqft, 1)
             notes = f"Perimeter {perimeter_ft} ft, area {estimated_sqft} sqft (measured), shape {pool_shape}"

@@ -168,6 +168,7 @@ export default function MapPage() {
   const [medians, setMedians] = useState<PortfolioMedians | null>(null);
   const [perimeterInputs, setPerimeterInputs] = useState<Map<string, string>>(new Map());
   const [areaInputs, setAreaInputs] = useState<Map<string, string>>(new Map());
+  const [volumeInputs, setVolumeInputs] = useState<Map<string, string>>(new Map());
   const [perimeterShapes, setPerimeterShapes] = useState<Map<string, string>>(new Map());
   const [savingPerimeter, setSavingPerimeter] = useState(false);
   const [measuringPerimeterBow, setMeasuringPerimeterBow] = useState<string | null>(null);
@@ -385,6 +386,7 @@ export default function MapPage() {
     setPerimeterShapes(newShapes);
     setPerimeterInputs(new Map());
     setAreaInputs(new Map());
+    setVolumeInputs(new Map());
     setMeasuringPerimeterBow(null);
   }, []);
 
@@ -491,27 +493,40 @@ export default function MapPage() {
     }
   };
 
-  const savePerimeter = async (bowId: string) => {
+  const saveMeasurements = async (bowId: string) => {
     const perimeterInput = perimeterInputs.get(bowId) || "";
     const perimeterShape = perimeterShapes.get(bowId) || "rectangle";
-    if (!perimeterInput) return;
-    const ft = parseFloat(perimeterInput);
-    if (isNaN(ft) || ft <= 0) {
-      toast.error("Enter a valid perimeter in feet");
+    const areaInput = areaInputs.get(bowId) || "";
+    const volumeInput = volumeInputs.get(bowId) || "";
+    const areaSqft = areaInput ? parseFloat(areaInput) : undefined;
+    const volumeGal = volumeInput ? parseInt(volumeInput) : undefined;
+    const ft = perimeterInput ? parseFloat(perimeterInput) : undefined;
+
+    if (!ft && !areaSqft && !volumeGal) {
+      toast.error("Enter at least one measurement");
       return;
     }
-    const areaInput = areaInputs.get(bowId) || "";
-    const areaSqft = areaInput ? parseFloat(areaInput) : undefined;
     setSavingPerimeter(true);
     try {
-      await api.post(`/v1/dimensions/bows/${bowId}/perimeter`, {
-        perimeter_ft: ft,
-        pool_shape: perimeterShape,
-        ...(areaSqft && areaSqft > 0 ? { area_sqft: areaSqft } : {}),
-      });
-      toast.success(areaSqft ? "Measurements saved" : "Perimeter estimate saved");
+      // Save perimeter + area via dimension estimate (if perimeter provided)
+      if (ft && ft > 0) {
+        await api.post(`/v1/dimensions/bows/${bowId}/perimeter`, {
+          perimeter_ft: ft,
+          pool_shape: perimeterShape,
+          ...(areaSqft && areaSqft > 0 ? { area_sqft: areaSqft } : {}),
+        });
+      } else if (areaSqft && areaSqft > 0) {
+        // Area without perimeter — save directly to BOW
+        await api.put(`/v1/bodies-of-water/${bowId}`, { pool_sqft: areaSqft, pool_shape: perimeterShape });
+      }
+      // Save volume directly to BOW
+      if (volumeGal && volumeGal > 0) {
+        await api.put(`/v1/bodies-of-water/${bowId}`, { pool_gallons: volumeGal });
+      }
+      toast.success("Measurements saved");
       setPerimeterInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       setAreaInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setVolumeInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       // Refresh detail
       if (selectedGroup) {
         await loadPropertyDetail(selectedPropertyId!, selectedGroup.bows);
@@ -753,11 +768,26 @@ export default function MapPage() {
                     </div>
                   </div>
                   {/* Volume */}
-                  <div className="flex justify-between text-[11px]">
+                  <div className="flex justify-between items-center text-[11px]">
                     <span className="text-muted-foreground">Volume</span>
-                    {(bowDetail as { pool_gallons?: number }).pool_gallons
-                      ? <span className="font-medium">{((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()} gal</span>
-                      : <span className="text-muted-foreground/50 italic">—</span>}
+                    {isMeasuring ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder="gal"
+                          value={volumeInputs.get(bow.id) ?? ((bowDetail as { pool_gallons?: number }).pool_gallons?.toString() || "")}
+                          onChange={(e) => setVolumeInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          className="h-6 w-20 text-[11px] px-1.5"
+                          min={0}
+                          step={100}
+                        />
+                        <span className="text-muted-foreground">gal</span>
+                      </div>
+                    ) : (
+                      (bowDetail as { pool_gallons?: number }).pool_gallons
+                        ? <span className="font-medium">{((bowDetail as { pool_gallons: number }).pool_gallons).toLocaleString()} gal</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>
+                    )}
                   </div>
                   {/* Shape */}
                   <div className="flex justify-between items-center text-[11px]">
@@ -801,9 +831,12 @@ export default function MapPage() {
                     )}
                   </div>
                   {/* L×W, Depth, Surface — read only */}
+                  {/* Surface & Structure */}
+                  <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70 pt-1.5 mt-1.5 border-t border-border/50">Surface & Structure</p>
                   {[
-                    { label: "L × W", value: (bowDetail as { pool_length_ft?: number; pool_width_ft?: number }).pool_length_ft && (bowDetail as { pool_width_ft?: number }).pool_width_ft ? `${(bowDetail as { pool_length_ft: number }).pool_length_ft} × ${(bowDetail as { pool_width_ft: number }).pool_width_ft} ft` : null },
-                    { label: "Depth", value: (bowDetail as { pool_depth_shallow?: number; pool_depth_deep?: number }).pool_depth_shallow && (bowDetail as { pool_depth_deep?: number }).pool_depth_deep ? `${(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow}–${(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft` : (bowDetail as { pool_depth_avg?: number }).pool_depth_avg ? `${(bowDetail as { pool_depth_avg: number }).pool_depth_avg} ft avg` : null },
+                    { label: "Surface", value: (bowDetail as { pool_surface?: string }).pool_surface?.replace(/_/g, " ") || null },
+                    { label: "Cover", value: (bowDetail as { pool_cover_type?: string }).pool_cover_type?.replace(/_/g, " ") || null },
+                    { label: "Skimmers", value: (bowDetail as { skimmer_count?: number }).skimmer_count != null ? String((bowDetail as { skimmer_count: number }).skimmer_count) : null },
                   ].map((d) => (
                     <div key={d.label} className="flex justify-between text-[11px]">
                       <span className="text-muted-foreground">{d.label}</span>
@@ -827,8 +860,8 @@ export default function MapPage() {
                       <Button
                         size="sm"
                         className="h-6 px-3 text-[11px]"
-                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(bow.id))}
-                        onClick={() => savePerimeter(bow.id)}
+                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(bow.id) && !volumeInputs.get(bow.id))}
+                        onClick={() => saveMeasurements(bow.id)}
                       >
                         {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
                       </Button>
@@ -841,27 +874,9 @@ export default function MapPage() {
               <div className="bg-muted/50 rounded-md overflow-hidden">
                 <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
                   <Wrench className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pool & Equipment</span>
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Equipment & Plumbing</span>
                 </div>
                 <div className="px-2.5 py-2 space-y-3">
-                  {/* Surface & Structure */}
-                  <div className="space-y-1">
-                    <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">Surface & Structure</p>
-                    {[
-                      { icon: Droplets, label: "Surface", value: (bowDetail as Record<string, unknown>).pool_surface as string | undefined },
-                      { icon: Shield, label: "Cover", value: (bowDetail as Record<string, unknown>).pool_cover_type as string | undefined },
-                      { icon: CircleDot, label: "Skimmers", value: (bowDetail as Record<string, unknown>).skimmer_count != null ? String((bowDetail as Record<string, unknown>).skimmer_count) : undefined },
-                    ].map((e) => (
-                      <div key={e.label} className="flex items-center gap-1.5 text-[11px]">
-                        <e.icon className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
-                        <span className="text-muted-foreground">{e.label}</span>
-                        <span className="truncate ml-auto">
-                          {e.value ? <span className="font-medium capitalize">{String(e.value).replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">—</span>}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-
                   {/* Plumbing & Drains */}
                   <div className="space-y-1">
                     <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">Plumbing & Drains</p>
@@ -1056,7 +1071,7 @@ export default function MapPage() {
                   <span className="text-[11px] text-muted-foreground/50">
                     {section.items.length}
                     {countBows(section.items) !== section.items.length && (
-                      <> ({countBows(section.items)} pools)</>
+                      <> ({countBows(section.items)} features)</>
                     )}
                   </span>
                   <div className="flex-1 border-t border-border ml-1" />
@@ -1257,7 +1272,7 @@ export default function MapPage() {
                           </div>
                         )}
                         {selectedGroup.bows.length > 1 && (
-                          <Badge variant="secondary" className="text-[9px] px-1 py-0">{selectedGroup.bows.length} pools</Badge>
+                          <Badge variant="secondary" className="text-[9px] px-1 py-0">{selectedGroup.bows.length} features</Badge>
                         )}
                       </div>
                       {canEdit && (

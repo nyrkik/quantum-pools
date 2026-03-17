@@ -285,11 +285,22 @@ class ChemicalCostService:
         6. Compute monthly costs
         7. Save/update ChemicalCostProfile
         """
-        # 1. Gallons
+        # 1. Gallons — estimate from sqft if not set
         gallons = bow.pool_gallons
         if not gallons and bow.pool_sqft:
-            # Rough estimate: sqft * avg_depth * 7.48 gal/cubic_ft
-            avg_depth = bow.pool_depth_avg or 5.0
+            # Default depth by water type and size
+            if bow.pool_depth_avg:
+                avg_depth = bow.pool_depth_avg
+            elif bow.water_type in ("spa", "hot_tub"):
+                avg_depth = 3.0
+            elif bow.water_type == "wading_pool":
+                avg_depth = 1.25
+            elif bow.pool_type == "commercial" or (bow.pool_sqft and bow.pool_sqft > 800):
+                avg_depth = 4.0
+            elif bow.pool_sqft and bow.pool_sqft < 400:
+                avg_depth = 4.0  # small residential
+            else:
+                avg_depth = 4.5  # medium residential
             gallons = int(bow.pool_sqft * avg_depth * 7.48)
         if not gallons:
             gallons = 15000  # Reasonable default for unknown pool

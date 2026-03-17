@@ -201,7 +201,6 @@ class SatelliteService:
             .outerjoin(SA, SA.body_of_water_id == BodyOfWater.id)
             .where(
                 BodyOfWater.organization_id == organization_id,
-                BodyOfWater.water_type == "pool",
                 BodyOfWater.is_active == True,
                 Customer.is_active == True,
                 Property.is_active == True,

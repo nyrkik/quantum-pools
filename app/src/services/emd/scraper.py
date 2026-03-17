@@ -25,17 +25,20 @@ class EMDScraper:
         self._playwright = None
 
     async def _ensure_browser(self):
-        """Launch Chromium browser if not already running."""
+        """Launch Firefox browser if not already running.
+
+        Uses Firefox (not Chromium) because the EMD portal blocks headless Chrome.
+        The original Pool Scout Pro used selenium/standalone-firefox successfully.
+        """
         if self._browser and self._browser.is_connected():
             return
 
         from playwright.async_api import async_playwright
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
+        self._browser = await self._playwright.firefox.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
         )
-        logger.info("Playwright browser launched")
+        logger.info("Playwright Firefox browser launched")
 
     async def close(self):
         """Clean up browser resources."""
@@ -68,7 +71,14 @@ class EMDScraper:
             end_date = start_date
 
         await self._ensure_browser()
-        page = await self._browser.new_page()
+        context = await self._browser.new_context(
+            user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        page = await context.new_page()
 
         try:
             # Format dates for the date picker: MM/DD/YYYY
@@ -77,7 +87,7 @@ class EMDScraper:
             date_range = f"{formatted_start} to {formatted_end}"
 
             logger.info(f"Navigating to EMD portal for {start_date} to {end_date}")
-            await page.goto(EMD_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.goto(EMD_URL, wait_until="domcontentloaded", timeout=60000)
 
             # Wait for the date picker to be present
             await page.wait_for_selector(".alt-datePicker", timeout=15000)
@@ -136,6 +146,7 @@ class EMDScraper:
             raise
         finally:
             await page.close()
+            await context.close()
 
     async def _handle_load_more(self, page, max_attempts: int):
         """Click 'Load more' button until no more results or max attempts reached."""
@@ -223,36 +234,102 @@ class EMDScraper:
         )
         return match.group(1).upper() if match else None
 
-    async def download_pdf(self, url: str, save_path: str) -> bool:
-        """Download a PDF from the given URL.
+    async def download_pdf(self, inspection_url: str, save_path: str) -> bool:
+        """Download inspection PDF via two-step process:
+        1. Navigate to the inspection detail page
+        2. Find the "View Original Inspection PDF" link
+        3. Download the actual PDF
 
         Args:
-            url: PDF download URL
+            inspection_url: Inspection detail page URL (relative or absolute)
             save_path: Local path to save the file
 
         Returns:
             True if download succeeded
         """
+        BASE = "https://inspections.myhealthdepartment.com"
+        full_url = (BASE + inspection_url) if inspection_url.startswith("/") else inspection_url
+
         await self._ensure_browser()
-        page = await self._browser.new_page()
+        context = await self._browser.new_context(
+            user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        page = await context.new_page()
         try:
-            response = await page.goto(url, timeout=30000)
-            if response and response.ok:
-                content = await response.body()
-                if content and len(content) > 100:
-                    import os
-                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                    with open(save_path, "wb") as f:
-                        f.write(content)
-                    logger.info(f"PDF downloaded: {save_path} ({len(content)} bytes)")
+            # Step 1: Navigate to inspection detail page
+            logger.info(f"Navigating to inspection page: {full_url}")
+            await page.goto(full_url, timeout=30000, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+
+            # Step 2: Find the "View Original Inspection PDF" link
+            pdf_link = await page.query_selector('a:has-text("View Original Inspection PDF")')
+            if not pdf_link:
+                # Try partial match
+                pdf_link = await page.query_selector('a:has-text("PDF")')
+            if not pdf_link:
+                logger.warning(f"No PDF link found on inspection page: {full_url}")
+                return False
+
+            pdf_href = await pdf_link.get_attribute("href")
+            if not pdf_href:
+                logger.warning("PDF link has no href")
+                return False
+
+            actual_pdf_url = (BASE + pdf_href) if pdf_href.startswith("/") else pdf_href
+            logger.info(f"Found PDF URL: {actual_pdf_url}")
+
+            # Step 3: Download the actual PDF using Playwright's download handler
+            import os
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # Use expect_download — the PDF link triggers a browser download
+            try:
+                async with page.expect_download(timeout=30000) as download_info:
+                    # Click the PDF link instead of navigating (triggers download naturally)
+                    await pdf_link.click()
+                download = await download_info.value
+                await download.save_as(save_path)
+                size = os.path.getsize(save_path) if os.path.exists(save_path) else 0
+                if size > 100:
+                    logger.info(f"PDF downloaded: {save_path} ({size} bytes)")
                     return True
-            logger.warning(f"PDF download failed for {url}")
+                logger.warning(f"Downloaded file too small: {size} bytes")
+            except Exception as e:
+                logger.warning(f"Download via click failed: {e}")
+
+                # Fallback: get cookies from browser and download via aiohttp
+                cookies = await context.cookies()
+                cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+                try:
+                    import aiohttp
+                    headers = {
+                        "Cookie": cookie_header,
+                        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(actual_pdf_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                            if resp.status == 200:
+                                content = await resp.read()
+                                if content and len(content) > 100:
+                                    with open(save_path, "wb") as f:
+                                        f.write(content)
+                                    logger.info(f"PDF downloaded via aiohttp: {save_path} ({len(content)} bytes)")
+                                    return True
+                except Exception as e2:
+                    logger.warning(f"aiohttp fallback also failed: {e2}")
+
+            logger.warning(f"PDF download failed for {actual_pdf_url}")
             return False
         except Exception as e:
             logger.error(f"PDF download error: {e}")
             return False
         finally:
             await page.close()
+            await context.close()
 
     async def get_facility_detail(self, facility_url: str) -> dict:
         """Navigate to a facility detail page and extract additional data.

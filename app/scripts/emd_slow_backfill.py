@@ -67,6 +67,8 @@ def load_status() -> dict:
             "total_skipped": 0,
             "errors": 0,
             "daily_log": {},  # "YYYY-MM-DD": {"found": N, "new": N, "pdfs": N, "failed": N}
+            "newest_date": None,
+            "oldest_date": None,
             "state": "idle",
         }
 
@@ -243,6 +245,11 @@ async def run_backfill():
                     consecutive_errors = 0
 
             # Update status
+            # Track date span
+            if not status.get("newest_date"):
+                status["newest_date"] = end_str
+            status["oldest_date"] = start_str
+
             status["total_found"] = status.get("total_found", 0) + day_found
             status["total_new"] = status.get("total_new", 0) + day_new
             status["total_pdfs"] = status.get("total_pdfs", 0) + day_pdfs

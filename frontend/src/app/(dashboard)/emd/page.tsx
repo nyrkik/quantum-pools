@@ -184,6 +184,8 @@ export default function EMDPage() {
   const [backfillStatus, setBackfillStatus] = useState<{
     state?: string;
     current_date?: string;
+    newest_date?: string;
+    oldest_date?: string;
     days_completed?: number;
     total_found?: number;
     total_new?: number;
@@ -286,18 +288,30 @@ export default function EMDPage() {
               </div>
               <div className="text-right">
                 {backfillStatus?.state === "running" ? (
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 text-right">
                     <div className="flex items-center gap-1 justify-end">
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                       <span className="text-[10px] text-green-600 font-medium">Scraping</span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground">{backfillStatus.current_date}</p>
-                    <p className="text-[10px] text-muted-foreground">{backfillStatus.days_completed} days · {backfillStatus.total_pdfs} PDFs</p>
+                    {backfillStatus.oldest_date && backfillStatus.newest_date && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {new Date(backfillStatus.oldest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+                        {" — "}
+                        {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-muted-foreground">{backfillStatus.total_found} found · {backfillStatus.total_pdfs} PDFs</p>
                   </div>
                 ) : backfillStatus?.state === "stopped" && backfillStatus.days_completed ? (
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-muted-foreground">Backfill paused</span>
-                    <p className="text-[10px] text-muted-foreground">{backfillStatus.days_completed} days done</p>
+                  <div className="space-y-0.5 text-right">
+                    <span className="text-[10px] text-muted-foreground">Paused</span>
+                    {backfillStatus.oldest_date && backfillStatus.newest_date && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {new Date(backfillStatus.oldest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+                        {" — "}
+                        {new Date(backfillStatus.newest_date + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <Building2 className="h-5 w-5 text-primary opacity-40" />

@@ -34,6 +34,11 @@ class BodyOfWater(Base):
     pool_shape: Mapped[str | None] = mapped_column(String(50))
     pool_volume_method: Mapped[str | None] = mapped_column(String(20))
 
+    # Shape & structure details
+    has_rounded_corners: Mapped[bool] = mapped_column(Boolean, default=False)
+    step_entry_count: Mapped[int] = mapped_column(Integer, default=0)
+    has_bench_shelf: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Dimension tracking
     dimension_source: Mapped[str | None] = mapped_column(String(20))  # inspection, perimeter, measurement, satellite, manual
     dimension_source_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

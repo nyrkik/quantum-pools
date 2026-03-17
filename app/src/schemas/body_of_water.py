@@ -19,6 +19,9 @@ class BodyOfWaterCreate(BaseModel):
     pool_depth_avg: Optional[float] = None
     pool_shape: Optional[str] = None
     pool_volume_method: Optional[str] = None
+    has_rounded_corners: Optional[bool] = None
+    step_entry_count: Optional[int] = None
+    has_bench_shelf: Optional[bool] = None
     sanitizer_type: Optional[str] = None
     pump_type: Optional[str] = None
     filter_type: Optional[str] = None
@@ -60,6 +63,9 @@ class BodyOfWaterUpdate(BaseModel):
     pool_depth_avg: Optional[float] = None
     pool_shape: Optional[str] = None
     pool_volume_method: Optional[str] = None
+    has_rounded_corners: Optional[bool] = None
+    step_entry_count: Optional[int] = None
+    has_bench_shelf: Optional[bool] = None
     sanitizer_type: Optional[str] = None
     pump_type: Optional[str] = None
     filter_type: Optional[str] = None
@@ -104,6 +110,9 @@ class BodyOfWaterResponse(BaseModel):
     pool_depth_avg: Optional[float] = None
     pool_shape: Optional[str] = None
     pool_volume_method: Optional[str] = None
+    has_rounded_corners: Optional[bool] = None
+    step_entry_count: Optional[int] = None
+    has_bench_shelf: Optional[bool] = None
     dimension_source: Optional[str] = None
     dimension_source_date: Optional[datetime] = None
     perimeter_ft: Optional[float] = None

@@ -56,6 +56,57 @@ UNIT_OZ_MAP = {
 }
 
 
+def estimate_volume(bow: BodyOfWater) -> int:
+    """Estimate pool volume from area + depth + structure.
+
+    Uses shallow/deep depths when available, applies reductions for steps and
+    bench/sun shelves to produce a more accurate cubic-foot-to-gallon estimate.
+    """
+    if bow.pool_gallons:
+        return bow.pool_gallons  # User-entered, always wins
+
+    sqft = bow.pool_sqft
+    if not sqft:
+        return 15000  # Default unknown
+
+    # Average depth from shallow + deep
+    shallow = bow.pool_depth_shallow
+    deep = bow.pool_depth_deep
+    if shallow and deep:
+        avg_depth = (shallow + deep) / 2
+    elif bow.pool_depth_avg:
+        avg_depth = bow.pool_depth_avg
+    elif bow.water_type in ("spa", "hot_tub"):
+        avg_depth = 3.0
+    elif bow.water_type == "wading_pool":
+        avg_depth = 1.25
+    elif bow.pool_type == "commercial" or (sqft and sqft > 800):
+        avg_depth = 4.0
+    elif sqft and sqft < 400:
+        avg_depth = 4.0
+    else:
+        avg_depth = 4.5
+
+    base_volume_cuft = sqft * avg_depth
+
+    # Step reduction: each step entry ~15 sqft, depth difference from step to shallow
+    step_reduction = 0.0
+    if bow.step_entry_count and bow.step_entry_count > 0 and shallow:
+        step_area = bow.step_entry_count * 15  # ~15 sqft per step entry
+        step_depth_saved = shallow * 0.5  # Steps are about half the shallow depth
+        step_reduction = step_area * step_depth_saved
+
+    # Bench/shelf reduction: ~10% of area at ~1ft depth instead of avg
+    shelf_reduction = 0.0
+    if bow.has_bench_shelf and avg_depth > 1.5:
+        shelf_area = sqft * 0.10  # ~10% of pool area
+        shelf_depth_saved = avg_depth - 1.0  # Shelf is ~1ft deep
+        shelf_reduction = shelf_area * shelf_depth_saved
+
+    adjusted_cuft = base_volume_cuft - step_reduction - shelf_reduction
+    return max(int(adjusted_cuft * 7.48), 100)
+
+
 class ChemicalCostService:
     """Computes and caches per-BOW monthly chemical costs."""
 
@@ -285,25 +336,8 @@ class ChemicalCostService:
         6. Compute monthly costs
         7. Save/update ChemicalCostProfile
         """
-        # 1. Gallons — estimate from sqft if not set
-        gallons = bow.pool_gallons
-        if not gallons and bow.pool_sqft:
-            # Default depth by water type and size
-            if bow.pool_depth_avg:
-                avg_depth = bow.pool_depth_avg
-            elif bow.water_type in ("spa", "hot_tub"):
-                avg_depth = 3.0
-            elif bow.water_type == "wading_pool":
-                avg_depth = 1.25
-            elif bow.pool_type == "commercial" or (bow.pool_sqft and bow.pool_sqft > 800):
-                avg_depth = 4.0
-            elif bow.pool_sqft and bow.pool_sqft < 400:
-                avg_depth = 4.0  # small residential
-            else:
-                avg_depth = 4.5  # medium residential
-            gallons = int(bow.pool_sqft * avg_depth * 7.48)
-        if not gallons:
-            gallons = 15000  # Reasonable default for unknown pool
+        # 1. Gallons — use structure-aware estimation
+        gallons = estimate_volume(bow)
 
         units_10k = gallons / 10000.0
 

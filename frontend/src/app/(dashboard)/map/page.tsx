@@ -171,6 +171,11 @@ export default function MapPage() {
   const [areaInputs, setAreaInputs] = useState<Map<string, string>>(new Map());
   const [volumeInputs, setVolumeInputs] = useState<Map<string, string>>(new Map());
   const [perimeterShapes, setPerimeterShapes] = useState<Map<string, string>>(new Map());
+  const [roundedCornersInputs, setRoundedCornersInputs] = useState<Map<string, boolean>>(new Map());
+  const [stepEntryInputs, setStepEntryInputs] = useState<Map<string, number>>(new Map());
+  const [benchShelfInputs, setBenchShelfInputs] = useState<Map<string, boolean>>(new Map());
+  const [shallowDepthInputs, setShallowDepthInputs] = useState<Map<string, string>>(new Map());
+  const [deepDepthInputs, setDeepDepthInputs] = useState<Map<string, string>>(new Map());
   const [savingPerimeter, setSavingPerimeter] = useState(false);
   const [measuringPerimeterBow, setMeasuringPerimeterBow] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -503,7 +508,19 @@ export default function MapPage() {
     const volumeGal = volumeInput ? parseInt(volumeInput) : undefined;
     const ft = perimeterInput ? parseFloat(perimeterInput) : undefined;
 
-    if (!ft && !areaSqft && !volumeGal) {
+    // Gather shape & structure fields
+    const shapeFields: Record<string, unknown> = {};
+    if (roundedCornersInputs.has(bowId)) shapeFields.has_rounded_corners = roundedCornersInputs.get(bowId);
+    if (stepEntryInputs.has(bowId)) shapeFields.step_entry_count = stepEntryInputs.get(bowId);
+    if (benchShelfInputs.has(bowId)) shapeFields.has_bench_shelf = benchShelfInputs.get(bowId);
+    const shallowVal = shallowDepthInputs.get(bowId);
+    if (shallowVal !== undefined) shapeFields.pool_depth_shallow = shallowVal ? parseFloat(shallowVal) : null;
+    const deepVal = deepDepthInputs.get(bowId);
+    if (deepVal !== undefined) shapeFields.pool_depth_deep = deepVal ? parseFloat(deepVal) : null;
+
+    const hasShapeChanges = Object.keys(shapeFields).length > 0;
+
+    if (!ft && !areaSqft && !volumeGal && !hasShapeChanges) {
       toast.error("Enter at least one measurement");
       return;
     }
@@ -524,16 +541,25 @@ export default function MapPage() {
       if (volumeGal && volumeGal > 0) {
         await api.put(`/v1/bodies-of-water/${bowId}`, { pool_gallons: volumeGal });
       }
+      // Save shape & structure fields + pool_shape to BOW
+      if (hasShapeChanges || perimeterShape) {
+        await api.put(`/v1/bodies-of-water/${bowId}`, { pool_shape: perimeterShape, ...shapeFields });
+      }
       toast.success("Measurements saved");
       setPerimeterInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       setAreaInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       setVolumeInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setRoundedCornersInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setStepEntryInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setBenchShelfInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setShallowDepthInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
+      setDeepDepthInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       // Refresh detail
       if (selectedGroup) {
         await loadPropertyDetail(selectedPropertyId!, selectedGroup.bows);
       }
     } catch {
-      toast.error("Failed to save perimeter");
+      toast.error("Failed to save measurements");
     } finally {
       setSavingPerimeter(false);
     }
@@ -790,25 +816,6 @@ export default function MapPage() {
                         : <span className="text-muted-foreground/50 italic">—</span>
                     )}
                   </div>
-                  {/* Shape */}
-                  <div className="flex justify-between items-center text-[11px]">
-                    <span className="text-muted-foreground">Shape</span>
-                    {isMeasuring ? (
-                      <select
-                        value={perimeterShape}
-                        onChange={(e) => setPerimeterShapes((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
-                        className="h-6 text-[11px] rounded border border-input bg-background px-1.5"
-                      >
-                        {POOL_SHAPES.map((s) => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      (bowDetail as { pool_shape?: string }).pool_shape
-                        ? <span className="font-medium capitalize">{(bowDetail as { pool_shape: string }).pool_shape.replace(/_/g, " ")}</span>
-                        : <span className="text-muted-foreground/50 italic">—</span>
-                    )}
-                  </div>
                   {/* Perimeter */}
                   <div className="flex justify-between items-center text-[11px]">
                     <span className="text-muted-foreground">Perimeter</span>
@@ -831,7 +838,121 @@ export default function MapPage() {
                         : <span className="text-muted-foreground/50 italic">—</span>
                     )}
                   </div>
-                  {/* L×W, Depth, Surface — read only */}
+                  {/* Shape & Structure */}
+                  <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70 pt-1.5 mt-1.5 border-t border-border/50">Shape & Structure</p>
+                  {/* Shape */}
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Shape</span>
+                    {isMeasuring ? (
+                      <select
+                        value={perimeterShape}
+                        onChange={(e) => setPerimeterShapes((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                        className="h-6 text-[11px] rounded border border-input bg-background px-1.5"
+                      >
+                        {POOL_SHAPES.map((s) => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      (bowDetail as { pool_shape?: string }).pool_shape
+                        ? <span className="font-medium capitalize">{(bowDetail as { pool_shape: string }).pool_shape.replace(/_/g, " ")}</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>
+                    )}
+                  </div>
+                  {/* Rounded corners — only for rectangle/irregular_rectangle */}
+                  {(perimeterShape === "rectangle" || perimeterShape === "irregular_rectangle") && (
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-muted-foreground">Rounded corners</span>
+                      {isMeasuring ? (
+                        <input
+                          type="checkbox"
+                          checked={roundedCornersInputs.get(bow.id) ?? (bowDetail as { has_rounded_corners?: boolean }).has_rounded_corners ?? false}
+                          onChange={(e) => setRoundedCornersInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.checked); return n; })}
+                          className="h-3.5 w-3.5 accent-primary"
+                        />
+                      ) : (
+                        <span className="font-medium">{(bowDetail as { has_rounded_corners?: boolean }).has_rounded_corners ? "Yes" : "No"}</span>
+                      )}
+                    </div>
+                  )}
+                  {/* Step entries */}
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Step entries</span>
+                    {isMeasuring ? (
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={stepEntryInputs.get(bow.id) ?? (bowDetail as { step_entry_count?: number }).step_entry_count ?? 0}
+                        onChange={(e) => setStepEntryInputs((prev) => { const n = new Map(prev); n.set(bow.id, parseInt(e.target.value) || 0); return n; })}
+                        className="h-6 w-14 text-[11px] px-1.5"
+                        min={0}
+                        max={4}
+                        step={1}
+                      />
+                    ) : (
+                      <span className="font-medium">{(bowDetail as { step_entry_count?: number }).step_entry_count || 0}</span>
+                    )}
+                  </div>
+                  {/* Bench/sun shelf */}
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Bench/sun shelf</span>
+                    {isMeasuring ? (
+                      <input
+                        type="checkbox"
+                        checked={benchShelfInputs.get(bow.id) ?? (bowDetail as { has_bench_shelf?: boolean }).has_bench_shelf ?? false}
+                        onChange={(e) => setBenchShelfInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.checked); return n; })}
+                        className="h-3.5 w-3.5 accent-primary"
+                      />
+                    ) : (
+                      <span className="font-medium">{(bowDetail as { has_bench_shelf?: boolean }).has_bench_shelf ? "Yes" : "No"}</span>
+                    )}
+                  </div>
+                  {/* Shallow depth */}
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Shallow depth</span>
+                    {isMeasuring ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder="ft"
+                          value={shallowDepthInputs.get(bow.id) ?? ((bowDetail as { pool_depth_shallow?: number }).pool_depth_shallow?.toString() || "")}
+                          onChange={(e) => setShallowDepthInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          className="h-6 w-16 text-[11px] px-1.5"
+                          min={0}
+                          max={12}
+                          step={0.5}
+                        />
+                        <span className="text-muted-foreground">ft</span>
+                      </div>
+                    ) : (
+                      (bowDetail as { pool_depth_shallow?: number }).pool_depth_shallow
+                        ? <span className="font-medium">{(bowDetail as { pool_depth_shallow: number }).pool_depth_shallow} ft</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>
+                    )}
+                  </div>
+                  {/* Deep depth */}
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-muted-foreground">Deep depth</span>
+                    {isMeasuring ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder="ft"
+                          value={deepDepthInputs.get(bow.id) ?? ((bowDetail as { pool_depth_deep?: number }).pool_depth_deep?.toString() || "")}
+                          onChange={(e) => setDeepDepthInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          className="h-6 w-16 text-[11px] px-1.5"
+                          min={0}
+                          max={15}
+                          step={0.5}
+                        />
+                        <span className="text-muted-foreground">ft</span>
+                      </div>
+                    ) : (
+                      (bowDetail as { pool_depth_deep?: number }).pool_depth_deep
+                        ? <span className="font-medium">{(bowDetail as { pool_depth_deep: number }).pool_depth_deep} ft</span>
+                        : <span className="text-muted-foreground/50 italic">—</span>
+                    )}
+                  </div>
                   {/* Surface & Structure */}
                   <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70 pt-1.5 mt-1.5 border-t border-border/50">Surface & Structure</p>
                   {[
@@ -861,7 +982,7 @@ export default function MapPage() {
                       <Button
                         size="sm"
                         className="h-6 px-3 text-[11px]"
-                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(bow.id) && !volumeInputs.get(bow.id))}
+                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(bow.id) && !volumeInputs.get(bow.id) && !roundedCornersInputs.has(bow.id) && !stepEntryInputs.has(bow.id) && !benchShelfInputs.has(bow.id) && !shallowDepthInputs.has(bow.id) && !deepDepthInputs.has(bow.id))}
                         onClick={() => saveMeasurements(bow.id)}
                       >
                         {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}

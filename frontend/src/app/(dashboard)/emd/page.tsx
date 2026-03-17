@@ -181,6 +181,9 @@ export default function EMDPage() {
   const [selectedEquipment, setSelectedEquipment] = useState<EMDEquipment | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [expandedInspection, setExpandedInspection] = useState<string | null>(null);
+  const [showMine, setShowMine] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "violations" | "high_risk" | "clean">("all");
+  const [matchFilter, setMatchFilter] = useState<"all" | "matched" | "unmatched">("all");
   const [backfillStatus, setBackfillStatus] = useState<{
     state?: string;
     current_date?: string;
@@ -274,6 +277,18 @@ export default function EMDPage() {
 
   const facilityStatus = selectedFacility ? getFacilityStatus(selectedFacility.inspections) : null;
 
+  const filteredFacilities = useMemo(() => {
+    return facilities.filter((f) => {
+      if (showMine && !f.matched_property_id) return false;
+      if (matchFilter === "matched" && !f.matched_property_id) return false;
+      if (matchFilter === "unmatched" && f.matched_property_id) return false;
+      if (statusFilter === "violations" && f.total_violations === 0) return false;
+      if (statusFilter === "high_risk" && f.total_violations <= 10) return false;
+      if (statusFilter === "clean" && f.total_violations > 0) return false;
+      return true;
+    });
+  }, [facilities, showMine, statusFilter, matchFilter]);
+
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col gap-3 overflow-hidden">
       {/* Summary Dashboard — 4 metric cards */}
@@ -351,8 +366,8 @@ export default function EMDPage() {
         {/* Left: Facility list */}
         <div className={`${selectedFacility ? "lg:col-span-4" : "lg:col-span-12"} min-h-0 flex flex-col`}>
           <Card className="shadow-sm flex-1 flex flex-col min-h-0">
-            {/* Search bar */}
-            <div className="p-3 pb-0 shrink-0">
+            {/* Search + filters */}
+            <div className="p-3 pb-0 shrink-0 space-y-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -362,6 +377,50 @@ export default function EMDPage() {
                   className="pl-9"
                 />
               </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Button
+                  variant={showMine ? "default" : "outline"}
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setShowMine(!showMine)}
+                >
+                  <Link2 className="h-3 w-3 mr-1" />
+                  Mine
+                </Button>
+                <span className="w-px h-4 bg-border" />
+                {([
+                  { value: "all" as const, label: "All" },
+                  { value: "violations" as const, label: "Violations" },
+                  { value: "high_risk" as const, label: "High Risk" },
+                  { value: "clean" as const, label: "Clean" },
+                ] as const).map((f) => (
+                  <Button
+                    key={f.value}
+                    variant={statusFilter === f.value ? "default" : "outline"}
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setStatusFilter(f.value)}
+                  >
+                    {f.label}
+                  </Button>
+                ))}
+                <span className="w-px h-4 bg-border" />
+                {([
+                  { value: "all" as const, label: "All" },
+                  { value: "matched" as const, label: "Matched" },
+                  { value: "unmatched" as const, label: "Unmatched" },
+                ] as const).map((f) => (
+                  <Button
+                    key={f.value}
+                    variant={matchFilter === f.value ? "default" : "outline"}
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setMatchFilter(f.value)}
+                  >
+                    {f.label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             {/* Facility list */}
@@ -370,10 +429,10 @@ export default function EMDPage() {
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : facilities.length === 0 ? (
+              ) : filteredFacilities.length === 0 ? (
                 <div className="text-center py-8 text-sm text-muted-foreground">No facilities found</div>
               ) : (
-                facilities.map((f) => {
+                filteredFacilities.map((f) => {
                   const isSelected = selectedFacility?.id === f.id;
                   const status = getListItemStatus(f);
                   return (
@@ -419,7 +478,7 @@ export default function EMDPage() {
 
             {/* Footer count */}
             <div className="text-[11px] text-muted-foreground px-3 py-1.5 border-t shrink-0">
-              {facilities.length} facilities
+              {filteredFacilities.length} of {facilities.length} facilities
             </div>
           </Card>
         </div>

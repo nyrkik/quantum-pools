@@ -376,20 +376,30 @@ class EMDService:
                     closed_inspection_ids.append(insp.id)
 
             # For closed inspections, fetch closure reasons from violations
+            # Standard violation code → short label mapping
+            VIOLATION_LABELS = {
+                "1a": "Gate Self-Close/Latch", "1b": "Gate Hardware", "1c": "Emergency Exit Gate",
+                "2a": "Pool Enclosure", "2b": "Non-Climbable Enclosure",
+                "3": "Safety Signs", "4": "Safety Equipment",
+                "10a": "Low Chlorine", "10b": "High Chlorine",
+                "12a": "Low pH", "12b": "High pH", "13": "High CYA",
+                "16": "Water Clarity", "24": "VGB Suction Covers",
+                "37": "Electrical Hazards", "43": "EMD Approval Required", "46": "Other",
+            }
+
             if closed_inspection_ids:
                 violation_result = await self.db.execute(
-                    select(EMDViolation.facility_id, EMDViolation.observations)
+                    select(EMDViolation.facility_id, EMDViolation.violation_code, EMDViolation.violation_title)
                     .where(
                         EMDViolation.inspection_id.in_(closed_inspection_ids),
                         EMDViolation.observations.ilike("MAJOR VIOLATION - CLOSURE:%"),
                     )
                 )
                 for vrow in violation_result.all():
-                    obs = vrow.observations or ""
-                    # Extract the reason after "MAJOR VIOLATION - CLOSURE:"
-                    reason = obs.split("CLOSURE:", 1)[-1].strip() if "CLOSURE:" in obs else obs
-                    if reason:
-                        closure_reasons_map.setdefault(vrow.facility_id, []).append(reason)
+                    code = (vrow.violation_code or "").strip().lower()
+                    label = VIOLATION_LABELS.get(code, vrow.violation_title or "Violation")
+                    if label and label not in closure_reasons_map.get(vrow.facility_id, []):
+                        closure_reasons_map.setdefault(vrow.facility_id, []).append(label)
 
         facilities = []
         for row in rows:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,17 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Shield,
   Search,
@@ -30,9 +20,12 @@ import {
   ChevronUp,
   Loader2,
   Wrench,
-  ArrowLeft,
   X,
+  Users,
+  Ban,
+  Target,
 } from "lucide-react";
+import Link from "next/link";
 
 interface EMDFacilityListItem {
   id: string;
@@ -133,6 +126,51 @@ interface EMDFacilityDetail {
   last_inspection_date: string | null;
   matched_property_address: string | null;
   matched_customer_name: string | null;
+  matched_customer_id?: string | null;
+}
+
+type FacilityStatus = "compliant" | "violations" | "reinspection" | "closure";
+
+function getFacilityStatus(inspections: EMDInspection[]): FacilityStatus {
+  if (inspections.length === 0) return "compliant";
+  const latest = inspections[0];
+  if (latest.closure_required) return "closure";
+  if (latest.reinspection_required) return "reinspection";
+  if (latest.total_violations > 0) return "violations";
+  return "compliant";
+}
+
+function getListItemStatus(f: EMDFacilityListItem): "green" | "amber" | "red" {
+  // Heuristic from list data: high violations = red, some = amber, none = green
+  if (f.total_violations > 10) return "red";
+  if (f.total_violations > 0) return "amber";
+  return "green";
+}
+
+function getStatusDotColor(status: "green" | "amber" | "red") {
+  if (status === "red") return "bg-red-500";
+  if (status === "amber") return "bg-amber-500";
+  return "bg-green-500";
+}
+
+function StatusBadge({ status, violationCount }: { status: FacilityStatus; violationCount?: number }) {
+  switch (status) {
+    case "closure":
+      return <Badge variant="destructive" className="text-xs font-semibold">CLOSURE REQUIRED</Badge>;
+    case "reinspection":
+      return <Badge variant="outline" className="text-xs font-semibold border-amber-400 text-amber-600">REINSPECTION NEEDED</Badge>;
+    case "violations":
+      return <Badge variant="outline" className="text-xs font-semibold border-amber-400 text-amber-600">VIOLATIONS {violationCount ? `(${violationCount})` : ""}</Badge>;
+    case "compliant":
+      return <Badge className="text-xs font-semibold bg-green-600 hover:bg-green-700 text-white">COMPLIANT</Badge>;
+  }
+}
+
+function getTimelineDotColor(insp: EMDInspection): string {
+  if (insp.closure_required) return "bg-red-500";
+  if (insp.major_violations > 0) return "bg-red-500";
+  if (insp.total_violations > 0) return "bg-amber-500";
+  return "bg-green-500";
 }
 
 export default function EMDPage() {
@@ -193,20 +231,58 @@ export default function EMDPage() {
     });
   };
 
+  // Computed summary metrics
+  const summaryMetrics = useMemo(() => {
+    const now = new Date();
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+    // These are approximations from list data
+    const totalFacilities = facilities.length;
+    const withViolations = facilities.filter(f => f.total_violations > 0).length;
+    const highViolation = facilities.filter(f => f.total_violations > 10).length;
+    const potentialLeads = facilities.filter(f => f.total_violations >= 3 && !f.matched_property_id).length;
+
+    return {
+      totalFacilities,
+      activeViolations: withViolations,
+      closuresRequired: highViolation,
+      potentialLeads,
+    };
+  }, [facilities]);
+
+  const facilityStatus = selectedFacility ? getFacilityStatus(selectedFacility.inspections) : null;
+
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">EMD Intelligence</h1>
-        <p className="text-muted-foreground">
-          Sacramento County inspection data — {facilities.length} facilities
-        </p>
+    <div className="h-[calc(100vh-4rem)] flex flex-col gap-3 overflow-hidden">
+      {/* Summary Dashboard — 4 metric cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+        {[
+          { label: "Total Facilities", value: summaryMetrics.totalFacilities, Icon: Building2, color: "text-primary" },
+          { label: "With Violations", value: summaryMetrics.activeViolations, Icon: AlertTriangle, color: "text-amber-600" },
+          { label: "High Risk", value: summaryMetrics.closuresRequired, Icon: Ban, color: "text-red-600" },
+          { label: "Potential Leads", value: summaryMetrics.potentialLeads, Icon: Target, color: "text-green-600" },
+        ].map((m) => (
+          <Card key={m.label} className="shadow-sm">
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{m.label}</p>
+                  <p className={`text-2xl font-bold leading-tight mt-0.5 ${m.color}`}>{m.value}</p>
+                </div>
+                <m.Icon className={`h-5 w-5 ${m.color} opacity-40`} />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      {/* Main content: list + detail */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
         {/* Left: Facility list */}
-        <div className={selectedFacility ? "lg:col-span-2" : "lg:col-span-5"}>
-          <Card className="shadow-sm">
-            <CardHeader className="pb-3">
+        <div className={`${selectedFacility ? "lg:col-span-4" : "lg:col-span-12"} min-h-0 flex flex-col`}>
+          <Card className="shadow-sm flex-1 flex flex-col min-h-0">
+            {/* Search bar */}
+            <div className="p-3 pb-0 shrink-0">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -216,89 +292,71 @@ export default function EMDPage() {
                   className="pl-9"
                 />
               </div>
-            </CardHeader>
-            <CardContent className="p-0">
+            </div>
+
+            {/* Facility list */}
+            <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 min-h-0">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
+              ) : facilities.length === 0 ? (
+                <div className="text-center py-8 text-sm text-muted-foreground">No facilities found</div>
               ) : (
-                <div className="max-h-[calc(100vh-240px)] overflow-y-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-100 dark:bg-slate-800">
-                        <TableHead className="text-xs font-medium uppercase tracking-wide">
-                          Facility
-                        </TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide text-center w-20">
-                          Insp
-                        </TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide text-center w-20">
-                          Viol
-                        </TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide w-28">
-                          Last
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {facilities.map((f, i) => (
-                        <TableRow
-                          key={f.id}
-                          className={`cursor-pointer ${
-                            selectedFacility?.id === f.id
-                              ? "bg-blue-50 dark:bg-blue-950"
-                              : i % 2 === 1
-                              ? "bg-slate-50 dark:bg-slate-900"
-                              : ""
-                          } hover:bg-blue-50 dark:hover:bg-blue-950`}
-                          onClick={() => selectFacility(f.id)}
-                        >
-                          <TableCell className="py-2">
-                            <div className="flex items-center gap-2">
-                              {f.matched_property_id && (
-                                <Link2 className="h-3 w-3 text-green-500 flex-shrink-0" />
-                              )}
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium truncate">{f.name}</p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {f.street_address}{f.city ? `, ${f.city}` : ""}
-                                </p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center text-sm">{f.total_inspections}</TableCell>
-                          <TableCell className="text-center">
+                facilities.map((f) => {
+                  const isSelected = selectedFacility?.id === f.id;
+                  const status = getListItemStatus(f);
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => selectFacility(f.id)}
+                      className={`w-full text-left rounded-md px-3 py-2.5 text-sm transition-colors ${
+                        isSelected
+                          ? "bg-accent border-l-3 border-l-primary font-medium"
+                          : "hover:bg-muted"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${getStatusDotColor(status)}`} />
+                        <span className="font-medium truncate flex-1">{f.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {f.matched_property_id && (
+                            <Link2 className="h-3 w-3 text-green-500" />
+                          )}
+                          {f.total_violations > 0 && (
                             <Badge
-                              variant={f.total_violations > 10 ? "destructive" : f.total_violations > 0 ? "secondary" : "outline"}
-                              className="text-xs"
+                              variant={f.total_violations > 10 ? "destructive" : "secondary"}
+                              className="text-[10px] px-1.5 py-0"
                             >
                               {f.total_violations}
                             </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {formatDate(f.last_inspection_date)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {facilities.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                            No facilities found
-                          </TableCell>
-                        </TableRow>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-xs truncate ml-4 text-muted-foreground">
+                        {f.street_address}{f.city ? `, ${f.city}` : ""}
+                      </div>
+                      {f.last_inspection_date && (
+                        <div className="text-[10px] truncate ml-4 text-muted-foreground/70">
+                          Last: {formatDate(f.last_inspection_date)}
+                        </div>
                       )}
-                    </TableBody>
-                  </Table>
-                </div>
+                    </button>
+                  );
+                })
               )}
-            </CardContent>
+            </div>
+
+            {/* Footer count */}
+            <div className="text-[11px] text-muted-foreground px-3 py-1.5 border-t shrink-0">
+              {facilities.length} facilities
+            </div>
           </Card>
         </div>
 
         {/* Right: Detail panel */}
         {selectedFacility && (
-          <div className="lg:col-span-3 space-y-4">
+          <div className="lg:col-span-8 min-h-0 overflow-y-auto space-y-3">
             {detailLoading ? (
               <Card className="shadow-sm">
                 <CardContent className="flex items-center justify-center py-12">
@@ -307,269 +365,300 @@ export default function EMDPage() {
               </Card>
             ) : (
               <>
-                {/* Facility Info */}
+                {/* Facility Header */}
                 <Card className="shadow-sm">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="flex items-center gap-2 text-lg">
-                          <Building2 className="h-4 w-4" />
-                          {selectedFacility.name}
-                        </CardTitle>
-                        <p className="text-sm text-muted-foreground mt-1">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <h2 className="text-lg font-semibold truncate">{selectedFacility.name}</h2>
+                          {facilityStatus && (
+                            <StatusBadge
+                              status={facilityStatus}
+                              violationCount={selectedFacility.inspections[0]?.total_violations}
+                            />
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-0.5">
                           {selectedFacility.street_address}
                           {selectedFacility.city ? `, ${selectedFacility.city}` : ""}
                           {selectedFacility.state ? `, ${selectedFacility.state}` : ""}
                           {selectedFacility.zip_code ? ` ${selectedFacility.zip_code}` : ""}
                         </p>
+
+                        {/* Info row */}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
+                          {selectedFacility.facility_id && (
+                            <span>Permit <span className="font-medium text-foreground">{selectedFacility.facility_id}</span></span>
+                          )}
+                          {selectedFacility.facility_type && (
+                            <span>Type <span className="font-medium text-foreground">{selectedFacility.facility_type}</span></span>
+                          )}
+                          {selectedFacility.permit_holder && (
+                            <span>Holder <span className="font-medium text-foreground">{selectedFacility.permit_holder}</span></span>
+                          )}
+                          {selectedFacility.phone && (
+                            <span>Phone <span className="font-medium text-foreground">{selectedFacility.phone}</span></span>
+                          )}
+                        </div>
+
+                        {/* Match status */}
+                        <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t">
+                          {selectedFacility.matched_property_id ? (
+                            <>
+                              <Link2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                              <span className="text-xs">
+                                Matched to{" "}
+                                {selectedFacility.matched_customer_id ? (
+                                  <Link href={`/customers/${selectedFacility.matched_customer_id}`} className="font-medium hover:underline text-primary">
+                                    {selectedFacility.matched_customer_name}
+                                  </Link>
+                                ) : (
+                                  <span className="font-medium">{selectedFacility.matched_customer_name}</span>
+                                )}
+                                {selectedFacility.matched_property_address && (
+                                  <span className="text-muted-foreground"> -- {selectedFacility.matched_property_address}</span>
+                                )}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Link2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-xs text-muted-foreground">Unmatched</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="shrink-0"
                         onClick={() => setSelectedFacility(null)}
                       >
                         <X className="h-4 w-4 text-muted-foreground hover:text-destructive" />
                       </Button>
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                      {selectedFacility.facility_id && (
-                        <div>
-                          <span className="text-muted-foreground">Permit ID</span>
-                          <p className="font-medium">{selectedFacility.facility_id}</p>
-                        </div>
-                      )}
-                      {selectedFacility.facility_type && (
-                        <div>
-                          <span className="text-muted-foreground">Type</span>
-                          <p className="font-medium">{selectedFacility.facility_type}</p>
-                        </div>
-                      )}
-                      {selectedFacility.permit_holder && (
-                        <div>
-                          <span className="text-muted-foreground">Permit Holder</span>
-                          <p className="font-medium">{selectedFacility.permit_holder}</p>
-                        </div>
-                      )}
-                      {selectedFacility.phone && (
-                        <div>
-                          <span className="text-muted-foreground">Phone</span>
-                          <p className="font-medium">{selectedFacility.phone}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Match status */}
-                    <div className="mt-4 pt-3 border-t">
-                      {selectedFacility.matched_property_id ? (
-                        <div className="flex items-center gap-2">
-                          <Link2 className="h-4 w-4 text-green-500" />
-                          <span className="text-sm">
-                            Matched to{" "}
-                            <span className="font-medium">
-                              {selectedFacility.matched_customer_name}
-                            </span>
-                            {selectedFacility.matched_property_address && (
-                              <span className="text-muted-foreground">
-                                {" "}— {selectedFacility.matched_property_address}
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Link2 className="h-4 w-4" />
-                          <span className="text-sm">Not matched to any customer</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Summary stats */}
-                    <div className="grid grid-cols-3 gap-3 mt-4 pt-3 border-t">
-                      <div className="text-center">
-                        <p className="text-2xl font-bold">{selectedFacility.total_inspections}</p>
-                        <p className="text-xs text-muted-foreground">Inspections</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-2xl font-bold text-amber-600">{selectedFacility.total_violations}</p>
-                        <p className="text-xs text-muted-foreground">Violations</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm font-medium">{formatDate(selectedFacility.last_inspection_date)}</p>
-                        <p className="text-xs text-muted-foreground">Last Inspection</p>
-                      </div>
-                    </div>
                   </CardContent>
                 </Card>
+
+                {/* Stats row — 3 metric tiles */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: "Inspections", value: String(selectedFacility.total_inspections), color: "" },
+                    { label: "Total Violations", value: String(selectedFacility.total_violations), color: selectedFacility.total_violations > 10 ? "text-red-600" : selectedFacility.total_violations > 0 ? "text-amber-600" : "" },
+                    { label: "Last Inspected", value: formatDate(selectedFacility.last_inspection_date), color: "" },
+                  ].map((s) => (
+                    <div key={s.label} className="bg-muted/50 rounded-md px-2.5 py-2 text-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{s.label}</p>
+                      <p className={`text-xl font-bold leading-tight mt-0.5 ${s.color}`}>{s.value}</p>
+                    </div>
+                  ))}
+                </div>
 
                 {/* Equipment */}
                 {selectedEquipment && (
                   <Card className="shadow-sm">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-center gap-2 text-base">
-                        <Wrench className="h-4 w-4" />
-                        Equipment (Latest)
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {/* Pool specs */}
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                        {selectedEquipment.pool_capacity_gallons && (
-                          <span><span className="text-muted-foreground">Capacity: </span><span className="font-medium">{selectedEquipment.pool_capacity_gallons.toLocaleString()} gal</span></span>
-                        )}
-                        {selectedEquipment.flow_rate_gpm && (
-                          <span><span className="text-muted-foreground">Flow: </span><span className="font-medium">{selectedEquipment.flow_rate_gpm} GPM</span></span>
-                        )}
-                        {selectedEquipment.filter_1_capacity_gpm && (
-                          <span><span className="text-muted-foreground">Filter cap: </span><span className="font-medium">{selectedEquipment.filter_1_capacity_gpm} GPM</span></span>
-                        )}
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Equipment</span>
+                        <div className="flex-1 border-t border-border ml-1" />
                       </div>
 
-                      {/* Pumps */}
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pumps</p>
+                      {/* Pool specs — headline numbers */}
+                      <div className="grid grid-cols-3 gap-2 mb-3">
                         {[
-                          { label: "Filter Pump 1", make: selectedEquipment.filter_pump_1_make, model: selectedEquipment.filter_pump_1_model, hp: selectedEquipment.filter_pump_1_hp },
-                          { label: "Filter Pump 2", make: selectedEquipment.filter_pump_2_make, model: selectedEquipment.filter_pump_2_model, hp: selectedEquipment.filter_pump_2_hp },
-                          { label: "Filter Pump 3", make: selectedEquipment.filter_pump_3_make, model: selectedEquipment.filter_pump_3_model, hp: selectedEquipment.filter_pump_3_hp },
-                          { label: "Jet Pump", make: selectedEquipment.jet_pump_1_make, model: selectedEquipment.jet_pump_1_model, hp: selectedEquipment.jet_pump_1_hp },
-                        ].filter(p => p.make).map((p) => (
-                          <div key={p.label} className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">{p.label}</span>
-                            <span className="font-medium">{p.make} {p.model || ""} {p.hp ? `(${p.hp} HP)` : ""}</span>
+                          { label: "Capacity", value: selectedEquipment.pool_capacity_gallons ? `${selectedEquipment.pool_capacity_gallons.toLocaleString()}` : null, unit: "gal" },
+                          { label: "Flow Rate", value: selectedEquipment.flow_rate_gpm ? `${selectedEquipment.flow_rate_gpm}` : null, unit: "GPM" },
+                          { label: "Filter Cap", value: selectedEquipment.filter_1_capacity_gpm ? `${selectedEquipment.filter_1_capacity_gpm}` : null, unit: "GPM" },
+                        ].map((s) => (
+                          <div key={s.label} className="bg-muted/50 rounded-md px-2.5 py-2 text-center">
+                            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{s.label}</p>
+                            {s.value ? (
+                              <p className="text-lg font-bold leading-tight">{s.value}<span className="text-xs font-normal text-muted-foreground ml-0.5">{s.unit}</span></p>
+                            ) : (
+                              <p className="text-sm text-muted-foreground/40">--</p>
+                            )}
                           </div>
                         ))}
-                        {selectedEquipment.pump_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.pump_notes}</p>}
                       </div>
 
-                      {/* Filter */}
-                      {(selectedEquipment.filter_1_make || selectedEquipment.filter_1_type) && (
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Filter</p>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Type</span>
-                            <span className="font-medium">{[selectedEquipment.filter_1_type, selectedEquipment.filter_1_make, selectedEquipment.filter_1_model].filter(Boolean).join(" ")}</span>
-                          </div>
-                          {selectedEquipment.filter_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.filter_notes}</p>}
-                        </div>
-                      )}
-
-                      {/* Sanitizer */}
-                      {(selectedEquipment.sanitizer_1_type || selectedEquipment.sanitizer_1_details) && (
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Sanitizer</p>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Primary</span>
-                            <span className="font-medium">{selectedEquipment.sanitizer_1_type}{selectedEquipment.sanitizer_1_details ? ` — ${selectedEquipment.sanitizer_1_details}` : ""}</span>
-                          </div>
-                          {selectedEquipment.sanitizer_2_type && (
-                            <div className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">Secondary</span>
-                              <span className="font-medium">{selectedEquipment.sanitizer_2_type}{selectedEquipment.sanitizer_2_details ? ` — ${selectedEquipment.sanitizer_2_details}` : ""}</span>
+                      {/* Equipment grid */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Pumps tile */}
+                        {(() => {
+                          const pumps = [
+                            { label: "Filter 1", make: selectedEquipment.filter_pump_1_make, model: selectedEquipment.filter_pump_1_model, hp: selectedEquipment.filter_pump_1_hp },
+                            { label: "Filter 2", make: selectedEquipment.filter_pump_2_make, model: selectedEquipment.filter_pump_2_model, hp: selectedEquipment.filter_pump_2_hp },
+                            { label: "Filter 3", make: selectedEquipment.filter_pump_3_make, model: selectedEquipment.filter_pump_3_model, hp: selectedEquipment.filter_pump_3_hp },
+                            { label: "Jet", make: selectedEquipment.jet_pump_1_make, model: selectedEquipment.jet_pump_1_model, hp: selectedEquipment.jet_pump_1_hp },
+                          ].filter(p => p.make);
+                          if (pumps.length === 0) return null;
+                          return (
+                            <div className="bg-muted/50 rounded-md overflow-hidden">
+                              <div className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Pumps</span>
+                              </div>
+                              <div className="px-3 py-2.5 space-y-2">
+                                {pumps.map((p) => (
+                                  <div key={p.label}>
+                                    <span className="text-[10px] text-muted-foreground uppercase">{p.label}</span>
+                                    <p className="text-sm font-medium leading-tight">{p.make} {p.model || ""}{p.hp ? ` \u00b7 ${p.hp}HP` : ""}</p>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          )}
-                          {selectedEquipment.sanitizer_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.sanitizer_notes}</p>}
-                        </div>
-                      )}
+                          );
+                        })()}
 
-                      {/* Drains */}
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Drains</p>
-                        {selectedEquipment.main_drain_install_date && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Main drain cover</span>
-                            <span className="font-medium">{selectedEquipment.main_drain_install_date}</span>
+                        {/* Filter + Sanitizer tile */}
+                        <div className="bg-muted/50 rounded-md overflow-hidden">
+                          <div className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Filter & Sanitizer</span>
+                          </div>
+                          <div className="px-3 py-2.5 space-y-2">
+                            {(selectedEquipment.filter_1_type || selectedEquipment.filter_1_make) && (
+                              <div>
+                                <span className="text-[10px] text-muted-foreground uppercase">Filter</span>
+                                <p className="text-sm font-medium leading-tight">{[selectedEquipment.filter_1_type, selectedEquipment.filter_1_make, selectedEquipment.filter_1_model].filter(Boolean).join(" ")}</p>
+                              </div>
+                            )}
+                            {selectedEquipment.sanitizer_1_type && (
+                              <div>
+                                <span className="text-[10px] text-muted-foreground uppercase">Sanitizer</span>
+                                <p className="text-sm font-medium leading-tight">{selectedEquipment.sanitizer_1_type}{selectedEquipment.sanitizer_1_details ? ` \u00b7 ${selectedEquipment.sanitizer_1_details}` : ""}</p>
+                              </div>
+                            )}
+                            {selectedEquipment.sanitizer_2_type && (
+                              <div>
+                                <span className="text-[10px] text-muted-foreground uppercase">Secondary</span>
+                                <p className="text-sm font-medium leading-tight">{selectedEquipment.sanitizer_2_type}{selectedEquipment.sanitizer_2_details ? ` \u00b7 ${selectedEquipment.sanitizer_2_details}` : ""}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Drain Covers tile */}
+                        {(selectedEquipment.main_drain_install_date || selectedEquipment.equalizer_install_date) && (
+                          <div className="col-span-2 bg-muted/50 rounded-md overflow-hidden">
+                            <div className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1">
+                              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Drain Covers</span>
+                            </div>
+                            <div className="px-3 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                              {selectedEquipment.main_drain_install_date && (
+                                <div className="text-sm flex justify-between">
+                                  <span className="text-muted-foreground">Main drain</span>
+                                  <span className="font-medium">{selectedEquipment.main_drain_install_date}</span>
+                                </div>
+                              )}
+                              {selectedEquipment.equalizer_install_date && (
+                                <div className="text-sm flex justify-between">
+                                  <span className="text-muted-foreground">Equalizer</span>
+                                  <span className="font-medium">{selectedEquipment.equalizer_install_date}</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
-                        {selectedEquipment.equalizer_install_date && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Equalizer cover</span>
-                            <span className="font-medium">{selectedEquipment.equalizer_install_date}</span>
-                          </div>
-                        )}
-                        {selectedEquipment.main_drain_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.main_drain_notes}</p>}
-                        {selectedEquipment.equalizer_notes && <p className="text-[10px] text-muted-foreground/70 italic">{selectedEquipment.equalizer_notes}</p>}
                       </div>
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Inspection History */}
+                {/* Inspection Timeline */}
                 <Card className="shadow-sm">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <ClipboardCheck className="h-4 w-4" />
-                      Inspection History
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <div className="max-h-[500px] overflow-y-auto">
-                      {selectedFacility.inspections.map((insp) => (
-                        <div key={insp.id} className="border-b last:border-b-0">
-                          <button
-                            className="w-full px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-900 flex items-center justify-between"
-                            onClick={() =>
-                              setExpandedInspection(
-                                expandedInspection === insp.id ? null : insp.id
-                              )
-                            }
-                          >
-                            <div className="flex items-center gap-3">
-                              <div>
-                                <p className="text-sm font-medium">
-                                  {formatDate(insp.inspection_date)}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {insp.inspection_type || "Inspection"}
-                                  {insp.inspector_name ? ` — ${insp.inspector_name}` : ""}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {insp.major_violations > 0 && (
-                                <Badge variant="destructive" className="text-xs">
-                                  {insp.major_violations} major
-                                </Badge>
-                              )}
-                              {insp.total_violations > 0 && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {insp.total_violations} violations
-                                </Badge>
-                              )}
-                              {insp.closure_required && (
-                                <Badge variant="destructive" className="text-xs">
-                                  Closure Required
-                                </Badge>
-                              )}
-                              {insp.reinspection_required && (
-                                <Badge variant="outline" className="text-xs border-amber-400 text-amber-600">
-                                  Reinspection
-                                </Badge>
-                              )}
-                              {expandedInspection === insp.id ? (
-                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </div>
-                          </button>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <ClipboardCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Inspection Timeline</span>
+                      <div className="flex-1 border-t border-border ml-1" />
+                      <span className="text-[11px] text-muted-foreground/50">{selectedFacility.inspections.length}</span>
+                    </div>
 
-                          {expandedInspection === insp.id && (
-                            <InspectionDetail inspection={insp} />
-                          )}
+                    <div className="max-h-[500px] overflow-y-auto">
+                      {selectedFacility.inspections.length === 0 ? (
+                        <p className="text-center py-8 text-muted-foreground text-sm">No inspection records</p>
+                      ) : (
+                        <div className="relative ml-3">
+                          {/* Vertical timeline line */}
+                          <div className="absolute left-0 top-2 bottom-2 w-px bg-border" />
+
+                          {selectedFacility.inspections.map((insp, idx) => (
+                            <div key={insp.id} className="relative pl-6 pb-1">
+                              {/* Timeline dot */}
+                              <div className={`absolute left-0 top-2.5 w-2.5 h-2.5 rounded-full -translate-x-[4.5px] ring-2 ring-background ${getTimelineDotColor(insp)}`} />
+
+                              <button
+                                className={`w-full text-left rounded-md px-3 py-2.5 transition-colors ${
+                                  expandedInspection === insp.id
+                                    ? "bg-accent"
+                                    : "hover:bg-muted"
+                                }`}
+                                onClick={() =>
+                                  setExpandedInspection(
+                                    expandedInspection === insp.id ? null : insp.id
+                                  )
+                                }
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium">
+                                      {formatDate(insp.inspection_date)}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {insp.inspection_type || "Inspection"}
+                                      {insp.inspector_name ? ` -- ${insp.inspector_name}` : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {insp.closure_required && (
+                                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Closure</Badge>
+                                    )}
+                                    {insp.reinspection_required && (
+                                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-400 text-amber-600">Reinspection</Badge>
+                                    )}
+                                    {insp.major_violations > 0 && (
+                                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{insp.major_violations} major</Badge>
+                                    )}
+                                    {insp.total_violations > 0 && (
+                                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{insp.total_violations} viol</Badge>
+                                    )}
+                                    {insp.water_chemistry && (
+                                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400" title="Chemistry data available" />
+                                    )}
+                                    {expandedInspection === insp.id ? (
+                                      <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+
+                              {expandedInspection === insp.id && (
+                                <div className="ml-3">
+                                  <InspectionDetail inspection={insp} />
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                      {selectedFacility.inspections.length === 0 && (
-                        <p className="text-center py-8 text-muted-foreground text-sm">
-                          No inspection records
-                        </p>
                       )}
                     </div>
                   </CardContent>
                 </Card>
               </>
             )}
+          </div>
+        )}
+
+        {/* Empty state when no facility selected and wide view */}
+        {!selectedFacility && !loading && facilities.length > 0 && (
+          <div className="hidden lg:flex lg:col-span-8 items-center justify-center text-muted-foreground text-sm">
+            <div className="text-center">
+              <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />
+              <p>Select a facility to view details</p>
+            </div>
           </div>
         )}
       </div>
@@ -582,42 +671,41 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // If violations are already loaded (from the detail response), use them
     if (inspection.violations && inspection.violations.length > 0) {
       setViolations(inspection.violations);
       setLoading(false);
       return;
     }
-
-    // Otherwise load them separately (when only count is available)
     setViolations([]);
     setLoading(false);
   }, [inspection]);
 
   return (
-    <div className="px-4 pb-4 space-y-3">
-      {/* Pool specs + Chemistry */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        {inspection.pool_capacity_gallons && (
-          <span className="text-muted-foreground">
-            Capacity: <span className="font-medium text-foreground">{inspection.pool_capacity_gallons.toLocaleString()} gal</span>
-          </span>
-        )}
-        {inspection.flow_rate_gpm && (
-          <span className="text-muted-foreground">
-            Flow: <span className="font-medium text-foreground">{inspection.flow_rate_gpm} GPM</span>
-          </span>
-        )}
-      </div>
+    <div className="px-3 pb-3 pt-1 space-y-2.5">
+      {/* Pool specs */}
+      {(inspection.pool_capacity_gallons || inspection.flow_rate_gpm) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {inspection.pool_capacity_gallons && (
+            <span className="text-muted-foreground">
+              Capacity: <span className="font-medium text-foreground">{inspection.pool_capacity_gallons.toLocaleString()} gal</span>
+            </span>
+          )}
+          {inspection.flow_rate_gpm && (
+            <span className="text-muted-foreground">
+              Flow: <span className="font-medium text-foreground">{inspection.flow_rate_gpm} GPM</span>
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Water Chemistry */}
+      {/* Water Chemistry — blue tinted row */}
       {inspection.water_chemistry && (
-        <div className="bg-blue-50 dark:bg-blue-950/30 rounded-md p-3 border border-blue-200 dark:border-blue-800">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-blue-700 dark:text-blue-400 mb-1.5">Chemical Readings</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <div className="bg-blue-50 dark:bg-blue-950/30 rounded-md p-2.5 border border-blue-200/50 dark:border-blue-800/50">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-1">Chemistry</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm">
             {inspection.water_chemistry.free_chlorine != null && (
               <span>
-                <span className="text-muted-foreground">FC: </span>
+                <span className="text-muted-foreground text-xs">FC </span>
                 <span className={`font-medium ${inspection.water_chemistry.free_chlorine < 1 || inspection.water_chemistry.free_chlorine > 10 ? "text-red-600" : "text-foreground"}`}>
                   {inspection.water_chemistry.free_chlorine} ppm
                 </span>
@@ -625,7 +713,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
             )}
             {inspection.water_chemistry.combined_chlorine != null && (
               <span>
-                <span className="text-muted-foreground">CC: </span>
+                <span className="text-muted-foreground text-xs">CC </span>
                 <span className={`font-medium ${inspection.water_chemistry.combined_chlorine > 0.5 ? "text-red-600" : "text-foreground"}`}>
                   {inspection.water_chemistry.combined_chlorine} ppm
                 </span>
@@ -633,7 +721,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
             )}
             {inspection.water_chemistry.ph != null && (
               <span>
-                <span className="text-muted-foreground">pH: </span>
+                <span className="text-muted-foreground text-xs">pH </span>
                 <span className={`font-medium ${inspection.water_chemistry.ph < 7.2 || inspection.water_chemistry.ph > 7.8 ? "text-red-600" : "text-foreground"}`}>
                   {inspection.water_chemistry.ph}
                 </span>
@@ -641,7 +729,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
             )}
             {inspection.water_chemistry.cyanuric_acid_ppm != null && (
               <span>
-                <span className="text-muted-foreground">CYA: </span>
+                <span className="text-muted-foreground text-xs">CYA </span>
                 <span className={`font-medium ${inspection.water_chemistry.cyanuric_acid_ppm > 100 ? "text-red-600" : inspection.water_chemistry.cyanuric_acid_ppm > 70 ? "text-amber-600" : "text-foreground"}`}>
                   {inspection.water_chemistry.cyanuric_acid_ppm} ppm
                 </span>
@@ -653,7 +741,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
 
       {/* Notes */}
       {inspection.report_notes && (
-        <div className="bg-muted/50 rounded-md p-3">
+        <div className="bg-muted/50 rounded-md p-2.5">
           <p className="text-xs text-muted-foreground whitespace-pre-line line-clamp-6">
             {inspection.report_notes}
           </p>
@@ -662,16 +750,16 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
 
       {/* Violations */}
       {violations.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
             Violations
           </p>
           {violations.map((v) => (
             <div
               key={v.id}
-              className={`rounded-md p-3 text-sm ${
+              className={`rounded-md p-2.5 text-sm ${
                 v.is_major_violation
-                  ? "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
+                  ? "bg-red-50 dark:bg-red-950/30 border border-red-200/50 dark:border-red-800/50"
                   : "bg-muted/50"
               }`}
             >
@@ -687,7 +775,7 @@ function InspectionDetail({ inspection }: { inspection: EMDInspection }) {
                     {v.shorthand_summary || v.violation_title || "Violation"}
                   </p>
                   {v.observations && (
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-3">
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">
                       {v.observations}
                     </p>
                   )}

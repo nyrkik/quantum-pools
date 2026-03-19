@@ -6,6 +6,15 @@ export interface OrgCostSettings {
   chemical_cost_per_gallon: number;
   monthly_overhead: number;
   target_margin_pct: number;
+  residential_overhead_per_account: number;
+  commercial_overhead_per_account: number;
+  avg_drive_minutes: number;
+  avg_drive_miles: number;
+  visits_per_month: number;
+  semi_annual_discount_type: string;
+  semi_annual_discount_value: number;
+  annual_discount_type: string;
+  annual_discount_value: number;
   created_at: string;
   updated_at: string;
 }
@@ -16,6 +25,15 @@ export interface OrgCostSettingsUpdate {
   chemical_cost_per_gallon?: number;
   monthly_overhead?: number;
   target_margin_pct?: number;
+  residential_overhead_per_account?: number;
+  commercial_overhead_per_account?: number;
+  avg_drive_minutes?: number;
+  avg_drive_miles?: number;
+  visits_per_month?: number;
+  semi_annual_discount_type?: string;
+  semi_annual_discount_value?: number;
+  annual_discount_type?: string;
+  annual_discount_value?: number;
 }
 
 export interface PropertyDifficulty {

@@ -20,6 +20,8 @@ class OrgCostSettings(Base):
     chemical_cost_per_gallon: Mapped[float] = mapped_column(Float, default=3.50)
     monthly_overhead: Mapped[float] = mapped_column(Float, default=2000.0)
     target_margin_pct: Mapped[float] = mapped_column(Float, default=35.0)
+    residential_overhead_per_account: Mapped[float] = mapped_column(Float, default=10.0)
+    commercial_overhead_per_account: Mapped[float] = mapped_column(Float, default=45.0)
     avg_drive_minutes: Mapped[float] = mapped_column(Float, default=5.0)
     avg_drive_miles: Mapped[float] = mapped_column(Float, default=2.0)
     visits_per_month: Mapped[float] = mapped_column(Float, default=4.0)

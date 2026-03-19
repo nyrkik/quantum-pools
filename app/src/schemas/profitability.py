@@ -13,6 +13,8 @@ class OrgCostSettingsUpdate(BaseModel):
     chemical_cost_per_gallon: Optional[float] = None
     monthly_overhead: Optional[float] = None
     target_margin_pct: Optional[float] = Field(None, ge=0, le=100)
+    residential_overhead_per_account: Optional[float] = None
+    commercial_overhead_per_account: Optional[float] = None
     avg_drive_minutes: Optional[float] = None
     avg_drive_miles: Optional[float] = None
     visits_per_month: Optional[float] = None
@@ -30,6 +32,8 @@ class OrgCostSettingsResponse(BaseModel):
     chemical_cost_per_gallon: float
     monthly_overhead: float
     target_margin_pct: float
+    residential_overhead_per_account: float = 10.0
+    commercial_overhead_per_account: float = 45.0
     avg_drive_minutes: float = 5.0
     avg_drive_miles: float = 2.0
     visits_per_month: float = 4.0

@@ -231,8 +231,11 @@ class ProfitabilityService:
             + settings.avg_drive_miles * settings.vehicle_cost_per_mile
         ) * visits
 
-        # Overhead
-        overhead_cost = settings.monthly_overhead / max(total_accounts, 1)
+        # Overhead — per account type
+        if customer.customer_type == "commercial":
+            overhead_cost = settings.commercial_overhead_per_account
+        else:
+            overhead_cost = settings.residential_overhead_per_account
 
         total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
         revenue = customer.monthly_rate or 0.0
@@ -602,6 +605,7 @@ class ProfitabilityService:
         difficulty_score: float,
         total_accounts: int,
         num_bows_at_property: int,
+        customer_type: str = "residential",
         chemical_profile: Optional[ChemicalCostProfile] = None,
     ) -> dict:
         """Compute cost breakdown for a single BOW.
@@ -631,8 +635,11 @@ class ProfitabilityService:
         ) * visits
         travel_cost = full_travel / max(num_bows_at_property, 1)
 
-        # Overhead — split across all accounts, then across BOWs at property
-        full_overhead = settings.monthly_overhead / max(total_accounts, 1)
+        # Overhead — per account type, split across BOWs at property
+        if customer_type == "commercial":
+            full_overhead = settings.commercial_overhead_per_account
+        else:
+            full_overhead = settings.residential_overhead_per_account
         overhead_cost = full_overhead / max(num_bows_at_property, 1)
 
         total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
@@ -800,6 +807,7 @@ class ProfitabilityService:
                 difficulty_score=score,
                 total_accounts=total_accounts,
                 num_bows_at_property=prop_bow_counts[prop.id],
+                customer_type=customer.customer_type or "residential",
                 chemical_profile=profile,
             )
             cost_data["customer_id"] = customer.id
@@ -924,7 +932,7 @@ class ProfitabilityService:
         chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
         labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
         travel_cost = ((settings.avg_drive_minutes / 60.0) * settings.burdened_labor_rate + settings.avg_drive_miles * settings.vehicle_cost_per_mile) * visits
-        overhead_cost = settings.monthly_overhead / max(total_accounts, 1)
+        overhead_cost = settings.commercial_overhead_per_account if customer_type == "commercial" else settings.residential_overhead_per_account
 
         total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
         target_margin = settings.target_margin_pct / 100.0

@@ -197,7 +197,7 @@ class ProfitabilityService:
         chemical_profiles: Optional[dict[str, ChemicalCostProfile]] = None,
     ) -> CostBreakdown:
         multiplier = self.difficulty_to_multiplier(difficulty_score)
-        visits_per_month = 4.0  # Standard weekly service
+        visits = settings.visits_per_month
 
         # Chemical cost — use chemical cost profiles if available
         if bows:
@@ -220,18 +220,16 @@ class ProfitabilityService:
 
         # Fallback to flat calculation if no profiles
         if chemical_cost is None:
-            chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits_per_month
+            chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
 
         # Labor cost
-        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits_per_month * multiplier
+        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
 
-        # Travel cost (estimate 15 min drive, 8 miles per stop)
-        drive_minutes = 15
-        miles = 8.0
+        # Travel cost
         travel_cost = (
-            (drive_minutes / 60.0) * settings.burdened_labor_rate
-            + miles * settings.vehicle_cost_per_mile
-        ) * visits_per_month
+            (settings.avg_drive_minutes / 60.0) * settings.burdened_labor_rate
+            + settings.avg_drive_miles * settings.vehicle_cost_per_mile
+        ) * visits
 
         # Overhead
         overhead_cost = settings.monthly_overhead / max(total_accounts, 1)
@@ -612,7 +610,7 @@ class ProfitabilityService:
         (one trip services all BOWs).
         """
         multiplier = self.difficulty_to_multiplier(difficulty_score)
-        visits_per_month = 4.0
+        visits = settings.visits_per_month
 
         gallons = bow.pool_gallons or 15000
         service_minutes = bow.estimated_service_minutes or 30
@@ -621,18 +619,16 @@ class ProfitabilityService:
         if chemical_profile and chemical_profile.total_monthly > 0:
             chemical_cost = chemical_profile.total_monthly
         else:
-            chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits_per_month
+            chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
 
         # Labor cost (per BOW — each BOW has its own service time)
-        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits_per_month * multiplier
+        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
 
         # Travel cost — split across BOWs at the property (one trip)
-        drive_minutes = 15
-        miles = 8.0
         full_travel = (
-            (drive_minutes / 60.0) * settings.burdened_labor_rate
-            + miles * settings.vehicle_cost_per_mile
-        ) * visits_per_month
+            (settings.avg_drive_minutes / 60.0) * settings.burdened_labor_rate
+            + settings.avg_drive_miles * settings.vehicle_cost_per_mile
+        ) * visits
         travel_cost = full_travel / max(num_bows_at_property, 1)
 
         # Overhead — split across all accounts, then across BOWs at property
@@ -923,11 +919,11 @@ class ProfitabilityService:
             select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
         )
         total_accounts = count_result.scalar() or 1
-        visits = 4.0
+        visits = settings.visits_per_month
 
         chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
         labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
-        travel_cost = ((15 / 60.0) * settings.burdened_labor_rate + 8.0 * settings.vehicle_cost_per_mile) * visits
+        travel_cost = ((settings.avg_drive_minutes / 60.0) * settings.burdened_labor_rate + settings.avg_drive_miles * settings.vehicle_cost_per_mile) * visits
         overhead_cost = settings.monthly_overhead / max(total_accounts, 1)
 
         total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost

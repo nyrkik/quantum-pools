@@ -102,12 +102,22 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
     )
     org_user = result.unique().scalar_one_or_none()
 
+    features: list[str] = []
+    emd_tier = None
+    if org_user:
+        from src.services.feature_service import FeatureService
+        feature_service = FeatureService(db)
+        features = await feature_service.get_org_active_feature_slugs(org_user.organization_id)
+        emd_tier = await feature_service.get_org_emd_tier(org_user.organization_id)
+
     return OrgUserResponse(
         user=UserResponse.model_validate(user),
         organization_id=org_user.organization_id if org_user else "",
         organization_name=org_user.organization.name if org_user and org_user.organization else "",
         role=org_user.role.value if org_user else "",
         is_developer=org_user.is_developer if org_user else False,
+        features=features,
+        emd_tier=emd_tier,
     )
 
 
@@ -145,13 +155,22 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
 
 
 @router.get("/me", response_model=OrgUserResponse)
-async def get_me(ctx: OrgUserContext = Depends(get_current_org_user)):
+async def get_me(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    features = await ctx.load_features(db)
+    from src.services.feature_service import FeatureService
+    feature_service = FeatureService(db)
+    emd_tier = await feature_service.get_org_emd_tier(ctx.organization_id)
     return OrgUserResponse(
         user=UserResponse.model_validate(ctx.user),
         organization_id=ctx.organization_id,
         organization_name=ctx.organization_name,
         role=ctx.role.value,
         is_developer=ctx.org_user.is_developer,
+        features=features,
+        emd_tier=emd_tier,
     )
 
 

@@ -107,12 +107,27 @@ async def get_customer(
 async def update_customer(
     customer_id: str,
     body: CustomerUpdate,
+    background_tasks: BackgroundTasks,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     svc = CustomerService(db)
     customer = await svc.update(ctx.organization_id, customer_id, **body.model_dump(exclude_unset=True))
+    # Re-run EMD match when status changes (active/inactive affects matching)
+    if body.status is not None or body.is_active is not None:
+        background_tasks.add_task(_emd_auto_match, ctx.organization_id)
     return CustomerResponse.model_validate(customer)
+
+
+async def _emd_auto_match(organization_id: str):
+    """Background task to auto-match EMD facilities after customer status changes."""
+    try:
+        async with get_db_context() as db:
+            from src.services.emd.service import EMDService
+            svc = EMDService(db)
+            await svc.auto_match_facilities(organization_id)
+    except Exception:
+        pass
 
 
 @router.delete("/{customer_id}", status_code=204)

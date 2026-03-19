@@ -48,7 +48,16 @@ import {
   Pipette,
   CircleDot,
   MapPin,
+  WavesLadder,
 } from "lucide-react";
+
+function waterTypeIcon(type: string, className: string) {
+  switch (type) {
+    case "spa": case "hot_tub": return <Droplets className={className} />;
+    case "fountain": case "water_feature": case "wading_pool": return <Waves className={className} />;
+    default: return <WavesLadder className={className} />;
+  }
+}
 import Link from "next/link";
 import type { Permissions } from "@/lib/permissions";
 
@@ -221,7 +230,7 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
       <div className="rounded-lg border shadow-sm bg-card p-4 space-y-3 border-l-4 border-l-primary">
         {/* BOW Header Bar — edit mode */}
         <div className="flex items-center gap-3">
-          <Waves className="h-4 w-4 text-primary/60" />
+          {waterTypeIcon(bow.water_type, "h-4 w-4 text-primary/60")}
           <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">
             {form.name || form.water_type.replace("_", " ")}
           </span>
@@ -572,7 +581,7 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
     <div className="rounded-lg border shadow-sm bg-card p-4 space-y-3">
       {/* BOW Header Bar */}
       <div className="flex items-center gap-3">
-        <Waves className="h-4 w-4 text-primary/60" />
+        {waterTypeIcon(bow.water_type, "h-4 w-4 text-primary/60")}
         <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
         {bow.pool_type && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{bow.pool_type}</Badge>}
         {techAssignment && (

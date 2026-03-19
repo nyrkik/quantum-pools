@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.api.deps import get_current_org_user, require_roles, require_feature, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.schemas.measurement import MeasurementResponse, MeasurementApplyResponse
 from src.services.pool_measurement_service import PoolMeasurementService
 from src.services.upload_service import save_file
 
-router = APIRouter(prefix="/measurements", tags=["measurements"])
+router = APIRouter(prefix="/measurements", tags=["measurements"], dependencies=[Depends(require_feature("pool_measurement"))])
 
 
 @router.post("/properties/{property_id}/upload", response_model=MeasurementResponse)

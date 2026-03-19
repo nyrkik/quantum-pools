@@ -19,6 +19,7 @@ class EMDFacilityResponse(BaseModel):
     facility_id: Optional[str] = None
     permit_holder: Optional[str] = None
     facility_type: Optional[str] = None
+    program_identifier: Optional[str] = None
     matched_property_id: Optional[str] = None
     matched_at: Optional[datetime] = None
     created_at: datetime
@@ -34,6 +35,8 @@ class EMDFacilityListResponse(BaseModel):
     city: Optional[str] = None
     facility_id: Optional[str] = None
     facility_type: Optional[str] = None
+    program_identifier: Optional[str] = None
+    permit_id: Optional[str] = None
     matched_property_id: Optional[str] = None
     total_inspections: int = 0
     total_violations: int = 0
@@ -62,6 +65,8 @@ class EMDInspectionResponse(BaseModel):
     inspection_date: Optional[date] = None
     inspection_type: Optional[str] = None
     inspector_name: Optional[str] = None
+    program_identifier: Optional[str] = None
+    permit_id: Optional[str] = None
     total_violations: int = 0
     major_violations: int = 0
     pool_capacity_gallons: Optional[int] = None
@@ -72,6 +77,7 @@ class EMDInspectionResponse(BaseModel):
     closure_required: bool = False
     reinspection_required: bool = False
     water_chemistry: Optional[dict] = None
+    has_pdf: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

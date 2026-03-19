@@ -20,6 +20,10 @@ class EMDInspection(Base):
     inspection_date: Mapped[date | None] = mapped_column(Date, index=True)
     inspection_type: Mapped[str | None] = mapped_column(String(50))
     inspector_name: Mapped[str | None] = mapped_column(String(100))
+    co_inspector: Mapped[str | None] = mapped_column(String(100))
+    inspector_phone: Mapped[str | None] = mapped_column(String(50))
+    program_identifier: Mapped[str | None] = mapped_column(String(100))
+    permit_id: Mapped[str | None] = mapped_column(String(50), index=True)
     total_violations: Mapped[int] = mapped_column(Integer, default=0)
     major_violations: Mapped[int] = mapped_column(Integer, default=0)
     pool_capacity_gallons: Mapped[int | None] = mapped_column(Integer)
@@ -30,8 +34,26 @@ class EMDInspection(Base):
     closure_required: Mapped[bool] = mapped_column(Boolean, default=False)
     reinspection_required: Mapped[bool] = mapped_column(Boolean, default=False)
     water_chemistry: Mapped[dict | None] = mapped_column(JSON)
+    pdf_download_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    pdf_permanently_missing: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Gauge readings (from chemistry/readings page)
+    pool_spa_temp: Mapped[float | None] = mapped_column(Integer)
+    rp_gauge: Mapped[float | None] = mapped_column(Integer)
+    rv_gauge: Mapped[float | None] = mapped_column(Integer)
+    bp_gauge: Mapped[float | None] = mapped_column(Integer)
+    bv_gauge: Mapped[float | None] = mapped_column(Integer)
+    uv_output: Mapped[str | None] = mapped_column(String(50))
+
+    # Sign-off
+    accepted_by: Mapped[str | None] = mapped_column(String(200))
+    reviewed_by: Mapped[str | None] = mapped_column(String(200))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    @property
+    def has_pdf(self) -> bool:
+        return bool(self.pdf_path and not self.pdf_path.startswith("/mnt"))
 
     # Relationships
     facility = relationship("EMDFacility", back_populates="inspections", lazy="noload")

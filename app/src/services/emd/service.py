@@ -114,6 +114,7 @@ class EMDService:
             facility_id=facility.id,
             inspection_id=inspection_id,
             inspection_date=inspection_date,
+            program_identifier="POOL",
             pdf_path=pdf_path,
         )
         self.db.add(inspection)
@@ -178,6 +179,11 @@ class EMDService:
                 inspection.inspection_date = datetime.strptime(data["inspection_date"], "%Y-%m-%d").date()
             except (ValueError, TypeError):
                 pass
+
+        # Save program identifier and permit ID on the inspection
+        inspection.program_identifier = data.get("program_identifier") or "POOL"
+        if data.get("permit_id"):
+            inspection.permit_id = data["permit_id"]
 
         violations = data.get("violations", [])
         inspection.total_violations = len(violations)
@@ -259,39 +265,94 @@ class EMDService:
         return facility
 
     async def auto_match_facilities(self, organization_id: str) -> dict:
-        """Try to auto-match unmatched EMD facilities to properties by address similarity."""
-        # Get unmatched facilities
+        """Auto-match unmatched EMD facilities to properties by normalized address.
+        Also unmatches facilities linked to inactive customers.
+        """
+        import re
+
+        # First: unmatch facilities linked to inactive customers
+        unmatched_inactive = await self.db.execute(
+            select(EMDFacility)
+            .join(Property, Property.id == EMDFacility.matched_property_id)
+            .join(Customer, Customer.id == Property.customer_id)
+            .where(
+                EMDFacility.matched_property_id.isnot(None),
+                Customer.is_active == False,
+            )
+        )
+        removed = 0
+        for fac in unmatched_inactive.scalars().all():
+            fac.matched_property_id = None
+            fac.matched_at = None
+            fac.organization_id = None
+            removed += 1
+        if removed > 0:
+            await self.db.flush()
+
         result = await self.db.execute(
             select(EMDFacility).where(EMDFacility.matched_property_id.is_(None))
         )
         unmatched = result.scalars().all()
 
-        # Get all org properties
         result = await self.db.execute(
-            select(Property).where(
+            select(Property)
+            .join(Customer, Customer.id == Property.customer_id)
+            .where(
                 Property.organization_id == organization_id,
                 Property.is_active == True,
+                Customer.is_active == True,
             )
         )
         properties = result.scalars().all()
 
+        # Build lookup by normalized address
+        prop_by_addr = {}
+        prop_by_street_key = {}
+        for prop in properties:
+            norm = self._normalize_address(prop.address)
+            if norm:
+                prop_by_addr[norm] = prop
+            # Also index by street number + street name for fuzzy
+            parts = norm.split()
+            if len(parts) >= 2 and parts[0].isdigit():
+                key = f"{parts[0]} {parts[1]}"
+                prop_by_street_key.setdefault(key, []).append(prop)
+
         matched = 0
+        matches_detail = []
         for facility in unmatched:
             if not facility.street_address:
                 continue
 
             fac_addr = self._normalize_address(facility.street_address)
-            for prop in properties:
-                prop_addr = self._normalize_address(prop.address)
-                if fac_addr and prop_addr and fac_addr == prop_addr:
-                    facility.matched_property_id = prop.id
-                    facility.matched_at = datetime.now(timezone.utc)
-                    facility.organization_id = organization_id
-                    matched += 1
-                    break
+            prop = prop_by_addr.get(fac_addr)
 
-        await self.db.flush()
-        return {"total_unmatched": len(unmatched), "matched": matched}
+            # Fuzzy: match on street number + name if exact fails
+            if not prop:
+                parts = fac_addr.split()
+                if len(parts) >= 2 and parts[0].isdigit():
+                    key = f"{parts[0]} {parts[1]}"
+                    candidates = prop_by_street_key.get(key, [])
+                    # Filter by city if available
+                    if facility.city and candidates:
+                        city_match = [p for p in candidates if p.city and p.city.lower() == facility.city.lower()]
+                        if city_match:
+                            candidates = city_match
+                    if len(candidates) == 1:
+                        prop = candidates[0]
+
+            if prop:
+                facility.matched_property_id = prop.id
+                facility.matched_at = datetime.now(timezone.utc)
+                facility.organization_id = organization_id
+                matched += 1
+                matches_detail.append({"facility": facility.name, "property_address": prop.address})
+
+        if matched > 0:
+            await self.db.flush()
+            logger.info(f"Auto-matched {matched} EMD facilities to properties")
+
+        return {"total_unmatched": len(unmatched), "matched": matched, "removed": removed, "details": matches_detail}
 
     # --- Queries ---
 
@@ -303,32 +364,36 @@ class EMDService:
         offset: int = 0,
         sort: str = "name",
     ) -> tuple[list[dict], int]:
-        """List EMD facilities with summary stats including closure info."""
-        # Count subqueries
-        inspection_count = (
-            select(func.count(EMDInspection.id))
-            .where(EMDInspection.facility_id == EMDFacility.id)
-            .correlate(EMDFacility)
-            .scalar_subquery()
-        )
-        violation_count = (
-            select(func.count(EMDViolation.id))
-            .where(EMDViolation.facility_id == EMDFacility.id)
-            .correlate(EMDFacility)
-            .scalar_subquery()
-        )
-        last_inspection = (
-            select(func.max(EMDInspection.inspection_date))
-            .where(EMDInspection.facility_id == EMDFacility.id)
-            .correlate(EMDFacility)
-            .scalar_subquery()
-        )
+        """List EMD water features — one row per (facility, permit_id).
 
-        query = select(
-            EMDFacility,
-            inspection_count.label("total_inspections"),
-            violation_count.label("total_violations"),
-            last_inspection.label("last_inspection_date"),
+        Each facility with multiple water features (PRs) appears as separate rows.
+        Stats and closure are per water feature.
+        """
+        # Query: group inspections by (facility_id, program_identifier) with stats
+        # program_identifier stays consistent across years; permit_id can change
+        wf_query = (
+            select(
+                EMDInspection.facility_id,
+                EMDInspection.program_identifier,
+                func.count(EMDInspection.id).label("total_inspections"),
+                func.max(EMDInspection.inspection_date).label("last_inspection_date"),
+                func.max(EMDInspection.permit_id).label("permit_id"),
+            )
+            .where(EMDInspection.program_identifier.isnot(None))
+            .group_by(EMDInspection.facility_id, EMDInspection.program_identifier)
+        )
+        wf_sq = wf_query.subquery()
+
+        # Join to facility for name/address and apply filters
+        query = (
+            select(
+                EMDFacility,
+                wf_sq.c.permit_id,
+                wf_sq.c.program_identifier,
+                wf_sq.c.total_inspections,
+                wf_sq.c.last_inspection_date,
+            )
+            .join(wf_sq, EMDFacility.id == wf_sq.c.facility_id)
         )
 
         if search:
@@ -337,110 +402,96 @@ class EMDService:
                 | EMDFacility.street_address.ilike(f"%{search}%")
                 | EMDFacility.facility_id.ilike(f"%{search}%")
             )
-
         if matched_only:
             query = query.where(EMDFacility.matched_property_id.isnot(None))
 
-        # Total count
+        # Count
         count_query = select(func.count()).select_from(query.subquery())
         total = (await self.db.execute(count_query)).scalar() or 0
 
-        # Fetch page with sort
+        # Sort
         if sort == "violations":
-            query = query.order_by(desc(violation_count), EMDFacility.name)
+            query = query.order_by(EMDFacility.name, wf_sq.c.program_identifier)
         elif sort == "last_inspection":
-            query = query.order_by(desc(last_inspection))
-        elif sort == "status":
-            # Closed facilities first (approximated by high violations), then by name
-            query = query.order_by(desc(violation_count), EMDFacility.name)
+            query = query.order_by(desc(wf_sq.c.last_inspection_date))
         else:
-            # Default: name
-            query = query.order_by(EMDFacility.name)
+            query = query.order_by(EMDFacility.name, wf_sq.c.program_identifier)
+
         query = query.limit(limit).offset(offset)
         result = await self.db.execute(query)
         rows = result.all()
 
-        # Collect facility IDs for batch closure lookup
-        facility_ids = [row[0].id for row in rows]
+        # Collect keys for batch lookups
+        wf_keys = [(row[0].id, row.program_identifier) for row in rows]
 
-        # Batch lookup: for each facility, get the most recent inspection's closure_required
-        closure_map: dict[str, bool] = {}
-        closure_reasons_map: dict[str, list[str]] = {}
-        if facility_ids:
-            # Subquery: latest inspection date per facility
-            latest_insp_sq = (
-                select(
-                    EMDInspection.facility_id,
-                    func.max(EMDInspection.inspection_date).label("max_date"),
-                )
-                .where(EMDInspection.facility_id.in_(facility_ids))
-                .group_by(EMDInspection.facility_id)
-                .subquery()
-            )
-            # Join back to get the actual inspection rows
-            latest_inspections_result = await self.db.execute(
-                select(EMDInspection)
-                .join(
-                    latest_insp_sq,
-                    and_(
-                        EMDInspection.facility_id == latest_insp_sq.c.facility_id,
-                        EMDInspection.inspection_date == latest_insp_sq.c.max_date,
-                    ),
+        # Batch: violation count per (facility_id, program_identifier)
+        viol_map: dict[tuple, int] = {}
+        for fac_id, prog in wf_keys:
+            viol_result = await self.db.execute(
+                select(func.count(EMDViolation.id))
+                .join(EMDInspection, EMDViolation.inspection_id == EMDInspection.id)
+                .where(
+                    EMDInspection.facility_id == fac_id,
+                    EMDInspection.program_identifier == prog,
                 )
             )
-            latest_inspections = latest_inspections_result.scalars().all()
+            viol_map[(fac_id, prog)] = viol_result.scalar() or 0
 
-            closed_inspection_ids = []
-            for insp in latest_inspections:
-                if insp.closure_required:
-                    closure_map[insp.facility_id] = True
-                    closed_inspection_ids.append(insp.id)
-
-            # For closed inspections, fetch closure reasons from violations
-            # Standard violation code → short label mapping
-            VIOLATION_LABELS = {
-                "1a": "Gate Self-Close/Latch", "1b": "Gate Hardware", "1c": "Emergency Exit Gate",
-                "2a": "Pool Enclosure", "2b": "Non-Climbable Enclosure",
-                "3": "Safety Signs", "4": "Safety Equipment",
-                "10a": "Low Chlorine", "10b": "High Chlorine",
-                "12a": "Low pH", "12b": "High pH", "13": "High CYA",
-                "16": "Water Clarity", "24": "VGB Suction Covers",
-                "37": "Electrical Hazards", "43": "EMD Approval Required", "46": "Other",
-            }
-
-            if closed_inspection_ids:
-                violation_result = await self.db.execute(
-                    select(EMDViolation.facility_id, EMDViolation.violation_code, EMDViolation.violation_title)
+        # Batch: closure per (facility, program_identifier) — latest inspection's violations
+        closure_map: dict[tuple, bool] = {}
+        closure_reasons_map: dict[tuple, list[str]] = {}
+        for fac_id, prog in wf_keys:
+            latest_result = await self.db.execute(
+                select(EMDInspection.id)
+                .where(
+                    EMDInspection.facility_id == fac_id,
+                    EMDInspection.program_identifier == prog,
+                )
+                .order_by(desc(EMDInspection.inspection_date))
+                .limit(1)
+            )
+            latest_id = latest_result.scalar()
+            if latest_id:
+                cv_result = await self.db.execute(
+                    select(EMDViolation.violation_code, EMDViolation.violation_title)
                     .where(
-                        EMDViolation.inspection_id.in_(closed_inspection_ids),
-                        EMDViolation.observations.ilike("MAJOR VIOLATION - CLOSURE:%"),
+                        EMDViolation.inspection_id == latest_id,
+                        EMDViolation.observations.op("~*")(r"MAJOR[\s/\-]*(VIOLATION[\s\-]*)?CLOSURE"),
                     )
                 )
-                for vrow in violation_result.all():
+                reasons = []
+                for vrow in cv_result.all():
                     code = (vrow.violation_code or "").strip().lower()
                     label = VIOLATION_LABELS.get(code, vrow.violation_title or "Violation")
-                    if label and label not in closure_reasons_map.get(vrow.facility_id, []):
-                        closure_reasons_map.setdefault(vrow.facility_id, []).append(label)
+                    if label not in reasons:
+                        reasons.append(label)
+                if reasons:
+                    closure_map[(fac_id, prog)] = True
+                    closure_reasons_map[(fac_id, prog)] = reasons
 
-        facilities = []
+        items = []
         for row in rows:
             fac = row[0]
-            facilities.append({
+            prog = row.program_identifier or "POOL"
+            key = (fac.id, prog)
+            items.append({
                 "id": fac.id,
                 "name": fac.name,
                 "street_address": fac.street_address,
                 "city": fac.city,
                 "facility_id": fac.facility_id,
                 "facility_type": fac.facility_type,
+                "program_identifier": prog,
+                "permit_id": row.permit_id,
                 "matched_property_id": fac.matched_property_id,
                 "total_inspections": row.total_inspections or 0,
-                "total_violations": row.total_violations or 0,
+                "total_violations": viol_map.get(key, 0),
                 "last_inspection_date": row.last_inspection_date,
-                "is_closed": closure_map.get(fac.id, False),
-                "closure_reasons": closure_reasons_map.get(fac.id, []),
+                "is_closed": closure_map.get(key, False),
+                "closure_reasons": closure_reasons_map.get(key, []),
             })
 
-        return facilities, total
+        return items, total
 
     async def get_facility_detail(self, facility_id: str) -> Optional[dict]:
         """Get facility with full inspection history."""
@@ -460,9 +511,11 @@ class EMDService:
         )
         inspections = result.scalars().all()
 
-        # Get matched property info
+        # Get matched property info + BOW names
         matched_property_address = None
         matched_customer_name = None
+        matched_customer_id = None
+        matched_bow_names: dict[str, str] = {}  # bow_type -> bow_name
         if facility.matched_property_id:
             result = await self.db.execute(
                 select(Property, Customer)
@@ -473,18 +526,59 @@ class EMDService:
             if row:
                 matched_property_address = row[0].full_address
                 matched_customer_name = row[1].display_name_col
+                matched_customer_id = row[1].id
+
+            # Get BOW names from the matched property
+            from src.models.body_of_water import BodyOfWater
+            bow_result = await self.db.execute(
+                select(BodyOfWater.water_type, BodyOfWater.name)
+                .where(BodyOfWater.property_id == facility.matched_property_id)
+            )
+            for bow_row in bow_result.all():
+                bow_type = (bow_row.water_type or "pool").lower()
+                if bow_row.name:
+                    matched_bow_names[bow_type] = bow_row.name
 
         total_violations = sum(i.total_violations for i in inspections)
         last_date = inspections[0].inspection_date if inspections else None
 
+        # Build programs summary (distinct PRs with stats)
+        closure_re = __import__("re").compile(r"MAJOR[\s/\-]*(VIOLATION[\s\-]*)?CLOSURE", __import__("re").IGNORECASE)
+        programs: dict[str, dict] = {}
+        for insp in inspections:
+            pr = insp.permit_id or "unknown"
+            if pr not in programs:
+                programs[pr] = {
+                    "permit_id": insp.permit_id,
+                    "program_identifier": insp.program_identifier or "POOL",
+                    "total_inspections": 0,
+                    "total_violations": 0,
+                    "last_inspection_date": None,
+                    "is_closed": False,
+                }
+            p = programs[pr]
+            p["total_inspections"] += 1
+            p["total_violations"] += insp.total_violations
+            if not p["last_inspection_date"] or (insp.inspection_date and insp.inspection_date > p["last_inspection_date"]):
+                p["last_inspection_date"] = insp.inspection_date
+                # Check closure on the latest inspection for this PR
+                if insp.violations:
+                    p["is_closed"] = any(
+                        v.observations and closure_re.search(v.observations)
+                        for v in insp.violations
+                    )
+
         return {
             "facility": facility,
             "inspections": inspections,
+            "programs": list(programs.values()),
             "total_inspections": len(inspections),
             "total_violations": total_violations,
             "last_inspection_date": last_date,
             "matched_property_address": matched_property_address,
             "matched_customer_name": matched_customer_name,
+            "matched_customer_id": matched_customer_id,
+            "matched_bow_names": matched_bow_names,
         }
 
     async def get_facility_inspections(self, facility_id: str) -> list[EMDInspection]:
@@ -497,14 +591,17 @@ class EMDService:
         )
         return result.scalars().all()
 
-    async def get_facility_equipment(self, facility_id: str) -> Optional[EMDEquipment]:
-        """Get the latest equipment data for a facility."""
-        result = await self.db.execute(
+    async def get_facility_equipment(self, facility_id: str, permit_id: str | None = None) -> Optional[EMDEquipment]:
+        """Get the latest equipment data for a facility, optionally filtered by permit_id."""
+        query = (
             select(EMDEquipment)
             .join(EMDInspection, EMDEquipment.inspection_id == EMDInspection.id)
             .where(EMDEquipment.facility_id == facility_id)
-            .order_by(desc(EMDInspection.inspection_date))
-            .limit(1)
+        )
+        if permit_id:
+            query = query.where(EMDInspection.permit_id == permit_id)
+        result = await self.db.execute(
+            query.order_by(desc(EMDInspection.inspection_date)).limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -538,14 +635,31 @@ class EMDService:
             .order_by(desc(EMDInspection.inspection_date))
         )
         my_inspections = []
+        my_insp_ids = []
+        my_insp_data = []
         for insp, fac in my_insp_result.all():
+            my_insp_ids.append(insp.id)
+            my_insp_data.append((insp, fac))
+
+        # Derive closure from violations, not the boolean
+        my_closure_set: set[str] = set()
+        if my_insp_ids:
+            closure_viols = await self.db.execute(
+                select(EMDViolation.inspection_id).where(
+                    EMDViolation.inspection_id.in_(my_insp_ids),
+                    EMDViolation.observations.op("~*")(r"MAJOR[\s/\-]*(VIOLATION[\s\-]*)?CLOSURE"),
+                ).distinct()
+            )
+            my_closure_set = {r.inspection_id for r in closure_viols.all()}
+
+        for insp, fac in my_insp_data:
             my_inspections.append({
                 "facility_name": fac.name,
                 "facility_id": fac.id,
                 "inspection_date": str(insp.inspection_date) if insp.inspection_date else None,
                 "total_violations": insp.total_violations or 0,
                 "major_violations": insp.major_violations or 0,
-                "closure_required": insp.closure_required or False,
+                "closure_required": insp.id in my_closure_set,
                 "is_matched": True,
             })
 
@@ -563,13 +677,16 @@ class EMDService:
             matched_ids = list(matched_facilities.keys())
 
             # Recent closures (last 90 days) for matched facilities
+            # Derive from violations, not the closure_required boolean
             closure_result = await self.db.execute(
-                select(EMDInspection.facility_id, EMDInspection.inspection_date)
+                select(EMDViolation.facility_id, EMDInspection.inspection_date)
+                .join(EMDInspection, EMDViolation.inspection_id == EMDInspection.id)
                 .where(
-                    EMDInspection.facility_id.in_(matched_ids),
-                    EMDInspection.closure_required == True,
+                    EMDViolation.facility_id.in_(matched_ids),
+                    EMDViolation.observations.op("~*")(r"MAJOR[\s/\-]*(VIOLATION[\s\-]*)?CLOSURE"),
                     EMDInspection.inspection_date >= ninety_days_ago,
                 )
+                .distinct()
                 .order_by(desc(EMDInspection.inspection_date))
             )
             for row in closure_result.all():
@@ -637,17 +754,34 @@ class EMDService:
         )
         fresh_leads = []
         seen_lead_ids = set()
+        lead_insp_ids = []
+        lead_data = []
         for fac, insp in leads_result.all():
             if fac.id in seen_lead_ids:
                 continue
             seen_lead_ids.add(fac.id)
+            lead_insp_ids.append(insp.id)
+            lead_data.append((fac, insp))
+
+        # Derive closure from violations
+        lead_closure_set: set[str] = set()
+        if lead_insp_ids:
+            lc_result = await self.db.execute(
+                select(EMDViolation.inspection_id).where(
+                    EMDViolation.inspection_id.in_(lead_insp_ids),
+                    EMDViolation.observations.op("~*")(r"MAJOR[\s/\-]*(VIOLATION[\s\-]*)?CLOSURE"),
+                ).distinct()
+            )
+            lead_closure_set = {r.inspection_id for r in lc_result.all()}
+
+        for fac, insp in lead_data:
             fresh_leads.append({
                 "facility_name": fac.name,
                 "facility_id": fac.id,
                 "address": f"{fac.street_address or ''}{', ' + fac.city if fac.city else ''}",
                 "inspection_date": str(insp.inspection_date) if insp.inspection_date else None,
                 "total_violations": insp.total_violations or 0,
-                "closure_required": insp.closure_required or False,
+                "closure_required": insp.id in lead_closure_set,
             })
 
         # --- trending_worse: facilities where most recent inspection has MORE violations than previous ---

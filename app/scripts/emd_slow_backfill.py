@@ -189,11 +189,9 @@ async def run_backfill():
                                 existing = await db.execute(
                                     select(EMDInspection).where(EMDInspection.inspection_id == inspection_id)
                                 )
-                                if existing.scalar_one_or_none():
-                                    day_skipped += 1
-                                    continue
+                                existing_record = existing.scalar_one_or_none()
 
-                                # Download PDF
+                                # Download PDF (even if record exists — file may be missing)
                                 pdf_path = None
                                 pdf_url = facility_data.get("pdf_url")
                                 if pdf_url:
@@ -208,13 +206,22 @@ async def run_backfill():
                                         success = await scraper.download_pdf(pdf_url, pdf_path)
                                         if success:
                                             day_pdfs += 1
+                                            # Update existing record with new PDF path
+                                            if existing_record and existing_record.pdf_path != pdf_path:
+                                                existing_record.pdf_path = pdf_path
+                                                await db.commit()
                                         else:
                                             day_failed += 1
                                             pdf_path = None
                                     else:
                                         day_pdfs += 1  # Already on disk
 
-                                # Save to DB
+                                # Skip DB insert if record already exists
+                                if existing_record:
+                                    day_skipped += 1
+                                    continue
+
+                                # Save new record to DB
                                 result = await svc.process_facility(facility_data, pdf_path=pdf_path)
                                 if result in ("new_facility", "new_inspection"):
                                     day_new += 1
@@ -305,6 +312,23 @@ def main():
     if "--status" in sys.argv:
         print_status()
         return
+
+    if "--redownload" in sys.argv:
+        logger.info("Resetting daily log to re-scrape all dates and download missing PDFs...")
+        status = load_status()
+        status["daily_log"] = {}
+        status["current_date"] = None
+        status["days_completed"] = 0
+        status["total_found"] = 0
+        status["total_new"] = 0
+        status["total_pdfs"] = 0
+        status["total_pdf_failed"] = 0
+        status["total_skipped"] = 0
+        status["errors"] = 0
+        status["newest_date"] = None
+        status["oldest_date"] = None
+        save_status(status)
+        logger.info("Reset complete. Starting fresh backfill...")
 
     asyncio.run(run_backfill())
 

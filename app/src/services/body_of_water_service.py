@@ -45,6 +45,19 @@ class BodyOfWaterService:
 
         kwargs.pop("is_primary", None)
 
+        # Water-type-aware service time defaults
+        if "estimated_service_minutes" not in kwargs or kwargs.get("estimated_service_minutes") is None:
+            wt = kwargs.get("water_type", "pool")
+            defaults = {"pool": 30, "spa": 10, "hot_tub": 10, "wading_pool": 10, "fountain": 15, "water_feature": 15}
+            kwargs["estimated_service_minutes"] = defaults.get(wt, 30)
+
+        # Water-type-aware gallons defaults
+        if "pool_gallons" not in kwargs or kwargs.get("pool_gallons") is None:
+            wt = kwargs.get("water_type", "pool")
+            gal_defaults = {"spa": 1000, "hot_tub": 500, "wading_pool": 500, "fountain": 500, "water_feature": 200}
+            if wt in gal_defaults:
+                kwargs["pool_gallons"] = gal_defaults[wt]
+
         bow = BodyOfWater(
             id=str(uuid.uuid4()),
             organization_id=org_id,

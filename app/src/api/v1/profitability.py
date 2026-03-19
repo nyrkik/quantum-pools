@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.api.deps import get_current_org_user, require_roles, require_feature, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.schemas.profitability import (
     OrgCostSettingsUpdate,
@@ -27,7 +27,7 @@ from src.services.bather_load_service import BatherLoadService
 from src.services.property_service import PropertyService
 from src.models.body_of_water import BodyOfWater
 
-router = APIRouter(prefix="/profitability", tags=["profitability"])
+router = APIRouter(prefix="/profitability", tags=["profitability"], dependencies=[Depends(require_feature("profitability"))])
 
 
 # --- Settings ---

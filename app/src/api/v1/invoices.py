@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.core.exceptions import NotFoundError, ValidationError
-from src.api.deps import get_current_org_user, OrgUserContext
+from src.api.deps import get_current_org_user, require_feature, OrgUserContext
 from src.schemas.invoice import InvoiceCreate, InvoiceUpdate, InvoiceResponse, InvoiceLineItemResponse, InvoiceStatsResponse
 from src.services.invoice_service import InvoiceService
 
-router = APIRouter(prefix="/invoices", tags=["invoices"])
+router = APIRouter(prefix="/invoices", tags=["invoices"], dependencies=[Depends(require_feature("invoicing"))])
 
 
 def _invoice_to_response(invoice) -> InvoiceResponse:

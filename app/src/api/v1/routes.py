@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, OrgUserContext
+from src.api.deps import get_current_org_user, require_feature, OrgUserContext
 from src.models.property import Property
 from src.models.customer import Customer
 from src.models.tech import Tech
@@ -28,7 +28,7 @@ from src.services import osrm_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/routes", tags=["routes"])
+router = APIRouter(prefix="/routes", tags=["routes"], dependencies=[Depends(require_feature("route_optimization"))])
 
 
 def _route_to_response(route) -> RouteResponse:

@@ -25,6 +25,7 @@ class EMDViolation(Base):
     is_major_violation: Mapped[bool] = mapped_column(Boolean, default=False)
     severity_level: Mapped[str | None] = mapped_column(String(20))
     shorthand_summary: Mapped[str | None] = mapped_column(String(500))
+    code_description: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

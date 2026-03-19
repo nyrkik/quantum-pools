@@ -1,12 +1,18 @@
-"""EMD inspection intelligence endpoints."""
+"""EMD inspection intelligence endpoints — tier-aware access."""
 
+import os
+import uuid
 from typing import Optional
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.api.deps import get_current_org_user, require_roles, require_feature, OrgUserContext
 from src.models.organization_user import OrgRole
+from src.models.emd_lookup import EMDLookup
 from src.schemas.emd import (
     EMDFacilityListResponse,
     EMDFacilityDetailResponse,
@@ -19,19 +25,66 @@ from src.schemas.emd import (
     MatchFacilityRequest,
 )
 from src.services.emd.service import EMDService
+from src.services.feature_service import FeatureService
 
-router = APIRouter(prefix="/emd", tags=["emd"])
+router = APIRouter(prefix="/emd", tags=["emd"], dependencies=[Depends(require_feature("emd_intelligence"))])
 
+LOOKUP_DURATION_DAYS = 30
+LOOKUP_PRICE_CENTS = 99
+
+
+async def _get_emd_tier(ctx: OrgUserContext, db: AsyncSession) -> str | None:
+    """Get the org's EMD subscription tier."""
+    svc = FeatureService(db)
+    return await svc.get_org_emd_tier(ctx.organization_id)
+
+
+async def _has_facility_access(
+    ctx: OrgUserContext, db: AsyncSession, facility_id: str, tier: str | None
+) -> bool:
+    """Check if org can view full detail for a facility."""
+    if tier == "full_research":
+        return True
+
+    # Check if facility is matched to org's property
+    from src.models.emd_facility import EMDFacility
+    result = await db.execute(
+        select(EMDFacility).where(
+            EMDFacility.id == facility_id,
+            EMDFacility.organization_id == ctx.organization_id,
+        )
+    )
+    if result.scalar_one_or_none():
+        return True
+
+    # Check for active single lookup
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(EMDLookup).where(
+            EMDLookup.organization_id == ctx.organization_id,
+            EMDLookup.facility_id == facility_id,
+            EMDLookup.expires_at > now,
+        )
+    )
+    if result.scalar_one_or_none():
+        return True
+
+    return False
+
+
+# --- Dashboard ---
 
 @router.get("/dashboard")
 async def get_dashboard(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get operations dashboard: inspections this week, alerts, fresh leads, trending worse."""
+    """Get operations dashboard. Available to all EMD tiers (shows matched-only data)."""
     svc = EMDService(db)
     return await svc.get_dashboard()
 
+
+# --- Facility list ---
 
 @router.get("/facilities", response_model=list[EMDFacilityListResponse])
 async def list_facilities(
@@ -43,7 +96,13 @@ async def list_facilities(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all EMD facilities with summary stats."""
+    """List EMD facilities. my_inspections tier only sees matched facilities."""
+    tier = await _get_emd_tier(ctx, db)
+
+    # my_inspections tier: force matched_only
+    if tier != "full_research":
+        matched_only = True
+
     svc = EMDService(db)
     facilities, total = await svc.list_facilities(
         search=search, matched_only=matched_only, limit=limit, offset=offset, sort=sort
@@ -51,20 +110,98 @@ async def list_facilities(
     return [EMDFacilityListResponse(**f) for f in facilities]
 
 
+# --- Search (available to all tiers, returns redacted results for non-accessible) ---
+
+@router.get("/search")
+async def search_facilities(
+    q: str = Query(..., min_length=2),
+    limit: int = Query(20, le=50),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search all facilities. Returns redacted results for facilities the org can't access.
+    Used for single-lookup cart building.
+    """
+    tier = await _get_emd_tier(ctx, db)
+    svc = EMDService(db)
+    facilities, _ = await svc.list_facilities(search=q, limit=limit, offset=0, sort="name")
+
+    # Get active lookups for this org
+    now = datetime.now(timezone.utc)
+    lookup_result = await db.execute(
+        select(EMDLookup.facility_id).where(
+            EMDLookup.organization_id == ctx.organization_id,
+            EMDLookup.expires_at > now,
+        )
+    )
+    active_lookup_ids = set(lookup_result.scalars().all())
+
+    results = []
+    for f in facilities:
+        is_matched = f["matched_property_id"] is not None
+        has_lookup = f["id"] in active_lookup_ids
+        has_access = tier == "full_research" or is_matched or has_lookup
+
+        if has_access:
+            results.append({**f, "redacted": False, "has_lookup": has_lookup})
+        else:
+            # Redacted: show name + violation count + partial address, hide detail
+            results.append({
+                "id": f["id"],
+                "name": f["name"],
+                "city": f["city"],
+                "facility_type": f["facility_type"],
+                "program_identifier": f.get("program_identifier"),
+                "total_violations": f["total_violations"],
+                "total_inspections": f["total_inspections"],
+                "last_inspection_date": f["last_inspection_date"],
+                "is_closed": f["is_closed"],
+                "redacted": True,
+                "has_lookup": False,
+                # Redact street address
+                "street_address": None,
+                "facility_id": None,
+                "matched_property_id": None,
+                "closure_reasons": [],
+            })
+
+    return results
+
+
+# --- Facility detail ---
+
 @router.get("/facilities/{facility_id}")
 async def get_facility_detail(
     facility_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get facility detail with full inspection history."""
+    """Get facility detail. Requires full_research, matched facility, or active lookup."""
+    tier = await _get_emd_tier(ctx, db)
+    has_access = await _has_facility_access(ctx, db, facility_id, tier)
+
     svc = EMDService(db)
     detail = await svc.get_facility_detail(facility_id)
     if not detail:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Facility not found")
 
+    if not has_access:
+        # Return tease data
+        facility = detail["facility"]
+        return {
+            "id": facility.id,
+            "name": facility.name,
+            "city": facility.city,
+            "facility_type": facility.facility_type,
+            "total_inspections": detail["total_inspections"],
+            "total_violations": detail["total_violations"],
+            "last_inspection_date": detail["last_inspection_date"],
+            "redacted": True,
+            "unlock_price_cents": LOOKUP_PRICE_CENTS,
+        }
+
     facility = detail["facility"]
-    return EMDFacilityDetailResponse(
+    resp = EMDFacilityDetailResponse(
         id=facility.id,
         organization_id=facility.organization_id,
         name=facility.name,
@@ -87,6 +224,11 @@ async def get_facility_detail(
         matched_property_address=detail["matched_property_address"],
         matched_customer_name=detail["matched_customer_name"],
     )
+    result = resp.model_dump()
+    result["programs"] = detail.get("programs", [])
+    result["matched_customer_id"] = detail.get("matched_customer_id")
+    result["matched_bow_names"] = detail.get("matched_bow_names", {})
+    return result
 
 
 @router.get("/facilities/{facility_id}/inspections", response_model=list[EMDInspectionResponse])
@@ -95,7 +237,13 @@ async def get_facility_inspections(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all inspections for a facility."""
+    """Get all inspections for a facility. Requires access."""
+    tier = await _get_emd_tier(ctx, db)
+    if not await _has_facility_access(ctx, db, facility_id, tier):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={
+            "error": "facility_not_accessible",
+            "message": "Purchase a single lookup or upgrade to Full Research to access this facility.",
+        })
     svc = EMDService(db)
     inspections = await svc.get_facility_inspections(facility_id)
     return [EMDInspectionResponse.model_validate(i) for i in inspections]
@@ -104,16 +252,128 @@ async def get_facility_inspections(
 @router.get("/facilities/{facility_id}/equipment", response_model=Optional[EMDEquipmentResponse])
 async def get_facility_equipment(
     facility_id: str,
+    permit_id: Optional[str] = Query(None),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get latest equipment data for a facility."""
+    """Get latest equipment data for a facility, optionally filtered by permit_id. Requires access."""
+    tier = await _get_emd_tier(ctx, db)
+    if not await _has_facility_access(ctx, db, facility_id, tier):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={
+            "error": "facility_not_accessible",
+            "message": "Purchase a single lookup or upgrade to Full Research to access this facility.",
+        })
     svc = EMDService(db)
-    equipment = await svc.get_facility_equipment(facility_id)
+    equipment = await svc.get_facility_equipment(facility_id, permit_id=permit_id)
     if not equipment:
         return None
     return EMDEquipmentResponse.model_validate(equipment)
 
+
+# --- Single Lookups ---
+
+@router.get("/lookups")
+async def get_active_lookups(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get active single lookups for this org."""
+    from src.models.emd_facility import EMDFacility
+
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(EMDLookup, EMDFacility)
+        .join(EMDFacility, EMDLookup.facility_id == EMDFacility.id)
+        .where(
+            EMDLookup.organization_id == ctx.organization_id,
+            EMDLookup.expires_at > now,
+        )
+        .order_by(EMDLookup.purchased_at.desc())
+    )
+    rows = result.all()
+
+    return [
+        {
+            "id": lookup.id,
+            "facility_id": facility.id,
+            "facility_name": facility.name,
+            "city": facility.city,
+            "purchased_at": lookup.purchased_at.isoformat(),
+            "expires_at": lookup.expires_at.isoformat(),
+            "days_remaining": max(0, (lookup.expires_at - now).days),
+        }
+        for lookup, facility in rows
+    ]
+
+
+@router.post("/lookups/purchase")
+async def purchase_lookups(
+    body: dict,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Purchase single lookups for multiple facilities.
+    Body: {"facility_ids": ["id1", "id2", ...]}
+    Returns created lookups. Stripe integration TBD — currently creates records directly.
+    """
+    facility_ids = body.get("facility_ids", [])
+    if not facility_ids:
+        raise HTTPException(status_code=400, detail="No facility IDs provided")
+    if len(facility_ids) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 facilities per purchase")
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=LOOKUP_DURATION_DAYS)
+
+    # Validate facilities exist
+    from src.models.emd_facility import EMDFacility
+    result = await db.execute(
+        select(EMDFacility.id).where(EMDFacility.id.in_(facility_ids))
+    )
+    valid_ids = set(result.scalars().all())
+    invalid = set(facility_ids) - valid_ids
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Invalid facility IDs: {', '.join(invalid)}")
+
+    # Check for existing active lookups (don't double-charge)
+    result = await db.execute(
+        select(EMDLookup.facility_id).where(
+            EMDLookup.organization_id == ctx.organization_id,
+            EMDLookup.facility_id.in_(facility_ids),
+            EMDLookup.expires_at > now,
+        )
+    )
+    already_active = set(result.scalars().all())
+
+    created = []
+    for fid in facility_ids:
+        if fid in already_active:
+            continue
+        lookup = EMDLookup(
+            id=str(uuid.uuid4()),
+            organization_id=ctx.organization_id,
+            facility_id=fid,
+            price_cents=LOOKUP_PRICE_CENTS,
+            purchased_at=now,
+            expires_at=expires_at,
+        )
+        db.add(lookup)
+        created.append(fid)
+
+    await db.flush()
+
+    total_cents = len(created) * LOOKUP_PRICE_CENTS
+
+    return {
+        "purchased": len(created),
+        "already_active": len(already_active),
+        "total_cents": total_cents,
+        "expires_at": expires_at.isoformat(),
+        "facility_ids": created,
+    }
+
+
+# --- Admin operations ---
 
 @router.post("/scrape")
 async def trigger_scrape(
@@ -129,6 +389,9 @@ async def trigger_scrape(
             end_date=body.end_date,
             rate_limit_seconds=body.rate_limit_seconds,
         )
+        if result.get("new_facilities", 0) > 0:
+            match_result = await svc.auto_match_facilities(ctx.organization_id)
+            result["auto_matched"] = match_result.get("matched", 0)
         return result
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -156,7 +419,7 @@ async def match_facility(
 
 @router.post("/auto-match")
 async def auto_match_facilities(
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Auto-match unmatched EMD facilities to properties by address."""
@@ -165,6 +428,8 @@ async def auto_match_facilities(
     return result
 
 
+# --- Leads (requires full_research) ---
+
 @router.get("/leads", response_model=list[EMDLeadResponse])
 async def get_leads(
     min_violations: int = Query(3),
@@ -172,13 +437,20 @@ async def get_leads(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get high-violation facilities for lead generation."""
+    """Get high-violation facilities for lead generation. Requires full_research tier."""
+    tier = await _get_emd_tier(ctx, db)
+    if tier != "full_research":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={
+            "error": "tier_required",
+            "required_tier": "full_research",
+            "message": "Upgrade to Full Research to access lead generation.",
+        })
     svc = EMDService(db)
-    leads = await svc.get_high_violation_facilities(
-        min_violations=min_violations, days=days
-    )
+    leads = await svc.get_high_violation_facilities(min_violations=min_violations, days=days)
     return [EMDLeadResponse(**lead) for lead in leads]
 
+
+# --- Property inspections ---
 
 @router.get("/property/{property_id}/inspections", response_model=list[EMDInspectionResponse])
 async def get_property_inspections(
@@ -213,11 +485,45 @@ async def sync_equipment_to_bow(
 async def get_backfill_status(
     ctx: OrgUserContext = Depends(get_current_org_user),
 ):
-    """Get the current EMD backfill scraper status."""
+    """Get the current EMD scraper health status."""
     import json
-    status_file = "/tmp/emd_backfill_status.json"
-    try:
-        with open(status_file) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"state": "idle"}
+    # Try daily scraper health first, fall back to old backfill status
+    for status_file in ["/tmp/emd_scraper_health.json", "/tmp/emd_backfill_status.json"]:
+        try:
+            with open(status_file) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+    return {"state": "idle"}
+
+
+@router.get("/inspections/{inspection_id}/pdf")
+async def get_inspection_pdf(
+    inspection_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve an inspection PDF file. Requires access to the facility."""
+    from src.models.emd_inspection import EMDInspection
+
+    result = await db.execute(
+        select(EMDInspection).where(EMDInspection.id == inspection_id)
+    )
+    inspection = result.scalar_one_or_none()
+    if not inspection or not inspection.pdf_path:
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    # Check access
+    tier = await _get_emd_tier(ctx, db)
+    if not await _has_facility_access(ctx, db, inspection.facility_id, tier):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Facility not accessible")
+
+    if not os.path.isabs(inspection.pdf_path):
+        pdf_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), inspection.pdf_path)
+    else:
+        pdf_path = inspection.pdf_path
+
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF file not on disk")
+
+    return FileResponse(pdf_path, media_type="application/pdf")

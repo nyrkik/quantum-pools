@@ -5,11 +5,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, OrgUserContext
+from src.api.deps import get_current_org_user, require_feature, OrgUserContext
 from src.schemas.payment import PaymentCreate, PaymentResponse
 from src.services.payment_service import PaymentService
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+router = APIRouter(prefix="/payments", tags=["payments"], dependencies=[Depends(require_feature("invoicing"))])
 
 
 def _payment_to_response(payment) -> PaymentResponse:

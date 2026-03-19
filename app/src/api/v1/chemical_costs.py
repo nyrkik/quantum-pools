@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.api.deps import get_current_org_user, require_roles, require_feature, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.schemas.chemical_costs import (
     RegionalDefaultResponse,
@@ -15,7 +15,7 @@ from src.schemas.chemical_costs import (
 )
 from src.services.chemical_cost_service import ChemicalCostService
 
-router = APIRouter(prefix="/chemical-costs", tags=["chemical-costs"])
+router = APIRouter(prefix="/chemical-costs", tags=["chemical-costs"], dependencies=[Depends(require_feature("chemical_costs"))])
 
 
 # --- Regional Defaults ---

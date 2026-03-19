@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, require_roles, OrgUserContext
+from src.api.deps import get_current_org_user, require_roles, require_feature, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.schemas.satellite import (
     SatelliteAnalysisResponse,
@@ -16,7 +16,7 @@ from src.schemas.satellite import (
 )
 from src.services.satellite_service import SatelliteService
 
-router = APIRouter(prefix="/satellite", tags=["satellite"])
+router = APIRouter(prefix="/satellite", tags=["satellite"], dependencies=[Depends(require_feature("satellite_analysis"))])
 
 
 @router.get("/all", response_model=list[SatelliteAnalysisResponse])

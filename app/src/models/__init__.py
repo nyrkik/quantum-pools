@@ -35,6 +35,9 @@ from src.models.emd_facility import EMDFacility
 from src.models.emd_inspection import EMDInspection
 from src.models.emd_violation import EMDViolation
 from src.models.emd_equipment import EMDEquipment
+from src.models.feature import Feature, FeatureTier
+from src.models.org_subscription import OrgSubscription
+from src.models.emd_lookup import EMDLookup
 
 __all__ = [
     "Base",
@@ -72,4 +75,8 @@ __all__ = [
     "EMDInspection",
     "EMDViolation",
     "EMDEquipment",
+    "Feature",
+    "FeatureTier",
+    "OrgSubscription",
+    "EMDLookup",
 ]

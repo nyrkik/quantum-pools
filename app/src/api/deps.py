@@ -110,6 +110,21 @@ class OrgUserContext:
         self.organization_id = org_user.organization_id
         self.organization_name = org_name
         self.role = org_user.role
+        self._features: list[str] | None = None
+
+    async def load_features(self, db: AsyncSession) -> list[str]:
+        """Lazy-load active feature slugs for this org. Cached per request."""
+        if self._features is None:
+            from src.services.feature_service import FeatureService
+            service = FeatureService(db)
+            self._features = await service.get_org_active_feature_slugs(self.organization_id)
+        return self._features
+
+    def has_feature(self, slug: str) -> bool:
+        """Check if features have been loaded and contain slug."""
+        if self._features is None:
+            raise RuntimeError("Features not loaded — call load_features() first")
+        return slug in self._features
 
 
 async def get_current_org_user(
@@ -178,3 +193,32 @@ def require_roles(*roles: OrgRole):
             )
         return ctx
     return _check_role
+
+
+def require_feature(*feature_slugs: str, tier_slug: str | None = None):
+    """Dependency factory: require org has active subscription to feature(s).
+
+    Checks AFTER role check. Base features always pass. Trial orgs pass all.
+    Canceled subscriptions still pass until period end.
+    """
+    async def _check_feature(
+        ctx: OrgUserContext = Depends(get_current_org_user),
+        db: AsyncSession = Depends(get_db),
+    ):
+        from src.services.feature_service import FeatureService
+        service = FeatureService(db)
+        for slug in feature_slugs:
+            has_it = await service.org_has_feature(ctx.organization_id, slug, tier_slug)
+            if not has_it:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": "feature_not_subscribed",
+                        "feature": slug,
+                        "message": f"Your organization does not have the '{slug}' feature. Upgrade your subscription to access this.",
+                    },
+                )
+        # Cache features on context
+        ctx._features = await service.get_org_active_feature_slugs(ctx.organization_id)
+        return ctx
+    return _check_feature

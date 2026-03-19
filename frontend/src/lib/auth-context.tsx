@@ -25,6 +25,8 @@ interface AuthState {
   organizationName: string;
   role: string;
   isDeveloper: boolean;
+  features: string[];
+  emdTier: string | null;
   isLoading: boolean;
 }
 
@@ -49,6 +51,8 @@ interface OrgUserResponse {
   organization_name: string;
   role: string;
   is_developer: boolean;
+  features: string[];
+  emd_tier: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -60,6 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     organizationName: "",
     role: "",
     isDeveloper: false,
+    features: [],
+    emdTier: null,
     isLoading: true,
   });
 
@@ -70,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       organizationName: data.organization_name,
       role: data.role,
       isDeveloper: data.is_developer ?? false,
+      features: data.features ?? [],
+      emdTier: data.emd_tier ?? null,
       isLoading: false,
     });
   }, []);
@@ -79,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api.get<OrgUserResponse>("/v1/auth/me");
       setFromResponse(data);
     } catch {
-      setState((prev) => ({ ...prev, user: null, isDeveloper: false, isLoading: false }));
+      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], emdTier: null, isLoading: false }));
     }
   }, [setFromResponse]);
 
@@ -108,6 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       organizationName: "",
       role: "",
       isDeveloper: false,
+      features: [],
+      emdTier: null,
       isLoading: false,
     });
   };

@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Boolean, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -38,11 +38,24 @@ class EMDEquipment(Base):
     jet_pump_1_model: Mapped[str | None] = mapped_column(String(100))
     jet_pump_1_hp: Mapped[str | None] = mapped_column(String(50))
 
+    # Structured pump fields (from form fields, not blob)
+    rp_make: Mapped[str | None] = mapped_column(String(100))
+    rp_model: Mapped[str | None] = mapped_column(String(100))
+    rp_hp: Mapped[str | None] = mapped_column(String(50))
+    bp_make: Mapped[str | None] = mapped_column(String(100))
+    bp_model: Mapped[str | None] = mapped_column(String(100))
+    bp_hp: Mapped[str | None] = mapped_column(String(50))
+
     # Filter
     filter_1_type: Mapped[str | None] = mapped_column(String(50))
     filter_1_make: Mapped[str | None] = mapped_column(String(100))
     filter_1_model: Mapped[str | None] = mapped_column(String(100))
     filter_1_capacity_gpm: Mapped[int | None] = mapped_column(Integer)
+    filter_cleaning_method: Mapped[str | None] = mapped_column(String(100))
+
+    # Diatomaceous filter
+    df_type: Mapped[str | None] = mapped_column(String(50))
+    df_make: Mapped[str | None] = mapped_column(String(100))
 
     # Sanitizer
     sanitizer_1_type: Mapped[str | None] = mapped_column(String(50))
@@ -54,8 +67,20 @@ class EMDEquipment(Base):
     main_drain_type: Mapped[str | None] = mapped_column(String(100))
     main_drain_model: Mapped[str | None] = mapped_column(String(100))
     main_drain_install_date: Mapped[str | None] = mapped_column(String(50))
+    main_drain_capacity_gpm: Mapped[int | None] = mapped_column(Integer)
+    main_drain_config: Mapped[str | None] = mapped_column(String(50))
     equalizer_model: Mapped[str | None] = mapped_column(String(100))
     equalizer_install_date: Mapped[str | None] = mapped_column(String(50))
+    equalizer_capacity_gpm: Mapped[int | None] = mapped_column(Integer)
+
+    # Skimmers
+    skimmer_count: Mapped[int | None] = mapped_column(Integer)
+
+    # Equipment match
+    equipment_matches_emd: Mapped[bool | None] = mapped_column(Boolean)
+
+    # Raw equipment text blob (for reference/reparse)
+    equipment_text: Mapped[str | None] = mapped_column(Text)
 
     # Notes
     pump_notes: Mapped[str | None] = mapped_column(Text)

@@ -25,6 +25,7 @@ class EMDFacility(Base):
     facility_id: Mapped[str | None] = mapped_column(String(50), unique=True, index=True)
     permit_holder: Mapped[str | None] = mapped_column(String(255))
     facility_type: Mapped[str | None] = mapped_column(String(50))
+    program_identifier: Mapped[str | None] = mapped_column(String(100))
 
     # Link to our customer/property
     matched_property_id: Mapped[str | None] = mapped_column(

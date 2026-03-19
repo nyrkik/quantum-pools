@@ -51,7 +51,17 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  WavesLadder,
+  Waves,
 } from "lucide-react";
+
+function waterTypeIcon(type: string, className: string) {
+  switch (type) {
+    case "spa": case "hot_tub": return <Droplets className={className} />;
+    case "fountain": case "water_feature": case "wading_pool": return <Waves className={className} />;
+    default: return <WavesLadder className={className} />;
+  }
+}
 import {
   AlertDialog,
   AlertDialogAction,
@@ -210,6 +220,9 @@ export default function MapPage() {
 
   useEffect(() => {
     loadData();
+    const onFocus = () => loadData();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [loadData]);
 
   const analysisMap = useMemo(() => new Map(analyses.map((a) => [a.body_of_water_id, a])), [analyses]);
@@ -669,8 +682,8 @@ export default function MapPage() {
             <div>
               <div className="flex items-baseline gap-3">
                 <div className="flex items-center gap-2">
-                  <Droplets className="h-3.5 w-3.5 text-blue-500" />
-                  <span className="text-base font-semibold">{bow.bow_name || "Pool"}</span>
+                  {waterTypeIcon(bow.water_type, "h-3.5 w-3.5 text-blue-500")}
+                  <span className="text-base font-semibold">{bow.bow_name || bow.water_type.replace("_", " ")}</span>
                 </div>
                 <span className="text-muted-foreground/30">·</span>
                 {bowDetail && (
@@ -1265,7 +1278,7 @@ export default function MapPage() {
                                 }`}
                               >
                                 <div className="flex items-center gap-1.5">
-                                  <Droplets className="h-2.5 w-2.5 text-blue-500 shrink-0" />
+                                  {waterTypeIcon(b.water_type, "h-2.5 w-2.5 text-blue-500 shrink-0")}
                                   <span className="truncate">{b.bow_name || b.water_type.replace("_", " ")}</span>
                                 </div>
                               </button>

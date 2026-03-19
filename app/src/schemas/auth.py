@@ -50,6 +50,8 @@ class OrgUserResponse(BaseModel):
     organization_name: str
     role: str
     is_developer: bool = False
+    features: list[str] = []
+    emd_tier: Optional[str] = None
 
 
 class MessageResponse(BaseModel):

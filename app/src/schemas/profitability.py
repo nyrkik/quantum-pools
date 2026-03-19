@@ -13,6 +13,10 @@ class OrgCostSettingsUpdate(BaseModel):
     chemical_cost_per_gallon: Optional[float] = None
     monthly_overhead: Optional[float] = None
     target_margin_pct: Optional[float] = Field(None, ge=0, le=100)
+    semi_annual_discount_type: Optional[str] = None
+    semi_annual_discount_value: Optional[float] = None
+    annual_discount_type: Optional[str] = None
+    annual_discount_value: Optional[float] = None
 
 
 class OrgCostSettingsResponse(BaseModel):
@@ -23,6 +27,10 @@ class OrgCostSettingsResponse(BaseModel):
     chemical_cost_per_gallon: float
     monthly_overhead: float
     target_margin_pct: float
+    semi_annual_discount_type: str = "percent"
+    semi_annual_discount_value: float = 5.0
+    annual_discount_type: str = "percent"
+    annual_discount_value: float = 10.0
     created_at: datetime
     updated_at: datetime
 

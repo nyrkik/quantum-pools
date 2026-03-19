@@ -817,6 +817,30 @@ class ProfitabilityService:
 
         return gaps
 
+    @staticmethod
+    def _billing_options(monthly_rate: float, settings: OrgCostSettings) -> dict:
+        """Calculate semi-annual and annual pricing with discounts."""
+        def apply_discount(monthly: float, months: int, dtype: str, dval: float) -> dict:
+            total_no_discount = monthly * months
+            if dtype == "percent":
+                discount = total_no_discount * (dval / 100.0)
+            else:
+                discount = dval * months
+            total = total_no_discount - discount
+            effective_monthly = total / months
+            return {
+                "total": round(total, 2),
+                "discount": round(discount, 2),
+                "effective_monthly": round(effective_monthly, 2),
+                "savings_pct": round((discount / total_no_discount * 100) if total_no_discount > 0 else 0, 1),
+            }
+
+        return {
+            "monthly": round(monthly_rate, 2),
+            "semi_annual": apply_discount(monthly_rate, 6, settings.semi_annual_discount_type, settings.semi_annual_discount_value),
+            "annual": apply_discount(monthly_rate, 12, settings.annual_discount_type, settings.annual_discount_value),
+        }
+
     async def suggest_rate(
         self, org_id: str, gallons: int, water_type: str = "pool",
         service_minutes: int = 30, difficulty_score: float = 2.5,
@@ -890,6 +914,7 @@ class ProfitabilityService:
                     "water_type": water_type,
                     "difficulty_score": round(difficulty_score, 2),
                     "tier_options": tier_options,
+                    "billing_options": self._billing_options(suggested_rate, settings),
                 }
 
         # Commercial: cost-based
@@ -922,4 +947,5 @@ class ProfitabilityService:
             "water_type": water_type,
             "service_minutes": service_minutes,
             "difficulty_score": round(difficulty_score, 2),
+            "billing_options": self._billing_options(suggested_rate, settings),
         }

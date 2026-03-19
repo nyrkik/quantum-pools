@@ -21,6 +21,12 @@ class OrgCostSettings(Base):
     monthly_overhead: Mapped[float] = mapped_column(Float, default=2000.0)
     target_margin_pct: Mapped[float] = mapped_column(Float, default=35.0)
 
+    # Billing frequency discounts
+    semi_annual_discount_type: Mapped[str] = mapped_column(String(10), default="percent")
+    semi_annual_discount_value: Mapped[float] = mapped_column(Float, default=5.0)
+    annual_discount_type: Mapped[str] = mapped_column(String(10), default="percent")
+    annual_discount_value: Mapped[float] = mapped_column(Float, default=10.0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -75,6 +75,8 @@ class BodyOfWater(Base):
     # Service
     estimated_service_minutes: Mapped[int] = mapped_column(Integer, default=30)
     monthly_rate: Mapped[float | None] = mapped_column(Float)
+    rate_allocation_method: Mapped[str | None] = mapped_column(String(20))
+    rate_allocated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

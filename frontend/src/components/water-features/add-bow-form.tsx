@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,18 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [waterType, setWaterType] = useState("pool");
+  const [gallons, setGallons] = useState("");
+  const [rate, setRate] = useState("");
+  const [suggestedRate, setSuggestedRate] = useState<number | null>(null);
+
+  // Fetch suggested rate when form opens or type/gallons change
+  useEffect(() => {
+    if (!open) return;
+    const gal = parseInt(gallons) || 15000;
+    api.get<{ suggested_rate: number }>(`/v1/profitability/suggest-rate?gallons=${gal}&water_type=${waterType}`)
+      .then((d) => setSuggestedRate(d.suggested_rate))
+      .catch(() => setSuggestedRate(null));
+  }, [open, waterType, gallons]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,11 +45,15 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
       await api.post(`/v1/bodies-of-water/property/${propertyId}`, {
         name: name || undefined,
         water_type: waterType,
-        estimated_service_minutes: 30,
+        pool_gallons: parseInt(gallons) || undefined,
+        monthly_rate: parseFloat(rate) || undefined,
+        estimated_service_minutes: waterType === "spa" || waterType === "hot_tub" ? 10 : 30,
       });
       toast.success("Water feature added");
       setName("");
       setWaterType("pool");
+      setGallons("");
+      setRate("");
       setOpen(false);
       onCreated();
     } catch {
@@ -79,8 +95,29 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Lap Pool" className="h-8 text-sm" />
         </div>
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Gallons</Label>
+          <Input type="number" value={gallons} onChange={(e) => setGallons(e.target.value)} placeholder="15000" className="h-8 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">
+            Monthly Rate
+            {suggestedRate != null && (
+              <button
+                type="button"
+                className="ml-1.5 text-primary hover:underline"
+                onClick={() => setRate(suggestedRate.toFixed(2))}
+              >
+                suggest ${suggestedRate.toFixed(0)}
+              </button>
+            )}
+          </Label>
+          <Input type="number" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0.00" className="h-8 text-sm" />
+        </div>
+      </div>
       <div className="flex gap-2">
-        <Button type="button" variant="outline" size="sm" className="flex-1 h-8" onClick={() => { setOpen(false); setName(""); setWaterType("pool"); }}>
+        <Button type="button" variant="outline" size="sm" className="flex-1 h-8" onClick={() => { setOpen(false); setName(""); setWaterType("pool"); setGallons(""); setRate(""); }}>
           Cancel
         </Button>
         <Button type="submit" size="sm" className="flex-1 h-8" disabled={saving}>

@@ -139,11 +139,13 @@ interface BowTileProps {
   propertyId: string;
   perms: Permissions;
   techAssignment?: TechAssignment;
+  suggestedRate?: number | null;
+  marginPct?: number | null;
   onUpdated: () => void;
   onDeleted: () => void;
 }
 
-export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onDeleted }: BowTileProps) {
+export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate, marginPct, onUpdated, onDeleted }: BowTileProps) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...bow });
   const [saving, setSaving] = useState(false);
@@ -619,7 +621,6 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
           { icon: Droplets, label: "Volume", value: bow.pool_gallons ? `${bow.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500", source: null as string | null },
           { icon: Move, label: "Surface", value: bow.pool_sqft ? `${bow.pool_sqft.toLocaleString()}` : null, unit: "ft\u00B2", color: "text-emerald-500", source: bow.dimension_source },
           { icon: Clock, label: "Service", value: `${bow.estimated_service_minutes}`, unit: "min", color: "text-amber-500", source: null as string | null },
-          { icon: DollarSign, label: "Rate", value: bow.monthly_rate != null ? `${bow.monthly_rate.toFixed(2)}` : null, unit: "/mo", color: "text-violet-500", source: null as string | null },
         ].map((m) => (
           <div key={m.label} className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
             <div className="flex items-center gap-1.5 mb-1">
@@ -638,6 +639,29 @@ export function BowTile({ bow, propertyId, perms, techAssignment, onUpdated, onD
             )}
           </div>
         ))}
+        <div className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
+          <div className="flex items-center gap-1.5 mb-1">
+            <DollarSign className="h-3 w-3 text-violet-500" />
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate</span>
+            {marginPct != null && (
+              <span className={`text-[9px] font-medium px-1 rounded ${
+                marginPct >= 35 ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
+                : marginPct >= 15 ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
+              }`}>{marginPct.toFixed(0)}%</span>
+            )}
+          </div>
+          {bow.monthly_rate != null ? (
+            <p className="text-lg font-bold leading-tight">${bow.monthly_rate.toFixed(2)}<span className="text-xs font-normal text-muted-foreground ml-0.5">/mo</span></p>
+          ) : suggestedRate != null ? (
+            <p className="text-sm leading-tight">
+              <span className="text-muted-foreground/50 italic">&mdash;</span>
+              <span className="text-[10px] text-muted-foreground ml-1.5">suggest ${suggestedRate.toFixed(0)}</span>
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground/50 italic leading-tight mt-0.5">&mdash;</p>
+          )}
+        </div>
       </div>
 
       {/* Two-column grid for category tiles */}

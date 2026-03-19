@@ -227,6 +227,113 @@ async def assign_jurisdiction(
     return {"status": "ok"}
 
 
+# --- Rate Allocation ---
+
+@router.get("/allocate-rates/{customer_id}")
+async def preview_rate_allocation(
+    customer_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview how a customer's rate would be split across their BOWs."""
+    svc = ProfitabilityService(db)
+    try:
+        return await svc.get_rate_allocation_preview(customer_id, ctx.organization_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/apply-rates/{customer_id}")
+async def apply_rate_allocation(
+    customer_id: str,
+    body: dict,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply per-BOW rates. Body: {"rates": {"bow_id": rate, ...}}."""
+    rates = body.get("rates", {})
+    if not rates:
+        raise HTTPException(status_code=400, detail="No rates provided")
+    svc = ProfitabilityService(db)
+    try:
+        return await svc.apply_rate_allocation(customer_id, ctx.organization_id, rates)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/allocate-rates/bulk")
+async def bulk_allocate_rates(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview rate allocation for all customers with unallocated BOW rates."""
+    from sqlalchemy import func, select as sa_select
+    from src.models.customer import Customer
+    from src.models.property import Property
+
+    # Find customers with multiple BOWs where any BOW has no rate
+    result = await db.execute(
+        sa_select(Customer.id)
+        .join(Property, Property.customer_id == Customer.id)
+        .join(BodyOfWater, BodyOfWater.property_id == Property.id)
+        .where(
+            Customer.organization_id == ctx.organization_id,
+            Customer.is_active == True,
+            BodyOfWater.is_active == True,
+            BodyOfWater.monthly_rate.is_(None),
+        )
+        .group_by(Customer.id)
+        .having(func.count(BodyOfWater.id) > 0)
+    )
+    customer_ids = [r.id for r in result.all()]
+
+    svc = ProfitabilityService(db)
+    previews = []
+    for cid in customer_ids:
+        try:
+            preview = await svc.get_rate_allocation_preview(cid, ctx.organization_id)
+            if preview.get("allocations"):
+                previews.append(preview)
+        except Exception:
+            continue
+
+    return {"total_customers": len(previews), "previews": previews}
+
+
+# --- Profit Gaps ---
+
+@router.get("/gaps")
+async def get_profit_gaps(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get per-BOW profitability sorted by margin (worst first)."""
+    svc = ProfitabilityService(db)
+    return await svc.get_profit_gaps(ctx.organization_id)
+
+
+# --- Rate Suggestion ---
+
+@router.get("/suggest-rate")
+async def suggest_rate(
+    gallons: int = Query(15000),
+    water_type: str = Query("pool"),
+    service_minutes: int = Query(30),
+    difficulty: float = Query(2.5),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suggest a rate for a new BOW based on org cost settings and target margin."""
+    svc = ProfitabilityService(db)
+    return await svc.suggest_rate(
+        org_id=ctx.organization_id,
+        gallons=gallons,
+        water_type=water_type,
+        service_minutes=service_minutes,
+        difficulty_score=difficulty,
+    )
+
+
 @router.post("/bulk-jurisdiction")
 async def bulk_assign_jurisdiction(
     body: BulkJurisdictionRequest,

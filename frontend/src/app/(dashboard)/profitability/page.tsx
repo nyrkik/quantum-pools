@@ -72,6 +72,17 @@ export default function ProfitabilityPage() {
   const [overview, setOverview] = useState<ProfitabilityOverview | null>(null);
   const [whaleCurve, setWhaleCurve] = useState<WhaleCurvePoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tableView, setTableView] = useState<"account" | "bow">("account");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [bowGaps, setBowGaps] = useState<any[] | null>(null);
+
+  const loadBowGaps = useCallback(() => {
+    if (bowGaps !== null) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    api.get<any[]>("/v1/profitability/gaps")
+      .then(setBowGaps)
+      .catch(() => setBowGaps([]));
+  }, [bowGaps]);
 
   const loadData = useCallback(async () => {
     try {
@@ -284,71 +295,122 @@ export default function ProfitabilityPage() {
         </Card>
       </div>
 
-      {/* Account Table */}
+      {/* Account Table + Per-BOW view */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">All Accounts by Margin</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Margin Analysis</CardTitle>
+            <div className="flex gap-1">
+              <Button variant={tableView === "account" ? "default" : "outline"} size="sm" className="h-7 text-xs" onClick={() => setTableView("account")}>By Account</Button>
+              <Button variant={tableView === "bow" ? "default" : "outline"} size="sm" className="h-7 text-xs" onClick={() => { setTableView("bow"); loadBowGaps(); }}>By Water Feature</Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Client</TableHead>
-                <TableHead>Address</TableHead>
-                <TableHead className="text-right">Rate</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead className="text-right">Profit</TableHead>
-                <TableHead className="text-right">Margin</TableHead>
-                <TableHead className="text-right">Suggested</TableHead>
-                <TableHead className="text-right">Difficulty</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {overview.accounts.map((account, i) => (
-                <TableRow key={`${account.customer_id}-${account.property_id}`} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
-                  <TableCell>
-                    <Link
-                      href={`/profitability/${account.customer_id}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {account.customer_name}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {account.property_address}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrency(account.monthly_rate)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrency(account.cost_breakdown.total_cost)}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-medium ${
-                      account.cost_breakdown.profit >= 0 ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {formatCurrency(account.cost_breakdown.profit)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {marginBadge(account.margin_pct, overview.target_margin_pct)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {account.cost_breakdown.rate_gap > 0 ? (
-                      <span className="text-yellow-600">
-                        {formatCurrency(account.cost_breakdown.suggested_rate)}
-                      </span>
-                    ) : (
-                      <span className="text-green-600">OK</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {account.difficulty_score.toFixed(1)}
-                  </TableCell>
+          {tableView === "account" ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Client</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead className="text-right">Rate</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Profit</TableHead>
+                  <TableHead className="text-right">Margin</TableHead>
+                  <TableHead className="text-right">Suggested</TableHead>
+                  <TableHead className="text-right">Difficulty</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {overview.accounts.map((account, i) => (
+                  <TableRow key={`${account.customer_id}-${account.property_id}`} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                    <TableCell>
+                      <Link
+                        href={`/profitability/${account.customer_id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {account.customer_name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {account.property_address}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrency(account.monthly_rate)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrency(account.cost_breakdown.total_cost)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-medium ${
+                        account.cost_breakdown.profit >= 0 ? "text-green-600" : "text-red-600"
+                      }`}
+                    >
+                      {formatCurrency(account.cost_breakdown.profit)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {marginBadge(account.margin_pct, overview.target_margin_pct)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {account.cost_breakdown.rate_gap > 0 ? (
+                        <span className="text-yellow-600">
+                          {formatCurrency(account.cost_breakdown.suggested_rate)}
+                        </span>
+                      ) : (
+                        <span className="text-green-600">OK</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {account.difficulty_score.toFixed(1)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : bowGaps === null ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Client</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Gallons</TableHead>
+                  <TableHead className="text-right">Rate</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Profit</TableHead>
+                  <TableHead className="text-right">Margin</TableHead>
+                  <TableHead className="text-right">Suggested</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bowGaps.map((gap, i) => (
+                  <TableRow key={gap.bow_id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${gap.below_target ? "bg-red-50/50 dark:bg-red-950/10" : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                    <TableCell>
+                      <Link
+                        href={`/customers/${gap.customer_id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {gap.customer_name}
+                      </Link>
+                      {gap.bow_name && <span className="text-xs text-muted-foreground ml-1.5">{gap.bow_name}</span>}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground capitalize">{gap.water_type}</TableCell>
+                    <TableCell className="text-right text-sm">{gap.gallons?.toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{gap.monthly_rate > 0 ? formatCurrency(gap.monthly_rate) : <span className="text-muted-foreground/50">—</span>}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(gap.total_cost)}</TableCell>
+                    <TableCell className={`text-right font-medium ${gap.profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(gap.profit)}</TableCell>
+                    <TableCell className="text-right">{marginBadge(gap.margin_pct, overview.target_margin_pct)}</TableCell>
+                    <TableCell className="text-right">
+                      {gap.rate_gap > 0 ? <span className="text-yellow-600">{formatCurrency(gap.suggested_rate)}</span> : <span className="text-green-600">OK</span>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

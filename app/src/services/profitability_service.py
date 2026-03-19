@@ -596,3 +596,262 @@ class ProfitabilityService:
         resp.composite_score = score
         resp.difficulty_multiplier = multiplier
         return resp
+
+    def compute_bow_cost(
+        self,
+        settings: OrgCostSettings,
+        bow: BodyOfWater,
+        difficulty_score: float,
+        total_accounts: int,
+        num_bows_at_property: int,
+        chemical_profile: Optional[ChemicalCostProfile] = None,
+    ) -> dict:
+        """Compute cost breakdown for a single BOW.
+
+        Travel and overhead are split across BOWs at the same property
+        (one trip services all BOWs).
+        """
+        multiplier = self.difficulty_to_multiplier(difficulty_score)
+        visits_per_month = 4.0
+
+        gallons = bow.pool_gallons or 15000
+        service_minutes = bow.estimated_service_minutes or 30
+
+        # Chemical cost
+        if chemical_profile and chemical_profile.total_monthly > 0:
+            chemical_cost = chemical_profile.total_monthly
+        else:
+            chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits_per_month
+
+        # Labor cost (per BOW — each BOW has its own service time)
+        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits_per_month * multiplier
+
+        # Travel cost — split across BOWs at the property (one trip)
+        drive_minutes = 15
+        miles = 8.0
+        full_travel = (
+            (drive_minutes / 60.0) * settings.burdened_labor_rate
+            + miles * settings.vehicle_cost_per_mile
+        ) * visits_per_month
+        travel_cost = full_travel / max(num_bows_at_property, 1)
+
+        # Overhead — split across all accounts, then across BOWs at property
+        full_overhead = settings.monthly_overhead / max(total_accounts, 1)
+        overhead_cost = full_overhead / max(num_bows_at_property, 1)
+
+        total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
+        revenue = bow.monthly_rate or 0.0
+        profit = revenue - total_cost
+        margin_pct = (profit / revenue * 100) if revenue > 0 else 0.0
+        target_margin = settings.target_margin_pct / 100.0
+        suggested_rate = total_cost / (1 - target_margin) if target_margin < 1 else total_cost * 2
+        rate_gap = suggested_rate - revenue
+
+        return {
+            "bow_id": bow.id,
+            "bow_name": bow.name,
+            "water_type": bow.water_type,
+            "gallons": gallons,
+            "service_minutes": service_minutes,
+            "monthly_rate": revenue,
+            "chemical_cost": round(chemical_cost, 2),
+            "labor_cost": round(labor_cost, 2),
+            "travel_cost": round(travel_cost, 2),
+            "overhead_cost": round(overhead_cost, 2),
+            "total_cost": round(total_cost, 2),
+            "profit": round(profit, 2),
+            "margin_pct": round(margin_pct, 1),
+            "suggested_rate": round(suggested_rate, 2),
+            "rate_gap": round(rate_gap, 2),
+            "difficulty_score": round(difficulty_score, 2),
+            "difficulty_multiplier": round(multiplier, 2),
+        }
+
+    async def get_rate_allocation_preview(self, customer_id: str, org_id: str) -> dict:
+        """Preview rate allocation for a customer's BOWs without saving."""
+        customer = await self.db.execute(
+            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
+        )
+        customer = customer.scalar_one_or_none()
+        if not customer:
+            raise NotFoundError("Customer not found")
+
+        # Get all properties + BOWs
+        props = await self.db.execute(
+            select(Property).where(Property.customer_id == customer_id, Property.is_active == True)
+        )
+        properties = props.scalars().all()
+        prop_ids = [p.id for p in properties]
+
+        bows_result = await self.db.execute(
+            select(BodyOfWater).where(BodyOfWater.property_id.in_(prop_ids), BodyOfWater.is_active == True)
+        )
+        bows = bows_result.scalars().all()
+
+        if not bows:
+            return {"customer_id": customer_id, "total_rate": customer.monthly_rate, "allocations": [], "method": None}
+
+        allocation = self.allocate_rate_to_bows(customer.monthly_rate, bows)
+
+        allocations = []
+        method = None
+        for bow in bows:
+            alloc = allocation.get(bow.id, {})
+            method = alloc.get("allocation_method", method)
+            allocations.append({
+                "bow_id": bow.id,
+                "bow_name": bow.name,
+                "water_type": bow.water_type,
+                "gallons": bow.pool_gallons,
+                "service_minutes": bow.estimated_service_minutes,
+                "current_rate": bow.monthly_rate,
+                "proposed_rate": alloc.get("allocated_rate", 0),
+                "weight": alloc.get("weight", 0),
+                "allocation_method": alloc.get("allocation_method"),
+            })
+
+        return {
+            "customer_id": customer_id,
+            "customer_name": customer.display_name_col,
+            "total_rate": customer.monthly_rate,
+            "method": method,
+            "allocations": allocations,
+        }
+
+    async def apply_rate_allocation(self, customer_id: str, org_id: str, rates: dict[str, float]) -> dict:
+        """Apply per-BOW rates. rates = {bow_id: rate}."""
+        from datetime import datetime, timezone
+
+        customer = await self.db.execute(
+            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
+        )
+        customer = customer.scalar_one_or_none()
+        if not customer:
+            raise NotFoundError("Customer not found")
+
+        updated = 0
+        for bow_id, rate in rates.items():
+            result = await self.db.execute(
+                select(BodyOfWater).where(BodyOfWater.id == bow_id, BodyOfWater.organization_id == org_id)
+            )
+            bow = result.scalar_one_or_none()
+            if bow:
+                bow.monthly_rate = round(rate, 2)
+                bow.rate_allocation_method = "manual"
+                bow.rate_allocated_at = datetime.now(timezone.utc)
+                updated += 1
+
+        await self.db.flush()
+        return {"updated": updated, "customer_id": customer_id}
+
+    async def get_profit_gaps(self, org_id: str) -> list[dict]:
+        """Get all BOWs sorted by margin, flagging those below target."""
+        settings = await self.get_or_create_settings(org_id)
+
+        # Count total active accounts
+        from sqlalchemy import func
+        count_result = await self.db.execute(
+            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
+        )
+        total_accounts = count_result.scalar() or 1
+
+        # Load all active BOWs with their property + customer
+        result = await self.db.execute(
+            select(BodyOfWater, Property, Customer)
+            .join(Property, BodyOfWater.property_id == Property.id)
+            .join(Customer, Property.customer_id == Customer.id)
+            .where(
+                BodyOfWater.organization_id == org_id,
+                BodyOfWater.is_active == True,
+                Customer.is_active == True,
+            )
+        )
+        rows = result.all()
+
+        # Count BOWs per property for travel/overhead split
+        from collections import Counter
+        prop_bow_counts = Counter(r[1].id for r in rows)
+
+        # Load difficulty scores
+        diff_map = {}
+        prop_ids = list(set(r[1].id for r in rows))
+        if prop_ids:
+            diff_result = await self.db.execute(
+                select(PropertyDifficulty).where(PropertyDifficulty.property_id.in_(prop_ids))
+            )
+            for d in diff_result.scalars().all():
+                diff_map[d.property_id] = d
+
+        # Load chemical profiles
+        chem_map = {}
+        bow_ids = [r[0].id for r in rows]
+        if bow_ids:
+            chem_result = await self.db.execute(
+                select(ChemicalCostProfile).where(ChemicalCostProfile.body_of_water_id.in_(bow_ids))
+            )
+            for cp in chem_result.scalars().all():
+                chem_map[cp.body_of_water_id] = cp
+
+        gaps = []
+        for bow, prop, customer in rows:
+            diff = diff_map.get(prop.id)
+            score = self.compute_composite_score(prop, diff, bows=[bow]) if diff else 2.5
+            profile = chem_map.get(bow.id)
+
+            cost_data = self.compute_bow_cost(
+                settings=settings,
+                bow=bow,
+                difficulty_score=score,
+                total_accounts=total_accounts,
+                num_bows_at_property=prop_bow_counts[prop.id],
+                chemical_profile=profile,
+            )
+            cost_data["customer_id"] = customer.id
+            cost_data["customer_name"] = customer.display_name_col
+            cost_data["property_address"] = prop.address
+            cost_data["below_target"] = cost_data["margin_pct"] < settings.target_margin_pct
+            gaps.append(cost_data)
+
+        # Sort by margin ascending (worst first)
+        gaps.sort(key=lambda g: g["margin_pct"])
+
+        return gaps
+
+    async def suggest_rate(
+        self, org_id: str, gallons: int, water_type: str = "pool",
+        service_minutes: int = 30, difficulty_score: float = 2.5,
+    ) -> dict:
+        """Suggest a rate for a new BOW based on org cost settings and target margin."""
+        settings = await self.get_or_create_settings(org_id)
+
+        from sqlalchemy import func
+        count_result = await self.db.execute(
+            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
+        )
+        total_accounts = count_result.scalar() or 1
+
+        multiplier = self.difficulty_to_multiplier(difficulty_score)
+        visits = 4.0
+
+        chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
+        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
+        travel_cost = ((15 / 60.0) * settings.burdened_labor_rate + 8.0 * settings.vehicle_cost_per_mile) * visits
+        overhead_cost = settings.monthly_overhead / max(total_accounts, 1)
+
+        total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
+        target_margin = settings.target_margin_pct / 100.0
+        suggested_rate = total_cost / (1 - target_margin) if target_margin < 1 else total_cost * 2
+
+        return {
+            "suggested_rate": round(suggested_rate, 2),
+            "total_cost": round(total_cost, 2),
+            "chemical_cost": round(chemical_cost, 2),
+            "labor_cost": round(labor_cost, 2),
+            "travel_cost": round(travel_cost, 2),
+            "overhead_cost": round(overhead_cost, 2),
+            "target_margin_pct": settings.target_margin_pct,
+            "gallons": gallons,
+            "water_type": water_type,
+            "service_minutes": service_minutes,
+            "difficulty_score": round(difficulty_score, 2),
+        }

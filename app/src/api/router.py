@@ -19,6 +19,7 @@ from src.api.v1.dimensions import router as dimensions_router
 from src.api.v1.chemical_costs import router as chemical_costs_router
 from src.api.v1.emd import router as emd_router
 from src.api.v1.billing import router as billing_router
+from src.api.v1.service_tiers import router as service_tiers_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -39,3 +40,4 @@ api_router.include_router(dimensions_router)
 api_router.include_router(chemical_costs_router)
 api_router.include_router(emd_router)
 api_router.include_router(billing_router)
+api_router.include_router(service_tiers_router)

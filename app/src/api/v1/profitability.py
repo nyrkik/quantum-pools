@@ -320,10 +320,12 @@ async def suggest_rate(
     water_type: str = Query("pool"),
     service_minutes: int = Query(30),
     difficulty: float = Query(2.5),
+    customer_type: str = Query("residential"),
+    tier_id: Optional[str] = Query(None),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Suggest a rate for a new BOW based on org cost settings and target margin."""
+    """Suggest a rate for a BOW. Residential uses tier-based pricing, commercial uses cost model."""
     svc = ProfitabilityService(db)
     return await svc.suggest_rate(
         org_id=ctx.organization_id,
@@ -331,6 +333,8 @@ async def suggest_rate(
         water_type=water_type,
         service_minutes=service_minutes,
         difficulty_score=difficulty,
+        customer_type=customer_type,
+        tier_id=tier_id,
     )
 
 

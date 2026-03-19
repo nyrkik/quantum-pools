@@ -820,17 +820,84 @@ class ProfitabilityService:
     async def suggest_rate(
         self, org_id: str, gallons: int, water_type: str = "pool",
         service_minutes: int = 30, difficulty_score: float = 2.5,
+        customer_type: str = "residential", tier_id: str | None = None,
     ) -> dict:
-        """Suggest a rate for a new BOW based on org cost settings and target margin."""
-        settings = await self.get_or_create_settings(org_id)
+        """Suggest a rate for a BOW.
 
+        Residential: tier base_rate × difficulty_multiplier × volume_factor
+        Commercial: cost-based calculation with target margin
+        """
+        settings = await self.get_or_create_settings(org_id)
+        multiplier = self.difficulty_to_multiplier(difficulty_score)
+
+        # Residential: tier-based pricing
+        if customer_type == "residential":
+            from src.models.service_tier import ServiceTier
+
+            tier = None
+            if tier_id:
+                result = await self.db.execute(
+                    select(ServiceTier).where(ServiceTier.id == tier_id, ServiceTier.organization_id == org_id)
+                )
+                tier = result.scalar_one_or_none()
+
+            # Fall back to default tier
+            if not tier:
+                result = await self.db.execute(
+                    select(ServiceTier).where(
+                        ServiceTier.organization_id == org_id,
+                        ServiceTier.is_default == True,
+                        ServiceTier.is_active == True,
+                    )
+                )
+                tier = result.scalar_one_or_none()
+
+            if tier:
+                # Volume factor: ratio vs typical 15k gallon pool
+                typical_gallons = 15000
+                volume_factor = max(0.7, min(1.5, (gallons / typical_gallons) ** 0.5)) if gallons > 0 else 1.0
+
+                suggested_rate = tier.base_rate * multiplier * volume_factor
+
+                # Load all tiers for comparison
+                result = await self.db.execute(
+                    select(ServiceTier)
+                    .where(ServiceTier.organization_id == org_id, ServiceTier.is_active == True)
+                    .order_by(ServiceTier.sort_order)
+                )
+                all_tiers = result.scalars().all()
+                tier_options = []
+                for t in all_tiers:
+                    tier_rate = t.base_rate * multiplier * volume_factor
+                    tier_options.append({
+                        "tier_id": t.id,
+                        "tier_name": t.name,
+                        "tier_slug": t.slug,
+                        "base_rate": t.base_rate,
+                        "suggested_rate": round(tier_rate, 2),
+                        "is_selected": t.id == tier.id,
+                    })
+
+                return {
+                    "suggested_rate": round(suggested_rate, 2),
+                    "method": "tier",
+                    "tier_id": tier.id,
+                    "tier_name": tier.name,
+                    "base_rate": tier.base_rate,
+                    "difficulty_multiplier": round(multiplier, 2),
+                    "volume_factor": round(volume_factor, 2),
+                    "gallons": gallons,
+                    "water_type": water_type,
+                    "difficulty_score": round(difficulty_score, 2),
+                    "tier_options": tier_options,
+                }
+
+        # Commercial: cost-based
         from sqlalchemy import func
         count_result = await self.db.execute(
             select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
         )
         total_accounts = count_result.scalar() or 1
-
-        multiplier = self.difficulty_to_multiplier(difficulty_score)
         visits = 4.0
 
         chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
@@ -844,6 +911,7 @@ class ProfitabilityService:
 
         return {
             "suggested_rate": round(suggested_rate, 2),
+            "method": "cost",
             "total_cost": round(total_cost, 2),
             "chemical_cost": round(chemical_cost, 2),
             "labor_cost": round(labor_cost, 2),

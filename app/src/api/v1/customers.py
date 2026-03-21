@@ -62,6 +62,9 @@ async def create_customer_with_property(
     # Split into customer, property, and BOW fields
     property_fields = {k: data.pop(k) for k in ["address", "city", "state", "zip_code", "gate_code", "access_instructions", "dog_on_property"]}
     bow_fields = {k: data.pop(k) for k in ["water_type", "pool_type"]}
+    # Assign customer rate to the first BOW
+    if data.get("monthly_rate"):
+        bow_fields["monthly_rate"] = data["monthly_rate"]
     # Set billing address from service address if not provided
     if not data.get("billing_address"):
         data["billing_address"] = property_fields["address"]

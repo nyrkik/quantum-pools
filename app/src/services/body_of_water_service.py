@@ -8,6 +8,7 @@ from sqlalchemy import select, func
 
 from src.models.body_of_water import BodyOfWater
 from src.models.property import Property
+from src.models.customer import Customer
 from src.core.exceptions import NotFoundError
 
 
@@ -67,6 +68,11 @@ class BodyOfWaterService:
         self.db.add(bow)
         await self.db.flush()
         await self.db.refresh(bow)
+
+        # Sync customer rate
+        if bow.monthly_rate:
+            await self._sync_customer_rate(property_id)
+
         return bow
 
     async def update(self, org_id: str, bow_id: str, **kwargs) -> BodyOfWater:
@@ -78,12 +84,46 @@ class BodyOfWaterService:
                 setattr(bow, key, value)
         await self.db.flush()
         await self.db.refresh(bow)
+
+        # Sync customer rate if BOW rate changed
+        if "monthly_rate" in kwargs:
+            await self._sync_customer_rate(bow.property_id)
+
         return bow
 
     async def delete(self, org_id: str, bow_id: str) -> None:
         bow = await self.get(org_id, bow_id)
+        property_id = bow.property_id
         await self.db.delete(bow)
         await self.db.flush()
+        await self._sync_customer_rate(property_id)
+
+    async def _sync_customer_rate(self, property_id: str) -> None:
+        """Sync Customer.monthly_rate to sum of active BOW rates."""
+        result = await self.db.execute(
+            select(Property).where(Property.id == property_id)
+        )
+        prop = result.scalar_one_or_none()
+        if not prop:
+            return
+
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(BodyOfWater.monthly_rate), 0))
+            .join(Property, BodyOfWater.property_id == Property.id)
+            .where(
+                Property.customer_id == prop.customer_id,
+                BodyOfWater.is_active == True,
+            )
+        )
+        total = result.scalar() or 0
+
+        result = await self.db.execute(
+            select(Customer).where(Customer.id == prop.customer_id)
+        )
+        customer = result.scalar_one_or_none()
+        if customer:
+            customer.monthly_rate = round(total, 2)
+            await self.db.flush()
 
     async def get_bow_summary(self, org_id: str, property_id: str) -> str:
         """Return a human-readable summary like 'Pool, Spa' or '2 Pools'."""

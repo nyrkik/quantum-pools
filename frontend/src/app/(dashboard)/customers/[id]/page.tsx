@@ -314,7 +314,7 @@ export default function CustomerDetailPage({
           billing_address: custForm.billing_address || null, billing_city: custForm.billing_city || null,
           billing_state: custForm.billing_state || null, billing_zip: custForm.billing_zip || null,
           service_frequency: custForm.service_frequency || null, preferred_day: custForm.preferred_day || null,
-          billing_frequency: custForm.billing_frequency, monthly_rate: custForm.monthly_rate,
+          billing_frequency: custForm.billing_frequency,
           payment_method: custForm.payment_method || null, payment_terms_days: custForm.payment_terms_days,
           difficulty_rating: custForm.difficulty_rating, notes: custForm.notes || null,
           status: custForm.status,
@@ -1043,8 +1043,9 @@ export default function CustomerDetailPage({
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Billing</p>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Monthly Rate ($)</Label>
-                        <Input type="number" step="0.01" value={custForm.monthly_rate} onChange={(e) => setCustField("monthly_rate", parseFloat(e.target.value) || 0)} className="h-9" />
+                        <Label className="text-xs">Monthly Rate</Label>
+                        <p className="h-9 flex items-center text-sm font-medium">${fullBows.reduce((s, b) => s + (b.monthly_rate || 0), 0).toFixed(2)}/mo</p>
+                        <p className="text-[10px] text-muted-foreground">Sum of water feature rates</p>
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Payment Terms (days)</Label>

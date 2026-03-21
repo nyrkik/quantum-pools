@@ -41,7 +41,6 @@ class CustomerUpdate(BaseModel):
     service_frequency: Optional[str] = None
     preferred_day: Optional[str] = None
     billing_frequency: Optional[str] = None
-    monthly_rate: Optional[float] = None
     payment_method: Optional[str] = None
     payment_terms_days: Optional[int] = None
     difficulty_rating: Optional[int] = None

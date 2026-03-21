@@ -65,9 +65,23 @@ def estimate_volume(bow: BodyOfWater) -> int:
     if bow.pool_gallons:
         return bow.pool_gallons  # User-entered, always wins
 
+    # Type-based defaults when no data available
+    DEFAULT_GALLONS = {
+        "pool": 15000,
+        "spa": 800,
+        "hot_tub": 800,
+        "wading_pool": 800,
+        "fountain": 500,
+        "water_feature": 500,
+    }
+
     sqft = bow.pool_sqft
     if not sqft:
-        return 15000  # Default unknown
+        base = DEFAULT_GALLONS.get(bow.water_type, 15000)
+        # Commercial pools are larger
+        if bow.water_type == "pool" and bow.pool_type == "commercial":
+            base = 25000
+        return base
 
     # Average depth from shallow + deep
     shallow = bow.pool_depth_shallow

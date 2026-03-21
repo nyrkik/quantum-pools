@@ -542,7 +542,19 @@ class ProfitabilityService:
         multiplier = self.difficulty_to_multiplier(difficulty_score)
         visits = settings.visits_per_month
 
-        gallons = bow.pool_gallons or 15000
+        # Type-aware gallon defaults
+        if bow.pool_gallons:
+            gallons = bow.pool_gallons
+        elif bow.water_type in ("spa", "hot_tub"):
+            gallons = 800
+        elif bow.water_type in ("wading_pool",):
+            gallons = 800
+        elif bow.water_type in ("fountain", "water_feature"):
+            gallons = 500
+        elif customer_type == "commercial":
+            gallons = 25000
+        else:
+            gallons = 15000
         service_minutes = bow.estimated_service_minutes or 30
 
         # Chemical cost

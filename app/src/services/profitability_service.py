@@ -464,13 +464,14 @@ class ProfitabilityService:
         num_bows_at_property: int,
         customer_type: str = "residential",
         chemical_profile: Optional[ChemicalCostProfile] = None,
+        difficulty: Optional[PropertyDifficulty] = None,
     ) -> dict:
         """Compute cost breakdown for a single BOW.
 
-        Travel and overhead are split across BOWs at the same property
-        (one trip services all BOWs).
+        Residential: flat dollar adjustments per visit from difficulty factors.
+        Commercial: multiplier-based scaling from composite difficulty score.
+        Travel and overhead are split across BOWs at the same property.
         """
-        multiplier = self.difficulty_to_multiplier(difficulty_score)
         visits = settings.visits_per_month
 
         # Type-aware gallon defaults
@@ -488,13 +489,30 @@ class ProfitabilityService:
             gallons = 15000
         service_minutes = bow.estimated_service_minutes or 30
 
+        if customer_type == "commercial":
+            # Commercial: multiplier-based (0.8x to 1.6x)
+            multiplier = self.difficulty_to_multiplier(difficulty_score)
+            difficulty_adjustment = 0.0
+        else:
+            # Residential: flat dollar adjustments per visit, no multiplier
+            multiplier = 1.0
+            if difficulty:
+                difficulty_adjustment = (
+                    (difficulty.res_tree_debris or 0)
+                    + (difficulty.res_dog or 0)
+                    + (difficulty.res_customer_demands or 0)
+                    + (difficulty.res_system_effectiveness or 0)
+                ) * visits
+            else:
+                difficulty_adjustment = 0.0
+
         # Chemical cost
         if chemical_profile and chemical_profile.total_monthly > 0:
             chemical_cost = chemical_profile.total_monthly
         else:
             chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
 
-        # Labor cost (per BOW — each BOW has its own service time)
+        # Labor cost
         labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
 
         # Travel cost — split across BOWs at the property (one trip)
@@ -511,7 +529,7 @@ class ProfitabilityService:
             full_overhead = settings.residential_overhead_per_account
         overhead_cost = full_overhead / max(num_bows_at_property, 1)
 
-        total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
+        total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost + difficulty_adjustment
         revenue = bow.monthly_rate or 0.0
         profit = revenue - total_cost
         margin_pct = (profit / revenue * 100) if revenue > 0 else 0.0
@@ -530,6 +548,7 @@ class ProfitabilityService:
             "labor_cost": round(labor_cost, 2),
             "travel_cost": round(travel_cost, 2),
             "overhead_cost": round(overhead_cost, 2),
+            "difficulty_adjustment": round(difficulty_adjustment, 2),
             "total_cost": round(total_cost, 2),
             "profit": round(profit, 2),
             "margin_pct": round(margin_pct, 1),
@@ -621,6 +640,7 @@ class ProfitabilityService:
                 num_bows_at_property=prop_bow_counts[bow.property_id],
                 customer_type=customer.customer_type or "residential",
                 chemical_profile=profile,
+                difficulty=diff,
             )
             bow_costs.append(bc)
             total_chem += bc["chemical_cost"]
@@ -789,6 +809,7 @@ class ProfitabilityService:
                 num_bows_at_property=prop_bow_counts[prop.id],
                 customer_type=customer.customer_type or "residential",
                 chemical_profile=profile,
+                difficulty=diff,
             )
             cost_data["customer_id"] = customer.id
             cost_data["customer_name"] = customer.display_name_col
@@ -865,7 +886,10 @@ class ProfitabilityService:
                 typical_gallons = 15000
                 volume_factor = max(0.7, min(1.5, (gallons / typical_gallons) ** 0.5)) if gallons > 0 else 1.0
 
-                suggested_rate = tier.base_rate * multiplier * volume_factor
+                # Residential: no multiplier, use dollar adjustments
+                # difficulty_score is not used for residential pricing — adjustments come from
+                # the res_* fields on PropertyDifficulty, applied after rate is set
+                suggested_rate = tier.base_rate * volume_factor
 
                 # Load all tiers for comparison
                 result = await self.db.execute(
@@ -876,7 +900,7 @@ class ProfitabilityService:
                 all_tiers = result.scalars().all()
                 tier_options = []
                 for t in all_tiers:
-                    tier_rate = t.base_rate * multiplier * volume_factor
+                    tier_rate = t.base_rate * volume_factor
                     tier_options.append({
                         "tier_id": t.id,
                         "tier_name": t.name,
@@ -892,11 +916,10 @@ class ProfitabilityService:
                     "tier_id": tier.id,
                     "tier_name": tier.name,
                     "base_rate": tier.base_rate,
-                    "difficulty_multiplier": round(multiplier, 2),
                     "volume_factor": round(volume_factor, 2),
                     "gallons": gallons,
                     "water_type": water_type,
-                    "difficulty_score": round(difficulty_score, 2),
+                    "note": "Difficulty adjustments (tree debris, dog, etc.) are added per-visit after rate is set",
                     "tier_options": tier_options,
                     "billing_options": self._billing_options(suggested_rate, settings),
                 }

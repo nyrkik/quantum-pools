@@ -61,6 +61,12 @@ class PropertyDifficulty(Base):
     chemical_demand_score: Mapped[float] = mapped_column(Float, default=1.0)
     callback_frequency_score: Mapped[float] = mapped_column(Float, default=1.0)
 
+    # Residential dollar adjustments (per visit, added to tier base × visits_per_month)
+    res_tree_debris: Mapped[float] = mapped_column(Float, default=0.0)
+    res_dog: Mapped[float] = mapped_column(Float, default=0.0)
+    res_customer_demands: Mapped[float] = mapped_column(Float, default=0.0)
+    res_system_effectiveness: Mapped[float] = mapped_column(Float, default=0.0)
+
     # Override
     override_composite: Mapped[float | None] = mapped_column(Float)
     notes: Mapped[str | None] = mapped_column(Text)

@@ -59,6 +59,10 @@ class BodyOfWaterService:
             if wt in gal_defaults:
                 kwargs["pool_gallons"] = gal_defaults[wt]
 
+        # Don't let the new BOW's rate inflate the customer total
+        # The customer rate is the contract — adding a BOW splits it, not adds to it
+        new_bow_rate = kwargs.pop("monthly_rate", None)
+
         bow = BodyOfWater(
             id=str(uuid.uuid4()),
             organization_id=org_id,
@@ -69,10 +73,10 @@ class BodyOfWaterService:
         await self.db.flush()
         await self.db.refresh(bow)
 
-        # Sync customer rate
-        if bow.monthly_rate:
-            await self._sync_customer_rate(property_id)
+        # Reallocate customer rate across all BOWs (including new one)
+        await self._reallocate_customer_rate(property_id, org_id)
 
+        await self.db.refresh(bow)
         return bow
 
     async def update(self, org_id: str, bow_id: str, **kwargs) -> BodyOfWater:
@@ -97,6 +101,47 @@ class BodyOfWaterService:
         await self.db.delete(bow)
         await self.db.flush()
         await self._sync_customer_rate(property_id)
+
+    async def _reallocate_customer_rate(self, property_id: str, org_id: str) -> None:
+        """Reallocate customer's existing rate across all active BOWs by gallons."""
+        from src.services.profitability_service import ProfitabilityService
+
+        result = await self.db.execute(
+            select(Property).where(Property.id == property_id)
+        )
+        prop = result.scalar_one_or_none()
+        if not prop:
+            return
+
+        result = await self.db.execute(
+            select(Customer).where(Customer.id == prop.customer_id)
+        )
+        customer = result.scalar_one_or_none()
+        if not customer or not customer.monthly_rate:
+            return
+
+        # Get all active BOWs for this customer
+        all_bows_result = await self.db.execute(
+            select(BodyOfWater)
+            .join(Property, BodyOfWater.property_id == Property.id)
+            .where(
+                Property.customer_id == customer.id,
+                BodyOfWater.is_active == True,
+            )
+        )
+        all_bows = all_bows_result.scalars().all()
+
+        if not all_bows:
+            return
+
+        # Allocate by gallons
+        allocation = ProfitabilityService.allocate_rate_to_bows(customer.monthly_rate, all_bows)
+        for bow in all_bows:
+            alloc = allocation.get(bow.id, {})
+            bow.monthly_rate = alloc.get("allocated_rate", customer.monthly_rate / len(all_bows))
+            bow.rate_allocation_method = alloc.get("allocation_method", "equal")
+
+        await self.db.flush()
 
     async def _sync_customer_rate(self, property_id: str) -> None:
         """Sync Customer.monthly_rate to sum of active BOW rates."""

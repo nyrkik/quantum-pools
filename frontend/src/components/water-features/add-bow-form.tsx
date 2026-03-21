@@ -25,18 +25,19 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [waterType, setWaterType] = useState("pool");
+  const [poolType, setPoolType] = useState("residential");
   const [gallons, setGallons] = useState("");
   const [rate, setRate] = useState("");
   const [suggestedRate, setSuggestedRate] = useState<number | null>(null);
 
-  // Fetch suggested rate when form opens or type/gallons change
+  // Fetch suggested rate when form opens or type/gallons/poolType change
   useEffect(() => {
     if (!open) return;
     const gal = parseInt(gallons) || 15000;
-    api.get<{ suggested_rate: number }>(`/v1/profitability/suggest-rate?gallons=${gal}&water_type=${waterType}`)
+    api.get<{ suggested_rate: number }>(`/v1/profitability/suggest-rate?gallons=${gal}&water_type=${waterType}&customer_type=${poolType}`)
       .then((d) => setSuggestedRate(d.suggested_rate))
       .catch(() => setSuggestedRate(null));
-  }, [open, waterType, gallons]);
+  }, [open, waterType, poolType, gallons]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +46,7 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
       await api.post(`/v1/bodies-of-water/property/${propertyId}`, {
         name: name || undefined,
         water_type: waterType,
+        pool_type: poolType,
         pool_gallons: parseInt(gallons) || undefined,
         monthly_rate: parseFloat(rate) || undefined,
         estimated_service_minutes: waterType === "spa" || waterType === "hot_tub" ? 10 : 30,
@@ -52,6 +54,7 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
       toast.success("Water feature added");
       setName("");
       setWaterType("pool");
+      setPoolType("residential");
       setGallons("");
       setRate("");
       setOpen(false);
@@ -75,9 +78,19 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
   return (
     <form onSubmit={handleSubmit} className="border rounded-lg p-4 space-y-3 bg-muted/30">
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">New Water Feature</p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-xs">Type</Label>
+          <Label className="text-xs">Res / Com</Label>
+          <Select value={poolType} onValueChange={setPoolType}>
+            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="residential">Residential</SelectItem>
+              <SelectItem value="commercial">Commercial</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Water Feature</Label>
           <Select value={waterType} onValueChange={setWaterType}>
             <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -117,7 +130,7 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
         </div>
       </div>
       <div className="flex gap-2">
-        <Button type="button" variant="outline" size="sm" className="flex-1 h-8" onClick={() => { setOpen(false); setName(""); setWaterType("pool"); setGallons(""); setRate(""); }}>
+        <Button type="button" variant="outline" size="sm" className="flex-1 h-8" onClick={() => { setOpen(false); setName(""); setWaterType("pool"); setPoolType("residential"); setGallons(""); setRate(""); }}>
           Cancel
         </Button>
         <Button type="submit" size="sm" className="flex-1 h-8" disabled={saving}>

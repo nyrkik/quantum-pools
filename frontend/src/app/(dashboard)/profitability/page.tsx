@@ -73,6 +73,7 @@ export default function ProfitabilityPage() {
   const [whaleCurve, setWhaleCurve] = useState<WhaleCurvePoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableView, setTableView] = useState<"account" | "bow">("account");
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [bowGaps, setBowGaps] = useState<any[] | null>(null);
 
@@ -227,7 +228,12 @@ export default function ProfitabilityPage() {
                     dataKey="cumulative_profit_pct"
                     stroke="#2989BE"
                     strokeWidth={2}
-                    dot={false}
+                    dot={(props: Record<string, unknown>) => {
+                      const pt = whaleCurve[props.index as number];
+                      if (!pt || pt.customer_id !== hoveredId) return <circle key={props.index as number} r={0} />;
+                      return <circle key={props.index as number} cx={props.cx as number} cy={props.cy as number} r={6} fill="#2989BE" stroke="#fff" strokeWidth={2} />;
+                    }}
+                    activeDot={{ r: 6, stroke: "#fff", strokeWidth: 2 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -263,26 +269,31 @@ export default function ProfitabilityPage() {
                   />
                   <ZAxis type="number" dataKey="z" range={[40, 200]} />
                   <Tooltip
-                    formatter={(value, name) => {
-                      const v = value as number;
-                      if (name === "Revenue") return [formatCurrency(v), name];
-                      if (name === "Margin") return [`${v.toFixed(1)}%`, name];
-                      return [v.toFixed(1), "Difficulty"];
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0].payload;
+                      return (
+                        <div className="bg-background border rounded-md shadow-md px-3 py-2 text-sm">
+                          <p className="font-semibold">{d.name}</p>
+                          <p className="text-muted-foreground">{formatCurrency(d.x)}/mo · {d.y.toFixed(1)}% margin</p>
+                        </div>
+                      );
                     }}
                   />
                   <Scatter data={scatterData}>
-                    {scatterData.map((entry, i) => (
-                      <Cell
-                        key={i}
-                        fill={
-                          entry.y >= overview.target_margin_pct
-                            ? "#22c55e"
-                            : entry.y >= 0
-                            ? "#eab308"
-                            : "#ef4444"
-                        }
-                      />
-                    ))}
+                    {scatterData.map((entry, i) => {
+                      const isHovered = entry.id === hoveredId;
+                      const baseColor = entry.y >= overview.target_margin_pct ? "#22c55e" : entry.y >= 0 ? "#eab308" : "#ef4444";
+                      return (
+                        <Cell
+                          key={i}
+                          fill={isHovered ? "#2989BE" : baseColor}
+                          stroke={isHovered ? "#fff" : "none"}
+                          strokeWidth={isHovered ? 2 : 0}
+                          r={isHovered ? 8 : undefined}
+                        />
+                      );
+                    })}
                   </Scatter>
                 </ScatterChart>
               </ResponsiveContainer>
@@ -323,7 +334,7 @@ export default function ProfitabilityPage() {
               </TableHeader>
               <TableBody>
                 {overview.accounts.map((account, i) => (
-                  <TableRow key={`${account.customer_id}-${account.property_id}`} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                  <TableRow key={`${account.customer_id}-${account.property_id}`} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${hoveredId === account.customer_id ? "bg-blue-100 dark:bg-blue-900" : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`} onMouseEnter={() => setHoveredId(account.customer_id)} onMouseLeave={() => setHoveredId(null)}>
                     <TableCell>
                       <Link
                         href={`/profitability/${account.customer_id}`}
@@ -387,7 +398,7 @@ export default function ProfitabilityPage() {
               </TableHeader>
               <TableBody>
                 {bowGaps.map((gap, i) => (
-                  <TableRow key={gap.bow_id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${gap.below_target ? "bg-red-50/50 dark:bg-red-950/10" : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                  <TableRow key={gap.bow_id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${hoveredId === gap.customer_id ? "bg-blue-100 dark:bg-blue-900" : gap.below_target ? "bg-red-50/50 dark:bg-red-950/10" : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`} onMouseEnter={() => setHoveredId(gap.customer_id)} onMouseLeave={() => setHoveredId(null)}>
                     <TableCell>
                       <Link
                         href={`/customers/${gap.customer_id}`}

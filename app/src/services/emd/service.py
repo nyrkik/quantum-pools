@@ -192,12 +192,14 @@ class EMDService:
 
         # Save violations
         for v in violations:
+            title = (v.get("violation_title") or "")[:500]
+            code = (v.get("violation_code") or "")[:20]
             violation = EMDViolation(
                 id=str(uuid.uuid4()),
                 inspection_id=inspection.id,
                 facility_id=facility.id,
-                violation_code=v.get("violation_code"),
-                violation_title=v.get("violation_title"),
+                violation_code=code,
+                violation_title=title,
                 observations=v.get("observations"),
                 is_major_violation=v.get("is_major_violation", False),
             )

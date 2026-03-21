@@ -309,6 +309,54 @@ export default function AccountDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Per-BOW Breakdown */}
+      {account.bow_costs && account.bow_costs.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Per Water Feature Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {account.bow_costs.map((bc) => (
+                <div key={bc.bow_id} className={`rounded-lg border px-4 py-3 ${bc.margin_pct < 35 ? "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20" : ""}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold capitalize">{bc.bow_name || bc.water_type}</span>
+                      <span className="text-xs text-muted-foreground">{bc.gallons.toLocaleString()} gal · {bc.service_minutes} min</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium">{formatCurrency(bc.monthly_rate)}/mo</span>
+                      <Badge className={bc.margin_pct >= 35 ? "bg-green-600 text-white" : bc.margin_pct >= 15 ? "bg-amber-500 text-white" : "bg-red-600 text-white"}>
+                        {bc.margin_pct.toFixed(0)}%
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2 text-xs">
+                    {[
+                      { label: "Chemical", value: bc.chemical_cost },
+                      { label: "Labor", value: bc.labor_cost },
+                      { label: "Travel", value: bc.travel_cost },
+                      { label: "Overhead", value: bc.overhead_cost },
+                      { label: "Profit", value: bc.profit },
+                    ].map((item) => (
+                      <div key={item.label} className="text-center">
+                        <p className="text-muted-foreground">{item.label}</p>
+                        <p className={`font-medium ${item.label === "Profit" ? (item.value >= 0 ? "text-green-600" : "text-red-600") : ""}`}>
+                          {formatCurrency(item.value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  {bc.rate_gap > 0 && (
+                    <p className="text-xs text-amber-600 mt-1">Suggested: {formatCurrency(bc.suggested_rate)}/mo (+{formatCurrency(bc.rate_gap)})</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

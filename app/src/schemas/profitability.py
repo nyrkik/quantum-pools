@@ -157,6 +157,25 @@ class CostBreakdown(BaseModel):
     rate_gap: float
 
 
+class BowCost(BaseModel):
+    bow_id: str
+    bow_name: Optional[str] = None
+    water_type: str
+    gallons: int
+    service_minutes: int
+    monthly_rate: float
+    chemical_cost: float
+    labor_cost: float
+    travel_cost: float
+    overhead_cost: float
+    total_cost: float
+    profit: float
+    margin_pct: float
+    suggested_rate: float
+    rate_gap: float
+    difficulty_score: float
+
+
 class ProfitabilityAccount(BaseModel):
     customer_id: str
     customer_name: str
@@ -171,6 +190,7 @@ class ProfitabilityAccount(BaseModel):
     cost_breakdown: CostBreakdown
     margin_pct: float
     rate_per_gallon: Optional[float] = None
+    bow_costs: list[BowCost] = []
 
 
 class PortfolioMedians(BaseModel):

@@ -13,6 +13,7 @@ from src.models.customer import Customer
 from src.models.body_of_water import BodyOfWater
 from src.schemas.profitability import (
     CostBreakdown,
+    BowCost,
     ProfitabilityAccount,
     ProfitabilityOverview,
     WhaleCurvePoint,
@@ -251,6 +252,7 @@ class ProfitabilityService:
                 cost_breakdown=cost,
                 margin_pct=cost.margin_pct,
                 rate_per_gallon=rate_per_gallon,
+                bow_costs=[BowCost(**bc) for bc in bow_costs],
             ))
 
         # Sort by margin ascending (worst first)
@@ -317,6 +319,7 @@ class ProfitabilityService:
             cost_breakdown=cost,
             margin_pct=cost.margin_pct,
             rate_per_gallon=rate_per_gallon,
+            bow_costs=[BowCost(**bc) for bc in bow_costs],
         )]
 
     @staticmethod

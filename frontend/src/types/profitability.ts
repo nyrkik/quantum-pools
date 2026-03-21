@@ -136,6 +136,25 @@ export interface CostBreakdown {
   rate_gap: number;
 }
 
+export interface BowCost {
+  bow_id: string;
+  bow_name: string | null;
+  water_type: string;
+  gallons: number;
+  service_minutes: number;
+  monthly_rate: number;
+  chemical_cost: number;
+  labor_cost: number;
+  travel_cost: number;
+  overhead_cost: number;
+  total_cost: number;
+  profit: number;
+  margin_pct: number;
+  suggested_rate: number;
+  rate_gap: number;
+  difficulty_score: number;
+}
+
 export interface ProfitabilityAccount {
   customer_id: string;
   customer_name: string;
@@ -150,6 +169,7 @@ export interface ProfitabilityAccount {
   cost_breakdown: CostBreakdown;
   margin_pct: number;
   rate_per_gallon: number | null;
+  bow_costs: BowCost[];
 }
 
 export interface ProfitabilityOverview {

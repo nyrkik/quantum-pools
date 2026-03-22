@@ -158,6 +158,7 @@ export interface BowCost {
 export interface ProfitabilityAccount {
   customer_id: string;
   customer_name: string;
+  customer_type: string;
   property_id: string;
   property_address: string;
   monthly_rate: number;

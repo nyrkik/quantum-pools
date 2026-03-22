@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -221,7 +221,11 @@ export default function CustomerDetailPage({
   const [fullBows, setFullBows] = useState<BodyOfWater[]>([]);
   const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>({});
   const isTech = perms.role === "technician";
-  const [viewTab, setViewTab] = useState<"overview" | "service" | "details" | "bows" | "invoices">(isTech ? "service" : "overview");
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const validTabs = ["overview", "service", "details", "bows", "invoices"] as const;
+  const initialTab = validTabs.includes(tabParam as typeof validTabs[number]) ? (tabParam as typeof validTabs[number]) : isTech ? "service" : "overview";
+  const [viewTab, setViewTab] = useState<typeof validTabs[number]>(initialTab);
   const [editingDetails, setEditingDetails] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<"details" | null>(null);
@@ -1344,6 +1348,7 @@ export default function CustomerDetailPage({
                           techAssignment={firstTech as TechAssignment | undefined}
                           marginPct={bowProfitability[bow.id]?.margin_pct ?? null}
                           suggestedRate={bowProfitability[bow.id]?.suggested_rate ?? null}
+                          customerType={customer?.customer_type}
                           onUpdated={load}
                           onDeleted={load}
                         />

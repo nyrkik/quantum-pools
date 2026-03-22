@@ -66,6 +66,10 @@ class PropertyDifficultyUpdate(BaseModel):
     customer_demands_score: Optional[float] = Field(None, ge=1, le=5)
     chemical_demand_score: Optional[float] = Field(None, ge=1, le=5)
     callback_frequency_score: Optional[float] = Field(None, ge=1, le=5)
+    res_tree_debris: Optional[float] = None
+    res_dog: Optional[float] = None
+    res_customer_demands: Optional[float] = None
+    res_system_effectiveness: Optional[float] = None
     override_composite: Optional[float] = Field(None, ge=1, le=5)
     notes: Optional[str] = None
 
@@ -89,6 +93,10 @@ class PropertyDifficultyResponse(BaseModel):
     customer_demands_score: float
     chemical_demand_score: float
     callback_frequency_score: float
+    res_tree_debris: float = 0.0
+    res_dog: float = 0.0
+    res_customer_demands: float = 0.0
+    res_system_effectiveness: float = 0.0
     override_composite: Optional[float] = None
     notes: Optional[str] = None
     composite_score: float = 0.0
@@ -179,6 +187,7 @@ class BowCost(BaseModel):
 class ProfitabilityAccount(BaseModel):
     customer_id: str
     customer_name: str
+    customer_type: str = "residential"
     property_id: str
     property_address: str
     monthly_rate: float

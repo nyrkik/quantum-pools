@@ -241,6 +241,7 @@ class ProfitabilityService:
             accounts.append(ProfitabilityAccount(
                 customer_id=customer.id,
                 customer_name=customer.display_name_col,
+                customer_type=customer.customer_type or "residential",
                 property_id=prop.id if prop else "",
                 property_address=prop.address if prop else "",
                 monthly_rate=cost.revenue,
@@ -813,6 +814,7 @@ class ProfitabilityService:
             )
             cost_data["customer_id"] = customer.id
             cost_data["customer_name"] = customer.display_name_col
+            cost_data["customer_type"] = customer.customer_type or "residential"
             cost_data["property_address"] = prop.address
             cost_data["below_target"] = cost_data["margin_pct"] < settings.target_margin_pct
             gaps.append(cost_data)

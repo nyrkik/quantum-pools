@@ -145,10 +145,13 @@ export default function AccountDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold">{account.customer_name}</h1>
           <p className="text-muted-foreground">{account.property_address}</p>
         </div>
+        <Link href={`/customers/${account.customer_id}?tab=bows`}>
+          <Button variant="outline" size="sm">Water Features</Button>
+        </Link>
       </div>
 
       {/* Rate comparison */}

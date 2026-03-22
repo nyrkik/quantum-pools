@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,6 +134,13 @@ const DIM_SOURCE_COLORS: Record<string, string> = {
 const numOrNull = (v: string) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
 const intOrNull = (v: string) => { const n = parseInt(v); return isNaN(n) ? null : n; };
 
+interface DifficultyAdjustments {
+  res_tree_debris: number;
+  res_dog: number;
+  res_customer_demands: number;
+  res_system_effectiveness: number;
+}
+
 interface BowTileProps {
   bow: BodyOfWater;
   propertyId: string;
@@ -141,13 +148,39 @@ interface BowTileProps {
   techAssignment?: TechAssignment;
   suggestedRate?: number | null;
   marginPct?: number | null;
+  customerType?: string;
   onUpdated: () => void;
   onDeleted: () => void;
 }
 
-export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate, marginPct, onUpdated, onDeleted }: BowTileProps) {
+export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate, marginPct, customerType, onUpdated, onDeleted }: BowTileProps) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...bow });
+  const [diffAdj, setDiffAdj] = useState<DifficultyAdjustments | null>(null);
+  const [diffSaving, setDiffSaving] = useState(false);
+
+  // Load difficulty adjustments
+  const isResidential = customerType !== "commercial";
+  useEffect(() => {
+    if (!isResidential) return;
+    api.get<{ res_tree_debris: number; res_dog: number; res_customer_demands: number; res_system_effectiveness: number }>(`/v1/profitability/properties/${propertyId}/difficulty`)
+      .then((d) => setDiffAdj({ res_tree_debris: d.res_tree_debris || 0, res_dog: d.res_dog || 0, res_customer_demands: d.res_customer_demands || 0, res_system_effectiveness: d.res_system_effectiveness || 0 }))
+      .catch(() => setDiffAdj({ res_tree_debris: 0, res_dog: 0, res_customer_demands: 0, res_system_effectiveness: 0 }));
+  }, [propertyId, isResidential]);
+
+  const saveDiffAdj = async (field: string, value: number) => {
+    setDiffSaving(true);
+    try {
+      await api.put(`/v1/profitability/properties/${propertyId}/difficulty`, { [field]: value });
+      setDiffAdj(prev => prev ? { ...prev, [field]: value } : null);
+      onUpdated();
+    } catch (e) {
+      toast.error("Failed to save adjustment");
+      console.error("saveDiffAdj error:", e);
+    } finally {
+      setDiffSaving(false);
+    }
+  };
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -663,6 +696,47 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
           )}
         </div>
       </div>
+
+      {/* Residential difficulty adjustments */}
+      {isResidential && diffAdj && (
+        <div className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Cost Adjustments (per visit)</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {([
+              { key: "res_tree_debris", label: "Tree Debris", options: [{ v: 0, l: "None" }, { v: 5, l: "+$5" }, { v: 12, l: "+$12" }] },
+              { key: "res_dog", label: "Dog", options: [{ v: 0, l: "None" }, { v: 3, l: "+$3" }, { v: 5, l: "+$5" }] },
+              { key: "res_customer_demands", label: "Demands", options: [{ v: 0, l: "None" }, { v: 5, l: "+$5" }, { v: 10, l: "+$10" }] },
+              { key: "res_system_effectiveness", label: "System", options: [{ v: 0, l: "Good" }, { v: 4, l: "+$4" }, { v: 8, l: "+$8" }] },
+            ] as const).map((factor) => {
+              const current = diffAdj[factor.key as keyof DifficultyAdjustments];
+              return (
+                <div key={factor.key} className="space-y-1">
+                  <span className="text-[9px] text-muted-foreground">{factor.label}</span>
+                  <div className="flex gap-0.5">
+                    {factor.options.map((opt) => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        disabled={diffSaving}
+                        onClick={() => saveDiffAdj(factor.key, opt.v)}
+                        className={`flex-1 text-[10px] py-1 rounded border cursor-pointer transition-colors ${
+                          current === opt.v
+                            ? opt.v === 0
+                              ? "bg-green-100 text-green-700 border-green-300 dark:bg-green-950 dark:text-green-400 dark:border-green-800 font-medium"
+                              : "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800 font-medium"
+                            : "bg-background text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                        }`}
+                      >
+                        {opt.l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Two-column grid for category tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

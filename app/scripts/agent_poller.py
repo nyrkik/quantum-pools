@@ -15,18 +15,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 60  # seconds
+HEARTBEAT_EVERY = 30  # log heartbeat every N cycles (~30 min)
 
 
 async def main():
     from src.services.customer_agent import run_poll_cycle
 
     logger.info("Customer Agent Poller started")
+    cycle = 0
 
     while True:
         try:
             count = await run_poll_cycle()
             if count > 0:
                 logger.info(f"Processed {count} emails")
+            cycle += 1
+            if cycle % HEARTBEAT_EVERY == 0:
+                logger.info(f"Heartbeat: {cycle} cycles, no errors")
         except Exception as e:
             logger.error(f"Poll cycle error: {e}")
 

@@ -6,7 +6,7 @@ import json
 import email
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
@@ -19,6 +19,7 @@ from twilio.rest import Client as TwilioClient
 from sqlalchemy import select
 from src.core.database import get_db_context
 from src.models.agent_message import AgentMessage
+from src.models.agent_action import AgentAction
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,14 @@ When classifying emails, respond with JSON:
   "summary": "one line summary",
   "needs_approval": true/false,
   "draft_response": "the response to send",
-  "internal_note": "note for the team if any"
+  "internal_note": "note for the team if any",
+  "actions": [
+    {
+      "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|other",
+      "description": "short description of what needs to happen",
+      "due_days": 1
+    }
+  ]
 }
 
 Guidelines:
@@ -57,7 +65,9 @@ Guidelines:
 - Draft responses should be warm, professional, concise. Sign as "Sapphire Pools" not a specific person.
 - Never promise specific dates/times without approval
 - If the email mentions a property name you recognize, include it in the response
-- Keep responses under 3 sentences unless the situation requires more"""
+- Keep responses under 3 sentences unless the situation requires more
+- "actions" array: extract ANY follow-up work the team needs to do (send a bid, schedule a visit, call back, repair something, change schedule). Include due_days (business days). Leave empty [] if no action needed.
+- Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)"""
 
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
@@ -269,6 +279,23 @@ async def process_incoming_email(uid: str, msg):
             notes=result.get("internal_note"),
         )
         db.add(agent_msg)
+        await db.flush()
+
+        # Create action items if any
+        actions = result.get("actions", [])
+        for action in actions:
+            if not action.get("description"):
+                continue
+            due_days = action.get("due_days", 3)
+            due_date = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
+            db.add(AgentAction(
+                agent_message_id=agent_msg.id,
+                action_type=action.get("action_type", "other"),
+                description=action["description"],
+                due_date=due_date,
+                status="open",
+            ))
+
         await db.commit()
 
         needs_approval = result.get("needs_approval", True)

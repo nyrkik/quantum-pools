@@ -33,6 +33,7 @@ import {
   Map,
   Menu,
   Code2,
+  Bot,
 } from "lucide-react";
 
 const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
@@ -47,6 +48,7 @@ const navItems = [
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
+  { href: "/agent", label: "Agent", icon: Bot, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 

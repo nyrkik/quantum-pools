@@ -15,6 +15,7 @@ from src.models.emd_violation import EMDViolation
 from src.models.property import Property
 from src.models.customer import Customer
 from src.models.agent_message import AgentMessage
+from src.models.agent_action import AgentAction
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -196,38 +197,349 @@ async def unmatch_facility(
 
 # --- Agent Message Log ---
 
+def _serialize_agent_msg(m: AgentMessage, include_body: bool = False) -> dict:
+    d = {
+        "id": m.id,
+        "direction": m.direction,
+        "from_email": m.from_email,
+        "to_email": m.to_email,
+        "subject": m.subject,
+        "category": m.category,
+        "urgency": m.urgency,
+        "status": m.status,
+        "customer_name": m.customer_name,
+        "draft_response": m.draft_response,
+        "final_response": m.final_response,
+        "approved_by": m.approved_by,
+        "notes": m.notes,
+        "received_at": m.received_at.isoformat() if m.received_at else None,
+        "approved_at": m.approved_at.isoformat() if m.approved_at else None,
+        "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+    }
+    if include_body:
+        d["body"] = m.body
+    return d
+
+
 @router.get("/agent-messages")
 async def list_agent_messages(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
-    """List recent agent messages."""
-    query = select(AgentMessage).order_by(desc(AgentMessage.received_at)).limit(limit)
+    """List agent messages with pagination."""
+    base = select(AgentMessage)
     if status:
-        query = query.where(AgentMessage.status == status)
+        base = base.where(AgentMessage.status == status)
+    if category:
+        base = base.where(AgentMessage.category == category)
+    if search:
+        q = f"%{search}%"
+        base = base.where(
+            AgentMessage.from_email.ilike(q)
+            | AgentMessage.subject.ilike(q)
+            | AgentMessage.customer_name.ilike(q)
+        )
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    result = await db.execute(base.order_by(desc(AgentMessage.received_at)).offset(offset).limit(limit))
+    return {
+        "items": [_serialize_agent_msg(m) for m in result.scalars().all()],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/agent-stats")
+async def get_agent_stats(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent message statistics."""
+    from datetime import datetime, timezone, timedelta
+
+    total = (await db.execute(select(func.count(AgentMessage.id)))).scalar() or 0
+
+    status_counts = {}
+    for s in ("pending", "sent", "auto_sent", "rejected", "ignored"):
+        c = (await db.execute(
+            select(func.count(AgentMessage.id)).where(AgentMessage.status == s)
+        )).scalar() or 0
+        status_counts[s] = c
+
+    cat_result = await db.execute(
+        select(AgentMessage.category, func.count(AgentMessage.id))
+        .where(AgentMessage.category.isnot(None))
+        .group_by(AgentMessage.category)
+    )
+    by_category = {row[0]: row[1] for row in cat_result.all()}
+
+    urg_result = await db.execute(
+        select(AgentMessage.urgency, func.count(AgentMessage.id))
+        .where(AgentMessage.urgency.isnot(None))
+        .group_by(AgentMessage.urgency)
+    )
+    by_urgency = {row[0]: row[1] for row in urg_result.all()}
+
+    since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent = (await db.execute(
+        select(func.count(AgentMessage.id)).where(AgentMessage.received_at >= since_24h)
+    )).scalar() or 0
+
+    # Action item counts
+    open_actions = (await db.execute(
+        select(func.count(AgentAction.id)).where(AgentAction.status.in_(("open", "in_progress")))
+    )).scalar() or 0
+    overdue_actions = (await db.execute(
+        select(func.count(AgentAction.id)).where(
+            AgentAction.status.in_(("open", "in_progress")),
+            AgentAction.due_date < datetime.now(timezone.utc),
+        )
+    )).scalar() or 0
+
+    # Avg response time for sent messages (seconds)
+    from sqlalchemy import extract
+    avg_result = await db.execute(
+        select(func.avg(extract("epoch", AgentMessage.sent_at) - extract("epoch", AgentMessage.received_at)))
+        .where(AgentMessage.status.in_(("sent", "auto_sent")), AgentMessage.sent_at.isnot(None))
+    )
+    avg_response_sec = avg_result.scalar()
+
+    # Stale pending count (> 30 min)
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    stale_pending = (await db.execute(
+        select(func.count(AgentMessage.id)).where(
+            AgentMessage.status == "pending",
+            AgentMessage.received_at < stale_cutoff,
+        )
+    )).scalar() or 0
+
+    return {
+        "total": total,
+        **status_counts,
+        "by_category": by_category,
+        "by_urgency": by_urgency,
+        "recent_24h": recent,
+        "open_actions": open_actions,
+        "overdue_actions": overdue_actions,
+        "avg_response_seconds": round(avg_response_sec) if avg_response_sec else None,
+        "stale_pending": stale_pending,
+    }
+
+
+def _serialize_action(a: AgentAction) -> dict:
+    return {
+        "id": a.id,
+        "agent_message_id": a.agent_message_id,
+        "action_type": a.action_type,
+        "description": a.description,
+        "assigned_to": a.assigned_to,
+        "due_date": a.due_date.isoformat() if a.due_date else None,
+        "status": a.status,
+        "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+
+
+@router.get("/agent-messages/{message_id}")
+async def get_agent_message(
+    message_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get full agent message detail."""
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    d = _serialize_agent_msg(msg, include_body=True)
+    # Include actions
+    actions_result = await db.execute(
+        select(AgentAction).where(AgentAction.agent_message_id == message_id).order_by(AgentAction.created_at)
+    )
+    d["actions"] = [_serialize_action(a) for a in actions_result.scalars().all()]
+    # Response time
+    if msg.sent_at and msg.received_at:
+        d["response_time_seconds"] = int((msg.sent_at - msg.received_at).total_seconds())
+    else:
+        d["response_time_seconds"] = None
+    # Waiting time for pending
+    if msg.status == "pending" and msg.received_at:
+        from datetime import datetime, timezone
+        d["waiting_seconds"] = int((datetime.now(timezone.utc) - msg.received_at).total_seconds())
+    else:
+        d["waiting_seconds"] = None
+    return d
+
+
+class ApproveBody(BaseModel):
+    response_text: Optional[str] = None
+
+
+@router.post("/agent-messages/{message_id}/approve")
+async def approve_agent_message(
+    message_id: str,
+    body: ApproveBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve and send an agent message from the dashboard."""
+    from datetime import datetime, timezone
+    from src.services.customer_agent import send_email_response
+
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.status not in ("pending",):
+        raise HTTPException(status_code=400, detail=f"Cannot approve message with status '{msg.status}'")
+
+    response_text = body.response_text or msg.draft_response
+    if not response_text:
+        raise HTTPException(status_code=400, detail="No response text provided")
+
+    success = await send_email_response(msg.from_email, msg.subject or "", response_text)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send email")
+
+    now = datetime.now(timezone.utc)
+    msg.status = "sent"
+    msg.final_response = response_text
+    msg.approved_by = f"{ctx.user.first_name} {ctx.user.last_name}"
+    msg.approved_at = now
+    msg.sent_at = now
+    await db.commit()
+
+    return {"sent": True, "to": msg.from_email}
+
+
+@router.post("/agent-messages/{message_id}/reject")
+async def reject_agent_message(
+    message_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject an agent message."""
+    from datetime import datetime, timezone
+
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.status not in ("pending",):
+        raise HTTPException(status_code=400, detail=f"Cannot reject message with status '{msg.status}'")
+
+    msg.status = "rejected"
+    msg.approved_by = f"{ctx.user.first_name} {ctx.user.last_name}"
+    msg.approved_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {"rejected": True}
+
+
+# --- Agent Actions ---
+
+@router.get("/agent-actions")
+async def list_agent_actions(
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List agent action items."""
+    query = select(AgentAction, AgentMessage).join(
+        AgentMessage, AgentAction.agent_message_id == AgentMessage.id
+    ).order_by(
+        # Open first, then by due date
+        desc(AgentAction.status.in_(("open", "in_progress"))),
+        AgentAction.due_date.asc().nulls_last(),
+    ).limit(limit)
+    if status:
+        query = query.where(AgentAction.status == status)
     result = await db.execute(query)
-    messages = result.scalars().all()
+    rows = result.all()
     return [
         {
-            "id": m.id,
-            "direction": m.direction,
-            "from_email": m.from_email,
-            "to_email": m.to_email,
-            "subject": m.subject,
-            "category": m.category,
-            "urgency": m.urgency,
-            "status": m.status,
-            "customer_name": m.customer_name,
-            "draft_response": m.draft_response,
-            "final_response": m.final_response,
-            "approved_by": m.approved_by,
-            "received_at": m.received_at.isoformat() if m.received_at else None,
-            "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+            **_serialize_action(action),
+            "from_email": msg.from_email,
+            "customer_name": msg.customer_name,
+            "subject": msg.subject,
         }
-        for m in messages
+        for action, msg in rows
     ]
+
+
+class CreateActionBody(BaseModel):
+    agent_message_id: str
+    action_type: str
+    description: str
+    assigned_to: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+@router.post("/agent-actions")
+async def create_agent_action(
+    body: CreateActionBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually create an action item."""
+    from datetime import datetime, timezone
+    due = datetime.fromisoformat(body.due_date) if body.due_date else None
+    action = AgentAction(
+        agent_message_id=body.agent_message_id,
+        action_type=body.action_type,
+        description=body.description,
+        assigned_to=body.assigned_to,
+        due_date=due,
+        status="open",
+    )
+    db.add(action)
+    await db.commit()
+    await db.refresh(action)
+    return _serialize_action(action)
+
+
+class UpdateActionBody(BaseModel):
+    status: Optional[str] = None
+    assigned_to: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+@router.put("/agent-actions/{action_id}")
+async def update_agent_action(
+    action_id: str,
+    body: UpdateActionBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update an action item (status, assignment, etc)."""
+    from datetime import datetime, timezone
+    result = await db.execute(select(AgentAction).where(AgentAction.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    if body.status is not None:
+        action.status = body.status
+        if body.status == "done":
+            action.completed_at = datetime.now(timezone.utc)
+        elif body.status in ("open", "in_progress"):
+            action.completed_at = None
+    if body.assigned_to is not None:
+        action.assigned_to = body.assigned_to
+    if body.description is not None:
+        action.description = body.description
+    if body.due_date is not None:
+        action.due_date = datetime.fromisoformat(body.due_date) if body.due_date else None
+
+    await db.commit()
+    return _serialize_action(action)
 
 
 # --- Twilio SMS Webhook ---

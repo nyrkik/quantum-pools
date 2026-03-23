@@ -218,39 +218,17 @@ function MemberDetail({
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-lg">{member.first_name} {member.last_name}</p>
-          <p className="text-sm text-muted-foreground truncate">{member.email}</p>
           <div className="flex items-center gap-1.5 mt-1">
             <Badge variant={roleBadgeVariant(member.role)}>{ROLE_LABELS[member.role]}</Badge>
-            {member.is_verified ? (
-              <Badge variant="outline" className="border-green-400 text-green-600 text-[10px]">
-                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
-                <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
-              </Badge>
-            )}
             {!member.is_active && (
               <Badge variant="destructive" className="text-[10px]">Deactivated</Badge>
             )}
           </div>
         </div>
-      </div>
-
-      {/* Edit / Save bar */}
-      <div className="flex items-center justify-between border-b pb-3">
-        {!editing ? (
+        {!editing && (
           <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-            <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit Profile
+            <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit
           </Button>
-        ) : (
-          <div className="flex gap-2">
-            <Button size="sm" onClick={handleSave} disabled={saving || !isDirty}>
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Check className="h-3.5 w-3.5 mr-1.5" />}
-              Save
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleCancel}>Cancel</Button>
-          </div>
         )}
       </div>
 
@@ -279,7 +257,40 @@ function MemberDetail({
 
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Email</Label>
-          <p className="text-sm">{member.email}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm">{member.email}</p>
+            {member.is_verified ? (
+              <Badge variant="outline" className="border-green-400 text-green-600 text-[10px]">
+                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
+              </Badge>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
+                  <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs text-muted-foreground hover:text-primary"
+                  disabled={resending}
+                  onClick={async () => {
+                    setResending(true);
+                    try {
+                      await api.post(`/v1/team/${member.id}/resend-invite`, {});
+                      toast.success("Invite email resent");
+                    } catch {
+                      toast.error("Failed to resend invite");
+                    } finally {
+                      setResending(false);
+                    }
+                  }}
+                >
+                  {resending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Mail className="h-3 w-3 mr-1" />}
+                  Resend
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="space-y-1">
@@ -367,10 +378,6 @@ function MemberDetail({
             <p className={!member.is_active ? "text-red-600 font-medium" : ""}>{member.is_active ? "Active" : "Deactivated"}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Verification</p>
-            <p className={!member.is_verified ? "text-amber-600" : ""}>{member.is_verified ? "Verified" : "Pending setup"}</p>
-          </div>
-          <div>
             <p className="text-xs text-muted-foreground">Last Login</p>
             <p>{member.last_login ? formatDate(member.last_login) : "Never"}</p>
           </div>
@@ -379,28 +386,18 @@ function MemberDetail({
             <p>{new Date(member.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
           </div>
         </div>
-        {!member.is_verified && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={resending}
-            onClick={async () => {
-              setResending(true);
-              try {
-                await api.post(`/v1/team/${member.id}/resend-invite`, {});
-                toast.success("Invite email resent");
-              } catch {
-                toast.error("Failed to resend invite");
-              } finally {
-                setResending(false);
-              }
-            }}
-          >
-            {resending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Mail className="h-3.5 w-3.5 mr-1.5" />}
-            Resend Invite Email
-          </Button>
-        )}
       </div>
+
+      {/* Save / Cancel — only visible when dirty */}
+      {isDirty && (
+        <div className="flex gap-2 pt-2 border-t sticky bottom-0 bg-background pb-2">
+          <Button className="flex-1" onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+            Save Changes
+          </Button>
+          <Button variant="ghost" onClick={handleCancel}>Cancel</Button>
+        </div>
+      )}
     </div>
   );
 }

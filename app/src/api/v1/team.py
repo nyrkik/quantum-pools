@@ -152,13 +152,16 @@ async def resend_invite(
     if member.user.is_verified:
         raise HTTPException(status_code=400, detail="User has already set up their account")
 
-    # Generate new token
-    member.user.verification_token = secrets.token_urlsafe(48)
-    await db.commit()
+    # Reuse existing token if present, only generate new if missing
+    if not member.user.verification_token:
+        member.user.verification_token = secrets.token_urlsafe(48)
+        await db.commit()
 
     try:
         await _send_invite_email(member.user, ctx.organization_id, db)
     except Exception as e:
+        import logging, traceback
+        logging.getLogger(__name__).error(f"Resend invite failed: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
     return {"sent": True}

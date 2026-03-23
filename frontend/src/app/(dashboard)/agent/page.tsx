@@ -989,7 +989,7 @@ export default function AgentPage() {
 
       {/* Detail sheet */}
       <Sheet open={!!selectedId} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto px-4 sm:px-6">
           <SheetHeader>
             <SheetTitle className="text-lg">
               {messages.find((m) => m.id === selectedId)?.subject || "Message Detail"}

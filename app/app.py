@@ -3,6 +3,9 @@
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
 
 import sentry_sdk
 from fastapi import FastAPI, Request

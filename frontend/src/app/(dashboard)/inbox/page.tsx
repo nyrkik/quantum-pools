@@ -991,103 +991,138 @@ export default function AgentPage() {
         </>
       )}
 
-      {activeTab === "actions" && (
-        <Card className="shadow-sm">
-          <CardContent className="p-0">
-            {actions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <CheckCircle2 className="h-10 w-10 mb-3 opacity-40" />
-                <p className="text-sm">All caught up — no open actions</p>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {actions.map((a) => {
-                  const overdue = isOverdue(a.due_date);
-                  return (
-                    <div
-                      key={a.id}
-                      className={`flex items-start gap-3 px-4 py-3 ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}
-                    >
-                      <button
-                        className="mt-0.5 flex-shrink-0"
-                        onClick={async () => {
-                          const newStatus = a.status === "done" ? "open" : "done";
-                          try {
-                            await api.put(`/v1/admin/agent-actions/${a.id}`, { status: newStatus });
-                            load();
-                          } catch { toast.error("Failed to update"); }
-                        }}
-                      >
-                        <ActionStatusIcon status={a.status} />
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <ActionTypeBadge type={a.action_type} />
-                          {overdue && <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>}
-                          {a.due_date && (
-                            <span className={`text-[10px] ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
-                              {formatDueDate(a.due_date)}
-                            </span>
-                          )}
+      {activeTab === "actions" && (() => {
+        // Group actions by parent message (event)
+        const grouped = new Map<string, { label: string; from: string; actions: AgentAction[] }>();
+        for (const a of actions) {
+          const key = a.agent_message_id;
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              label: a.subject || "Unknown",
+              from: a.customer_name || a.from_email || "",
+              actions: [],
+            });
+          }
+          grouped.get(key)!.actions.push(a);
+        }
+        const groups = Array.from(grouped.entries());
+
+        return (
+          <Card className="shadow-sm">
+            <CardContent className="p-0">
+              {actions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                  <CheckCircle2 className="h-10 w-10 mb-3 opacity-40" />
+                  <p className="text-sm">All caught up — no open actions</p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {groups.map(([msgId, group]) => {
+                    const doneCount = group.actions.filter(a => a.status === "done").length;
+                    const hasOverdue = group.actions.some(a => a.status !== "done" && a.status !== "cancelled" && isOverdue(a.due_date));
+                    return (
+                      <div key={msgId} className={hasOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}>
+                        {/* Event header */}
+                        <div className="flex items-center justify-between px-4 pt-3 pb-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className="text-sm font-medium truncate">{group.from}</p>
+                            <span className="text-xs text-muted-foreground truncate hidden sm:inline">— {group.label}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="text-[10px] text-muted-foreground">{doneCount}/{group.actions.length}</span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-primary"
+                              title="View message"
+                              onClick={() => { setSelectedId(msgId); setActiveTab("inbox"); }}
+                            >
+                              <Mail className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </div>
-                        <p className={`text-sm mt-0.5 ${a.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-                          {a.description}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                          <span>{a.customer_name || a.from_email}</span>
-                          <Select
-                            value={a.assigned_to || ""}
-                            onValueChange={async (v) => {
-                              try {
-                                await api.put(`/v1/admin/agent-actions/${a.id}`, { assigned_to: v });
-                                load();
-                              } catch { toast.error("Failed to assign"); }
-                            }}
-                          >
-                            <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
-                              <SelectValue placeholder="Assign..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {TEAM_MEMBERS.map((name) => (
-                                <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        {/* Actions under this event */}
+                        <div className="px-4 pb-3 space-y-1">
+                          {group.actions.map((a) => {
+                            const overdue = a.status !== "done" && a.status !== "cancelled" && isOverdue(a.due_date);
+                            return (
+                              <div
+                                key={a.id}
+                                className={`flex items-start gap-2 py-1.5 pl-2 rounded ${overdue ? "bg-red-50 dark:bg-red-950/20" : ""}`}
+                              >
+                                <button
+                                  className="mt-0.5 flex-shrink-0"
+                                  onClick={async () => {
+                                    const newStatus = a.status === "done" ? "open" : "done";
+                                    try {
+                                      await api.put(`/v1/admin/agent-actions/${a.id}`, { status: newStatus });
+                                      load();
+                                    } catch { toast.error("Failed to update"); }
+                                  }}
+                                >
+                                  <ActionStatusIcon status={a.status} />
+                                </button>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <ActionTypeBadge type={a.action_type} />
+                                    {overdue && <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>}
+                                    {a.due_date && (
+                                      <span className={`text-[10px] ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+                                        {formatDueDate(a.due_date)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className={`text-sm mt-0.5 ${a.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+                                    {a.description}
+                                  </p>
+                                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                                    <Select
+                                      value={a.assigned_to || ""}
+                                      onValueChange={async (v) => {
+                                        try {
+                                          await api.put(`/v1/admin/agent-actions/${a.id}`, { assigned_to: v });
+                                          load();
+                                        } catch { toast.error("Failed to assign"); }
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
+                                        <SelectValue placeholder="Assign..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {TEAM_MEMBERS.map((name) => (
+                                          <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 text-muted-foreground hover:text-destructive flex-shrink-0"
+                                  title="Cancel action"
+                                  onClick={async () => {
+                                    try {
+                                      await api.put(`/v1/admin/agent-actions/${a.id}`, { status: "cancelled" });
+                                      load();
+                                    } catch { toast.error("Failed to cancel"); }
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-muted-foreground hover:text-primary"
-                          title="View message"
-                          onClick={() => { setSelectedId(a.agent_message_id); setActiveTab("inbox"); }}
-                        >
-                          <Mail className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                          title="Cancel action"
-                          onClick={async () => {
-                            try {
-                              await api.put(`/v1/admin/agent-actions/${a.id}`, { status: "cancelled" });
-                              load();
-                            } catch { toast.error("Failed to cancel"); }
-                          }}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Detail sheet */}
       <Sheet open={!!selectedId} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>

@@ -691,7 +691,7 @@ export default function AgentPage() {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <Bot className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Customer Agent</h1>
+        <h1 className="text-2xl font-bold">Inbox</h1>
       </div>
 
       {/* Stats */}

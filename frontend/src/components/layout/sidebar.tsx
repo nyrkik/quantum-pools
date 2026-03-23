@@ -48,7 +48,7 @@ const navItems = [
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
-  { href: "/agent", label: "Agent", icon: Bot, check: "canViewSettings" as keyof Permissions },
+  { href: "/agent", label: "Inbox", icon: Bot, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 

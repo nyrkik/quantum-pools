@@ -706,6 +706,18 @@ export default function AgentPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"inbox" | "actions">("inbox");
+  const [suggestion, setSuggestion] = useState<{ id: string; action_type: string; description: string; reasoning: string } | null>(null);
+
+  const handleToggleAction = async (actionId: string, currentStatus: string) => {
+    const newStatus = currentStatus === "done" ? "open" : "done";
+    try {
+      const result = await api.put<{ suggestion?: { id: string; action_type: string; description: string; reasoning: string } }>(`/v1/admin/agent-actions/${actionId}`, { status: newStatus });
+      if (result.suggestion) {
+        setSuggestion(result.suggestion);
+      }
+      load();
+    } catch { toast.error("Failed to update"); }
+  };
 
   const totalPages = Math.ceil(totalMessages / PAGE_SIZE);
 
@@ -857,6 +869,52 @@ export default function AgentPage() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {/* AI Suggestion banner */}
+      {suggestion && (
+        <Card className="shadow-sm border-l-4 border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-start gap-3">
+              <Bot className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Suggested next step</p>
+                <p className="text-sm mt-0.5">{suggestion.description}</p>
+                <p className="text-xs text-muted-foreground mt-1">{suggestion.reasoning}</p>
+              </div>
+              <div className="flex gap-1.5 flex-shrink-0">
+                <Button
+                  size="sm"
+                  className="h-7"
+                  onClick={async () => {
+                    try {
+                      await api.put(`/v1/admin/agent-actions/${suggestion.id}`, { status: "open" });
+                      toast.success("Action accepted");
+                      setSuggestion(null);
+                      load();
+                    } catch { toast.error("Failed"); }
+                  }}
+                >
+                  Accept
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7"
+                  onClick={async () => {
+                    try {
+                      await api.put(`/v1/admin/agent-actions/${suggestion.id}`, { status: "cancelled" });
+                      setSuggestion(null);
+                      load();
+                    } catch { toast.error("Failed"); }
+                  }}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Tab toggle */}
@@ -1052,13 +1110,7 @@ export default function AgentPage() {
                               >
                                 <button
                                   className="mt-0.5 flex-shrink-0"
-                                  onClick={async () => {
-                                    const newStatus = a.status === "done" ? "open" : "done";
-                                    try {
-                                      await api.put(`/v1/admin/agent-actions/${a.id}`, { status: newStatus });
-                                      load();
-                                    } catch { toast.error("Failed to update"); }
-                                  }}
+                                  onClick={() => handleToggleAction(a.id, a.status)}
                                 >
                                   <ActionStatusIcon status={a.status} />
                                 </button>

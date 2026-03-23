@@ -587,6 +587,8 @@ async def update_agent_action(
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
+    was_not_done = action.status != "done"
+
     if body.status is not None:
         action.status = body.status
         if body.status == "done":
@@ -601,7 +603,38 @@ async def update_agent_action(
         action.due_date = datetime.fromisoformat(body.due_date) if body.due_date else None
 
     await db.commit()
-    return _serialize_action(action)
+
+    # If just marked done, evaluate if a follow-up action is needed
+    suggestion = None
+    if body.status == "done" and was_not_done:
+        from src.services.customer_agent import evaluate_next_action
+        try:
+            rec = await evaluate_next_action(action_id)
+            if rec:
+                due_days = rec.get("due_days", 3)
+                due_date = datetime.now(timezone.utc) + __import__("datetime").timedelta(days=due_days) if due_days else None
+                suggested = AgentAction(
+                    agent_message_id=rec["agent_message_id"],
+                    action_type=rec["action_type"],
+                    description=rec["description"],
+                    due_date=due_date,
+                    status="suggested",
+                )
+                db.add(suggested)
+                await db.commit()
+                await db.refresh(suggested)
+                suggestion = {
+                    **_serialize_action(suggested),
+                    "reasoning": rec.get("reasoning", ""),
+                }
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Next action eval failed: {e}")
+
+    result = _serialize_action(action)
+    if suggestion:
+        result["suggestion"] = suggestion
+    return result
 
 
 # --- Twilio SMS Webhook ---

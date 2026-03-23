@@ -84,8 +84,9 @@ CRITICAL TONE RULES — follow these exactly:
 - Don't over-promise urgency. "We'll look into this" or "we'll follow up" is fine — avoid "prioritizing", "right away", "ASAP" unless truly critical.
 - Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines, then the signature. Use \\n for line breaks in the JSON string.
 - Always end with this exact signature (no variations):\\n\\nBest,\\nThe Sapphire Pools Team\\ncontact@sapphire-pools.com
-- "actions" array: extract ANY follow-up work the team needs to do (send a bid, schedule a visit, call back, repair something, change schedule). Include due_days (business days). Leave empty [] if no action needed.
-- Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)"""
+- "actions" array: extract follow-up work the team needs to do. ONE action per distinct task — do NOT split a single task into steps. For example, "inspect pool and report back" is ONE action, not two. Include due_days (business days). Leave empty [] if no action needed.
+- Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)
+- Keep action descriptions concise — what needs to happen, not how to do it"""
 
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
@@ -1019,6 +1020,105 @@ async def save_discovered_contact(agent_msg_id: str):
 
         if updated:
             await db.commit()
+
+
+async def evaluate_next_action(action_id: str) -> dict | None:
+    """When an action is completed, use Claude to evaluate if a follow-up is needed.
+    Returns a recommended action dict or None."""
+    async with get_db_context() as db:
+        # Load the completed action + parent message + all sibling actions
+        action_result = await db.execute(
+            select(AgentAction).where(AgentAction.id == action_id)
+        )
+        action = action_result.scalar_one_or_none()
+        if not action:
+            return None
+
+        msg_result = await db.execute(
+            select(AgentMessage).where(AgentMessage.id == action.agent_message_id)
+        )
+        msg = msg_result.scalar_one_or_none()
+        if not msg:
+            return None
+
+        # Get all actions for this message
+        siblings_result = await db.execute(
+            select(AgentAction).where(AgentAction.agent_message_id == msg.id)
+        )
+        all_actions = siblings_result.scalars().all()
+
+        # Build context for Claude
+        actions_summary = []
+        for a in all_actions:
+            status_label = a.status
+            if a.id == action_id:
+                status_label = "JUST COMPLETED"
+            actions_summary.append(f"- [{status_label}] {a.action_type}: {a.description}")
+
+        # Get customer context if matched
+        customer_info = ""
+        if msg.matched_customer_id:
+            cust_result = await db.execute(
+                select(Customer).where(Customer.id == msg.matched_customer_id)
+            )
+            customer = cust_result.scalar_one_or_none()
+            if customer:
+                customer_info = f"\nCustomer: {customer.display_name} ({customer.customer_type})"
+                if customer.company_name:
+                    customer_info += f" — {customer.company_name}"
+
+    prompt = f"""An action item was just completed for a pool service company. Based on the context, determine if there is a logical next step.
+
+Original email from {msg.from_email}:
+Subject: {msg.subject}
+{msg.body[:500] if msg.body else 'No body'}
+{customer_info}
+
+Our response: {msg.final_response[:300] if msg.final_response else msg.draft_response[:300] if msg.draft_response else 'Not yet responded'}
+
+Action items for this event:
+{chr(10).join(actions_summary)}
+
+Based on the completed action and the overall situation, is there a natural next step?
+
+Respond with JSON:
+{{
+  "has_next": true/false,
+  "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|other",
+  "description": "what needs to happen next",
+  "due_days": 3,
+  "reasoning": "why this is the logical next step"
+}}
+
+Rules:
+- Only recommend a next step if it's genuinely needed — don't create busywork
+- If all necessary work is covered by existing open actions, return has_next: false
+- Common patterns: site_visit done → report findings to client or schedule repair; repair done → follow up to confirm satisfaction; bid sent → follow up if no response in a few days
+- Keep description concise — one task, not multiple steps"""
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text
+        json_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            if result.get("has_next"):
+                return {
+                    "agent_message_id": msg.id,
+                    "action_type": result.get("action_type", "follow_up"),
+                    "description": result.get("description", ""),
+                    "due_days": result.get("due_days", 3),
+                    "reasoning": result.get("reasoning", ""),
+                }
+    except Exception as e:
+        logger.error(f"Failed to evaluate next action: {e}")
+
+    return None
 
 
 def poll_inbox():

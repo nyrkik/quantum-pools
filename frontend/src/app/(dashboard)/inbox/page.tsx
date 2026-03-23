@@ -62,6 +62,8 @@ import {
   Timer,
   ClipboardList,
   Plus,
+  Trash2,
+  Mail,
 } from "lucide-react";
 
 interface AgentAction {
@@ -407,6 +409,20 @@ function MessageDetail({
     }
   };
 
+  const handleDelete = async () => {
+    setSending(true);
+    try {
+      await api.delete(`/v1/admin/agent-messages/${messageId}`);
+      toast.success("Message deleted");
+      onAction();
+      onClose();
+    } catch {
+      toast.error("Failed to delete");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleAddAction = async () => {
     if (!newAction.description.trim()) return;
     const dueDate = newAction.due_days
@@ -652,6 +668,29 @@ function MessageDetail({
           </AlertDialog>
         </div>
       )}
+
+      {/* Delete — available for any status */}
+      <div className="pt-2 border-t">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive" disabled={sending}>
+              <Trash2 className="h-3 w-3 mr-1" />Delete Message
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this message?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove the message and all associated action items. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   );
 }
@@ -961,43 +1000,89 @@ export default function AgentPage() {
                 <p className="text-sm">All caught up — no open actions</p>
               </div>
             ) : (
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-100 dark:bg-slate-800">
-                      <TableHead className="text-xs font-medium uppercase tracking-wide w-8"></TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide w-28">Type</TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide">Description</TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide">Client</TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Assigned</TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide w-28">Due</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {actions.map((a, i) => {
-                      const overdue = isOverdue(a.due_date);
-                      return (
-                        <TableRow
-                          key={a.id}
-                          className={`${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""} ${overdue ? "!bg-red-50 dark:!bg-red-950/20" : ""} hover:bg-blue-50 dark:hover:bg-blue-950`}
+              <div className="divide-y">
+                {actions.map((a) => {
+                  const overdue = isOverdue(a.due_date);
+                  return (
+                    <div
+                      key={a.id}
+                      className={`flex items-start gap-3 px-4 py-3 ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}
+                    >
+                      <button
+                        className="mt-0.5 flex-shrink-0"
+                        onClick={async () => {
+                          const newStatus = a.status === "done" ? "open" : "done";
+                          try {
+                            await api.put(`/v1/admin/agent-actions/${a.id}`, { status: newStatus });
+                            load();
+                          } catch { toast.error("Failed to update"); }
+                        }}
+                      >
+                        <ActionStatusIcon status={a.status} />
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <ActionTypeBadge type={a.action_type} />
+                          {overdue && <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>}
+                          {a.due_date && (
+                            <span className={`text-[10px] ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+                              {formatDueDate(a.due_date)}
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-sm mt-0.5 ${a.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+                          {a.description}
+                        </p>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                          <span>{a.customer_name || a.from_email}</span>
+                          <Select
+                            value={a.assigned_to || ""}
+                            onValueChange={async (v) => {
+                              try {
+                                await api.put(`/v1/admin/agent-actions/${a.id}`, { assigned_to: v });
+                                load();
+                              } catch { toast.error("Failed to assign"); }
+                            }}
+                          >
+                            <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
+                              <SelectValue placeholder="Assign..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TEAM_MEMBERS.map((name) => (
+                                <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-primary"
+                          title="View message"
+                          onClick={() => { setSelectedId(a.agent_message_id); setActiveTab("inbox"); }}
                         >
-                          <TableCell>
-                            <ActionStatusIcon status={a.status} />
-                          </TableCell>
-                          <TableCell><ActionTypeBadge type={a.action_type} /></TableCell>
-                          <TableCell className="text-sm">{a.description}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {a.customer_name || a.from_email}
-                          </TableCell>
-                          <TableCell className="text-sm">{a.assigned_to || <span className="text-muted-foreground">—</span>}</TableCell>
-                          <TableCell className={`text-sm ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
-                            {a.due_date ? formatDueDate(a.due_date) : "—"}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                          <Mail className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                          title="Cancel action"
+                          onClick={async () => {
+                            try {
+                              await api.put(`/v1/admin/agent-actions/${a.id}`, { status: "cancelled" });
+                              load();
+                            } catch { toast.error("Failed to cancel"); }
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>

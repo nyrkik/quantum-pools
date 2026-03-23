@@ -19,7 +19,6 @@ import {
   MapPin,
   CalendarCheck,
   DollarSign,
-  Plus,
   Mail,
   ClipboardList,
   AlertTriangle,
@@ -136,7 +135,7 @@ export default function DashboardPage() {
           ),
         ];
 
-        if (perms.canViewSettings) {
+        if (perms.canViewInbox) {
           promises.push(
             api.get<AgentStats>("/v1/admin/agent-stats"),
             api.get<{ items: AgentMessage[] }>("/v1/admin/agent-messages?status=pending&limit=5"),
@@ -155,7 +154,7 @@ export default function DashboardPage() {
           monthlyRevenue: 0,
         });
 
-        if (perms.canViewSettings && results.length > 3) {
+        if (perms.canViewInbox && results.length > 3) {
           setAgentStats(results[3] as AgentStats);
           setPendingMessages((results[4] as { items: AgentMessage[] }).items || []);
           setOpenActions(results[5] as AgentAction[]);
@@ -167,7 +166,7 @@ export default function DashboardPage() {
         setLoading(false);
       }
     })();
-  }, [perms.canViewSettings]);
+  }, [perms.canViewInbox]);
 
   const statCards = [
     { title: "Clients", value: stats.customers, icon: Users, href: "/customers" },
@@ -178,19 +177,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            Welcome back, {user?.first_name}
-          </p>
-        </div>
-        <Link href="/customers">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Client
-          </Button>
-        </Link>
+      <div>
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          Welcome back, {user?.first_name}
+        </p>
       </div>
 
       {/* Stat cards */}
@@ -211,7 +202,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Inbox + Actions row */}
-      {perms.canViewSettings && agentStats && (
+      {perms.canViewInbox && agentStats && (
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Pending Messages */}
           <Card className={`shadow-sm ${agentStats.pending > 0 ? "border-l-4 border-amber-400" : ""}`}>
@@ -326,7 +317,7 @@ export default function DashboardPage() {
       )}
 
       {/* Recent Activity */}
-      {perms.canViewSettings && recentMessages.length > 0 && (
+      {perms.canViewInbox && recentMessages.length > 0 && (
         <Card className="shadow-sm">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">

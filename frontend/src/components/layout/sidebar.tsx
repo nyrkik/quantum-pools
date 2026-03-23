@@ -35,13 +35,14 @@ import {
   Menu,
   Code2,
   Bot,
+  Mail,
 } from "lucide-react";
 
 const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
-  { href: "/inbox", label: "Inbox", icon: Bot, check: "canViewSettings" as keyof Permissions, badge: "pending" as const },
+  { href: "/inbox", label: "Inbox", icon: Bot, check: "canViewInbox" as keyof Permissions, badge: "pending" as const },
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
@@ -68,12 +69,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [pendingCount, setPendingCount] = useState(0);
 
   const fetchPending = useCallback(() => {
-    if (perms.canViewSettings) {
+    if (perms.canViewInbox) {
       api.get<{ pending: number }>("/v1/admin/agent-stats")
         .then((s) => setPendingCount(s.pending ?? 0))
         .catch(() => {});
     }
-  }, [perms.canViewSettings]);
+  }, [perms.canViewInbox]);
 
   useEffect(() => {
     fetchPending();
@@ -200,27 +201,52 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export function Sidebar() {
   const [open, setOpen] = useState(false);
   const { organizationName, branding } = useAuth();
+  const perms = usePermissions();
   const mobileDisplayName = organizationName || "QuantumPools";
+  const [mobilePending, setMobilePending] = useState(0);
+
+  useEffect(() => {
+    const fetch = () => {
+      if (perms.canViewInbox) {
+        api.get<{ pending: number }>("/v1/admin/agent-stats")
+          .then((s) => setMobilePending(s.pending ?? 0))
+          .catch(() => {});
+      }
+    };
+    fetch();
+    const interval = setInterval(fetch, 30000);
+    return () => clearInterval(interval);
+  }, [perms.canViewInbox]);
 
   return (
     <>
       {/* Mobile hamburger — fixed top bar */}
-      <div className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center border-b bg-background px-4 sm:hidden">
-        <Sheet open={open} onOpenChange={setOpen}>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <Menu className="h-5 w-5" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="w-64 p-0">
-            <div className="flex h-full flex-col">
-              <SidebarContent onNavigate={() => setOpen(false)} />
-            </div>
-          </SheetContent>
-        </Sheet>
-        <span className="ml-2 text-sm font-semibold" style={branding.primaryColor ? { color: branding.primaryColor } : undefined}>
-          {mobileDisplayName}
-        </span>
+      <div className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-between border-b bg-background px-4 sm:hidden">
+        <div className="flex items-center">
+          <Sheet open={open} onOpenChange={setOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-64 p-0">
+              <div className="flex h-full flex-col">
+                <SidebarContent onNavigate={() => setOpen(false)} />
+              </div>
+            </SheetContent>
+          </Sheet>
+          <span className="ml-2 text-sm font-semibold" style={branding.primaryColor ? { color: branding.primaryColor } : undefined}>
+            {mobileDisplayName}
+          </span>
+        </div>
+        {mobilePending > 0 && (
+          <Link href="/inbox" className="relative">
+            <Mail className="h-5 w-5 text-muted-foreground" />
+            <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">
+              {mobilePending}
+            </span>
+          </Link>
+        )}
       </div>
 
       {/* Desktop sidebar */}

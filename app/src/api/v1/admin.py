@@ -230,7 +230,7 @@ async def list_agent_messages(
     status: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """List agent messages with pagination."""
@@ -258,7 +258,7 @@ async def list_agent_messages(
 
 @router.get("/agent-stats")
 async def get_agent_stats(
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Agent message statistics."""
@@ -350,7 +350,7 @@ def _serialize_action(a: AgentAction) -> dict:
 @router.get("/agent-messages/{message_id}")
 async def get_agent_message(
     message_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Get full agent message detail."""
@@ -386,7 +386,7 @@ class ApproveBody(BaseModel):
 async def approve_agent_message(
     message_id: str,
     body: ApproveBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Approve and send an agent message from the dashboard."""
@@ -426,7 +426,7 @@ async def approve_agent_message(
 @router.post("/agent-messages/{message_id}/reject")
 async def reject_agent_message(
     message_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Reject an agent message."""
@@ -450,10 +450,10 @@ async def reject_agent_message(
 @router.post("/agent-messages/{message_id}/dismiss")
 async def dismiss_agent_message(
     message_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dismiss a message — no reply, no learning impact."""
+    """Dismiss a message — no reply, no learning impact. Cancels associated actions."""
     result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
     msg = result.scalar_one_or_none()
     if not msg:
@@ -464,9 +464,43 @@ async def dismiss_agent_message(
     msg.status = "ignored"
     msg.notes = (msg.notes or "") + "\nDismissed by " + f"{ctx.user.first_name} {ctx.user.last_name}"
     msg.notes = msg.notes.strip()
-    await db.commit()
 
+    # Cancel associated actions
+    actions_result = await db.execute(
+        select(AgentAction).where(
+            AgentAction.agent_message_id == message_id,
+            AgentAction.status.in_(("open", "in_progress")),
+        )
+    )
+    for action in actions_result.scalars().all():
+        action.status = "cancelled"
+
+    await db.commit()
     return {"dismissed": True}
+
+
+@router.delete("/agent-messages/{message_id}")
+async def delete_agent_message(
+    message_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a message and its actions entirely — for test/spam that got through."""
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Delete associated actions first
+    actions_result = await db.execute(
+        select(AgentAction).where(AgentAction.agent_message_id == message_id)
+    )
+    for action in actions_result.scalars().all():
+        await db.delete(action)
+
+    await db.delete(msg)
+    await db.commit()
+    return {"deleted": True}
 
 
 # --- Agent Actions ---
@@ -475,7 +509,7 @@ async def dismiss_agent_message(
 async def list_agent_actions(
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """List agent action items."""
@@ -512,7 +546,7 @@ class CreateActionBody(BaseModel):
 @router.post("/agent-actions")
 async def create_agent_action(
     body: CreateActionBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Manually create an action item."""
@@ -543,7 +577,7 @@ class UpdateActionBody(BaseModel):
 async def update_agent_action(
     action_id: str,
     body: UpdateActionBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Update an action item (status, assignment, etc)."""

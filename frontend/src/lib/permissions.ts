@@ -23,6 +23,7 @@ export interface Permissions {
   canViewSettings: boolean;
   canViewRoutes: boolean;
   canViewEmd: boolean;
+  canViewInbox: boolean;
   canViewTeam: boolean;
   canViewChemicalCosts: boolean;
   // Customer / Property
@@ -50,6 +51,7 @@ interface RolePermissions {
   canViewSettings: boolean;
   canViewRoutes: boolean;
   canViewEmd: boolean;
+  canViewInbox: boolean;
   canViewTeam: boolean;
   canEditCustomers: boolean;
   canCreateCustomers: boolean;
@@ -71,6 +73,7 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewSettings: true,
     canViewRoutes: true,
     canViewEmd: true,
+    canViewInbox: true,
     canViewTeam: true,
     canEditCustomers: true,
     canCreateCustomers: true,
@@ -90,6 +93,7 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewSettings: false,
     canViewRoutes: true,
     canViewEmd: true,
+    canViewInbox: true,
     canViewTeam: true,
     canEditCustomers: true,
     canCreateCustomers: true,
@@ -109,6 +113,7 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewSettings: false,
     canViewRoutes: true,
     canViewEmd: true,
+    canViewInbox: false,
     canViewTeam: false,
     canEditCustomers: true,
     canCreateCustomers: true,
@@ -128,6 +133,7 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewSettings: false,
     canViewRoutes: true,
     canViewEmd: true,
+    canViewInbox: false,
     canViewTeam: false,
     canEditCustomers: false,
     canCreateCustomers: false,
@@ -147,6 +153,7 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewSettings: false,
     canViewRoutes: true,
     canViewEmd: true,
+    canViewInbox: false,
     canViewTeam: false,
     canEditCustomers: false,
     canCreateCustomers: false,

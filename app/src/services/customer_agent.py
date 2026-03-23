@@ -45,12 +45,12 @@ SYSTEM_PROMPT = """You are the AI assistant for Sapphire Pools, a commercial and
 
 When classifying emails, respond with JSON:
 {
-  "category": "schedule|complaint|billing|gate_code|service_request|general|spam|auto_reply",
+  "category": "schedule|complaint|billing|gate_code|service_request|general|spam|auto_reply|no_response",
   "urgency": "low|medium|high",
   "customer_name": "extracted name or null",
   "summary": "one line summary",
   "needs_approval": true/false,
-  "draft_response": "the response to send",
+  "draft_response": "the response to send or null if no_response",
   "internal_note": "note for the team if any",
   "actions": [
     {
@@ -64,8 +64,9 @@ When classifying emails, respond with JSON:
 Guidelines:
 - category "auto_reply" means no-reply addresses, bounce notifications, marketing — ignore these
 - category "spam" — junk, ignore
-- needs_approval = false ONLY for: simple acknowledgments, "we received your message", gate code confirmations where no action needed
-- needs_approval = true for: schedule changes, complaints, billing questions, service requests, anything requiring a decision
+- category "no_response" — client emails that don't need a reply: "thank you", "thanks", "got it", "ok", "sounds good", "perfect", thumbs up, single-word acknowledgments, forwarded FYI emails with no question. Log but don't draft a response or alert anyone.
+- needs_approval = false ONLY for: gate code confirmations where no action needed
+- needs_approval = true for: schedule changes, complaints, billing questions, service requests, anything requiring a decision or a real reply
 - Draft responses should be warm, professional, concise. Sign as "Sapphire Pools" not a specific person.
 - Never promise specific dates/times without approval
 - If the email mentions a property name you recognize, include it in the response
@@ -81,6 +82,8 @@ CRITICAL TONE RULES — follow these exactly:
 - Address clients by first name if known, or "Hi" with their name. Use the contact name from the customer record when available.
 - Don't use "family" as a suffix (e.g., "Blomquist family"). Just use their name.
 - Don't over-promise urgency. "We'll look into this" or "we'll follow up" is fine — avoid "prioritizing", "right away", "ASAP" unless truly critical.
+- Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines, then the signature. Use \\n for line breaks in the JSON string.
+- Always end with this exact signature (no variations):\\n\\nBest,\\nThe Sapphire Pools Team\\ncontact@sapphire-pools.com
 - "actions" array: extract ANY follow-up work the team needs to do (send a bid, schedule a visit, call back, repair something, change schedule). Include due_days (business days). Leave empty [] if no action needed.
 - Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)"""
 
@@ -674,7 +677,7 @@ async def process_incoming_email(uid: str, msg):
     result = await classify_and_draft(from_email, subject, body, from_header=from_header)
 
     category = result.get("category", "general")
-    if category in ("spam", "auto_reply"):
+    if category in ("spam", "auto_reply", "no_response"):
         logger.info(f"Skipping {category}: {subject}")
         async with get_db_context() as db:
             agent_msg = AgentMessage(

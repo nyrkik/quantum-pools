@@ -13,6 +13,7 @@ from src.schemas.auth import (
     LoginRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
+    SetupAccountRequest,
     TokenResponse,
     UserResponse,
     OrgUserResponse,
@@ -184,3 +185,26 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
 async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
     # TODO: Implement password reset token verification
     raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Password reset not yet implemented.")
+
+
+@router.post("/setup-account", response_model=MessageResponse)
+async def setup_account(body: SetupAccountRequest, db: AsyncSession = Depends(get_db)):
+    """Set up account for an invited user — set password and verify."""
+    from src.core.security import get_password_hash
+
+    result = await db.execute(
+        select(User).where(
+            User.email == body.email,
+            User.verification_token == body.token,
+        )
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired setup link.")
+
+    user.hashed_password = get_password_hash(body.password)
+    user.is_verified = True
+    user.verification_token = None
+    await db.commit()
+
+    return MessageResponse(message="Account set up successfully. You can now log in.")

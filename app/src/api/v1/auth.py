@@ -8,6 +8,8 @@ from sqlalchemy.orm import joinedload
 from src.core.database import get_db
 from src.core.config import settings
 from src.core.exceptions import AuthenticationError, ValidationError
+from pydantic import BaseModel, Field
+from typing import Optional
 from src.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -226,3 +228,72 @@ async def setup_account(body: SetupAccountRequest, db: AsyncSession = Depends(ge
     await db.commit()
 
     return MessageResponse(message="Account set up successfully. You can now log in.")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    body: ChangePasswordRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change password for the logged-in user."""
+    from src.core.security import verify_password, get_password_hash
+
+    result = await db.execute(select(User).where(User.id == ctx.user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(body.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    user.hashed_password = get_password_hash(body.new_password)
+    await db.commit()
+    return MessageResponse(message="Password changed successfully.")
+
+
+class UpdateProfileRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+
+
+@router.put("/profile", response_model=UserResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update profile for the logged-in user."""
+    result = await db.execute(select(User).where(User.id == ctx.user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if body.first_name is not None:
+        user.first_name = body.first_name
+    if body.last_name is not None:
+        user.last_name = body.last_name
+    if body.phone is not None:
+        user.phone = body.phone or None
+    if body.address is not None:
+        user.address = body.address or None
+    if body.city is not None:
+        user.city = body.city or None
+    if body.state is not None:
+        user.state = body.state or None
+    if body.zip_code is not None:
+        user.zip_code = body.zip_code or None
+
+    await db.commit()
+    await db.refresh(user)
+    return UserResponse.model_validate(user)

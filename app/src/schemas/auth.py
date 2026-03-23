@@ -44,6 +44,11 @@ class UserResponse(BaseModel):
     email: str
     first_name: str
     last_name: str
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
     is_active: bool
     created_at: datetime
 

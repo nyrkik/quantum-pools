@@ -145,7 +145,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="border-t p-4">
         <Link
-          href="/settings"
+          href="/profile"
           onClick={onNavigate}
           className="mb-3 flex items-center gap-3 rounded-md p-1 -mx-1 transition-colors hover:bg-accent/50"
         >

@@ -90,6 +90,110 @@ CRITICAL TONE RULES — follow these exactly:
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
 
+# Flood protection: track recent SMS alerts per sender
+_recent_alerts: dict[str, datetime] = {}
+ALERT_COOLDOWN_MINUTES = 10
+
+# Business hours (Pacific time)
+BUSINESS_HOUR_START = 7  # 7 AM
+BUSINESS_HOUR_END = 20   # 8 PM
+
+# Reply loop detection patterns
+LOOP_PATTERNS = ["noreply@", "no-reply@", "mailer-daemon@", "postmaster@"]
+
+
+def _is_own_email(from_email: str) -> bool:
+    """Check if the email is from one of our own addresses (reply loop prevention)."""
+    addr = from_email.lower().strip()
+    # Check our own sending addresses
+    if FROM_EMAIL and addr == FROM_EMAIL.lower():
+        return True
+    if GMAIL_USER and addr == GMAIL_USER.lower():
+        return True
+    # Check common no-reply patterns
+    for pattern in LOOP_PATTERNS:
+        if pattern in addr:
+            return True
+    return False
+
+
+def _is_business_hours() -> bool:
+    """Check if current time is within business hours (Pacific)."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        return BUSINESS_HOUR_START <= now.hour < BUSINESS_HOUR_END and now.weekday() < 5
+    except Exception:
+        return True  # Default to allowing if timezone fails
+
+
+def _should_throttle_alert(from_email: str) -> bool:
+    """Check if we've already alerted about this sender recently."""
+    addr = from_email.lower()
+    now = datetime.now(timezone.utc)
+    last = _recent_alerts.get(addr)
+    if last and (now - last).total_seconds() < ALERT_COOLDOWN_MINUTES * 60:
+        return True
+    _recent_alerts[addr] = now
+    # Clean old entries
+    cutoff = now - timedelta(minutes=ALERT_COOLDOWN_MINUTES * 2)
+    for k in list(_recent_alerts.keys()):
+        if _recent_alerts[k] < cutoff:
+            del _recent_alerts[k]
+    return False
+
+
+def _normalize_subject(subject: str) -> str:
+    """Strip Re:/Fwd: prefixes for thread matching."""
+    s = subject.strip()
+    while True:
+        lower = s.lower()
+        if lower.startswith("re:"):
+            s = s[3:].strip()
+        elif lower.startswith("fwd:"):
+            s = s[4:].strip()
+        elif lower.startswith("fw:"):
+            s = s[3:].strip()
+        else:
+            break
+    return s
+
+
+async def _find_thread(from_email: str, subject: str, message_id_header: str | None = None) -> AgentMessage | None:
+    """Find the most recent message in the same thread (same sender + normalized subject)."""
+    normalized = _normalize_subject(subject)
+    if not normalized:
+        return None
+
+    async with get_db_context() as db:
+        # Look for recent messages from same sender with same base subject
+        result = await db.execute(
+            select(AgentMessage)
+            .where(
+                AgentMessage.from_email == from_email,
+                AgentMessage.status.in_(("sent", "auto_sent", "pending")),
+            )
+            .order_by(desc(AgentMessage.received_at))
+            .limit(10)
+        )
+        for msg in result.scalars().all():
+            if msg.subject and _normalize_subject(msg.subject) == normalized:
+                return msg
+    return None
+
+
+async def _get_thread_open_actions(thread_msg: AgentMessage) -> list[str]:
+    """Get descriptions of open action items for a thread message."""
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(AgentAction)
+            .where(
+                AgentAction.agent_message_id == thread_msg.id,
+                AgentAction.status.in_(("open", "in_progress")),
+            )
+        )
+        return [a.description for a in result.scalars().all()]
+
 
 def decode_email_header(header):
     """Decode email header handling various encodings."""
@@ -655,12 +759,18 @@ async def process_incoming_email(uid: str, msg):
     from_header = decode_email_header(msg.get("From", ""))
     subject = decode_email_header(msg.get("Subject", ""))
     body = extract_text_body(msg)
+    message_id_header = msg.get("Message-ID", "")
 
     # Extract email address from From header
     email_match = re.search(r"<(.+?)>", from_header)
     from_email = email_match.group(1) if email_match else from_header
 
     to_header = decode_email_header(msg.get("To", ""))
+
+    # --- Reply loop prevention ---
+    if _is_own_email(from_email):
+        logger.info(f"Skipping own email: {from_email}: {subject}")
+        return
 
     logger.info(f"Processing email from {from_email}: {subject}")
 
@@ -673,8 +783,24 @@ async def process_incoming_email(uid: str, msg):
             logger.info(f"Already processed: {uid}")
             return
 
+    # --- Thread detection ---
+    thread_parent = await _find_thread(from_email, subject, message_id_header)
+    thread_context = ""
+    existing_action_descriptions = []
+    if thread_parent:
+        logger.info(f"Thread detected: reply to message {thread_parent.id[:8]}")
+        # Build thread context for Claude
+        thread_context = f"\n\n=== THIS IS A FOLLOW-UP ===\nThis email is a reply in an existing thread. Previous message status: {thread_parent.status}."
+        if thread_parent.final_response:
+            thread_context += f"\nOur last reply: {thread_parent.final_response[:300]}"
+        elif thread_parent.draft_response:
+            thread_context += f"\nDraft (not yet sent): {thread_parent.draft_response[:300]}"
+        thread_context += "\nDo NOT create duplicate action items. Only add new actions if this email introduces genuinely new work."
+        # Get existing actions to prevent duplicates
+        existing_action_descriptions = await _get_thread_open_actions(thread_parent)
+
     # Classify and draft
-    result = await classify_and_draft(from_email, subject, body, from_header=from_header)
+    result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
 
     category = result.get("category", "general")
     if category in ("spam", "auto_reply", "no_response"):
@@ -718,11 +844,27 @@ async def process_incoming_email(uid: str, msg):
         db.add(agent_msg)
         await db.flush()
 
-        # Create action items if any
+        # Create action items — skip duplicates from thread
         actions = result.get("actions", [])
         for action in actions:
             if not action.get("description"):
                 continue
+            # Skip if similar action already exists in thread
+            desc_lower = action["description"].lower()
+            is_duplicate = False
+            for existing_desc in existing_action_descriptions:
+                # Fuzzy match: if >60% of words overlap, it's a duplicate
+                existing_words = set(existing_desc.lower().split())
+                new_words = set(desc_lower.split())
+                if existing_words and new_words:
+                    overlap = len(existing_words & new_words) / max(len(existing_words), len(new_words))
+                    if overlap > 0.6:
+                        is_duplicate = True
+                        logger.info(f"Skipping duplicate action: {action['description'][:60]}")
+                        break
+            if is_duplicate:
+                continue
+
             due_days = action.get("due_days", 3)
             due_date = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
             db.add(AgentAction(
@@ -738,12 +880,22 @@ async def process_incoming_email(uid: str, msg):
         needs_approval = result.get("needs_approval", True)
 
         if needs_approval:
-            await send_approval_request(
-                agent_msg.id,
-                result.get("summary", subject),
-                result.get("draft_response", ""),
-                from_email,
-            )
+            # --- Flood protection: don't spam SMS for same sender ---
+            if _should_throttle_alert(from_email):
+                logger.info(f"Throttled SMS alert for {from_email} (cooldown)")
+            elif not _is_business_hours():
+                # --- Outside business hours: skip SMS, just log ---
+                logger.info(f"Outside business hours, skipping SMS alert for: {subject}")
+                agent_msg.notes = (agent_msg.notes or "") + "\nSMS alert suppressed (outside business hours)"
+                agent_msg.notes = agent_msg.notes.strip()
+                await db.commit()
+            else:
+                await send_approval_request(
+                    agent_msg.id,
+                    result.get("summary", subject),
+                    result.get("draft_response", ""),
+                    from_email,
+                )
         else:
             # Auto-send
             draft = result.get("draft_response", "")
@@ -753,9 +905,10 @@ async def process_incoming_email(uid: str, msg):
                 agent_msg.final_response = draft
                 agent_msg.sent_at = datetime.now(timezone.utc)
                 await db.commit()
-                # Notify team
-                for number in APPROVAL_NUMBERS:
-                    await send_sms(number, f"📤 Auto-replied to {from_email}: {result.get('summary', subject)[:100]}")
+                # Notify team (respect business hours + throttle)
+                if _is_business_hours() and not _should_throttle_alert(f"auto_{from_email}"):
+                    for number in APPROVAL_NUMBERS:
+                        await send_sms(number, f"📤 Auto-replied to {from_email}: {result.get('summary', subject)[:100]}")
 
 
 async def handle_sms_reply(from_number: str, body: str):

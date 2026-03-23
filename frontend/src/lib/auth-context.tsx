@@ -19,6 +19,12 @@ interface User {
   created_at: string;
 }
 
+interface Branding {
+  logoUrl: string | null;
+  primaryColor: string | null;
+  tagline: string | null;
+}
+
 interface AuthState {
   user: User | null;
   organizationId: string;
@@ -27,6 +33,7 @@ interface AuthState {
   isDeveloper: boolean;
   features: string[];
   emdTier: string | null;
+  branding: Branding;
   isLoading: boolean;
 }
 
@@ -53,7 +60,14 @@ interface OrgUserResponse {
   is_developer: boolean;
   features: string[];
   emd_tier: string | null;
+  branding?: {
+    logo_url: string | null;
+    primary_color: string | null;
+    tagline: string | null;
+  } | null;
 }
+
+const DEFAULT_BRANDING: Branding = { logoUrl: null, primaryColor: null, tagline: null };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -66,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isDeveloper: false,
     features: [],
     emdTier: null,
+    branding: DEFAULT_BRANDING,
     isLoading: true,
   });
 
@@ -78,6 +93,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isDeveloper: data.is_developer ?? false,
       features: data.features ?? [],
       emdTier: data.emd_tier ?? null,
+      branding: data.branding ? {
+        logoUrl: data.branding.logo_url,
+        primaryColor: data.branding.primary_color,
+        tagline: data.branding.tagline,
+      } : DEFAULT_BRANDING,
       isLoading: false,
     });
   }, []);
@@ -87,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api.get<OrgUserResponse>("/v1/auth/me");
       setFromResponse(data);
     } catch {
-      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], emdTier: null, isLoading: false }));
+      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], emdTier: null, branding: DEFAULT_BRANDING, isLoading: false }));
     }
   }, [setFromResponse]);
 
@@ -118,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isDeveloper: false,
       features: [],
       emdTier: null,
+      branding: DEFAULT_BRANDING,
       isLoading: false,
     });
   };

@@ -52,9 +52,14 @@ const navItems = [
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 
+function getBackendUrl(path: string) {
+  if (typeof window === "undefined") return path;
+  return `${window.location.protocol}//${window.location.hostname}:7061${path}`;
+}
+
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { user, organizationName, logout } = useAuth();
+  const { user, organizationName, branding, logout } = useAuth();
   const perms = usePermissions();
   const dev = useDevMode();
 
@@ -62,11 +67,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     (item) => item.check === null || perms[item.check] === true
   );
 
+  const logoSrc = branding.logoUrl ? getBackendUrl(branding.logoUrl) : "/logo.png";
+  const displayName = organizationName || "QuantumPools";
+
   return (
     <>
       <div className="flex items-center gap-3 border-b px-4 py-4">
-        <Image src="/logo.png" alt="QuantumPools" width={72} height={72} />
-        <span className="text-lg font-semibold text-primary">QuantumPools</span>
+        <Image src={logoSrc} alt={displayName} width={72} height={72} className="object-contain" unoptimized />
+        <div className="min-w-0">
+          <span className="text-lg font-semibold block truncate" style={branding.primaryColor ? { color: branding.primaryColor } : undefined}>
+            {displayName}
+          </span>
+          {branding.tagline && (
+            <span className="text-[10px] text-muted-foreground block truncate">{branding.tagline}</span>
+          )}
+        </div>
       </div>
 
       <nav className="flex-1 space-y-1 px-2 py-3">
@@ -125,6 +140,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       )}
 
+      <div className="px-4 py-1.5">
+        <p className="text-[10px] text-muted-foreground/50 text-center">Powered by QuantumPools</p>
+      </div>
+
       <div className="border-t p-4">
         <Link
           href="/settings"
@@ -160,6 +179,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 export function Sidebar() {
   const [open, setOpen] = useState(false);
+  const { organizationName, branding } = useAuth();
+  const mobileDisplayName = organizationName || "QuantumPools";
 
   return (
     <>
@@ -177,7 +198,9 @@ export function Sidebar() {
             </div>
           </SheetContent>
         </Sheet>
-        <span className="ml-2 text-sm font-semibold text-primary">QuantumPools</span>
+        <span className="ml-2 text-sm font-semibold" style={branding.primaryColor ? { color: branding.primaryColor } : undefined}>
+          {mobileDisplayName}
+        </span>
       </div>
 
       {/* Desktop sidebar */}

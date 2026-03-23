@@ -50,6 +50,12 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OrgBrandingResponse(BaseModel):
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    tagline: Optional[str] = None
+
+
 class OrgUserResponse(BaseModel):
     user: UserResponse
     organization_id: str
@@ -58,6 +64,7 @@ class OrgUserResponse(BaseModel):
     is_developer: bool = False
     features: list[str] = []
     emd_tier: Optional[str] = None
+    branding: Optional[OrgBrandingResponse] = None
 
 
 class MessageResponse(BaseModel):

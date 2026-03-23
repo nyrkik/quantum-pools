@@ -20,6 +20,8 @@ class Organization(Base):
     state: Mapped[str | None] = mapped_column(String(50))
     zip_code: Mapped[str | None] = mapped_column(String(20))
     logo_url: Mapped[str | None] = mapped_column(String(500))
+    primary_color: Mapped[str | None] = mapped_column(String(20))  # hex color e.g. #1e40af
+    tagline: Mapped[str | None] = mapped_column(String(255))
     stripe_customer_id: Mapped[str | None] = mapped_column(String(100))
     billing_email: Mapped[str | None] = mapped_column(String(255))
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

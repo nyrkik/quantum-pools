@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Loader2, Save, Plus, Pencil, Trash2 } from "lucide-react";
+import { Loader2, Save, Plus, Pencil, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -90,6 +90,159 @@ function getDefaultPrice(defaults: RegionalDefault[], row: ChemicalRow): number 
 }
 
 type SettingsTab = "general" | "costs" | "tiers" | "chemicals";
+
+function BrandingSection() {
+  const { refreshUser } = useAuth();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [branding, setBranding] = useState<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null } | null>(null);
+  const [form, setForm] = useState({ name: "", primary_color: "", tagline: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null }>("/v1/branding");
+      setBranding(data);
+      setForm({ name: data.name || "", primary_color: data.primary_color || "", tagline: data.tagline || "" });
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const isDirty = branding && (
+    form.name !== (branding.name || "") ||
+    form.primary_color !== (branding.primary_color || "") ||
+    form.tagline !== (branding.tagline || "")
+  );
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put("/v1/branding", {
+        organization_name: form.name,
+        primary_color: form.primary_color || null,
+        tagline: form.tagline || null,
+      });
+      toast.success("Branding updated");
+      load();
+      refreshUser();
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api/v1/branding/logo`;
+      const res = await fetch(backendUrl, { method: "POST", body: formData, credentials: "include" });
+      if (!res.ok) throw new Error("Upload failed");
+      toast.success("Logo uploaded");
+      load();
+      refreshUser();
+    } catch {
+      toast.error("Failed to upload logo");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const logoSrc = branding?.logo_url
+    ? `${typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:7061` : ""}${branding.logo_url}`
+    : null;
+
+  if (loading) return null;
+
+  return (
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-base">Branding</CardTitle>
+        <CardDescription>Customize how your company appears in the app.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Logo */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Logo</Label>
+          <div className="flex items-center gap-4">
+            {logoSrc ? (
+              <img src={logoSrc} alt="Logo" className="h-16 w-auto object-contain rounded border p-1 bg-white" />
+            ) : (
+              <div className="h-16 w-16 rounded border bg-muted flex items-center justify-center text-xs text-muted-foreground">No logo</div>
+            )}
+            <div>
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" className="hidden" onChange={handleLogoUpload} />
+              <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
+                {logoSrc ? "Change Logo" : "Upload Logo"}
+              </Button>
+              <p className="text-[10px] text-muted-foreground mt-1">PNG, JPEG, SVG, or WebP. Max 2MB.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Company Name */}
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">Company Name</Label>
+          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="max-w-sm" />
+        </div>
+
+        {/* Primary Color */}
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">Brand Color</Label>
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={form.primary_color || "#1a1a2e"}
+              onChange={(e) => setForm({ ...form, primary_color: e.target.value })}
+              className="h-9 w-12 rounded border cursor-pointer"
+            />
+            <Input
+              value={form.primary_color}
+              onChange={(e) => setForm({ ...form, primary_color: e.target.value })}
+              placeholder="#1e40af"
+              className="w-28 font-mono text-sm"
+            />
+            {form.primary_color && (
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded" style={{ backgroundColor: form.primary_color }} />
+                <span className="text-sm font-medium" style={{ color: form.primary_color }}>Preview</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Tagline */}
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">Tagline</Label>
+          <Input
+            value={form.tagline}
+            onChange={(e) => setForm({ ...form, tagline: e.target.value })}
+            placeholder="Your company slogan or tagline"
+            className="max-w-sm"
+          />
+          <p className="text-[10px] text-muted-foreground">Displayed under your logo in the sidebar.</p>
+        </div>
+
+        {/* Save */}
+        {isDirty && (
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Branding
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SettingsPage() {
   const { user, organizationName, role } = useAuth();
@@ -280,21 +433,24 @@ export default function SettingsPage() {
 
       {/* General */}
       {tab === "general" && (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="shadow-sm">
-            <CardHeader><CardTitle className="text-base">Account</CardTitle></CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div><span className="text-muted-foreground">Name: </span>{user?.first_name} {user?.last_name}</div>
-              <div><span className="text-muted-foreground">Email: </span>{user?.email}</div>
-              <div><span className="text-muted-foreground">Role: </span>{role}</div>
-            </CardContent>
-          </Card>
-          <Card className="shadow-sm">
-            <CardHeader><CardTitle className="text-base">Organization</CardTitle></CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div><span className="text-muted-foreground">Name: </span>{organizationName}</div>
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="shadow-sm">
+              <CardHeader><CardTitle className="text-base">Account</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div><span className="text-muted-foreground">Name: </span>{user?.first_name} {user?.last_name}</div>
+                <div><span className="text-muted-foreground">Email: </span>{user?.email}</div>
+                <div><span className="text-muted-foreground">Role: </span>{role}</div>
+              </CardContent>
+            </Card>
+            <Card className="shadow-sm">
+              <CardHeader><CardTitle className="text-base">Organization</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div><span className="text-muted-foreground">Name: </span>{organizationName}</div>
+              </CardContent>
+            </Card>
+          </div>
+          {canEdit && <BrandingSection />}
         </div>
       )}
 

@@ -17,11 +17,23 @@ from src.schemas.auth import (
     TokenResponse,
     UserResponse,
     OrgUserResponse,
+    OrgBrandingResponse,
     MessageResponse,
 )
 from src.services.auth_service import AuthService
 from src.api.deps import get_current_user, get_current_org_user, OrgUserContext, REFRESH_TOKEN_COOKIE
 from src.models.user import User
+from src.models.organization import Organization
+
+
+def _branding(org) -> OrgBrandingResponse | None:
+    if not org:
+        return None
+    return OrgBrandingResponse(
+        logo_url=org.logo_url,
+        primary_color=org.primary_color,
+        tagline=org.tagline,
+    )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -75,6 +87,7 @@ async def register(body: RegisterRequest, response: Response, db: AsyncSession =
         organization_name=org.name,
         role="owner",
         is_developer=False,
+        branding=_branding(org),
     )
 
 
@@ -119,6 +132,7 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
         is_developer=org_user.is_developer if org_user else False,
         features=features,
         emd_tier=emd_tier,
+        branding=_branding(org_user.organization if org_user else None),
     )
 
 
@@ -164,6 +178,9 @@ async def get_me(
     from src.services.feature_service import FeatureService
     feature_service = FeatureService(db)
     emd_tier = await feature_service.get_org_emd_tier(ctx.organization_id)
+    # Load org for branding
+    org_result = await db.execute(select(Organization).where(Organization.id == ctx.organization_id))
+    org = org_result.scalar_one_or_none()
     return OrgUserResponse(
         user=UserResponse.model_validate(ctx.user),
         organization_id=ctx.organization_id,
@@ -172,6 +189,7 @@ async def get_me(
         is_developer=ctx.org_user.is_developer,
         features=features,
         emd_tier=emd_tier,
+        branding=_branding(org),
     )
 
 

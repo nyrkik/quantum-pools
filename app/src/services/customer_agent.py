@@ -165,6 +165,7 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
                     match_method = "previous_match"
 
         # 3. Domain match (for property managers — same @company.com)
+        multi_match_customers = None
         if not customer:
             domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
             if domain and domain not in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "protonmail.com", "me.com"):
@@ -172,11 +173,16 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
                     select(Customer).where(
                         Customer.email.ilike(f"%@{domain}"),
                         Customer.is_active == True,
-                    ).limit(1)
+                    ).limit(10)
                 )
-                customer = result.scalar_one_or_none()
-                if customer:
+                domain_matches = result.scalars().all()
+                if len(domain_matches) == 1:
+                    customer = domain_matches[0]
                     match_method = "domain"
+                elif len(domain_matches) > 1:
+                    # Multiple customers with same domain — store for Claude to disambiguate
+                    multi_match_customers = domain_matches
+                    match_method = "domain_multi"
 
         # 4. Sender name match — extract name from "From: John Smith <john@example.com>"
         if not customer:
@@ -246,8 +252,39 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
                 customer = name_matches[0]
                 match_method = "body_name"
 
-        if not customer:
+        if not customer and not multi_match_customers:
             return None
+
+        # Multi-match: build context for all candidates, let Claude disambiguate
+        if not customer and multi_match_customers:
+            candidates = []
+            for c in multi_match_customers:
+                props_result = await db.execute(
+                    select(Property).where(Property.customer_id == c.id, Property.is_active == True)
+                )
+                props = props_result.scalars().all()
+                addresses = [p.full_address for p in props]
+                candidates.append({
+                    "customer_id": c.id,
+                    "name": c.display_name,
+                    "company": c.company_name,
+                    "addresses": addresses,
+                })
+            return {
+                "customer_id": None,
+                "match_method": "domain_multi",
+                "customer_name": None,
+                "customer_type": multi_match_customers[0].customer_type,
+                "company_name": multi_match_customers[0].company_name,
+                "email": from_email,
+                "phone": None,
+                "preferred_day": None,
+                "monthly_rate": None,
+                "notes": None,
+                "properties": [],
+                "property_address": None,
+                "_multi_candidates": candidates,
+            }
 
         # Build context
         props_result = await db.execute(
@@ -403,7 +440,17 @@ def build_context_prompt(customer_ctx: dict | None, history: dict | None) -> str
     """Build the context section to inject into the system prompt."""
     parts = []
 
-    if customer_ctx:
+    if customer_ctx and customer_ctx.get("_multi_candidates"):
+        candidates = customer_ctx["_multi_candidates"]
+        parts.append("=== MULTIPLE POSSIBLE CUSTOMERS ===")
+        parts.append(f"The sender's email domain matches {len(candidates)} customers. Determine which one based on the email content:")
+        for i, c in enumerate(candidates, 1):
+            addrs = ", ".join(c["addresses"][:3]) if c["addresses"] else "no properties"
+            parts.append(f"  {i}. {c['name']}{' (' + c['company'] + ')' if c.get('company') else ''} — {addrs}")
+        parts.append("")
+        parts.append("In your JSON response, set customer_name to the matched customer's name. If you cannot determine which customer, set customer_name to null and add an internal_note explaining the ambiguity.")
+
+    elif customer_ctx:
         parts.append("=== KNOWN CUSTOMER ===")
         parts.append(f"Name: {customer_ctx['customer_name']}")
         parts.append(f"Type: {customer_ctx['customer_type']}")
@@ -482,11 +529,25 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
             result = json.loads(json_match.group())
             # Enrich with matched customer data
             if customer_ctx:
-                if not result.get("customer_name"):
-                    result["customer_name"] = customer_ctx["customer_name"]
-                result["_matched_customer_id"] = customer_ctx["customer_id"]
-                result["_match_method"] = customer_ctx["match_method"]
-                result["_property_address"] = customer_ctx.get("property_address")
+                # Handle multi-match: Claude picks the customer by name
+                if customer_ctx.get("_multi_candidates") and result.get("customer_name"):
+                    picked_name = result["customer_name"].lower()
+                    for c in customer_ctx["_multi_candidates"]:
+                        if c["name"].lower() in picked_name or picked_name in c["name"].lower():
+                            result["_matched_customer_id"] = c["customer_id"]
+                            result["_match_method"] = "domain_multi"
+                            # Get property address
+                            if c.get("addresses"):
+                                result["_property_address"] = c["addresses"][0]
+                            break
+                    if not result.get("_matched_customer_id"):
+                        result["_match_method"] = "domain_multi_unresolved"
+                elif customer_ctx.get("customer_id"):
+                    if not result.get("customer_name"):
+                        result["customer_name"] = customer_ctx["customer_name"]
+                    result["_matched_customer_id"] = customer_ctx["customer_id"]
+                    result["_match_method"] = customer_ctx["match_method"]
+                    result["_property_address"] = customer_ctx.get("property_address")
             return result
     except json.JSONDecodeError:
         pass

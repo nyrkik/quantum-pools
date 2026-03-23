@@ -37,8 +37,8 @@ class PropertyDifficulty(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    body_of_water_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), index=True
+    water_feature_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="SET NULL"), index=True
     )
 
     # Measured fields (auto-calculated or entered)
@@ -60,6 +60,8 @@ class PropertyDifficulty(Base):
     customer_demands_score: Mapped[float] = mapped_column(Float, default=1.0)
     chemical_demand_score: Mapped[float] = mapped_column(Float, default=1.0)
     callback_frequency_score: Mapped[float] = mapped_column(Float, default=1.0)
+    equipment_effectiveness: Mapped[float] = mapped_column(Float, default=3.0)
+    pool_design_score: Mapped[float] = mapped_column(Float, default=3.0)
 
     # Residential dollar adjustments (per visit, added to tier base × visits_per_month)
     res_tree_debris: Mapped[float] = mapped_column(Float, default=0.0)
@@ -80,4 +82,4 @@ class PropertyDifficulty(Base):
 
     property = relationship("Property", back_populates="difficulty", lazy="noload")
     organization = relationship("Organization", lazy="noload")
-    body_of_water = relationship("BodyOfWater", back_populates="difficulty", lazy="noload")
+    water_feature = relationship("WaterFeature", back_populates="difficulty", lazy="noload")

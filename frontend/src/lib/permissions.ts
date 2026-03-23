@@ -9,7 +9,6 @@ export type FeatureSlug =
   | "invoicing"
   | "profitability"
   | "satellite_analysis"
-  | "pool_measurement"
   | "emd_intelligence"
   | "chemical_costs"
   | "customer_portal";
@@ -26,7 +25,6 @@ export interface Permissions {
   canViewEmd: boolean;
   canViewTeam: boolean;
   canViewChemicalCosts: boolean;
-  canViewMeasurement: boolean;
   // Customer / Property
   canEditCustomers: boolean;
   canCreateCustomers: boolean;
@@ -34,8 +32,7 @@ export interface Permissions {
   canViewRates: boolean;
   canViewBalance: boolean;
   canEditRates: boolean;
-  // BOW / Measurement
-  canMeasure: boolean;
+  // WF
   canViewDimensions: boolean;
   canViewDifficulty: boolean;
   // Route
@@ -60,7 +57,6 @@ interface RolePermissions {
   canViewRates: boolean;
   canViewBalance: boolean;
   canEditRates: boolean;
-  canMeasure: boolean;
   canViewDimensions: boolean;
   canViewDifficulty: boolean;
   canManageRoutes: boolean;
@@ -82,7 +78,6 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewRates: true,
     canViewBalance: true,
     canEditRates: true,
-    canMeasure: true,
     canViewDimensions: true,
     canViewDifficulty: true,
     canManageRoutes: true,
@@ -102,7 +97,6 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewRates: true,
     canViewBalance: true,
     canEditRates: true,
-    canMeasure: true,
     canViewDimensions: true,
     canViewDifficulty: true,
     canManageRoutes: true,
@@ -122,7 +116,6 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewRates: false,
     canViewBalance: false,
     canEditRates: false,
-    canMeasure: true,
     canViewDimensions: true,
     canViewDifficulty: true,
     canManageRoutes: true,
@@ -142,7 +135,6 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewRates: false,
     canViewBalance: false,
     canEditRates: false,
-    canMeasure: false,
     canViewDimensions: false,
     canViewDifficulty: false,
     canManageRoutes: false,
@@ -162,7 +154,6 @@ const ROLE_PERMISSIONS: Record<Role, RolePermissions> = {
     canViewRates: true,
     canViewBalance: true,
     canEditRates: false,
-    canMeasure: false,
     canViewDimensions: true,
     canViewDifficulty: true,
     canManageRoutes: false,
@@ -177,8 +168,6 @@ const FEATURE_GATES: Partial<Record<keyof RolePermissions, FeatureSlug>> = {
   canViewSatellite: "satellite_analysis",
   canViewRoutes: "route_optimization",
   canViewEmd: "emd_intelligence",
-  canMeasure: "pool_measurement",
-  canViewDimensions: "pool_measurement",
   canManageRoutes: "route_optimization",
 };
 
@@ -203,7 +192,6 @@ export function getPermissionsForRole(role: Role, features: string[] = []): Perm
     features: featureSet,
     hasFeature,
     canViewChemicalCosts: (merged.canViewProfitability ?? false) && featureSet.has("chemical_costs"),
-    canViewMeasurement: (rolePerms.canMeasure) && featureSet.has("pool_measurement"),
     ...merged,
   } as Permissions;
 }

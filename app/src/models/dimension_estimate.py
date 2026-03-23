@@ -11,8 +11,8 @@ class DimensionEstimate(Base):
     __tablename__ = "dimension_estimates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    body_of_water_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="CASCADE"), nullable=False, index=True
+    water_feature_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="CASCADE"), nullable=False, index=True
     )
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
@@ -30,6 +30,6 @@ class DimensionEstimate(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    body_of_water = relationship("BodyOfWater", back_populates="dimension_estimates", lazy="noload")
+    water_feature = relationship("WaterFeature", back_populates="dimension_estimates", lazy="noload")
     organization = relationship("Organization", lazy="noload")
     user = relationship("User", lazy="noload")

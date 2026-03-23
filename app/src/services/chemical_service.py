@@ -8,7 +8,7 @@ from sqlalchemy import select, func
 
 from src.models.chemical_reading import ChemicalReading
 from src.models.property import Property
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 from src.core.exceptions import NotFoundError
 
 
@@ -58,14 +58,14 @@ class ChemicalService:
     async def create(self, org_id: str, pool_gallons: Optional[int] = None, **kwargs) -> ChemicalReading:
         reading = ChemicalReading(id=str(uuid.uuid4()), organization_id=org_id, **kwargs)
 
-        # Auto-fetch pool_gallons: prefer BOW, fall back to property
-        if pool_gallons is None and kwargs.get("body_of_water_id"):
+        # Auto-fetch pool_gallons: prefer WF, fall back to property
+        if pool_gallons is None and kwargs.get("water_feature_id"):
             bow_result = await self.db.execute(
-                select(BodyOfWater).where(BodyOfWater.id == kwargs["body_of_water_id"])
+                select(WaterFeature).where(WaterFeature.id == kwargs["water_feature_id"])
             )
-            bow = bow_result.scalar_one_or_none()
-            if bow:
-                pool_gallons = bow.pool_gallons
+            wf = bow_result.scalar_one_or_none()
+            if wf:
+                pool_gallons = wf.pool_gallons
         if pool_gallons is None:
             prop_result = await self.db.execute(
                 select(Property).where(Property.id == kwargs.get("property_id"))

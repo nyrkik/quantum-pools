@@ -27,6 +27,7 @@ import {
   FileText,
   Shield,
   Settings,
+  Wrench,
   LogOut,
   TrendingUp,
   Map,
@@ -46,6 +47,7 @@ const navItems = [
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
+  { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {

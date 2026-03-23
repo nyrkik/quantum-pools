@@ -25,7 +25,7 @@ from src.schemas.profitability import (
 from src.services.profitability_service import ProfitabilityService
 from src.services.bather_load_service import BatherLoadService
 from src.services.property_service import PropertyService
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 
 router = APIRouter(prefix="/profitability", tags=["profitability"], dependencies=[Depends(require_feature("profitability"))])
 
@@ -125,7 +125,7 @@ async def get_rate_allocation(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get per-BOW rate allocation for a property."""
+    """Get per-WF rate allocation for a property."""
     from src.models.property import Property
     from src.models.customer import Customer
     from sqlalchemy import select
@@ -142,16 +142,16 @@ async def get_rate_allocation(
         raise HTTPException(status_code=404, detail="Property not found")
 
     bow_result = await db.execute(
-        select(BodyOfWater).where(
-            BodyOfWater.property_id == property_id,
-            BodyOfWater.organization_id == ctx.organization_id,
-            BodyOfWater.is_active == True,
+        select(WaterFeature).where(
+            WaterFeature.property_id == property_id,
+            WaterFeature.organization_id == ctx.organization_id,
+            WaterFeature.is_active == True,
         )
     )
-    bows = list(bow_result.scalars().all())
+    wfs = list(bow_result.scalars().all())
     total_rate = prop.customer.monthly_rate if prop.customer else 0
 
-    return ProfitabilityService.allocate_rate_to_bows(total_rate, bows)
+    return ProfitabilityService.allocate_rate_to_wfs(total_rate, wfs)
 
 
 @router.get("/whale-curve", response_model=list[WhaleCurvePoint])
@@ -235,7 +235,7 @@ async def preview_rate_allocation(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Preview how a customer's rate would be split across their BOWs."""
+    """Preview how a customer's rate would be split across their WFs."""
     svc = ProfitabilityService(db)
     try:
         return await svc.get_rate_allocation_preview(customer_id, ctx.organization_id)
@@ -250,7 +250,7 @@ async def apply_rate_allocation(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Apply per-BOW rates. Body: {"rates": {"bow_id": rate, ...}}."""
+    """Apply per-WF rates. Body: {"rates": {"wf_id": rate, ...}}."""
     rates = body.get("rates", {})
     if not rates:
         raise HTTPException(status_code=400, detail="No rates provided")
@@ -266,24 +266,24 @@ async def bulk_allocate_rates(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Preview rate allocation for all customers with unallocated BOW rates."""
+    """Preview rate allocation for all customers with unallocated WF rates."""
     from sqlalchemy import func, select as sa_select
     from src.models.customer import Customer
     from src.models.property import Property
 
-    # Find customers with multiple BOWs where any BOW has no rate
+    # Find customers with multiple WFs where any WF has no rate
     result = await db.execute(
         sa_select(Customer.id)
         .join(Property, Property.customer_id == Customer.id)
-        .join(BodyOfWater, BodyOfWater.property_id == Property.id)
+        .join(WaterFeature, WaterFeature.property_id == Property.id)
         .where(
             Customer.organization_id == ctx.organization_id,
             Customer.is_active == True,
-            BodyOfWater.is_active == True,
-            BodyOfWater.monthly_rate.is_(None),
+            WaterFeature.is_active == True,
+            WaterFeature.monthly_rate.is_(None),
         )
         .group_by(Customer.id)
-        .having(func.count(BodyOfWater.id) > 0)
+        .having(func.count(WaterFeature.id) > 0)
     )
     customer_ids = [r.id for r in result.all()]
 
@@ -307,7 +307,7 @@ async def get_profit_gaps(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get per-BOW profitability sorted by margin (worst first)."""
+    """Get per-WF profitability sorted by margin (worst first)."""
     svc = ProfitabilityService(db)
     return await svc.get_profit_gaps(ctx.organization_id)
 
@@ -325,7 +325,7 @@ async def suggest_rate(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Suggest a rate for a BOW. Residential uses tier-based pricing, commercial uses cost model."""
+    """Suggest a rate for a WF. Residential uses tier-based pricing, commercial uses cost model."""
     svc = ProfitabilityService(db)
     return await svc.suggest_rate(
         org_id=ctx.organization_id,

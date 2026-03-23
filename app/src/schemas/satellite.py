@@ -8,7 +8,7 @@ from datetime import datetime
 class SatelliteAnalysisResponse(BaseModel):
     id: str
     property_id: str
-    body_of_water_id: Optional[str] = None
+    water_feature_id: Optional[str] = None
     pool_detected: bool
     estimated_pool_sqft: Optional[float] = None
     pool_confidence: float
@@ -60,7 +60,7 @@ class PoolBowWithCoordsResponse(BaseModel):
 
 
 class BulkAnalysisRequest(BaseModel):
-    bow_ids: Optional[list[str]] = None
+    wf_ids: Optional[list[str]] = None
     property_ids: Optional[list[str]] = None  # deprecated fallback
     force_reanalyze: bool = False
 

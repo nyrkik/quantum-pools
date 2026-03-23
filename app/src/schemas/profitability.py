@@ -66,6 +66,8 @@ class PropertyDifficultyUpdate(BaseModel):
     customer_demands_score: Optional[float] = Field(None, ge=1, le=5)
     chemical_demand_score: Optional[float] = Field(None, ge=1, le=5)
     callback_frequency_score: Optional[float] = Field(None, ge=1, le=5)
+    equipment_effectiveness: Optional[float] = Field(None, ge=1, le=5)
+    pool_design_score: Optional[float] = Field(None, ge=1, le=5)
     res_tree_debris: Optional[float] = None
     res_dog: Optional[float] = None
     res_customer_demands: Optional[float] = None
@@ -93,6 +95,8 @@ class PropertyDifficultyResponse(BaseModel):
     customer_demands_score: float
     chemical_demand_score: float
     callback_frequency_score: float
+    equipment_effectiveness: float = 3.0
+    pool_design_score: float = 3.0
     res_tree_debris: float = 0.0
     res_dog: float = 0.0
     res_customer_demands: float = 0.0
@@ -165,8 +169,8 @@ class CostBreakdown(BaseModel):
     rate_gap: float
 
 
-class BowCost(BaseModel):
-    bow_id: str
+class WfCost(BaseModel):
+    wf_id: str
     bow_name: Optional[str] = None
     water_type: str
     gallons: int
@@ -199,7 +203,7 @@ class ProfitabilityAccount(BaseModel):
     cost_breakdown: CostBreakdown
     margin_pct: float
     rate_per_gallon: Optional[float] = None
-    bow_costs: list[BowCost] = []
+    wf_costs: list[WfCost] = []
 
 
 class PortfolioMedians(BaseModel):

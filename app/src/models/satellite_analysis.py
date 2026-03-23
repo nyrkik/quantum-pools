@@ -17,8 +17,8 @@ class SatelliteAnalysis(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    body_of_water_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), nullable=True, unique=True, index=True
+    water_feature_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="SET NULL"), nullable=True, unique=True, index=True
     )
 
     # Pool detection
@@ -58,5 +58,5 @@ class SatelliteAnalysis(Base):
     )
 
     property = relationship("Property", back_populates="satellite_analyses", lazy="noload")
-    body_of_water = relationship("BodyOfWater", back_populates="satellite_analysis", lazy="noload")
+    water_feature = relationship("WaterFeature", back_populates="satellite_analysis", lazy="noload")
     organization = relationship("Organization", lazy="noload")

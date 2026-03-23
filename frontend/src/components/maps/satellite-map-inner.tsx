@@ -173,7 +173,7 @@ function PropertyMarkers({ propertyGroups, selectedPropertyId, zoomLevel, onProp
       {propertyGroups.map((pg) => {
         if (!pg.lat || !pg.lng) return null;
         const isSelected = pg.property_id === selectedPropertyId;
-        const pinned = pg.bows.find((b) => b.pool_lat && b.pool_lng);
+        const pinned = pg.wfs.find((b) => b.pool_lat && b.pool_lng);
         return (
           <Marker
             key={pg.property_id}
@@ -261,18 +261,18 @@ export default function SatelliteMapInner({
       <MapActionsProvider
         actionsRef={actionsRef}
         selectedLat={(() => {
-          const pinned = selectedGroup?.bows.find((b) => b.pool_lat);
+          const pinned = selectedGroup?.wfs.find((b) => b.pool_lat);
           return pinned?.pool_lat ?? selectedGroup?.lat ?? null;
         })()}
         selectedLng={(() => {
-          const pinned = selectedGroup?.bows.find((b) => b.pool_lng);
+          const pinned = selectedGroup?.wfs.find((b) => b.pool_lng);
           return pinned?.pool_lng ?? selectedGroup?.lng ?? null;
         })()}
         bounds={bounds}
       />
 
       {flyTo && selectedGroup && selectedPropertyId && selectedGroup.lat && selectedGroup.lng && (() => {
-        const pinned = selectedGroup.bows.find((b) => b.pool_lat && b.pool_lng);
+        const pinned = selectedGroup.wfs.find((b) => b.pool_lat && b.pool_lng);
         return (
           <PanToSelected
             lat={pinned?.pool_lat ?? selectedGroup.lat}
@@ -283,13 +283,13 @@ export default function SatelliteMapInner({
       })()}
 
       {/* Saved pool pins for selected property */}
-      {selectedGroup && selectedGroup.bows.map((bow) => {
-        if (!bow.pool_lat || !bow.pool_lng) return null;
-        const name = bow.bow_name || (bow.water_type === "pool" ? "Pool" : bow.water_type.replace("_", " "));
+      {selectedGroup && selectedGroup.wfs.map((wf) => {
+        if (!wf.pool_lat || !wf.pool_lng) return null;
+        const name = wf.wf_name || (wf.water_type === "pool" ? "Pool" : wf.water_type.replace("_", " "));
         return (
           <Marker
-            key={`pin-${bow.id}`}
-            position={[bow.pool_lat, bow.pool_lng]}
+            key={`pin-${wf.id}`}
+            position={[wf.pool_lat, wf.pool_lng]}
             icon={createPoolPin(zoomLevel >= 17 ? name : undefined)}
             zIndexOffset={1500}
           >

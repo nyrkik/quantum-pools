@@ -48,11 +48,11 @@ async def get_org_prices(
 @router.put("/org-prices", response_model=OrgChemicalPricesResponse)
 async def update_org_prices(
     body: OrgChemicalPricesUpdate,
-    recompute: bool = Query(False, description="Recompute all BOW costs after price update"),
+    recompute: bool = Query(False, description="Recompute all WF costs after price update"),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update org chemical price overrides. Optionally recompute all BOW costs."""
+    """Update org chemical price overrides. Optionally recompute all WF costs."""
     svc = ChemicalCostService(db)
     prices = await svc.update_org_prices(ctx.organization_id, **body.model_dump(exclude_unset=True))
     if recompute:
@@ -60,30 +60,30 @@ async def update_org_prices(
     return OrgChemicalPricesResponse.model_validate(prices)
 
 
-# --- BOW Chemical Cost Profiles ---
+# --- WF Chemical Cost Profiles ---
 
-@router.get("/bows/{bow_id}", response_model=ChemicalCostProfileResponse)
+@router.get("/wfs/{wf_id}", response_model=ChemicalCostProfileResponse)
 async def get_bow_chemical_cost(
-    bow_id: str,
+    wf_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get or compute chemical cost profile for a body of water."""
     svc = ChemicalCostService(db)
-    profile = await svc.get_or_compute(ctx.organization_id, bow_id)
+    profile = await svc.get_or_compute(ctx.organization_id, wf_id)
     return ChemicalCostProfileResponse.model_validate(profile)
 
 
-@router.put("/bows/{bow_id}", response_model=ChemicalCostProfileResponse)
+@router.put("/wfs/{wf_id}", response_model=ChemicalCostProfileResponse)
 async def update_bow_chemical_cost(
-    bow_id: str,
+    wf_id: str,
     body: ChemicalCostProfileUpdate,
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Override BOW-level chemical costs or usage rates."""
+    """Override WF-level chemical costs or usage rates."""
     svc = ChemicalCostService(db)
-    profile = await svc.update_bow_overrides(ctx.organization_id, bow_id, **body.model_dump(exclude_unset=True))
+    profile = await svc.update_bow_overrides(ctx.organization_id, wf_id, **body.model_dump(exclude_unset=True))
     return ChemicalCostProfileResponse.model_validate(profile)
 
 
@@ -94,7 +94,7 @@ async def recompute_all(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Recompute all BOW chemical costs for the org."""
+    """Recompute all WF chemical costs for the org."""
     svc = ChemicalCostService(db)
     count = await svc.recompute_all(ctx.organization_id)
     return {"recomputed": count}

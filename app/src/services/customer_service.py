@@ -9,7 +9,7 @@ from sqlalchemy.orm import joinedload
 
 from src.models.customer import Customer
 from src.models.property import Property
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 from src.core.exceptions import NotFoundError
 
 
@@ -91,10 +91,10 @@ class CustomerService:
         property_data: dict,
         bow_data: dict,
     ) -> Tuple[Customer, Property]:
-        """Atomically create customer + property + primary BOW."""
+        """Atomically create customer + property + primary WF."""
         customer_id = str(uuid.uuid4())
         property_id = str(uuid.uuid4())
-        bow_id = str(uuid.uuid4())
+        wf_id = str(uuid.uuid4())
 
         customer = Customer(id=customer_id, organization_id=org_id, **customer_data)
         self.db.add(customer)
@@ -107,13 +107,13 @@ class CustomerService:
         )
         self.db.add(prop)
 
-        bow = BodyOfWater(
-            id=bow_id,
+        wf = WaterFeature(
+            id=wf_id,
             organization_id=org_id,
             property_id=property_id,
             **bow_data,
         )
-        self.db.add(bow)
+        self.db.add(wf)
 
         await self.db.flush()
         await self.db.refresh(customer)
@@ -142,8 +142,8 @@ class CustomerService:
 
     async def get_first_property_pool_type(self, customer_id: str) -> Optional[str]:
         result = await self.db.execute(
-            select(BodyOfWater.pool_type)
-            .join(Property, Property.id == BodyOfWater.property_id)
+            select(WaterFeature.pool_type)
+            .join(Property, Property.id == WaterFeature.property_id)
             .where(Property.customer_id == customer_id)
             .order_by(Property.created_at)
             .limit(1)
@@ -157,8 +157,8 @@ class CustomerService:
         )
         return result.scalar_one_or_none()
 
-    async def get_property_bow_summary(self, customer_id: str) -> Optional[str]:
-        """Return BOW summary for customer's first property, e.g. 'Pool, Spa'."""
+    async def get_property_wf_summary(self, customer_id: str) -> Optional[str]:
+        """Return WF summary for customer's first property, e.g. 'Pool, Spa'."""
         result = await self.db.execute(
             select(Property.id).where(Property.customer_id == customer_id)
             .order_by(Property.created_at).limit(1)
@@ -167,10 +167,10 @@ class CustomerService:
         if not prop_id:
             return None
         bow_result = await self.db.execute(
-            select(BodyOfWater.water_type).where(
-                BodyOfWater.property_id == prop_id,
-                BodyOfWater.is_active == True,
-            ).order_by(BodyOfWater.water_type)
+            select(WaterFeature.water_type).where(
+                WaterFeature.property_id == prop_id,
+                WaterFeature.is_active == True,
+            ).order_by(WaterFeature.water_type)
         )
         types = [r[0] for r in bow_result.all()]
         if not types:

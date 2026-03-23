@@ -10,7 +10,6 @@ const FEATURE_NAMES: Record<FeatureSlug, string> = {
   invoicing: "Invoicing & Billing",
   profitability: "Profitability Analysis",
   satellite_analysis: "Satellite Analysis",
-  pool_measurement: "Pool Measurement",
   emd_intelligence: "EMD Inspection Intel",
   chemical_costs: "Chemical Cost Engine",
   customer_portal: "Customer Portal",

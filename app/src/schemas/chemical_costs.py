@@ -61,7 +61,7 @@ class OrgChemicalPricesResponse(BaseModel):
 
 class ChemicalCostProfileResponse(BaseModel):
     id: str
-    body_of_water_id: str
+    water_feature_id: str
     organization_id: str
     sanitizer_cost: float
     acid_cost: float

@@ -1,4 +1,4 @@
-"""Chemical cost engine — computes per-BOW monthly chemical costs using regional defaults,
+"""Chemical cost engine — computes per-WF monthly chemical costs using regional defaults,
 org price overrides, environment adjustments from satellite/difficulty data."""
 
 import uuid
@@ -12,7 +12,7 @@ from sqlalchemy import select
 from src.models.regional_default import RegionalDefault
 from src.models.org_chemical_prices import OrgChemicalPrices
 from src.models.chemical_cost_profile import ChemicalCostProfile
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.property_difficulty import PropertyDifficulty
 from src.core.exceptions import NotFoundError
@@ -56,14 +56,14 @@ UNIT_OZ_MAP = {
 }
 
 
-def estimate_volume(bow: BodyOfWater) -> int:
+def estimate_volume(wf: WaterFeature) -> int:
     """Estimate pool volume from area + depth + structure.
 
     Uses shallow/deep depths when available, applies reductions for steps and
     bench/sun shelves to produce a more accurate cubic-foot-to-gallon estimate.
     """
-    if bow.pool_gallons:
-        return bow.pool_gallons  # User-entered, always wins
+    if wf.pool_gallons:
+        return wf.pool_gallons  # User-entered, always wins
 
     # Type-based defaults when no data available
     DEFAULT_GALLONS = {
@@ -75,26 +75,26 @@ def estimate_volume(bow: BodyOfWater) -> int:
         "water_feature": 500,
     }
 
-    sqft = bow.pool_sqft
+    sqft = wf.pool_sqft
     if not sqft:
-        base = DEFAULT_GALLONS.get(bow.water_type, 15000)
+        base = DEFAULT_GALLONS.get(wf.water_type, 15000)
         # Commercial pools are larger
-        if bow.water_type == "pool" and bow.pool_type == "commercial":
+        if wf.water_type == "pool" and wf.pool_type == "commercial":
             base = 25000
         return base
 
     # Average depth from shallow + deep
-    shallow = bow.pool_depth_shallow
-    deep = bow.pool_depth_deep
+    shallow = wf.pool_depth_shallow
+    deep = wf.pool_depth_deep
     if shallow and deep:
         avg_depth = (shallow + deep) / 2
-    elif bow.pool_depth_avg:
-        avg_depth = bow.pool_depth_avg
-    elif bow.water_type in ("spa", "hot_tub"):
+    elif wf.pool_depth_avg:
+        avg_depth = wf.pool_depth_avg
+    elif wf.water_type in ("spa", "hot_tub"):
         avg_depth = 3.0
-    elif bow.water_type == "wading_pool":
+    elif wf.water_type == "wading_pool":
         avg_depth = 1.25
-    elif bow.pool_type == "commercial" or (sqft and sqft > 800):
+    elif wf.pool_type == "commercial" or (sqft and sqft > 800):
         avg_depth = 4.0
     elif sqft and sqft < 400:
         avg_depth = 4.0
@@ -105,14 +105,14 @@ def estimate_volume(bow: BodyOfWater) -> int:
 
     # Step reduction: each step entry ~15 sqft, depth difference from step to shallow
     step_reduction = 0.0
-    if bow.step_entry_count and bow.step_entry_count > 0 and shallow:
-        step_area = bow.step_entry_count * 15  # ~15 sqft per step entry
+    if wf.step_entry_count and wf.step_entry_count > 0 and shallow:
+        step_area = wf.step_entry_count * 15  # ~15 sqft per step entry
         step_depth_saved = shallow * 0.5  # Steps are about half the shallow depth
         step_reduction = step_area * step_depth_saved
 
     # Bench/shelf reduction: ~10% of area at ~1ft depth instead of avg
     shelf_reduction = 0.0
-    if bow.has_bench_shelf and avg_depth > 1.5:
+    if wf.has_bench_shelf and avg_depth > 1.5:
         shelf_area = sqft * 0.10  # ~10% of pool area
         shelf_depth_saved = avg_depth - 1.0  # Shelf is ~1ft deep
         shelf_reduction = shelf_area * shelf_depth_saved
@@ -122,7 +122,7 @@ def estimate_volume(bow: BodyOfWater) -> int:
 
 
 class ChemicalCostService:
-    """Computes and caches per-BOW monthly chemical costs."""
+    """Computes and caches per-WF monthly chemical costs."""
 
     # Environment adjustments based on satellite analysis and property difficulty
     ENVIRONMENT_ADJUSTMENTS = {
@@ -334,7 +334,7 @@ class ChemicalCostService:
     async def compute_bow_chemical_cost(
         self,
         org_id: str,
-        bow: BodyOfWater,
+        wf: WaterFeature,
         region_key: str = DEFAULT_REGION,
         satellite_analysis: Optional[SatelliteAnalysis] = None,
         difficulty: Optional[PropertyDifficulty] = None,
@@ -345,18 +345,18 @@ class ChemicalCostService:
         1. Get gallons (or estimate from sqft)
         2. Get sanitizer type (or default to "liquid")
         3. Get prices (org override > regional > national)
-        4. Get usage rates (BOW override > regional)
+        4. Get usage rates (WF override > regional)
         5. Get environment adjustments
         6. Compute monthly costs
         7. Save/update ChemicalCostProfile
         """
         # 1. Gallons — use structure-aware estimation
-        gallons = estimate_volume(bow)
+        gallons = estimate_volume(wf)
 
         units_10k = gallons / 10000.0
 
         # 2. Sanitizer type
-        sanitizer_type = bow.sanitizer_type or "liquid"
+        sanitizer_type = wf.sanitizer_type or "liquid"
         # Normalize some common aliases
         type_map = {"trichlor": "tabs", "chlorine": "liquid"}
         sanitizer_type = type_map.get(sanitizer_type, sanitizer_type)
@@ -366,9 +366,9 @@ class ChemicalCostService:
         org_prices = await self.get_org_prices(org_id)
         prices = self.get_effective_price(sanitizer_type, org_prices, regional)
 
-        # 4. Usage rates (BOW override > regional)
+        # 4. Usage rates (WF override > regional)
         # Check for existing profile with overrides
-        existing = await self._get_existing_profile(bow.id)
+        existing = await self._get_existing_profile(wf.id)
         sanitizer_usage_oz = regional.sanitizer_usage_oz
         acid_usage_oz = regional.acid_usage_oz
         if existing and existing.sanitizer_usage_override_oz is not None:
@@ -393,7 +393,7 @@ class ChemicalCostService:
             if difficulty.enclosure_type:
                 diff_data["enclosure_type"] = difficulty.enclosure_type
 
-        pool_type = bow.pool_type
+        pool_type = wf.pool_type
         adj = self.compute_adjustments(sat_data, diff_data, pool_type)
         san_factor = adj["sanitizer_factor"]
         acid_factor = adj["acid_factor"]
@@ -477,7 +477,7 @@ class ChemicalCostService:
         else:
             profile = ChemicalCostProfile(
                 id=str(uuid.uuid4()),
-                body_of_water_id=bow.id,
+                water_feature_id=wf.id,
                 organization_id=org_id,
                 sanitizer_cost=round(sanitizer_cost, 2),
                 acid_cost=round(acid_cost, 2),
@@ -495,45 +495,45 @@ class ChemicalCostService:
             await self.db.refresh(profile)
             return profile
 
-    async def _get_existing_profile(self, bow_id: str) -> Optional[ChemicalCostProfile]:
+    async def _get_existing_profile(self, wf_id: str) -> Optional[ChemicalCostProfile]:
         result = await self.db.execute(
-            select(ChemicalCostProfile).where(ChemicalCostProfile.body_of_water_id == bow_id)
+            select(ChemicalCostProfile).where(ChemicalCostProfile.water_feature_id == wf_id)
         )
         return result.scalar_one_or_none()
 
     async def get_or_compute(
         self,
         org_id: str,
-        bow_id: str,
+        wf_id: str,
         region_key: str = DEFAULT_REGION,
     ) -> ChemicalCostProfile:
         """Get existing profile or compute a new one."""
-        existing = await self._get_existing_profile(bow_id)
+        existing = await self._get_existing_profile(wf_id)
         if existing:
             return existing
 
-        # Need to load the BOW
+        # Need to load the WF
         result = await self.db.execute(
-            select(BodyOfWater).where(BodyOfWater.id == bow_id, BodyOfWater.organization_id == org_id)
+            select(WaterFeature).where(WaterFeature.id == wf_id, WaterFeature.organization_id == org_id)
         )
-        bow = result.scalar_one_or_none()
-        if not bow:
+        wf = result.scalar_one_or_none()
+        if not wf:
             raise NotFoundError("Body of water not found")
 
         # Load satellite analysis for the property
         sat_result = await self.db.execute(
-            select(SatelliteAnalysis).where(SatelliteAnalysis.property_id == bow.property_id)
+            select(SatelliteAnalysis).where(SatelliteAnalysis.property_id == wf.property_id)
         )
         satellite = sat_result.scalar_one_or_none()
 
         # Load difficulty
         diff_result = await self.db.execute(
-            select(PropertyDifficulty).where(PropertyDifficulty.property_id == bow.property_id)
+            select(PropertyDifficulty).where(PropertyDifficulty.property_id == wf.property_id)
         )
         difficulty = diff_result.scalar_one_or_none()
 
         return await self.compute_bow_chemical_cost(
-            org_id, bow, region_key=region_key,
+            org_id, wf, region_key=region_key,
             satellite_analysis=satellite, difficulty=difficulty,
         )
 
@@ -547,12 +547,12 @@ class ChemicalCostService:
         await self.db.refresh(prices)
         return prices
 
-    async def update_bow_overrides(self, org_id: str, bow_id: str, **kwargs) -> ChemicalCostProfile:
-        """Update BOW-level cost overrides."""
-        profile = await self._get_existing_profile(bow_id)
+    async def update_bow_overrides(self, org_id: str, wf_id: str, **kwargs) -> ChemicalCostProfile:
+        """Update WF-level cost overrides."""
+        profile = await self._get_existing_profile(wf_id)
         if not profile:
             # Compute first, then override
-            profile = await self.get_or_compute(org_id, bow_id)
+            profile = await self.get_or_compute(org_id, wf_id)
 
         overrides = profile.overrides or {}
         cost_fields = {"sanitizer_cost", "acid_cost", "cya_cost", "salt_cost"}
@@ -578,15 +578,15 @@ class ChemicalCostService:
         return profile
 
     async def recompute_all(self, org_id: str, region_key: str = DEFAULT_REGION) -> int:
-        """Recompute all BOW chemical costs for an org. Returns count recomputed."""
-        # Load all active BOWs
+        """Recompute all WF chemical costs for an org. Returns count recomputed."""
+        # Load all active WFs
         bow_result = await self.db.execute(
-            select(BodyOfWater).where(
-                BodyOfWater.organization_id == org_id,
-                BodyOfWater.is_active == True,
+            select(WaterFeature).where(
+                WaterFeature.organization_id == org_id,
+                WaterFeature.is_active == True,
             )
         )
-        bows = list(bow_result.scalars().all())
+        wfs = list(bow_result.scalars().all())
 
         # Load satellite analyses indexed by property_id
         sat_result = await self.db.execute(
@@ -601,14 +601,14 @@ class ChemicalCostService:
         diff_by_prop = {d.property_id: d for d in diff_result.scalars().all()}
 
         count = 0
-        for bow in bows:
-            satellite = sat_by_prop.get(bow.property_id)
-            difficulty = diff_by_prop.get(bow.property_id)
+        for wf in wfs:
+            satellite = sat_by_prop.get(wf.property_id)
+            difficulty = diff_by_prop.get(wf.property_id)
             await self.compute_bow_chemical_cost(
-                org_id, bow, region_key=region_key,
+                org_id, wf, region_key=region_key,
                 satellite_analysis=satellite, difficulty=difficulty,
             )
             count += 1
 
-        logger.info(f"Recomputed chemical costs for {count} BOWs in org {org_id}")
+        logger.info(f"Recomputed chemical costs for {count} WFs in org {org_id}")
         return count

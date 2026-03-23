@@ -21,7 +21,7 @@ export interface PropertyGroup {
   lng: number | null;
   tech_name: string | null;
   tech_color: string | null;
-  bows: PoolBowWithCoords[];
+  wfs: PoolBowWithCoords[];
   best_status: "analyzed" | "pinned" | "not_analyzed";
 }
 

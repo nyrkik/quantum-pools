@@ -43,7 +43,7 @@ class PhotoService:
     async def upload_photo(
         self, organization_id: str, property_id: str,
         file_bytes: bytes, filename: str,
-        bow_id: Optional[str] = None, caption: Optional[str] = None,
+        wf_id: Optional[str] = None, caption: Optional[str] = None,
         uploaded_by: Optional[str] = None,
     ) -> PropertyPhoto:
         # Verify property exists
@@ -77,7 +77,7 @@ class PhotoService:
             id=photo_id,
             property_id=property_id,
             organization_id=organization_id,
-            body_of_water_id=bow_id,
+            water_feature_id=wf_id,
             filename=safe_filename,
             caption=caption,
             is_hero=is_hero,

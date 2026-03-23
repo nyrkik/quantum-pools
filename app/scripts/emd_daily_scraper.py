@@ -184,6 +184,10 @@ async def scrape_day(target_date: date) -> dict:
 
 async def run_daily_scrape():
     """Run the daily scrape cycle."""
+    from src.core.database import get_db_context
+    from src.models.scraper_run import ScraperRun
+    from src.services.email_service import send_scraper_alert
+
     health = load_health()
     health["state"] = "scraping"
     health["last_attempt"] = datetime.now(timezone.utc).isoformat()
@@ -191,6 +195,8 @@ async def run_daily_scrape():
 
     today = date.today()
     yesterday = today - timedelta(days=1)
+    start_time = datetime.now(timezone.utc)
+    all_errors = []
 
     try:
         total_found = 0
@@ -203,9 +209,12 @@ async def run_daily_scrape():
             total_found += result["found"]
             total_new += result["new"]
             total_pdfs += result["pdfs"]
+            all_errors.extend(result.get("errors", []))
 
             if result["errors"]:
                 logger.warning(f"  {len(result['errors'])} errors on {target}")
+
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         # Success
         health["state"] = "idle"
@@ -219,13 +228,54 @@ async def run_daily_scrape():
 
         logger.info(f"Daily scrape complete: found={total_found}, new={total_new}, pdfs={total_pdfs}")
 
+        # Log to DB
+        try:
+            async with get_db_context() as db:
+                run = ScraperRun(
+                    started_at=start_time,
+                    finished_at=datetime.now(timezone.utc),
+                    status="success",
+                    days_scraped=2,
+                    inspections_found=total_found,
+                    inspections_new=total_new,
+                    pdfs_downloaded=total_pdfs,
+                    errors="\n".join(all_errors) if all_errors else None,
+                    duration_seconds=duration,
+                )
+                db.add(run)
+
+                # Send email
+                scrape_dates = [yesterday.strftime("%b %d"), today.strftime("%b %d")]
+                email_sent = await send_scraper_alert(total_found, total_new, total_pdfs, all_errors, duration, scrape_dates)
+                run.email_sent = email_sent
+
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log scraper run: {e}")
+
     except Exception as e:
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
         health["state"] = "error"
         health["last_error"] = str(e)
         health["consecutive_failures"] += 1
         save_health(health)
 
         logger.error(f"Daily scrape failed: {e}")
+
+        # Log failure to DB
+        try:
+            async with get_db_context() as db:
+                run = ScraperRun(
+                    started_at=start_time,
+                    finished_at=datetime.now(timezone.utc),
+                    status="error",
+                    errors=str(e),
+                    duration_seconds=duration,
+                )
+                db.add(run)
+                await db.commit()
+        except Exception as db_err:
+            logger.error(f"Failed to log scraper error: {db_err}")
 
         if health["consecutive_failures"] >= MAX_CONSECUTIVE_FAILURES and not health["alert_sent"]:
             await send_alert(

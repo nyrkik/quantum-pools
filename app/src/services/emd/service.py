@@ -356,6 +356,196 @@ class EMDService:
 
         return {"total_unmatched": len(unmatched), "matched": matched, "removed": removed, "details": matches_detail}
 
+    async def get_org_properties_emd_status(self, organization_id: str) -> list[dict]:
+        """Get EMD match status for all commercial properties in the org."""
+        result = await self.db.execute(
+            select(Property, Customer)
+            .join(Customer, Customer.id == Property.customer_id)
+            .where(
+                Property.organization_id == organization_id,
+                Customer.customer_type == "commercial",
+                Customer.is_active == True,
+                Property.is_active == True,
+                Property.county == "Sacramento",
+            )
+            .order_by(Customer.first_name)
+        )
+        rows = result.all()
+
+        statuses = []
+        for prop, cust in rows:
+            # Check for matched facility
+            fac_result = await self.db.execute(
+                select(EMDFacility).where(EMDFacility.matched_property_id == prop.id)
+            )
+            facility = fac_result.scalar_one_or_none()
+
+            # Get inspection stats if matched
+            total_violations = 0
+            last_date = None
+            if facility:
+                stats = await self.db.execute(
+                    select(
+                        func.count(EMDViolation.id),
+                        func.max(EMDInspection.inspection_date),
+                    )
+                    .select_from(EMDInspection)
+                    .outerjoin(EMDViolation, EMDViolation.inspection_id == EMDInspection.id)
+                    .where(EMDInspection.facility_id == facility.id)
+                )
+                stat_row = stats.one()
+                total_violations = stat_row[0] or 0
+                last_date = stat_row[1]
+
+            statuses.append({
+                "property_id": prop.id,
+                "property_address": prop.full_address,
+                "customer_name": cust.display_name_col,
+                "customer_id": cust.id,
+                "match_status": "matched" if facility else "unmatched",
+                "facility_id": facility.id if facility else None,
+                "facility_name": facility.name if facility else None,
+                "last_inspection_date": last_date,
+                "total_violations": total_violations,
+            })
+
+        return statuses
+
+    async def suggest_matches(self, property_id: str, organization_id: str) -> list[dict]:
+        """Suggest top EMD facility matches for a property by address similarity."""
+        prop_result = await self.db.execute(
+            select(Property).where(Property.id == property_id, Property.organization_id == organization_id)
+        )
+        prop = prop_result.scalar_one_or_none()
+        if not prop:
+            return []
+
+        prop_norm = self._normalize_address(prop.address)
+        prop_parts = prop_norm.split()
+        prop_number = prop_parts[0] if prop_parts and prop_parts[0].isdigit() else None
+        prop_street = " ".join(prop_parts[1:]) if len(prop_parts) > 1 else ""
+        prop_city = (prop.city or "").lower()
+
+        # Get customer name for name matching
+        cust_result = await self.db.execute(
+            select(Customer).where(Customer.id == prop.customer_id)
+        )
+        customer = cust_result.scalar_one_or_none()
+        cust_name_words = set((customer.display_name_col or "").lower().split()) if customer else set()
+        # Remove generic words
+        cust_name_words -= {"apartments", "apartment", "apts", "apt", "the", "at", "of", "and", "llc", "inc"}
+
+        # Get all facilities (not already matched to another property)
+        result = await self.db.execute(
+            select(EMDFacility).where(
+                EMDFacility.matched_property_id.is_(None) | (EMDFacility.matched_property_id == property_id)
+            )
+        )
+        facilities = result.scalars().all()
+
+        scored = []
+        for fac in facilities:
+            fac_norm = self._normalize_address(fac.street_address) if fac.street_address else ""
+            fac_parts = fac_norm.split()
+            fac_number = fac_parts[0] if fac_parts and fac_parts[0].isdigit() else None
+            fac_street = " ".join(fac_parts[1:]) if len(fac_parts) > 1 else ""
+            fac_city = (fac.city or "").lower()
+
+            score = 0
+
+            # Address scoring
+            if fac_norm and prop_norm == fac_norm:
+                score = 100
+            elif prop_street and fac_street:
+                number_match = prop_number and fac_number and prop_number == fac_number
+                # Close number (within 10) — catches 7000 vs 7002
+                number_close = (prop_number and fac_number
+                    and abs(int(prop_number) - int(fac_number)) <= 10)
+                # Street name comparison
+                street_exact = prop_street == fac_street
+                prop_words = set(prop_street.split())
+                fac_words = set(fac_street.split())
+                street_overlap = len(prop_words & fac_words) / max(len(prop_words | fac_words), 1)
+
+                if number_match and street_exact:
+                    score = 90
+                elif number_match and street_overlap >= 0.5:
+                    score = 70
+                elif number_close and street_exact:
+                    score = 70
+                elif number_close and street_overlap >= 0.5:
+                    score = 55
+                elif street_exact and prop_city == fac_city:
+                    score = 40
+                elif number_match and prop_city == fac_city:
+                    score = 35
+
+            # Name matching — boost or create score if facility name overlaps customer name
+            if cust_name_words and fac.name:
+                fac_name_words = set(fac.name.lower().split()) - {"apartments", "apartment", "apts", "apt", "the", "at", "of", "and", "llc", "inc"}
+                overlap = cust_name_words & fac_name_words
+                if overlap and len(overlap) >= 1:
+                    score = max(score, 30) + min(len(overlap) * 15, 30)
+
+            if score >= 30:
+                scored.append((score, fac))
+
+        scored.sort(key=lambda x: -x[0])
+
+        # Get inspection stats for top results
+        suggestions = []
+        for score, fac in scored[:5]:
+            stats = await self.db.execute(
+                select(
+                    func.count(EMDInspection.id),
+                    func.count(EMDViolation.id),
+                    func.max(EMDInspection.inspection_date),
+                )
+                .select_from(EMDInspection)
+                .outerjoin(EMDViolation, EMDViolation.inspection_id == EMDInspection.id)
+                .where(EMDInspection.facility_id == fac.id)
+            )
+            stat_row = stats.one()
+            suggestions.append({
+                "facility_id": fac.id,
+                "facility_name": fac.name,
+                "street_address": fac.street_address,
+                "city": fac.city,
+                "score": score,
+                "total_inspections": stat_row[0] or 0,
+                "total_violations": stat_row[1] or 0,
+                "last_inspection_date": stat_row[2],
+            })
+
+        return suggestions
+
+    async def unmatch_property(self, property_id: str, organization_id: str):
+        """Remove EMD match from a property and clear FA/PR numbers."""
+        # Find and unlink facility
+        result = await self.db.execute(
+            select(EMDFacility).where(EMDFacility.matched_property_id == property_id)
+        )
+        for fac in result.scalars().all():
+            fac.matched_property_id = None
+            fac.matched_at = None
+
+        # Clear FA number on property
+        prop_result = await self.db.execute(
+            select(Property).where(Property.id == property_id, Property.organization_id == organization_id)
+        )
+        prop = prop_result.scalar_one_or_none()
+        if prop:
+            prop.emd_fa_number = None
+
+        # Clear PR numbers on water features
+        wf_result = await self.db.execute(
+            select(WaterFeature).where(WaterFeature.property_id == property_id)
+        )
+        for wf in wf_result.scalars().all():
+            wf.emd_pr_number = None
+
+        await self.db.flush()
+
     # --- Queries ---
 
     async def list_facilities(
@@ -513,7 +703,7 @@ class EMDService:
         )
         inspections = result.scalars().all()
 
-        # Get matched property info + BOW names
+        # Get matched property info + WF names
         matched_property_address = None
         matched_customer_name = None
         matched_customer_id = None
@@ -530,11 +720,11 @@ class EMDService:
                 matched_customer_name = row[1].display_name_col
                 matched_customer_id = row[1].id
 
-            # Get BOW names from the matched property
-            from src.models.body_of_water import BodyOfWater
+            # Get WF names from the matched property
+            from src.models.water_feature import WaterFeature
             bow_result = await self.db.execute(
-                select(BodyOfWater.water_type, BodyOfWater.name)
-                .where(BodyOfWater.property_id == facility.matched_property_id)
+                select(WaterFeature.water_type, WaterFeature.name)
+                .where(WaterFeature.property_id == facility.matched_property_id)
             )
             for bow_row in bow_result.all():
                 bow_type = (bow_row.water_type or "pool").lower()
@@ -909,11 +1099,11 @@ class EMDService:
 
         return leads
 
-    # --- Sync equipment to BOW ---
+    # --- Sync equipment to WF ---
 
     async def sync_equipment_to_bow(self, facility_id: str) -> Optional[dict]:
-        """Copy latest EMD equipment data to the matched property's primary BOW."""
-        from src.models.body_of_water import BodyOfWater
+        """Copy latest EMD equipment data to the matched property's primary WF."""
+        from src.models.water_feature import WaterFeature
 
         # Get facility with match
         result = await self.db.execute(
@@ -928,25 +1118,25 @@ class EMDService:
         if not equipment:
             return None
 
-        # Get primary BOW for the property
+        # Get primary WF for the property
         result = await self.db.execute(
-            select(BodyOfWater).where(
-                BodyOfWater.property_id == facility.matched_property_id,
-                BodyOfWater.is_primary == True,
+            select(WaterFeature).where(
+                WaterFeature.property_id == facility.matched_property_id,
+                WaterFeature.is_primary == True,
             )
         )
-        bow = result.scalar_one_or_none()
-        if not bow:
+        wf = result.scalar_one_or_none()
+        if not wf:
             return None
 
         # Sync pool specs
         updated = {}
-        if equipment.pool_capacity_gallons and not bow.pool_gallons:
-            bow.pool_gallons = equipment.pool_capacity_gallons
+        if equipment.pool_capacity_gallons and not wf.pool_gallons:
+            wf.pool_gallons = equipment.pool_capacity_gallons
             updated["pool_gallons"] = equipment.pool_capacity_gallons
 
         await self.db.flush()
-        return {"bow_id": bow.id, "updated_fields": updated}
+        return {"wf_id": wf.id, "updated_fields": updated}
 
     # --- Helpers ---
 
@@ -986,11 +1176,15 @@ class EMDService:
         # Remove unit/suite/apt numbers
         addr = re.sub(r"\s*#\s*\d+", "", addr)
         addr = re.sub(r"\s*(suite|ste|apt|unit)\s*\w*", "", addr, flags=re.I)
-        # Standardize abbreviations
+        # Standardize abbreviations (both directions)
         addr = addr.replace(" street", " st").replace(" avenue", " ave")
         addr = addr.replace(" boulevard", " blvd").replace(" drive", " dr")
         addr = addr.replace(" road", " rd").replace(" lane", " ln")
         addr = addr.replace(" court", " ct").replace(" place", " pl")
+        addr = addr.replace(" parkway", " pkwy").replace(" circle", " cir")
+        addr = addr.replace(" terrace", " ter").replace(" way", " wy")
+        addr = addr.replace(" south ", " s ").replace(" north ", " n ")
+        addr = addr.replace(" east ", " e ").replace(" west ", " w ")
         # Remove extra spaces
         addr = re.sub(r"\s+", " ", addr).strip()
         return addr

@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
+import { PropertyMatching } from "@/components/emd/property-matching";
 import {
   Tooltip,
   TooltipContent,
@@ -225,7 +226,7 @@ interface EMDFacilityDetail {
   matched_property_address: string | null;
   matched_customer_name: string | null;
   matched_customer_id?: string | null;
-  matched_bow_names?: Record<string, string>;
+  matched_wf_names?: Record<string, string>;
 }
 
 interface DashboardData {
@@ -869,6 +870,11 @@ export default function EMDPage() {
         </div>
       )}
 
+      {/* ===== MY PROPERTIES EMD MATCHING ===== */}
+      <div className="shrink-0 max-h-80 overflow-y-auto">
+        <PropertyMatching />
+      </div>
+
       {/* ===== RESEARCH SECTION ===== */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
         {/* Left: Facility list */}
@@ -1253,7 +1259,7 @@ export default function EMDPage() {
                       const cleanName = rawProgName ? cleanProgramId(rawProgName) : null;
                       const prId = latestInsp?.permit_id;
                       const bowType = cleanName?.toLowerCase() || "pool";
-                      const userBowName = selectedFacility.matched_bow_names?.[bowType];
+                      const userBowName = selectedFacility.matched_wf_names?.[bowType];
                       const displayName = userBowName || cleanName;
                       const emdName = userBowName && rawProgName ? cleanProgramId(rawProgName) : null;
                       return displayName ? (

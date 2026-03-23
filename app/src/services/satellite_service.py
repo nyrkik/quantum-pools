@@ -1,6 +1,6 @@
-"""Satellite analysis service v5 — Per-BOW analysis (pools only).
+"""Satellite analysis service v5 — Per-WF analysis (pools only).
 
-Each pool BOW gets its own pin and analysis. Spas/fountains excluded.
+Each pool WF gets its own pin and analysis. Spas/fountains excluded.
 SatelliteImages stay property-keyed (one set of overhead photos per yard).
 """
 
@@ -21,7 +21,7 @@ from src.core.config import settings
 from src.core.exceptions import NotFoundError
 from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.property import Property
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 
 logger = logging.getLogger(__name__)
 
@@ -79,19 +79,19 @@ class SatelliteService:
             self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
-    async def _get_bow(self, organization_id: str, bow_id: str) -> BodyOfWater:
+    async def _get_bow(self, organization_id: str, wf_id: str) -> WaterFeature:
         result = await self.db.execute(
-            select(BodyOfWater).where(
-                BodyOfWater.id == bow_id,
-                BodyOfWater.organization_id == organization_id,
+            select(WaterFeature).where(
+                WaterFeature.id == wf_id,
+                WaterFeature.organization_id == organization_id,
             )
         )
-        bow = result.scalar_one_or_none()
-        if not bow:
-            raise NotFoundError(f"Body of water {bow_id} not found")
-        if bow.water_type != "pool":
-            raise ValueError(f"Satellite analysis only applies to pools, not {bow.water_type}")
-        return bow
+        wf = result.scalar_one_or_none()
+        if not wf:
+            raise NotFoundError(f"Body of water {wf_id} not found")
+        if wf.water_type != "pool":
+            raise ValueError(f"Satellite analysis only applies to pools, not {wf.water_type}")
+        return wf
 
     async def _get_property(self, organization_id: str, property_id: str) -> Property:
         result = await self.db.execute(
@@ -105,22 +105,22 @@ class SatelliteService:
             raise NotFoundError(f"Property {property_id} not found")
         return prop
 
-    async def get_analysis(self, organization_id: str, bow_id: str) -> Optional[SatelliteAnalysis]:
+    async def get_analysis(self, organization_id: str, wf_id: str) -> Optional[SatelliteAnalysis]:
         result = await self.db.execute(
             select(SatelliteAnalysis).where(
-                SatelliteAnalysis.body_of_water_id == bow_id,
+                SatelliteAnalysis.water_feature_id == wf_id,
                 SatelliteAnalysis.organization_id == organization_id,
             )
         )
         return result.scalar_one_or_none()
 
     async def set_pool_pin(
-        self, organization_id: str, bow_id: str, pool_lat: float, pool_lng: float
+        self, organization_id: str, wf_id: str, pool_lat: float, pool_lng: float
     ) -> SatelliteAnalysis:
-        bow = await self._get_bow(organization_id, bow_id)
-        prop = await self._get_property(organization_id, bow.property_id)
+        wf = await self._get_bow(organization_id, wf_id)
+        prop = await self._get_property(organization_id, wf.property_id)
 
-        existing = await self.get_analysis(organization_id, bow_id)
+        existing = await self.get_analysis(organization_id, wf_id)
         if existing:
             existing.pool_lat = pool_lat
             existing.pool_lng = pool_lng
@@ -132,7 +132,7 @@ class SatelliteService:
             id=str(uuid.uuid4()),
             organization_id=organization_id,
             property_id=prop.id,
-            body_of_water_id=bow_id,
+            water_feature_id=wf_id,
             pool_lat=pool_lat,
             pool_lng=pool_lng,
             analysis_version="5.0",
@@ -143,7 +143,7 @@ class SatelliteService:
         return analysis
 
     async def get_pool_bows_with_coords(self, organization_id: str) -> list[dict]:
-        """List all pool BOWs with property coordinates, analysis status, and assigned tech."""
+        """List all pool WFs with property coordinates, analysis status, and assigned tech."""
         from src.models.customer import Customer
         from src.models.route import Route, RouteStop
         from src.models.tech import Tech
@@ -178,11 +178,11 @@ class SatelliteService:
 
         result = await self.db.execute(
             select(
-                BodyOfWater.id,
-                BodyOfWater.property_id,
-                BodyOfWater.name,
-                BodyOfWater.water_type,
-                BodyOfWater.pool_sqft,
+                WaterFeature.id,
+                WaterFeature.property_id,
+                WaterFeature.name,
+                WaterFeature.water_type,
+                WaterFeature.pool_sqft,
                 Property.address,
                 Property.city,
                 Customer.display_name_col.label("customer_name"),
@@ -196,12 +196,12 @@ class SatelliteService:
                 tech_name_subq,
                 tech_color_subq,
             )
-            .join(Property, BodyOfWater.property_id == Property.id)
+            .join(Property, WaterFeature.property_id == Property.id)
             .join(Customer, Property.customer_id == Customer.id)
-            .outerjoin(SA, SA.body_of_water_id == BodyOfWater.id)
+            .outerjoin(SA, SA.water_feature_id == WaterFeature.id)
             .where(
-                BodyOfWater.organization_id == organization_id,
-                BodyOfWater.is_active == True,
+                WaterFeature.organization_id == organization_id,
+                WaterFeature.is_active == True,
                 Customer.is_active == True,
                 Property.is_active == True,
                 Property.lat.isnot(None),
@@ -234,7 +234,7 @@ class SatelliteService:
         ]
 
     async def analyze_bow(
-        self, organization_id: str, bow_id: str,
+        self, organization_id: str, wf_id: str,
         force: bool = False,
         pool_lat: Optional[float] = None, pool_lng: Optional[float] = None,
     ) -> SatelliteAnalysis:
@@ -243,13 +243,13 @@ class SatelliteService:
         if not settings.anthropic_api_key:
             raise ValueError("Anthropic API key not configured")
 
-        bow = await self._get_bow(organization_id, bow_id)
-        prop = await self._get_property(organization_id, bow.property_id)
+        wf = await self._get_bow(organization_id, wf_id)
+        prop = await self._get_property(organization_id, wf.property_id)
 
         if not prop.lat or not prop.lng:
             raise ValueError(f"Property {prop.id} has no coordinates — geocode first")
 
-        existing = await self.get_analysis(organization_id, bow_id)
+        existing = await self.get_analysis(organization_id, wf_id)
         if existing and not force:
             return existing
 
@@ -263,7 +263,7 @@ class SatelliteService:
                     id=str(uuid.uuid4()),
                     organization_id=organization_id,
                     property_id=prop.id,
-                    body_of_water_id=bow_id,
+                    water_feature_id=wf_id,
                     pool_lat=pool_lat,
                     pool_lng=pool_lng,
                 )
@@ -285,7 +285,7 @@ class SatelliteService:
 
         if not bytes_z21 and not bytes_z20:
             return await self._save_error(
-                organization_id, prop.id, bow_id, existing,
+                organization_id, prop.id, wf_id, existing,
                 "Failed to fetch satellite images",
                 url_z21, 21, width, height,
             )
@@ -300,26 +300,26 @@ class SatelliteService:
                 center_lat, width, height,
             )
         except Exception as e:
-            logger.error(f"Claude analysis failed for BOW {bow_id}: {e}")
+            logger.error(f"Claude analysis failed for WF {wf_id}: {e}")
             return await self._save_error(
-                organization_id, prop.id, bow_id, existing,
+                organization_id, prop.id, wf_id, existing,
                 f"Claude analysis failed: {e}",
                 url_z21, 21, width, height,
             )
 
         if not results:
             return await self._save_error(
-                organization_id, prop.id, bow_id, existing,
+                organization_id, prop.id, wf_id, existing,
                 "Pool not detected",
                 url_z21, 21, width, height,
             )
 
-        # Update pool_sqft on this BOW only
-        if results["pool_detected"] and results["estimated_pool_sqft"] and not bow.pool_sqft:
-            bow.pool_sqft = results["estimated_pool_sqft"]
+        # Update pool_sqft on this WF only
+        if results["pool_detected"] and results["estimated_pool_sqft"] and not wf.pool_sqft:
+            wf.pool_sqft = results["estimated_pool_sqft"]
 
         return await self._save_analysis(
-            organization_id, prop.id, bow_id, existing,
+            organization_id, prop.id, wf_id, existing,
             pool_detected=results["pool_detected"],
             estimated_pool_sqft=results["estimated_pool_sqft"],
             pool_contour_points=None,
@@ -335,47 +335,47 @@ class SatelliteService:
         )
 
     async def bulk_analyze(
-        self, organization_id: str, bow_ids: Optional[list[str]] = None, force: bool = False
+        self, organization_id: str, wf_ids: Optional[list[str]] = None, force: bool = False
     ) -> dict:
-        if bow_ids:
+        if wf_ids:
             result = await self.db.execute(
-                select(BodyOfWater).where(
-                    BodyOfWater.organization_id == organization_id,
-                    BodyOfWater.id.in_(bow_ids),
-                    BodyOfWater.water_type == "pool",
-                    BodyOfWater.is_active == True,
+                select(WaterFeature).where(
+                    WaterFeature.organization_id == organization_id,
+                    WaterFeature.id.in_(wf_ids),
+                    WaterFeature.water_type == "pool",
+                    WaterFeature.is_active == True,
                 )
             )
         else:
             result = await self.db.execute(
-                select(BodyOfWater)
-                .join(Property, BodyOfWater.property_id == Property.id)
+                select(WaterFeature)
+                .join(Property, WaterFeature.property_id == Property.id)
                 .where(
-                    BodyOfWater.organization_id == organization_id,
-                    BodyOfWater.water_type == "pool",
-                    BodyOfWater.is_active == True,
+                    WaterFeature.organization_id == organization_id,
+                    WaterFeature.water_type == "pool",
+                    WaterFeature.is_active == True,
                     Property.is_active == True,
                     Property.lat.isnot(None),
                     Property.lng.isnot(None),
                 )
             )
-        bows = result.scalars().all()
+        wfs = result.scalars().all()
 
         analyzed, skipped, failed = [], 0, 0
-        for bow in bows:
+        for wf in wfs:
             try:
-                analysis = await self.analyze_bow(organization_id, bow.id, force=force)
+                analysis = await self.analyze_bow(organization_id, wf.id, force=force)
                 if analysis.error_message:
                     failed += 1
                 else:
                     analyzed.append(analysis)
             except Exception as e:
-                logger.error(f"Bulk analysis failed for BOW {bow.id}: {e}")
+                logger.error(f"Bulk analysis failed for WF {wf.id}: {e}")
                 failed += 1
 
         await self.db.flush()
         return {
-            "total": len(bows),
+            "total": len(wfs),
             "analyzed": len(analyzed),
             "skipped": skipped,
             "failed": failed,
@@ -501,19 +501,19 @@ class SatelliteService:
     # --- Persistence ---
 
     async def _save_error(
-        self, organization_id: str, property_id: str, bow_id: str,
+        self, organization_id: str, property_id: str, wf_id: str,
         existing: Optional[SatelliteAnalysis],
         error_message: str, image_url: str, zoom: int, width: int, height: int,
     ) -> SatelliteAnalysis:
         return await self._save_analysis(
-            organization_id, property_id, bow_id, existing,
+            organization_id, property_id, wf_id, existing,
             error_message=error_message,
             image_url=image_url, image_zoom=zoom,
             image_width=width, image_height=height,
         )
 
     async def _save_analysis(
-        self, organization_id: str, property_id: str, bow_id: str,
+        self, organization_id: str, property_id: str, wf_id: str,
         existing: Optional[SatelliteAnalysis], **kwargs
     ) -> SatelliteAnalysis:
         if existing:
@@ -528,7 +528,7 @@ class SatelliteService:
             id=str(uuid.uuid4()),
             organization_id=organization_id,
             property_id=property_id,
-            body_of_water_id=bow_id,
+            water_feature_id=wf_id,
             **kwargs,
         )
         self.db.add(analysis)

@@ -16,6 +16,8 @@ class PropertyCreate(BaseModel):
     city: str = Field(..., min_length=1)
     state: str = Field(..., min_length=1)
     zip_code: str = Field(..., min_length=1)
+    county: Optional[str] = None
+    emd_fa_number: Optional[str] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
@@ -37,6 +39,7 @@ class PropertyCreate(BaseModel):
     gate_code: Optional[str] = None
     access_instructions: Optional[str] = None
     dog_on_property: bool = False
+    monthly_rate: Optional[float] = None
     estimated_service_minutes: int = 30
     is_locked_to_day: bool = False
     service_day_pattern: Optional[str] = None
@@ -49,6 +52,8 @@ class PropertyUpdate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     zip_code: Optional[str] = None
+    county: Optional[str] = None
+    emd_fa_number: Optional[str] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
     pool_sqft: Optional[float] = None
@@ -70,6 +75,7 @@ class PropertyUpdate(BaseModel):
     gate_code: Optional[str] = None
     access_instructions: Optional[str] = None
     dog_on_property: Optional[bool] = None
+    monthly_rate: Optional[float] = None
     estimated_service_minutes: Optional[int] = None
     is_locked_to_day: Optional[bool] = None
     service_day_pattern: Optional[str] = None
@@ -85,6 +91,8 @@ class PropertyResponse(BaseModel):
     city: str
     state: str
     zip_code: str
+    county: Optional[str] = None
+    emd_fa_number: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
     pool_type: Optional[str] = None
@@ -108,6 +116,7 @@ class PropertyResponse(BaseModel):
     gate_code: Optional[str] = None
     access_instructions: Optional[str] = None
     dog_on_property: bool
+    monthly_rate: Optional[float] = None
     estimated_service_minutes: int
     is_locked_to_day: bool
     service_day_pattern: Optional[str] = None
@@ -115,13 +124,13 @@ class PropertyResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    bodies_of_water: list[BodyOfWaterSummary] = []
+    water_features: list[WaterFeatureSummary] = []
 
     model_config = {"from_attributes": True}
 
 
-class BodyOfWaterSummary(BaseModel):
-    """Inline BOW summary for property responses."""
+class WaterFeatureSummary(BaseModel):
+    """Inline WF summary for property responses."""
     id: str
     name: Optional[str] = None
     water_type: str

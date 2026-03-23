@@ -1,7 +1,7 @@
 export interface PropertyPhoto {
   id: string;
   property_id: string;
-  body_of_water_id: string | null;
+  water_feature_id: string | null;
   filename: string;
   url: string;
   caption: string | null;

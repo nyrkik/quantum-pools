@@ -25,7 +25,7 @@ from src.models.bather_load_jurisdiction import BatherLoadJurisdiction
 from src.models.property_jurisdiction import PropertyJurisdiction
 from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.pool_measurement import PoolMeasurement
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 from src.models.property_photo import PropertyPhoto
 from src.models.dimension_estimate import DimensionEstimate
 from src.models.regional_default import RegionalDefault
@@ -39,6 +39,7 @@ from src.models.service_tier import ServiceTier
 from src.models.feature import Feature, FeatureTier
 from src.models.org_subscription import OrgSubscription
 from src.models.emd_lookup import EMDLookup
+from src.models.scraper_run import ScraperRun
 
 __all__ = [
     "Base",
@@ -66,7 +67,7 @@ __all__ = [
     "PropertyJurisdiction",
     "SatelliteAnalysis",
     "PoolMeasurement",
-    "BodyOfWater",
+    "WaterFeature",
     "PropertyPhoto",
     "DimensionEstimate",
     "RegionalDefault",

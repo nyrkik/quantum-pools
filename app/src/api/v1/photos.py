@@ -17,7 +17,7 @@ router = APIRouter(prefix="/photos", tags=["photos"])
 class PropertyPhotoResponse(BaseModel):
     id: str
     property_id: str
-    body_of_water_id: Optional[str] = None
+    water_feature_id: Optional[str] = None
     filename: str
     url: str
     caption: Optional[str] = None
@@ -36,7 +36,7 @@ def _to_response(photo) -> PropertyPhotoResponse:
     return PropertyPhotoResponse(
         id=photo.id,
         property_id=photo.property_id,
-        body_of_water_id=photo.body_of_water_id,
+        water_feature_id=photo.water_feature_id,
         filename=photo.filename,
         url=f"/uploads/photos/{photo.property_id}/{photo.filename}",
         caption=photo.caption,
@@ -71,7 +71,7 @@ async def list_photos(
 async def upload_photo(
     property_id: str,
     photo: UploadFile = File(...),
-    body_of_water_id: Optional[str] = Form(None),
+    water_feature_id: Optional[str] = Form(None),
     caption: Optional[str] = Form(None),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
@@ -87,7 +87,7 @@ async def upload_photo(
         result = await svc.upload_photo(
             ctx.organization_id, property_id,
             file_bytes, photo.filename or "photo.jpg",
-            bow_id=body_of_water_id, caption=caption,
+            wf_id=water_feature_id, caption=caption,
             uploaded_by=ctx.user_id,
         )
     except ValueError as e:

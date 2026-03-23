@@ -1,4 +1,4 @@
-"""Satellite analysis endpoints — per-BOW pool detection and vegetation analysis."""
+"""Satellite analysis endpoints — per-WF pool detection and vegetation analysis."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +35,7 @@ async def get_all_analyses(
     return [SatelliteAnalysisResponse.model_validate(a) for a in analyses]
 
 
-@router.get("/pool-bows", response_model=list[PoolBowWithCoordsResponse])
+@router.get("/pool-wfs", response_model=list[PoolBowWithCoordsResponse])
 async def get_pool_bows(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
@@ -44,37 +44,37 @@ async def get_pool_bows(
     return await svc.get_pool_bows_with_coords(ctx.organization_id)
 
 
-@router.get("/bows/{bow_id}", response_model=SatelliteAnalysisResponse)
+@router.get("/wfs/{wf_id}", response_model=SatelliteAnalysisResponse)
 async def get_analysis(
-    bow_id: str,
+    wf_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     svc = SatelliteService(db)
-    analysis = await svc.get_analysis(ctx.organization_id, bow_id)
+    analysis = await svc.get_analysis(ctx.organization_id, wf_id)
     if not analysis:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No analysis found for this pool")
     return SatelliteAnalysisResponse.model_validate(analysis)
 
 
-@router.put("/bows/{bow_id}/pin", response_model=SatelliteAnalysisResponse)
+@router.put("/wfs/{wf_id}/pin", response_model=SatelliteAnalysisResponse)
 async def set_pool_pin(
-    bow_id: str,
+    wf_id: str,
     body: SetPinRequest,
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     svc = SatelliteService(db)
     try:
-        analysis = await svc.set_pool_pin(ctx.organization_id, bow_id, body.pool_lat, body.pool_lng)
+        analysis = await svc.set_pool_pin(ctx.organization_id, wf_id, body.pool_lat, body.pool_lng)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return SatelliteAnalysisResponse.model_validate(analysis)
 
 
-@router.post("/bows/{bow_id}/analyze", response_model=SatelliteAnalysisResponse)
+@router.post("/wfs/{wf_id}/analyze", response_model=SatelliteAnalysisResponse)
 async def analyze_bow(
-    bow_id: str,
+    wf_id: str,
     body: AnalyzeRequest | None = None,
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
@@ -82,7 +82,7 @@ async def analyze_bow(
     svc = SatelliteService(db)
     try:
         analysis = await svc.analyze_bow(
-            ctx.organization_id, bow_id,
+            ctx.organization_id, wf_id,
             force=body.force if body else False,
             pool_lat=body.pool_lat if body else None,
             pool_lng=body.pool_lng if body else None,
@@ -101,7 +101,7 @@ async def bulk_analyze(
     svc = SatelliteService(db)
     result = await svc.bulk_analyze(
         ctx.organization_id,
-        bow_ids=body.bow_ids,
+        wf_ids=body.wf_ids,
         force=body.force_reanalyze,
     )
     return BulkAnalysisResponse(

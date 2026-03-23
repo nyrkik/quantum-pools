@@ -79,13 +79,13 @@ class CustomerResponse(BaseModel):
     first_property_id: Optional[str] = None
     first_property_address: Optional[str] = None
     first_property_pool_type: Optional[str] = None
-    bow_summary: Optional[str] = None
+    wf_summary: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
 
 class CustomerCreateWithProperty(CustomerCreate):
-    """Create customer + property + primary BOW in one call."""
+    """Create customer + property + primary WF in one call."""
     address: str = Field(..., min_length=1)
     city: str = Field(..., min_length=1)
     state: str = Field(..., min_length=1)

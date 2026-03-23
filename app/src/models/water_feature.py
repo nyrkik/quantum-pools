@@ -1,4 +1,4 @@
-"""BodyOfWater model — individual body of water (pool, spa, fountain) within a property."""
+"""WaterFeature model — individual body of water (pool, spa, fountain) within a property."""
 
 import uuid
 from datetime import datetime, timezone
@@ -7,8 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class BodyOfWater(Base):
-    __tablename__ = "bodies_of_water"
+class WaterFeature(Base):
+    __tablename__ = "water_features"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     organization_id: Mapped[str] = mapped_column(
@@ -20,6 +20,7 @@ class BodyOfWater(Base):
 
     # Identity
     name: Mapped[str | None] = mapped_column(String(100))
+    emd_pr_number: Mapped[str | None] = mapped_column(String(50), index=True)
     water_type: Mapped[str] = mapped_column(String(20), nullable=False, default="pool")
     # Pool details
     pool_type: Mapped[str | None] = mapped_column(String(50))
@@ -80,6 +81,14 @@ class BodyOfWater(Base):
     )
     rate_allocation_method: Mapped[str | None] = mapped_column(String(20))
     rate_allocated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Difficulty scores (1-5, per water feature)
+    access_difficulty: Mapped[float] = mapped_column(Float, default=1.0)
+    chemical_demand: Mapped[float] = mapped_column(Float, default=1.0)
+    equipment_effectiveness: Mapped[float] = mapped_column(Float, default=3.0)
+    pool_design: Mapped[float] = mapped_column(Float, default=3.0)
+    shade_exposure: Mapped[float] = mapped_column(Float, default=1.0)
+    tree_debris: Mapped[float] = mapped_column(Float, default=1.0)
+
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -90,12 +99,12 @@ class BodyOfWater(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    property = relationship("Property", back_populates="bodies_of_water", lazy="noload")
+    property = relationship("Property", back_populates="water_features", lazy="noload")
     organization = relationship("Organization", lazy="noload")
-    difficulty = relationship("PropertyDifficulty", back_populates="body_of_water", uselist=False, lazy="noload")
-    jurisdiction = relationship("PropertyJurisdiction", back_populates="body_of_water", uselist=False, lazy="noload")
-    measurements = relationship("PoolMeasurement", back_populates="body_of_water", lazy="noload")
-    chemical_readings = relationship("ChemicalReading", back_populates="body_of_water", lazy="noload")
-    satellite_analysis = relationship("SatelliteAnalysis", back_populates="body_of_water", uselist=False, lazy="noload")
-    dimension_estimates = relationship("DimensionEstimate", back_populates="body_of_water", lazy="noload")
-    chemical_cost_profile = relationship("ChemicalCostProfile", back_populates="body_of_water", uselist=False, lazy="noload")
+    difficulty = relationship("PropertyDifficulty", back_populates="water_feature", uselist=False, lazy="noload")
+    jurisdiction = relationship("PropertyJurisdiction", back_populates="water_feature", uselist=False, lazy="noload")
+    measurements = relationship("PoolMeasurement", back_populates="water_feature", lazy="noload")
+    chemical_readings = relationship("ChemicalReading", back_populates="water_feature", lazy="noload")
+    satellite_analysis = relationship("SatelliteAnalysis", back_populates="water_feature", uselist=False, lazy="noload")
+    dimension_estimates = relationship("DimensionEstimate", back_populates="water_feature", lazy="noload")
+    chemical_cost_profile = relationship("ChemicalCostProfile", back_populates="water_feature", uselist=False, lazy="noload")

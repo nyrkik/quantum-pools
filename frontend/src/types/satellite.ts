@@ -1,7 +1,7 @@
 export interface SatelliteAnalysis {
   id: string;
   property_id: string;
-  body_of_water_id: string | null;
+  water_feature_id: string | null;
   pool_detected: boolean;
   estimated_pool_sqft: number | null;
   pool_confidence: number;
@@ -22,7 +22,7 @@ export interface SatelliteAnalysis {
 export interface PoolBowWithCoords {
   id: string;
   property_id: string;
-  bow_name: string | null;
+  wf_name: string | null;
   water_type: string;
   address: string;
   city: string;
@@ -40,7 +40,7 @@ export interface PoolBowWithCoords {
 }
 
 export interface BulkAnalysisRequest {
-  bow_ids?: string[] | null;
+  wf_ids?: string[] | null;
   force_reanalyze?: boolean;
 }
 

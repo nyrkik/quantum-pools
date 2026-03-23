@@ -42,6 +42,10 @@ class PropertyService:
         return prop
 
     async def create(self, org_id: str, **kwargs) -> Property:
+        # Auto-populate county from zip if not provided
+        if not kwargs.get("county") and kwargs.get("zip_code"):
+            from src.utils.zip_county import get_county
+            kwargs["county"] = get_county(kwargs["zip_code"])
         prop = Property(id=str(uuid.uuid4()), organization_id=org_id, **kwargs)
         self.db.add(prop)
         await self.db.flush()
@@ -56,6 +60,10 @@ class PropertyService:
                 if key in ("address", "city", "state", "zip_code"):
                     address_changed = True
                 setattr(prop, key, value)
+        # Auto-update county when zip changes
+        if "zip_code" in kwargs and "county" not in kwargs:
+            from src.utils.zip_county import get_county
+            prop.county = get_county(prop.zip_code)
         await self.db.flush()
         await self.db.refresh(prop)
         return prop, address_changed

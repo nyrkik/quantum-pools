@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 from src.models.dimension_estimate import DimensionEstimate
 from src.core.exceptions import NotFoundError
 
@@ -56,17 +56,17 @@ class DimensionService:
         circle_area = math.pi * radius ** 2
         return round(circle_area * factor, 1)
 
-    async def _get_bow(self, org_id: str, bow_id: str) -> BodyOfWater:
+    async def _get_bow(self, org_id: str, wf_id: str) -> WaterFeature:
         result = await self.db.execute(
-            select(BodyOfWater).where(
-                BodyOfWater.id == bow_id,
-                BodyOfWater.organization_id == org_id,
+            select(WaterFeature).where(
+                WaterFeature.id == wf_id,
+                WaterFeature.organization_id == org_id,
             )
         )
-        bow = result.scalar_one_or_none()
-        if not bow:
+        wf = result.scalar_one_or_none()
+        if not wf:
             raise NotFoundError("Body of water not found")
-        return bow
+        return wf
 
     def _should_promote(self, new_source: str, current_source: Optional[str]) -> bool:
         """Return True if new_source has higher priority (lower number) than current."""
@@ -79,21 +79,21 @@ class DimensionService:
     async def add_perimeter_estimate(
         self,
         org_id: str,
-        bow_id: str,
+        wf_id: str,
         perimeter_ft: float,
         pool_shape: str,
         area_sqft: Optional[float] = None,
         user_id: Optional[str] = None,
     ) -> DimensionEstimate:
-        """Add a perimeter-based dimension estimate and potentially update BOW.
+        """Add a perimeter-based dimension estimate and potentially update WF.
         If area_sqft is provided (e.g. from Google Maps), use it directly instead of calculating.
         """
-        bow = await self._get_bow(org_id, bow_id)
+        wf = await self._get_bow(org_id, wf_id)
 
-        # Delete previous perimeter estimates for this BOW — re-measurement replaces old one
+        # Delete previous perimeter estimates for this WF — re-measurement replaces old one
         old_result = await self.db.execute(
             select(DimensionEstimate).where(
-                DimensionEstimate.body_of_water_id == bow_id,
+                DimensionEstimate.water_feature_id == wf_id,
                 DimensionEstimate.source == "perimeter",
             )
         )
@@ -109,7 +109,7 @@ class DimensionService:
 
         estimate = DimensionEstimate(
             id=str(uuid.uuid4()),
-            body_of_water_id=bow_id,
+            water_feature_id=wf_id,
             organization_id=org_id,
             source="perimeter",
             estimated_sqft=estimated_sqft,
@@ -121,13 +121,13 @@ class DimensionService:
         self.db.add(estimate)
 
         # Auto-promote if higher priority than current source
-        if self._should_promote("perimeter", bow.dimension_source):
-            bow.pool_sqft = estimated_sqft
-            bow.perimeter_ft = perimeter_ft
-            bow.dimension_source = "perimeter"
-            bow.dimension_source_date = datetime.now(timezone.utc)
+        if self._should_promote("perimeter", wf.dimension_source):
+            wf.pool_sqft = estimated_sqft
+            wf.perimeter_ft = perimeter_ft
+            wf.dimension_source = "perimeter"
+            wf.dimension_source_date = datetime.now(timezone.utc)
             if pool_shape:
-                bow.pool_shape = pool_shape
+                wf.pool_shape = pool_shape
 
         await self.db.flush()
         await self.db.refresh(estimate)
@@ -136,7 +136,7 @@ class DimensionService:
     async def add_estimate(
         self,
         org_id: str,
-        bow_id: str,
+        wf_id: str,
         source: str,
         estimated_sqft: Optional[float] = None,
         perimeter_ft: Optional[float] = None,
@@ -145,11 +145,11 @@ class DimensionService:
         user_id: Optional[str] = None,
     ) -> DimensionEstimate:
         """Add a dimension estimate from any source."""
-        bow = await self._get_bow(org_id, bow_id)
+        wf = await self._get_bow(org_id, wf_id)
 
         estimate = DimensionEstimate(
             id=str(uuid.uuid4()),
-            body_of_water_id=bow_id,
+            water_feature_id=wf_id,
             organization_id=org_id,
             source=source,
             estimated_sqft=estimated_sqft,
@@ -161,41 +161,41 @@ class DimensionService:
         self.db.add(estimate)
 
         # Auto-promote if higher priority than current source
-        if estimated_sqft and self._should_promote(source, bow.dimension_source):
-            bow.pool_sqft = estimated_sqft
+        if estimated_sqft and self._should_promote(source, wf.dimension_source):
+            wf.pool_sqft = estimated_sqft
             if perimeter_ft:
-                bow.perimeter_ft = perimeter_ft
-            bow.dimension_source = source
-            bow.dimension_source_date = datetime.now(timezone.utc)
+                wf.perimeter_ft = perimeter_ft
+            wf.dimension_source = source
+            wf.dimension_source_date = datetime.now(timezone.utc)
 
         await self.db.flush()
         await self.db.refresh(estimate)
         return estimate
 
-    async def get_estimates(self, org_id: str, bow_id: str) -> list[DimensionEstimate]:
-        """Return all estimates for a BOW, ordered by created_at desc."""
-        # Verify BOW exists and belongs to org
-        await self._get_bow(org_id, bow_id)
+    async def get_estimates(self, org_id: str, wf_id: str) -> list[DimensionEstimate]:
+        """Return all estimates for a WF, ordered by created_at desc."""
+        # Verify WF exists and belongs to org
+        await self._get_bow(org_id, wf_id)
 
         result = await self.db.execute(
             select(DimensionEstimate)
             .where(
-                DimensionEstimate.body_of_water_id == bow_id,
+                DimensionEstimate.water_feature_id == wf_id,
                 DimensionEstimate.organization_id == org_id,
             )
             .order_by(DimensionEstimate.created_at.desc())
         )
         return list(result.scalars().all())
 
-    async def get_comparison(self, org_id: str, bow_id: str) -> dict:
+    async def get_comparison(self, org_id: str, wf_id: str) -> dict:
         """Get comparison data with discrepancy analysis."""
-        bow = await self._get_bow(org_id, bow_id)
-        estimates = await self.get_estimates(org_id, bow_id)
+        wf = await self._get_bow(org_id, wf_id)
+        estimates = await self.get_estimates(org_id, wf_id)
 
         result = {
             "estimates": estimates,
-            "active_source": bow.dimension_source,
-            "active_sqft": bow.pool_sqft,
+            "active_source": wf.dimension_source,
+            "active_sqft": wf.pool_sqft,
             "discrepancy_pct": None,
             "discrepancy_level": None,
         }

@@ -15,17 +15,18 @@ import {
 import { toast } from "sonner";
 import { Plus, Loader2 } from "lucide-react";
 
-interface AddBowFormProps {
+interface AddWfFormProps {
   propertyId: string;
+  customerType?: string;
   onCreated: () => void;
 }
 
-export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
+export function AddWfForm({ propertyId, customerType, onCreated }: AddWfFormProps) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [waterType, setWaterType] = useState("pool");
-  const [poolType, setPoolType] = useState("residential");
+  const [poolType, setPoolType] = useState(customerType || "residential");
   const [gallons, setGallons] = useState("");
   const [rate, setRate] = useState("");
   const [suggestedRate, setSuggestedRate] = useState<number | null>(null);
@@ -43,7 +44,7 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post(`/v1/bodies-of-water/property/${propertyId}`, {
+      await api.post(`/v1/water-features/property/${propertyId}`, {
         name: name || undefined,
         water_type: waterType,
         pool_type: poolType,
@@ -54,7 +55,7 @@ export function AddBowForm({ propertyId, onCreated }: AddBowFormProps) {
       toast.success("Water feature added");
       setName("");
       setWaterType("pool");
-      setPoolType("residential");
+      setPoolType(customerType || "residential");
       setGallons("");
       setRate("");
       setOpen(false);

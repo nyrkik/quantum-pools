@@ -1,4 +1,4 @@
-"""Chemical cost profile — computed per-BOW monthly chemical costs."""
+"""Chemical cost profile — computed per-WF monthly chemical costs."""
 
 import uuid
 from datetime import datetime, timezone
@@ -11,8 +11,8 @@ class ChemicalCostProfile(Base):
     __tablename__ = "chemical_cost_profiles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    body_of_water_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    water_feature_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
     )
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
@@ -44,5 +44,5 @@ class ChemicalCostProfile(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    body_of_water = relationship("BodyOfWater", back_populates="chemical_cost_profile", lazy="noload")
+    water_feature = relationship("WaterFeature", back_populates="chemical_cost_profile", lazy="noload")
     organization = relationship("Organization", lazy="noload")

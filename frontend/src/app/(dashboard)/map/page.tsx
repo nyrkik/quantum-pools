@@ -134,9 +134,9 @@ const MAP_MODES = [
   { key: "profitability" as MapMode, label: "Profitability", Icon: TrendingUp },
 ];
 
-function getBowStatus(bow: PoolBowWithCoords, analysisMap: Map<string | null, SatelliteAnalysis>): StatusFilter {
-  const a = analysisMap.get(bow.id);
-  if (a?.pool_detected && bow.pool_lat) return "pinned";
+function getBowStatus(wf: PoolBowWithCoords, analysisMap: Map<string | null, SatelliteAnalysis>): StatusFilter {
+  const a = analysisMap.get(wf.id);
+  if (a?.pool_detected && wf.pool_lat) return "pinned";
   if (a?.pool_detected) return "analyzed";
   return "not_analyzed";
 }
@@ -149,7 +149,7 @@ function bestStatus(statuses: StatusFilter[]): StatusFilter {
 
 export default function MapPage() {
   const searchParams = useSearchParams();
-  const initialBowId = searchParams.get("bow");
+  const initialBowId = searchParams.get("wf");
   const perms = usePermissions();
   const canEdit = perms.role !== "technician" && perms.role !== "readonly";
   const [mode, setMode] = useState<MapMode>("pools");
@@ -170,7 +170,7 @@ export default function MapPage() {
   const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(new Set(["analyzed", "pinned", "not_analyzed"]));
   const [shouldFlyTo, setShouldFlyTo] = useState(false);
   const [pinDirty, setPinDirty] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [bowDetails, setBowDetails] = useState<Map<string, Record<string, unknown>>>(new Map());
   const [propDetail, setPropDetail] = useState<Record<string, unknown> | null>(null);
   const [profitData, setProfitData] = useState<Record<string, unknown> | null>(null);
@@ -203,12 +203,12 @@ export default function MapPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [bows, allAnalyses, med] = await Promise.all([
-        api.get<PoolBowWithCoords[]>("/v1/satellite/pool-bows"),
+      const [wfs, allAnalyses, med] = await Promise.all([
+        api.get<PoolBowWithCoords[]>("/v1/satellite/pool-wfs"),
         api.get<SatelliteAnalysis[]>("/v1/satellite/all"),
         api.get<PortfolioMedians>("/v1/profitability/medians").catch(() => null),
       ]);
-      setPoolBows(bows);
+      setPoolBows(wfs);
       setAnalyses(allAnalyses);
       if (med) setMedians(med);
     } catch {
@@ -225,35 +225,35 @@ export default function MapPage() {
     return () => window.removeEventListener("focus", onFocus);
   }, [loadData]);
 
-  const analysisMap = useMemo(() => new Map(analyses.map((a) => [a.body_of_water_id, a])), [analyses]);
+  const analysisMap = useMemo(() => new Map(analyses.map((a) => [a.water_feature_id, a])), [analyses]);
 
-  // Group BOWs by property
+  // Group WFs by property
   const propertyGroups = useMemo((): PropertyGroup[] => {
     const groupMap = new Map<string, PropertyGroup>();
-    for (const bow of poolBows) {
-      let group = groupMap.get(bow.property_id);
+    for (const wf of poolBows) {
+      let group = groupMap.get(wf.property_id);
       if (!group) {
         group = {
-          property_id: bow.property_id,
-          customer_id: bow.customer_id,
-          customer_name: bow.customer_name,
-          customer_type: bow.customer_type,
-          address: bow.address,
-          city: bow.city,
-          lat: bow.lat,
-          lng: bow.lng,
-          tech_name: bow.tech_name,
-          tech_color: bow.tech_color,
-          bows: [],
+          property_id: wf.property_id,
+          customer_id: wf.customer_id,
+          customer_name: wf.customer_name,
+          customer_type: wf.customer_type,
+          address: wf.address,
+          city: wf.city,
+          lat: wf.lat,
+          lng: wf.lng,
+          tech_name: wf.tech_name,
+          tech_color: wf.tech_color,
+          wfs: [],
           best_status: "not_analyzed",
         };
-        groupMap.set(bow.property_id, group);
+        groupMap.set(wf.property_id, group);
       }
-      group.bows.push(bow);
+      group.wfs.push(wf);
     }
     // Compute best_status per property
     for (const group of groupMap.values()) {
-      const statuses = group.bows.map((b) => getBowStatus(b, analysisMap));
+      const statuses = group.wfs.map((b) => getBowStatus(b, analysisMap));
       group.best_status = bestStatus(statuses);
     }
     return Array.from(groupMap.values());
@@ -265,9 +265,9 @@ export default function MapPage() {
     if (autoSelected.current || propertyGroups.length === 0) return;
     autoSelected.current = true;
 
-    // URL param: find property containing that BOW
+    // URL param: find property containing that WF
     if (initialBowId) {
-      const pg = propertyGroups.find((g) => g.bows.some((b) => b.id === initialBowId));
+      const pg = propertyGroups.find((g) => g.wfs.some((b) => b.id === initialBowId));
       if (pg) {
         setShouldFlyTo(true);
         handlePropertySelect(pg.property_id);
@@ -296,12 +296,7 @@ export default function MapPage() {
   };
 
   const toggleType = (t: string) => {
-    setTypeFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t);
-      else next.add(t);
-      return next;
-    });
+    setTypeFilter((prev) => prev === t ? null : t);
   };
 
   const sortFn = useCallback((a: PropertyGroup, b: PropertyGroup) => {
@@ -310,14 +305,14 @@ export default function MapPage() {
 
   const filteredGroups = useMemo(() => {
     return propertyGroups.filter((g) => {
-      if (!typeFilter.has(g.customer_type)) return false;
+      if (typeFilter !== null && g.customer_type !== typeFilter) return false;
       if (!statusFilters.has(g.best_status)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return g.customer_name.toLowerCase().includes(q)
         || g.address.toLowerCase().includes(q)
         || g.city.toLowerCase().includes(q)
-        || g.bows.some((b) => b.bow_name?.toLowerCase().includes(q));
+        || g.wfs.some((b) => b.wf_name?.toLowerCase().includes(q));
     });
   }, [propertyGroups, search, statusFilters, typeFilter]);
 
@@ -331,7 +326,7 @@ export default function MapPage() {
   );
 
   // Count helpers for section headers
-  const countBows = (groups: PropertyGroup[]) => groups.reduce((sum, g) => sum + g.bows.length, 0);
+  const countBows = (groups: PropertyGroup[]) => groups.reduce((sum, g) => sum + g.wfs.length, 0);
 
   // Load images when property is selected (images are property-keyed)
   const loadImages = useCallback(async (propertyId: string) => {
@@ -343,7 +338,7 @@ export default function MapPage() {
     }
   }, []);
 
-  const loadPropertyDetail = useCallback(async (propertyId: string, bows: PoolBowWithCoords[]) => {
+  const loadPropertyDetail = useCallback(async (propertyId: string, wfs: PoolBowWithCoords[]) => {
     setBowDetails(new Map());
     setPropDetail(null);
     setProfitData(null);
@@ -352,12 +347,12 @@ export default function MapPage() {
     setChemicalCosts(new Map());
     setCostExpanded(false);
 
-    const bowPromises = bows.map(async (b) => {
-      const [bow, comparison] = await Promise.all([
-        api.get<Record<string, unknown>>(`/v1/bodies-of-water/${b.id}`).catch(() => null),
-        api.get<DimensionComparison>(`/v1/dimensions/bows/${b.id}/comparison`).catch(() => null),
+    const bowPromises = wfs.map(async (b) => {
+      const [wf, comparison] = await Promise.all([
+        api.get<Record<string, unknown>>(`/v1/water-features/${b.id}`).catch(() => null),
+        api.get<DimensionComparison>(`/v1/dimensions/wfs/${b.id}/comparison`).catch(() => null),
       ]);
-      return { bowId: b.id, bow, comparison };
+      return { bowId: b.id, wf, comparison };
     });
 
     const [prop, profit, allocation, ...bowResults] = await Promise.all([
@@ -371,10 +366,10 @@ export default function MapPage() {
     setProfitData(profit);
     setRateAllocation(allocation || {});
 
-    // Fetch chemical costs for each BOW in parallel
+    // Fetch chemical costs for each WF in parallel
     const chemCostResults = await Promise.all(
-      bows.map(async (b) => {
-        const cc = await api.get<{ sanitizer_cost: number; acid_cost: number; cya_cost: number; salt_cost: number; cell_cost: number; insurance_cost: number; total_monthly: number; source: string }>(`/v1/chemical-costs/bows/${b.id}`).catch(() => null);
+      wfs.map(async (b) => {
+        const cc = await api.get<{ sanitizer_cost: number; acid_cost: number; cya_cost: number; salt_cost: number; cell_cost: number; insurance_cost: number; total_monthly: number; source: string }>(`/v1/chemical-costs/wfs/${b.id}`).catch(() => null);
         return { bowId: b.id, cc };
       })
     );
@@ -387,7 +382,7 @@ export default function MapPage() {
     const newBowDetails = new Map<string, Record<string, unknown>>();
     const newDimComps = new Map<string, DimensionComparison>();
     for (const r of bowResults) {
-      if (r.bow) newBowDetails.set(r.bowId, r.bow);
+      if (r.wf) newBowDetails.set(r.bowId, r.wf);
       if (r.comparison) newDimComps.set(r.bowId, r.comparison);
     }
     setBowDetails(newBowDetails);
@@ -396,8 +391,8 @@ export default function MapPage() {
     // Reset perimeter states
     const newShapes = new Map<string, string>();
     for (const r of bowResults) {
-      if (r.bow && (r.bow as { pool_shape?: string }).pool_shape) {
-        newShapes.set(r.bowId, (r.bow as { pool_shape: string }).pool_shape);
+      if (r.wf && (r.wf as { pool_shape?: string }).pool_shape) {
+        newShapes.set(r.bowId, (r.wf as { pool_shape: string }).pool_shape);
       } else {
         newShapes.set(r.bowId, "rectangle");
       }
@@ -420,10 +415,10 @@ export default function MapPage() {
 
     const group = propertyGroups.find((g) => g.property_id === propertyId);
     if (group) {
-      // Auto-activate BOW for single-pool properties (enables map click to place pin)
-      setActiveBowId(group.bows.length === 1 ? group.bows[0].id : null);
+      // Auto-activate WF for single-pool properties (enables map click to place pin)
+      setActiveBowId(group.wfs.length === 1 ? group.wfs[0].id : null);
       loadImages(propertyId);
-      loadPropertyDetail(propertyId, group.bows);
+      loadPropertyDetail(propertyId, group.wfs);
     }
   }, [propertyGroups, analyses, loadImages, loadPropertyDetail]);
 
@@ -445,10 +440,10 @@ export default function MapPage() {
       return;
     }
 
-    // Pool pin mode — auto-pick BOW: highlighted > active > first in group
+    // Pool pin mode — auto-pick WF: highlighted > active > first in group
     const group = propertyGroups.find((g) => g.property_id === selectedPropertyId);
     if (!group) return;
-    const targetBow = highlightedBowId || activeBowId || group.bows[0]?.id;
+    const targetBow = highlightedBowId || activeBowId || group.wfs[0]?.id;
     if (!targetBow) return;
     setActiveBowId(targetBow);
     setHighlightedBowId(targetBow);
@@ -461,11 +456,11 @@ export default function MapPage() {
     setSavingPin(true);
     try {
       const result = await api.put<SatelliteAnalysis>(
-        `/v1/satellite/bows/${activeBowId}/pin`,
+        `/v1/satellite/wfs/${activeBowId}/pin`,
         { pool_lat: pinPosition.lat, pool_lng: pinPosition.lng }
       );
       setAnalyses((prev) => {
-        const idx = prev.findIndex((a) => a.body_of_water_id === activeBowId);
+        const idx = prev.findIndex((a) => a.water_feature_id === activeBowId);
         if (idx >= 0) return [...prev.slice(0, idx), result, ...prev.slice(idx + 1)];
         return [...prev, result];
       });
@@ -541,22 +536,22 @@ export default function MapPage() {
     try {
       // Save perimeter + area via dimension estimate (if perimeter provided)
       if (ft && ft > 0) {
-        await api.post(`/v1/dimensions/bows/${bowId}/perimeter`, {
+        await api.post(`/v1/dimensions/wfs/${bowId}/perimeter`, {
           perimeter_ft: ft,
           pool_shape: perimeterShape,
           ...(areaSqft && areaSqft > 0 ? { area_sqft: areaSqft } : {}),
         });
       } else if (areaSqft && areaSqft > 0) {
-        // Area without perimeter — save directly to BOW
-        await api.put(`/v1/bodies-of-water/${bowId}`, { pool_sqft: areaSqft, pool_shape: perimeterShape });
+        // Area without perimeter — save directly to WF
+        await api.put(`/v1/water-features/${bowId}`, { pool_sqft: areaSqft, pool_shape: perimeterShape });
       }
-      // Save volume directly to BOW
+      // Save volume directly to WF
       if (volumeGal && volumeGal > 0) {
-        await api.put(`/v1/bodies-of-water/${bowId}`, { pool_gallons: volumeGal });
+        await api.put(`/v1/water-features/${bowId}`, { pool_gallons: volumeGal });
       }
-      // Save shape & structure fields + pool_shape to BOW
+      // Save shape & structure fields + pool_shape to WF
       if (hasShapeChanges || perimeterShape) {
-        await api.put(`/v1/bodies-of-water/${bowId}`, { pool_shape: perimeterShape, ...shapeFields });
+        await api.put(`/v1/water-features/${bowId}`, { pool_shape: perimeterShape, ...shapeFields });
       }
       toast.success("Measurements saved");
       setPerimeterInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
@@ -569,7 +564,7 @@ export default function MapPage() {
       setDeepDepthInputs((prev) => { const n = new Map(prev); n.delete(bowId); return n; });
       // Refresh detail
       if (selectedGroup) {
-        await loadPropertyDetail(selectedPropertyId!, selectedGroup.bows);
+        await loadPropertyDetail(selectedPropertyId!, selectedGroup.wfs);
       }
     } catch {
       toast.error("Failed to save measurements");
@@ -586,7 +581,7 @@ export default function MapPage() {
       const resized = await resizeImage(file, 1600);
       const formData = new FormData();
       formData.append("photo", resized, file.name);
-      if (activeBowId) formData.append("body_of_water_id", activeBowId);
+      if (activeBowId) formData.append("water_feature_id", activeBowId);
       const img = await api.upload<PropertyPhoto>(
         `/v1/photos/properties/${selectedPropertyId}/upload`,
         formData
@@ -622,7 +617,7 @@ export default function MapPage() {
     }
   };
 
-  // Activate a BOW for pin placement
+  // Activate a WF for pin placement
   const handleBowPinActivate = (bowId: string) => {
     if (activeBowId === bowId) {
       // Deactivate
@@ -632,12 +627,12 @@ export default function MapPage() {
     } else {
       setActiveBowId(bowId);
       setPinDirty(false);
-      const bow = poolBows.find((b) => b.id === bowId);
-      const analysis = analyses.find((a) => a.body_of_water_id === bowId);
+      const wf = poolBows.find((b) => b.id === bowId);
+      const analysis = analyses.find((a) => a.water_feature_id === bowId);
       if (analysis?.pool_lat && analysis?.pool_lng) {
         setPinPosition({ lat: analysis.pool_lat, lng: analysis.pool_lng });
-      } else if (bow?.pool_lat && bow?.pool_lng) {
-        setPinPosition({ lat: bow.pool_lat, lng: bow.pool_lng });
+      } else if (wf?.pool_lat && wf?.pool_lng) {
+        setPinPosition({ lat: wf.pool_lat, lng: wf.pool_lng });
       } else {
         setPinPosition(null);
       }
@@ -666,31 +661,31 @@ export default function MapPage() {
     );
   };
 
-  // Render a single BOW tile in the detail panel
-  const renderBowTile = (bow: PoolBowWithCoords, bowDetail: Record<string, unknown> | null, dimComparison: DimensionComparison | null) => {
-    const analysis = analysisMap.get(bow.id) || null;
-    const isBowActive = activeBowId === bow.id;
-    const perimeterInput = perimeterInputs.get(bow.id) || "";
-    const perimeterShape = perimeterShapes.get(bow.id) || "rectangle";
-    const isMeasuring = measuringPerimeterBow === bow.id;
+  // Render a single WF tile in the detail panel
+  const renderWfTile = (wf: PoolBowWithCoords, bowDetail: Record<string, unknown> | null, dimComparison: DimensionComparison | null) => {
+    const analysis = analysisMap.get(wf.id) || null;
+    const isBowActive = activeBowId === wf.id;
+    const perimeterInput = perimeterInputs.get(wf.id) || "";
+    const perimeterShape = perimeterShapes.get(wf.id) || "rectangle";
+    const isMeasuring = measuringPerimeterBow === wf.id;
 
     return (
-      <Card key={bow.id} id={`bow-tile-${bow.id}`} className={`shadow-sm border-l-4 cursor-pointer ${isBowActive ? "border-l-primary" : highlightedBowId === bow.id ? "border-l-amber-400" : "border-l-blue-500"}`} onClick={() => setHighlightedBowId(bow.id)}>
+      <Card key={wf.id} id={`wf-tile-${wf.id}`} className={`shadow-sm border-l-4 cursor-pointer ${isBowActive ? "border-l-primary" : highlightedBowId === wf.id ? "border-l-amber-400" : "border-l-blue-500"}`} onClick={() => setHighlightedBowId(wf.id)}>
         <CardContent className="p-4 space-y-3">
           {/* Pool header */}
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-baseline gap-3">
                 <div className="flex items-center gap-2">
-                  {waterTypeIcon(bow.water_type, "h-3.5 w-3.5 text-blue-500")}
-                  <span className="text-base font-semibold">{bow.bow_name || bow.water_type.replace("_", " ")}</span>
+                  {waterTypeIcon(wf.water_type, "h-3.5 w-3.5 text-blue-500")}
+                  <span className="text-base font-semibold">{wf.wf_name || wf.water_type.replace("_", " ")}</span>
                 </div>
                 <span className="text-muted-foreground/30">·</span>
                 {bowDetail && (
                   <span className="text-base font-bold">{(bowDetail as { estimated_service_minutes: number }).estimated_service_minutes}<span className="text-[10px] font-normal text-muted-foreground ml-0.5">min</span></span>
                 )}
                 {perms.canViewRates && (() => {
-                  const alloc = rateAllocation[bow.id];
+                  const alloc = rateAllocation[wf.id];
                   const bowRate = (bowDetail as { monthly_rate?: number })?.monthly_rate;
                   const rate = bowRate || alloc?.allocated_rate || null;
                   const margin = profitData ? (profitData as { cost_breakdown: { margin_pct: number } }).cost_breakdown?.margin_pct : null;
@@ -728,7 +723,7 @@ export default function MapPage() {
           )}
 
           {/* Discrepancy alert */}
-          {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && !dismissedDiscrepancies.has(bow.id) && (() => {
+          {dimComparison && dimComparison.discrepancy_level && dimComparison.discrepancy_level !== "ok" && !dismissedDiscrepancies.has(wf.id) && (() => {
             const e1 = dimComparison.estimates[0];
             const e2 = dimComparison.estimates[1];
             const desc = e1 && e2
@@ -749,7 +744,7 @@ export default function MapPage() {
                 </div>
                 <button
                   onClick={() => setDismissedDiscrepancies((prev) => {
-                    const next = new Set(prev).add(bow.id);
+                    const next = new Set(prev).add(wf.id);
                     try { localStorage.setItem("qp_dismissed_discrepancies", JSON.stringify([...next])); } catch {}
                     return next;
                   })}
@@ -772,7 +767,7 @@ export default function MapPage() {
                   {canEdit && (
                     <button
                       className={`ml-auto transition-colors ${isMeasuring ? "text-primary" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
-                      onClick={() => setMeasuringPerimeterBow(isMeasuring ? null : bow.id)}
+                      onClick={() => setMeasuringPerimeterBow(isMeasuring ? null : wf.id)}
                       title={isMeasuring ? "Close edit" : "Edit measurements"}
                     >
                       {isMeasuring ? <X className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
@@ -789,8 +784,8 @@ export default function MapPage() {
                           <Input
                             type="number"
                             placeholder="ft²"
-                            value={areaInputs.get(bow.id) ?? ((bowDetail as { pool_sqft?: number }).pool_sqft?.toString() || "")}
-                            onChange={(e) => setAreaInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                            value={areaInputs.get(wf.id) ?? ((bowDetail as { pool_sqft?: number }).pool_sqft?.toString() || "")}
+                            onChange={(e) => setAreaInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.value); return n; })}
                             className="h-6 w-20 text-[11px] px-1.5"
                             min={0}
                             step={1}
@@ -815,8 +810,8 @@ export default function MapPage() {
                         <Input
                           type="number"
                           placeholder="gal"
-                          value={volumeInputs.get(bow.id) ?? ((bowDetail as { pool_gallons?: number }).pool_gallons?.toString() || "")}
-                          onChange={(e) => setVolumeInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          value={volumeInputs.get(wf.id) ?? ((bowDetail as { pool_gallons?: number }).pool_gallons?.toString() || "")}
+                          onChange={(e) => setVolumeInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.value); return n; })}
                           className="h-6 w-20 text-[11px] px-1.5"
                           min={0}
                           step={100}
@@ -838,7 +833,7 @@ export default function MapPage() {
                           type="number"
                           placeholder="ft"
                           value={perimeterInput || ((bowDetail as { perimeter_ft?: number }).perimeter_ft?.toString() || "")}
-                          onChange={(e) => setPerimeterInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          onChange={(e) => setPerimeterInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.value); return n; })}
                           className="h-6 w-20 text-[11px] px-1.5"
                           min={0}
                           step={0.1}
@@ -859,7 +854,7 @@ export default function MapPage() {
                     {isMeasuring ? (
                       <select
                         value={perimeterShape}
-                        onChange={(e) => setPerimeterShapes((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                        onChange={(e) => setPerimeterShapes((prev) => { const n = new Map(prev); n.set(wf.id, e.target.value); return n; })}
                         className="h-6 text-[11px] rounded border border-input bg-background px-1.5"
                       >
                         {POOL_SHAPES.map((s) => (
@@ -879,8 +874,8 @@ export default function MapPage() {
                       {isMeasuring ? (
                         <input
                           type="checkbox"
-                          checked={roundedCornersInputs.get(bow.id) ?? (bowDetail as { has_rounded_corners?: boolean }).has_rounded_corners ?? false}
-                          onChange={(e) => setRoundedCornersInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.checked); return n; })}
+                          checked={roundedCornersInputs.get(wf.id) ?? (bowDetail as { has_rounded_corners?: boolean }).has_rounded_corners ?? false}
+                          onChange={(e) => setRoundedCornersInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.checked); return n; })}
                           className="h-3.5 w-3.5 accent-primary"
                         />
                       ) : (
@@ -895,8 +890,8 @@ export default function MapPage() {
                       <Input
                         type="number"
                         placeholder="0"
-                        value={stepEntryInputs.get(bow.id) ?? (bowDetail as { step_entry_count?: number }).step_entry_count ?? 0}
-                        onChange={(e) => setStepEntryInputs((prev) => { const n = new Map(prev); n.set(bow.id, parseInt(e.target.value) || 0); return n; })}
+                        value={stepEntryInputs.get(wf.id) ?? (bowDetail as { step_entry_count?: number }).step_entry_count ?? 0}
+                        onChange={(e) => setStepEntryInputs((prev) => { const n = new Map(prev); n.set(wf.id, parseInt(e.target.value) || 0); return n; })}
                         className="h-6 w-14 text-[11px] px-1.5"
                         min={0}
                         max={4}
@@ -912,8 +907,8 @@ export default function MapPage() {
                     {isMeasuring ? (
                       <input
                         type="checkbox"
-                        checked={benchShelfInputs.get(bow.id) ?? (bowDetail as { has_bench_shelf?: boolean }).has_bench_shelf ?? false}
-                        onChange={(e) => setBenchShelfInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.checked); return n; })}
+                        checked={benchShelfInputs.get(wf.id) ?? (bowDetail as { has_bench_shelf?: boolean }).has_bench_shelf ?? false}
+                        onChange={(e) => setBenchShelfInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.checked); return n; })}
                         className="h-3.5 w-3.5 accent-primary"
                       />
                     ) : (
@@ -928,8 +923,8 @@ export default function MapPage() {
                         <Input
                           type="number"
                           placeholder="ft"
-                          value={shallowDepthInputs.get(bow.id) ?? ((bowDetail as { pool_depth_shallow?: number }).pool_depth_shallow?.toString() || "")}
-                          onChange={(e) => setShallowDepthInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          value={shallowDepthInputs.get(wf.id) ?? ((bowDetail as { pool_depth_shallow?: number }).pool_depth_shallow?.toString() || "")}
+                          onChange={(e) => setShallowDepthInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.value); return n; })}
                           className="h-6 w-16 text-[11px] px-1.5"
                           min={0}
                           max={12}
@@ -951,8 +946,8 @@ export default function MapPage() {
                         <Input
                           type="number"
                           placeholder="ft"
-                          value={deepDepthInputs.get(bow.id) ?? ((bowDetail as { pool_depth_deep?: number }).pool_depth_deep?.toString() || "")}
-                          onChange={(e) => setDeepDepthInputs((prev) => { const n = new Map(prev); n.set(bow.id, e.target.value); return n; })}
+                          value={deepDepthInputs.get(wf.id) ?? ((bowDetail as { pool_depth_deep?: number }).pool_depth_deep?.toString() || "")}
+                          onChange={(e) => setDeepDepthInputs((prev) => { const n = new Map(prev); n.set(wf.id, e.target.value); return n; })}
                           className="h-6 w-16 text-[11px] px-1.5"
                           min={0}
                           max={15}
@@ -981,9 +976,9 @@ export default function MapPage() {
                   {/* Edit mode: Save + Google Maps link */}
                   {isMeasuring && canEdit && (
                     <div className="flex items-center justify-between pt-1.5 border-t border-border/50 mt-1.5">
-                      {(bow.pool_lat || (bow.lat && bow.lng)) ? (
+                      {(wf.pool_lat || (wf.lat && wf.lng)) ? (
                         <a
-                          href={`https://www.google.com/maps/@${(bow.pool_lat ?? bow.lat)},${(bow.pool_lng ?? bow.lng)},20z/data=!3m1!1e3`}
+                          href={`https://www.google.com/maps/@${(wf.pool_lat ?? wf.lat)},${(wf.pool_lng ?? wf.lng)},20z/data=!3m1!1e3`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
@@ -995,8 +990,8 @@ export default function MapPage() {
                       <Button
                         size="sm"
                         className="h-6 px-3 text-[11px]"
-                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(bow.id) && !volumeInputs.get(bow.id) && !roundedCornersInputs.has(bow.id) && !stepEntryInputs.has(bow.id) && !benchShelfInputs.has(bow.id) && !shallowDepthInputs.has(bow.id) && !deepDepthInputs.has(bow.id))}
-                        onClick={() => saveMeasurements(bow.id)}
+                        disabled={savingPerimeter || (!perimeterInput && !areaInputs.get(wf.id) && !volumeInputs.get(wf.id) && !roundedCornersInputs.has(wf.id) && !stepEntryInputs.has(wf.id) && !benchShelfInputs.has(wf.id) && !shallowDepthInputs.has(wf.id) && !deepDepthInputs.has(wf.id))}
+                        onClick={() => saveMeasurements(wf.id)}
                       >
                         {savingPerimeter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
                       </Button>
@@ -1174,7 +1169,7 @@ export default function MapPage() {
               />
             </div>
             <Button
-              variant={typeFilter.has("commercial") ? "default" : "outline"}
+              variant={typeFilter === "commercial" ? "default" : "outline"}
               size="icon"
               className="h-8 w-8 shrink-0"
               onClick={() => toggleType("commercial")}
@@ -1183,7 +1178,7 @@ export default function MapPage() {
               <Building2 className="h-3.5 w-3.5" />
             </Button>
             <Button
-              variant={typeFilter.has("residential") ? "default" : "outline"}
+              variant={typeFilter === "residential" ? "default" : "outline"}
               size="icon"
               className="h-8 w-8 shrink-0"
               onClick={() => toggleType("residential")}
@@ -1196,8 +1191,8 @@ export default function MapPage() {
           {/* Property list — commercial first */}
           <div ref={listRef} className="flex-1 overflow-y-auto space-y-0 pr-1">
             {[
-              { label: "Commercial", Icon: Building2, items: commercialGroups, show: typeFilter.has("commercial") },
-              { label: "Residential", Icon: Home, items: residentialGroups, show: typeFilter.has("residential") },
+              { label: "Commercial", Icon: Building2, items: commercialGroups, show: typeFilter === null || typeFilter === "commercial" },
+              { label: "Residential", Icon: Home, items: residentialGroups, show: typeFilter === null || typeFilter === "residential" },
             ].map((section) => section.show && section.items.length > 0 && (
               <div key={section.label}>
                 <div className="flex items-center gap-2 px-1 pt-3 pb-1.5 mb-0.5 sticky top-0 z-10 bg-background border-b border-border">
@@ -1238,9 +1233,9 @@ export default function MapPage() {
                             <span className="font-medium truncate flex-1">
                               {g.customer_name}
                             </span>
-                            {g.bows.length > 1 && (
+                            {g.wfs.length > 1 && (
                               <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0">
-                                {g.bows.length}
+                                {g.wfs.length}
                               </Badge>
                             )}
                           </div>
@@ -1259,16 +1254,16 @@ export default function MapPage() {
                             </div>
                           )}
                         </button>
-                        {/* Child BOW entries — show when selected and multi-BOW */}
-                        {isSelected && g.bows.length > 1 && (
+                        {/* Child WF entries — show when selected and multi-WF */}
+                        {isSelected && g.wfs.length > 1 && (
                           <div className="ml-6 border-l-2 border-border pl-2 py-1 space-y-0.5">
-                            {g.bows.map((b) => (
+                            {g.wfs.map((b) => (
                               <button
                                 key={b.id}
                                 onClick={() => {
                                   setHighlightedBowId(b.id);
                                   setTimeout(() => {
-                                    document.getElementById(`bow-tile-${b.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                                    document.getElementById(`wf-tile-${b.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
                                   }, 50);
                                 }}
                                 className={`w-full text-left rounded px-2 py-1 text-xs transition-colors ${
@@ -1279,7 +1274,7 @@ export default function MapPage() {
                               >
                                 <div className="flex items-center gap-1.5">
                                   {waterTypeIcon(b.water_type, "h-2.5 w-2.5 text-blue-500 shrink-0")}
-                                  <span className="truncate">{b.bow_name || b.water_type.replace("_", " ")}</span>
+                                  <span className="truncate">{b.wf_name || b.water_type.replace("_", " ")}</span>
                                 </div>
                               </button>
                             ))}
@@ -1406,8 +1401,8 @@ export default function MapPage() {
                             {(propDetail as { gate_code: string }).gate_code}
                           </div>
                         )}
-                        {selectedGroup.bows.length > 1 && (
-                          <Badge variant="secondary" className="text-[9px] px-1 py-0">{selectedGroup.bows.length} features</Badge>
+                        {selectedGroup.wfs.length > 1 && (
+                          <Badge variant="secondary" className="text-[9px] px-1 py-0">{selectedGroup.wfs.length} features</Badge>
                         )}
                       </div>
                       {canEdit && (
@@ -1478,7 +1473,7 @@ export default function MapPage() {
                           { label: "Diff", value: `${diff.toFixed(1)}`, medianLabel: m ? `${m.difficulty.toFixed(1)}` : null, color: diff > 3.5 ? "text-red-600" : diff > 2.5 ? "text-amber-600" : "text-muted-foreground", cmp: compare(diff, m?.difficulty, false), editable: true, expandable: false },
                         ];
 
-                        // Sum chemical costs across all BOWs
+                        // Sum chemical costs across all WFs
                         const chemSum = { sanitizer: 0, acid: 0, insurance: 0, salt_cell: 0, total: 0 };
                         let hasSalt = false;
                         for (const [, cc] of chemicalCosts) {
@@ -1562,9 +1557,9 @@ export default function MapPage() {
                 </CardContent>
               </Card>
 
-              {/* BOW tiles — one per pool at this property */}
-              {selectedGroup.bows.map((bow) =>
-                renderBowTile(bow, bowDetails.get(bow.id) || null, dimComparisons.get(bow.id) || null)
+              {/* WF tiles — one per pool at this property */}
+              {selectedGroup.wfs.map((wf) =>
+                renderWfTile(wf, bowDetails.get(wf.id) || null, dimComparisons.get(wf.id) || null)
               )}
 
               {/* Photos — property-level */}
@@ -1666,10 +1661,10 @@ export default function MapPage() {
           open={diffModalOpen}
           onOpenChange={setDiffModalOpen}
           propertyId={selectedPropertyId}
-          bowDetail={selectedGroup?.bows[0] ? (bowDetails.get(selectedGroup.bows[0].id) || null) : null}
+          bowDetail={selectedGroup?.wfs[0] ? (bowDetails.get(selectedGroup.wfs[0].id) || null) : null}
           onSaved={() => {
             if (selectedPropertyId && selectedGroup) {
-              loadPropertyDetail(selectedPropertyId, selectedGroup.bows);
+              loadPropertyDetail(selectedPropertyId, selectedGroup.wfs);
             }
           }}
         />

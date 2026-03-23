@@ -15,9 +15,9 @@ from src.services.dimension_service import DimensionService
 router = APIRouter(prefix="/dimensions", tags=["dimensions"])
 
 
-@router.post("/bows/{bow_id}/perimeter", response_model=DimensionEstimateResponse)
+@router.post("/wfs/{wf_id}/perimeter", response_model=DimensionEstimateResponse)
 async def add_perimeter_measurement(
-    bow_id: str,
+    wf_id: str,
     body: PerimeterMeasurementRequest,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
@@ -26,7 +26,7 @@ async def add_perimeter_measurement(
     svc = DimensionService(db)
     estimate = await svc.add_perimeter_estimate(
         org_id=ctx.organization_id,
-        bow_id=bow_id,
+        wf_id=wf_id,
         perimeter_ft=body.perimeter_ft,
         pool_shape=body.pool_shape,
         area_sqft=body.area_sqft,
@@ -35,27 +35,27 @@ async def add_perimeter_measurement(
     return DimensionEstimateResponse.model_validate(estimate)
 
 
-@router.get("/bows/{bow_id}/estimates", response_model=list[DimensionEstimateResponse])
+@router.get("/wfs/{wf_id}/estimates", response_model=list[DimensionEstimateResponse])
 async def list_estimates(
-    bow_id: str,
+    wf_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all dimension estimates for a body of water."""
     svc = DimensionService(db)
-    estimates = await svc.get_estimates(ctx.organization_id, bow_id)
+    estimates = await svc.get_estimates(ctx.organization_id, wf_id)
     return [DimensionEstimateResponse.model_validate(e) for e in estimates]
 
 
-@router.get("/bows/{bow_id}/comparison", response_model=DimensionComparisonResponse)
+@router.get("/wfs/{wf_id}/comparison", response_model=DimensionComparisonResponse)
 async def get_comparison(
-    bow_id: str,
+    wf_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get dimension comparison with discrepancy analysis."""
     svc = DimensionService(db)
-    data = await svc.get_comparison(ctx.organization_id, bow_id)
+    data = await svc.get_comparison(ctx.organization_id, wf_id)
     return DimensionComparisonResponse(
         estimates=[DimensionEstimateResponse.model_validate(e) for e in data["estimates"]],
         active_source=data["active_source"],

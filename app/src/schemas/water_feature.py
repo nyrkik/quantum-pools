@@ -1,12 +1,13 @@
-"""BodyOfWater schemas."""
+"""WaterFeature schemas."""
 
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
 
-class BodyOfWaterCreate(BaseModel):
+class WaterFeatureCreate(BaseModel):
     name: Optional[str] = None
+    emd_pr_number: Optional[str] = None
     water_type: str = "pool"
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
@@ -49,8 +50,9 @@ class BodyOfWaterCreate(BaseModel):
     notes: Optional[str] = None
 
 
-class BodyOfWaterUpdate(BaseModel):
+class WaterFeatureUpdate(BaseModel):
     name: Optional[str] = None
+    emd_pr_number: Optional[str] = None
     water_type: Optional[str] = None
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
@@ -90,14 +92,21 @@ class BodyOfWaterUpdate(BaseModel):
     equipment_pad_location: Optional[str] = None
     estimated_service_minutes: Optional[int] = None
     monthly_rate: Optional[float] = None
+    access_difficulty: Optional[float] = None
+    chemical_demand: Optional[float] = None
+    equipment_effectiveness: Optional[float] = None
+    pool_design: Optional[float] = None
+    shade_exposure: Optional[float] = None
+    tree_debris: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
 
-class BodyOfWaterResponse(BaseModel):
+class WaterFeatureResponse(BaseModel):
     id: str
     property_id: str
     name: Optional[str] = None
+    emd_pr_number: Optional[str] = None
     water_type: str
     pool_type: Optional[str] = None
     pool_gallons: Optional[int] = None
@@ -140,6 +149,12 @@ class BodyOfWaterResponse(BaseModel):
     equipment_pad_location: Optional[str] = None
     estimated_service_minutes: int
     monthly_rate: Optional[float] = None
+    access_difficulty: float = 1.0
+    chemical_demand: float = 1.0
+    equipment_effectiveness: float = 3.0
+    pool_design: float = 3.0
+    shade_exposure: float = 1.0
+    tree_debris: float = 1.0
     notes: Optional[str] = None
     is_active: bool
     created_at: datetime

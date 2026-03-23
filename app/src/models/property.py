@@ -26,6 +26,8 @@ class Property(Base):
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     state: Mapped[str] = mapped_column(String(50), nullable=False)
     zip_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    county: Mapped[str | None] = mapped_column(String(100))
+    emd_fa_number: Mapped[str | None] = mapped_column(String(50), index=True)
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
     geocode_provider: Mapped[str | None] = mapped_column(String(50))
@@ -60,6 +62,9 @@ class Property(Base):
     access_instructions: Mapped[str | None] = mapped_column(Text)
     dog_on_property: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Billing
+    monthly_rate: Mapped[float | None] = mapped_column(Float)
+
     # Service
     estimated_service_minutes: Mapped[int] = mapped_column(Integer, default=30)
     is_locked_to_day: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -83,7 +88,7 @@ class Property(Base):
     satellite_analyses = relationship("SatelliteAnalysis", back_populates="property", lazy="noload")
     photos = relationship("PropertyPhoto", back_populates="property", lazy="noload")
     measurements = relationship("PoolMeasurement", back_populates="property", lazy="noload")
-    bodies_of_water = relationship("BodyOfWater", back_populates="property", lazy="noload")
+    water_features = relationship("WaterFeature", back_populates="property", lazy="noload")
 
     @property
     def full_address(self) -> str:

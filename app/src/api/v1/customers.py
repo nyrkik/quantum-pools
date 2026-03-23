@@ -2,6 +2,7 @@
 
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db, get_db_context
@@ -34,9 +35,25 @@ async def list_customers(
         resp.first_property_id = first_prop.id if first_prop else None
         resp.first_property_address = first_prop.address if first_prop else None
         resp.first_property_pool_type = await svc.get_first_property_pool_type(c.id)
-        resp.bow_summary = await svc.get_property_bow_summary(c.id)
+        resp.wf_summary = await svc.get_property_wf_summary(c.id)
         results.append(resp)
     return {"items": results, "total": total}
+
+
+@router.get("/companies", response_model=list[str])
+async def list_companies(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.customer import Customer
+    stmt = (
+        select(Customer.company_name)
+        .where(Customer.organization_id == ctx.organization_id, Customer.company_name.isnot(None), Customer.company_name != "")
+        .distinct()
+        .order_by(Customer.company_name)
+    )
+    result = await db.execute(stmt)
+    return [row[0] for row in result.all()]
 
 
 async def _geocode_property(property_id: str, address: str):
@@ -59,12 +76,12 @@ async def create_customer_with_property(
 ):
     svc = CustomerService(db)
     data = body.model_dump()
-    # Split into customer, property, and BOW fields
+    # Split into customer, property, and WF fields
     property_fields = {k: data.pop(k) for k in ["address", "city", "state", "zip_code", "gate_code", "access_instructions", "dog_on_property"]}
-    bow_fields = {k: data.pop(k) for k in ["water_type", "pool_type"]}
-    # Assign customer rate to the first BOW
+    wf_fields = {k: data.pop(k) for k in ["water_type", "pool_type"]}
+    # Assign customer rate to the first WF
     if data.get("monthly_rate"):
-        bow_fields["monthly_rate"] = data["monthly_rate"]
+        wf_fields["monthly_rate"] = data["monthly_rate"]
     # Set billing address from service address if not provided
     if not data.get("billing_address"):
         data["billing_address"] = property_fields["address"]
@@ -72,8 +89,11 @@ async def create_customer_with_property(
         data["billing_state"] = property_fields["state"]
         data["billing_zip"] = property_fields["zip_code"]
     customer, prop = await svc.create_with_property(
-        ctx.organization_id, data, property_fields, bow_fields,
+        ctx.organization_id, data, property_fields, wf_fields,
     )
+    # Sync property rate from WF, customer rate from property
+    from src.services.rate_sync import sync_rates_for_property
+    await sync_rates_for_property(db, prop.id)
     full_addr = f"{prop.address}, {prop.city}, {prop.state} {prop.zip_code}"
     background_tasks.add_task(_geocode_property, prop.id, full_addr)
     resp = CustomerResponse.model_validate(customer)

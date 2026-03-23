@@ -428,6 +428,85 @@ async def auto_match_facilities(
     return result
 
 
+# --- User-facing EMD matching ---
+
+@router.get("/my-properties")
+async def get_my_properties_emd_status(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get EMD match status for all commercial properties."""
+    svc = EMDService(db)
+    return await svc.get_org_properties_emd_status(ctx.organization_id)
+
+
+@router.get("/suggest-matches/{property_id}")
+async def suggest_emd_matches(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suggest top EMD facility matches for a property (redacted — no inspection details)."""
+    svc = EMDService(db)
+    return await svc.suggest_matches(property_id, ctx.organization_id)
+
+
+from pydantic import BaseModel as _BaseModel
+
+class _ConfirmMatchBody(_BaseModel):
+    property_id: str
+    facility_id: str
+
+@router.post("/confirm-match")
+async def confirm_emd_match(
+    body: _ConfirmMatchBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """User confirms an EMD facility match to their property."""
+    svc = EMDService(db)
+
+    # Verify property belongs to org
+    from src.models.property import Property
+    prop = (await db.execute(
+        select(Property).where(Property.id == body.property_id, Property.organization_id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    # Check facility isn't already matched to a different property
+    from src.models.emd_facility import EMDFacility
+    facility = (await db.execute(
+        select(EMDFacility).where(EMDFacility.id == body.facility_id)
+    )).scalar_one_or_none()
+    if not facility:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    if facility.matched_property_id and facility.matched_property_id != body.property_id:
+        raise HTTPException(status_code=400, detail="This facility is already matched to another property")
+
+    try:
+        await svc.match_facility_to_property(body.facility_id, body.property_id, ctx.organization_id)
+        # Copy FA number
+        if facility.facility_id and not prop.emd_fa_number:
+            prop.emd_fa_number = facility.facility_id
+        await db.flush()
+        return {"matched": True, "facility_name": facility.name}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/reject-match/{property_id}")
+async def reject_emd_match(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """User rejects an EMD match — unlinks and clears FA/PR numbers."""
+    svc = EMDService(db)
+    await svc.unmatch_property(property_id, ctx.organization_id)
+    return {"unmatched": True}
+
+
 # --- Leads (requires full_research) ---
 
 @router.get("/leads", response_model=list[EMDLeadResponse])
@@ -470,7 +549,7 @@ async def sync_equipment_to_bow(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Sync EMD equipment data to matched property's primary BOW."""
+    """Sync EMD equipment data to matched property's primary WF."""
     svc = EMDService(db)
     result = await svc.sync_equipment_to_bow(facility_id)
     if not result:

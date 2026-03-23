@@ -17,8 +17,8 @@ class ChemicalReading(Base):
     property_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    body_of_water_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), index=True
+    water_feature_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="SET NULL"), index=True
     )
     visit_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("visits.id", ondelete="SET NULL"), index=True
@@ -44,4 +44,4 @@ class ChemicalReading(Base):
 
     property = relationship("Property", back_populates="chemical_readings", lazy="noload")
     visit = relationship("Visit", back_populates="chemical_readings", lazy="noload")
-    body_of_water = relationship("BodyOfWater", back_populates="chemical_readings", lazy="noload")
+    water_feature = relationship("WaterFeature", back_populates="chemical_readings", lazy="noload")

@@ -55,6 +55,8 @@ export interface PropertyDifficulty {
   customer_demands_score: number;
   chemical_demand_score: number;
   callback_frequency_score: number;
+  equipment_effectiveness: number;
+  pool_design_score: number;
   override_composite: number | null;
   notes: string | null;
   composite_score: number;
@@ -80,6 +82,8 @@ export interface PropertyDifficultyUpdate {
   customer_demands_score?: number;
   chemical_demand_score?: number;
   callback_frequency_score?: number;
+  equipment_effectiveness?: number;
+  pool_design_score?: number;
   override_composite?: number | null;
   notes?: string | null;
 }
@@ -136,9 +140,9 @@ export interface CostBreakdown {
   rate_gap: number;
 }
 
-export interface BowCost {
-  bow_id: string;
-  bow_name: string | null;
+export interface WfCost {
+  wf_id: string;
+  wf_name: string | null;
   water_type: string;
   gallons: number;
   service_minutes: number;
@@ -170,7 +174,7 @@ export interface ProfitabilityAccount {
   cost_breakdown: CostBreakdown;
   margin_pct: number;
   rate_per_gallon: number | null;
-  bow_costs: BowCost[];
+  wf_costs: WfCost[];
 }
 
 export interface ProfitabilityOverview {

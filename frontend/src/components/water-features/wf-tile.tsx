@@ -61,7 +61,7 @@ function waterTypeIcon(type: string, className: string) {
 import Link from "next/link";
 import type { Permissions } from "@/lib/permissions";
 
-export interface BodyOfWater {
+export interface WaterFeature {
   id: string;
   property_id: string;
   name: string | null;
@@ -141,21 +141,23 @@ interface DifficultyAdjustments {
   res_system_effectiveness: number;
 }
 
-interface BowTileProps {
-  bow: BodyOfWater;
+interface WfTileProps {
+  wf: WaterFeature;
   propertyId: string;
   perms: Permissions;
   techAssignment?: TechAssignment;
   suggestedRate?: number | null;
   marginPct?: number | null;
   customerType?: string;
+  collapsed?: boolean;
+  onExpand?: () => void;
   onUpdated: () => void;
   onDeleted: () => void;
 }
 
-export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate, marginPct, customerType, onUpdated, onDeleted }: BowTileProps) {
+export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, marginPct, customerType, collapsed, onExpand, onUpdated, onDeleted }: WfTileProps) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ ...bow });
+  const [form, setForm] = useState({ ...wf });
   const [diffAdj, setDiffAdj] = useState<DifficultyAdjustments | null>(null);
   const [diffSaving, setDiffSaving] = useState(false);
 
@@ -192,7 +194,7 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put(`/v1/bodies-of-water/${bow.id}`, {
+      await api.put(`/v1/water-features/${wf.id}`, {
         name: form.name || null,
         water_type: form.water_type,
         pool_type: form.pool_type || null,
@@ -243,14 +245,14 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
   };
 
   const handleCancel = () => {
-    setForm({ ...bow });
+    setForm({ ...wf });
     setDirty(false);
     setEditing(false);
   };
 
   const handleDelete = async () => {
     try {
-      await api.delete(`/v1/bodies-of-water/${bow.id}`);
+      await api.delete(`/v1/water-features/${wf.id}`);
       toast.success("Deleted");
       onDeleted();
     } catch {
@@ -258,14 +260,14 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
     }
   };
 
-  const fb = bow;
+  const fb = wf;
 
   if (editing) {
     return (
       <div className="rounded-lg border shadow-sm bg-card p-4 space-y-3 border-l-4 border-l-primary">
-        {/* BOW Header Bar — edit mode */}
+        {/* WF Header Bar — edit mode */}
         <div className="flex items-center gap-3">
-          {waterTypeIcon(bow.water_type, "h-4 w-4 text-primary/60")}
+          {waterTypeIcon(wf.water_type, "h-4 w-4 text-primary/60")}
           <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">
             {form.name || form.water_type.replace("_", " ")}
           </span>
@@ -276,7 +278,7 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
               </Button>
             )}
             {dirty && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setForm({ ...bow }); setDirty(false); }}>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setForm({ ...wf }); setDirty(false); }}>
                 Cancel
               </Button>
             )}
@@ -613,12 +615,12 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
 
   // --- View mode ---
   return (
-    <div className="rounded-lg border shadow-sm bg-card p-4 space-y-3">
-      {/* BOW Header Bar */}
+    <div className={`rounded-lg border shadow-sm bg-card p-4 space-y-3 ${collapsed ? "cursor-pointer hover:bg-muted/30 transition-colors" : ""}`} onClick={collapsed ? onExpand : undefined}>
+      {/* WF Header Bar */}
       <div className="flex items-center gap-3">
-        {waterTypeIcon(bow.water_type, "h-4 w-4 text-primary/60")}
-        <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">{bow.name || bow.water_type.replace("_", " ")}</span>
-        {bow.pool_type && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{bow.pool_type}</Badge>}
+        {waterTypeIcon(wf.water_type, "h-4 w-4 text-primary/60")}
+        <span className="text-sm font-semibold uppercase tracking-widest text-foreground/70 capitalize">{wf.name || wf.water_type.replace("_", " ")}</span>
+        {wf.pool_type && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{wf.pool_type}</Badge>}
         {techAssignment && (
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: techAssignment.color }} />
@@ -626,20 +628,6 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
           </div>
         )}
         <div className="ml-auto flex items-center gap-1">
-          {bow.water_type === "pool" && (
-            <Link href={`/map?bow=${bow.id}`}>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent">
-                <Satellite className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
-          )}
-          {perms.canMeasure && (
-            <Link href={`/properties/${propertyId}/measure?bow=${bow.id}`}>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent">
-                <Ruler className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
-          )}
           {perms.canEditCustomers && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(true)}>
               <Pencil className="h-3.5 w-3.5" />
@@ -651,9 +639,9 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
       {/* Metric Cards Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {[
-          { icon: Droplets, label: "Volume", value: bow.pool_gallons ? `${bow.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500", source: null as string | null },
-          { icon: Move, label: "Surface", value: bow.pool_sqft ? `${bow.pool_sqft.toLocaleString()}` : null, unit: "ft\u00B2", color: "text-emerald-500", source: bow.dimension_source },
-          { icon: Clock, label: "Service", value: `${bow.estimated_service_minutes}`, unit: "min", color: "text-amber-500", source: null as string | null },
+          { icon: Droplets, label: "Volume", value: wf.pool_gallons ? `${wf.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500", source: null as string | null },
+          { icon: Move, label: "Surface", value: wf.pool_sqft ? `${wf.pool_sqft.toLocaleString()}` : null, unit: "ft\u00B2", color: "text-emerald-500", source: wf.dimension_source },
+          { icon: Clock, label: "Service", value: `${wf.estimated_service_minutes}`, unit: "min", color: "text-amber-500", source: null as string | null },
         ].map((m) => (
           <div key={m.label} className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
             <div className="flex items-center gap-1.5 mb-1">
@@ -684,8 +672,8 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
               }`}>{marginPct.toFixed(0)}%</span>
             )}
           </div>
-          {bow.monthly_rate != null ? (
-            <p className="text-lg font-bold leading-tight">${bow.monthly_rate.toFixed(2)}<span className="text-xs font-normal text-muted-foreground ml-0.5">/mo</span></p>
+          {wf.monthly_rate != null ? (
+            <p className="text-lg font-bold leading-tight">${wf.monthly_rate.toFixed(2)}<span className="text-xs font-normal text-muted-foreground ml-0.5">/mo</span></p>
           ) : suggestedRate != null ? (
             <p className="text-sm leading-tight">
               <span className="text-muted-foreground/50 italic">&mdash;</span>
@@ -697,6 +685,7 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
         </div>
       </div>
 
+      {!collapsed && <>
       {/* Residential difficulty adjustments */}
       {isResidential && diffAdj && (
         <div className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
@@ -924,6 +913,7 @@ export function BowTile({ bow, propertyId, perms, techAssignment, suggestedRate,
           </div>
         </div>
       </div>
+      </>}
     </div>
   );
 }

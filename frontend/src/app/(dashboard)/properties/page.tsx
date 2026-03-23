@@ -13,10 +13,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { MapPin, Ruler } from "lucide-react";
+import { MapPin } from "lucide-react";
 import Link from "next/link";
 
-interface BodyOfWaterSummary {
+interface WaterFeatureSummary {
   id: string;
   name: string | null;
   water_type: string;
@@ -41,7 +41,7 @@ interface Property {
   has_water_feature: boolean;
   estimated_service_minutes: number;
   is_active: boolean;
-  bodies_of_water: BodyOfWaterSummary[];
+  water_features: WaterFeatureSummary[];
 }
 
 export default function PropertiesPage() {
@@ -123,10 +123,10 @@ export default function PropertiesPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1 flex-wrap">
-                      {(p.bodies_of_water?.length > 0) ? (
-                        p.bodies_of_water.map((bow) => (
-                          <Badge key={bow.id} variant="outline" className="capitalize text-xs">
-                            {bow.name || bow.water_type.replace("_", " ")}
+                      {(p.water_features?.length > 0) ? (
+                        p.water_features.map((wf) => (
+                          <Badge key={wf.id} variant="outline" className="capitalize text-xs">
+                            {wf.name || wf.water_type.replace("_", " ")}
                           </Badge>
                         ))
                       ) : (
@@ -142,14 +142,6 @@ export default function PropertiesPage() {
                     <Badge variant={p.is_active ? "default" : "secondary"}>
                       {p.is_active ? "Active" : "Inactive"}
                     </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/properties/${p.id}/measure`}>
-                      <Button variant="ghost" size="sm">
-                        <Ruler className="h-4 w-4 mr-1" />
-                        Measure
-                      </Button>
-                    </Link>
                   </TableCell>
                 </TableRow>
               ))

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     smtp_password: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
     smtp_from_email: Optional[str] = Field(default=None, env="SMTP_FROM_EMAIL")
     smtp_from_name: str = Field(default="QuantumPools", env="SMTP_FROM_NAME")
+    notification_email: Optional[str] = Field(default=None, env="NOTIFICATION_EMAIL")
     frontend_url: str = Field(default="http://localhost:7060", env="FRONTEND_URL")
 
     # AI Services

@@ -55,7 +55,7 @@ interface Customer {
   property_count: number;
   first_property_address: string | null;
   first_property_pool_type: string | null;
-  bow_summary: string | null;
+  wf_summary: string | null;
   first_property_id: string | null;
 }
 
@@ -158,7 +158,7 @@ function ClientTable({
                   {c.company_name || "\u2014"}
                 </TableCell>
                 <TableCell className="hidden sm:table-cell text-sm text-muted-foreground capitalize">
-                  {c.bow_summary || c.first_property_pool_type || "\u2014"}
+                  {c.wf_summary || c.first_property_pool_type || "\u2014"}
                 </TableCell>
                 <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
                   {(() => {
@@ -205,7 +205,7 @@ export default function CustomersPage() {
   const [newCompany, setNewCompany] = useState("");
   const [newCompanyCustom, setNewCompanyCustom] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(["active"]));
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set(["commercial", "residential"]));
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_name: string; color: string }>>>({});
@@ -298,7 +298,7 @@ export default function CustomersPage() {
       case "company":
         return dir * (a.company_name ?? "").localeCompare(b.company_name ?? "");
       case "pool":
-        return dir * (a.bow_summary ?? a.first_property_pool_type ?? "").localeCompare(b.bow_summary ?? b.first_property_pool_type ?? "");
+        return dir * (a.wf_summary ?? a.first_property_pool_type ?? "").localeCompare(b.wf_summary ?? b.first_property_pool_type ?? "");
       case "rate":
         return dir * (a.monthly_rate - b.monthly_rate);
       case "balance":
@@ -484,15 +484,10 @@ export default function CustomersPage() {
           ].map((t) => (
             <Button
               key={t.value}
-              variant={typeFilter.has(t.value) ? "default" : "outline"}
+              variant={typeFilter === t.value ? "default" : "outline"}
               size="sm"
               className="h-7 px-2.5 text-xs"
-              onClick={() => setTypeFilter(prev => {
-                const next = new Set(prev);
-                if (next.has(t.value)) next.delete(t.value);
-                else next.add(t.value);
-                return next;
-              })}
+              onClick={() => setTypeFilter(prev => prev === t.value ? null : t.value)}
             >
               <t.icon className="h-3.5 w-3.5 mr-1" />{t.label}
             </Button>
@@ -529,7 +524,7 @@ export default function CustomersPage() {
       ) : (
         <TooltipProvider>
           <div className="space-y-6">
-            {typeFilter.has("commercial") && (
+            {(typeFilter === null || typeFilter === "commercial") && (
               <ClientTable
                 title="Commercial"
                 icon={Building2}
@@ -542,7 +537,7 @@ export default function CustomersPage() {
                 techAssignments={techAssignments}
               />
             )}
-            {typeFilter.has("residential") && (
+            {(typeFilter === null || typeFilter === "residential") && (
               <ClientTable
                 title="Residential"
                 icon={Home}

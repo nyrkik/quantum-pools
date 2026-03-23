@@ -9,7 +9,7 @@ from src.api.deps import get_current_org_user, OrgUserContext
 from src.schemas.property import PropertyCreate, PropertyUpdate, PropertyResponse
 from src.services.property_service import PropertyService
 from src.services.geocoding_service import GeocodingService
-from src.services.body_of_water_service import BodyOfWaterService
+from src.services.water_feature_service import WaterFeatureService
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -45,18 +45,18 @@ async def list_properties(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PropertyService(db)
-    bow_svc = BodyOfWaterService(db)
+    wf_svc = WaterFeatureService(db)
     properties, total = await svc.list(
         ctx.organization_id, customer_id=customer_id, is_active=is_active, skip=skip, limit=limit
     )
     results = []
     for p in properties:
         resp = PropertyResponse.model_validate(p)
-        resp.bodies_of_water = [
+        resp.water_features = [
             {"id": b.id, "name": b.name, "water_type": b.water_type,
              "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
              "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
-            for b in await bow_svc.list_for_property(ctx.organization_id, p.id)
+            for b in await wf_svc.list_for_property(ctx.organization_id, p.id)
         ]
         results.append(resp)
     return {"items": results, "total": total}
@@ -83,14 +83,14 @@ async def get_property(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PropertyService(db)
-    bow_svc = BodyOfWaterService(db)
+    wf_svc = WaterFeatureService(db)
     prop = await svc.get(ctx.organization_id, property_id)
     resp = PropertyResponse.model_validate(prop)
-    resp.bodies_of_water = [
+    resp.water_features = [
         {"id": b.id, "name": b.name, "water_type": b.water_type,
          "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
          "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
-        for b in await bow_svc.list_for_property(ctx.organization_id, prop.id)
+        for b in await wf_svc.list_for_property(ctx.organization_id, prop.id)
     ]
     return resp
 
@@ -104,12 +104,39 @@ async def update_property(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PropertyService(db)
+    update_data = body.model_dump(exclude_unset=True)
+    rate_changed = "monthly_rate" in update_data
     prop, address_changed = await svc.update(
-        ctx.organization_id, property_id, **body.model_dump(exclude_unset=True)
+        ctx.organization_id, property_id, **update_data
     )
     if address_changed:
         background_tasks.add_task(_geocode_property, prop.id, prop.full_address)
         background_tasks.add_task(_emd_auto_match, ctx.organization_id)
+    if rate_changed:
+        from src.models.water_feature import WaterFeature
+        from src.services.profitability_service import ProfitabilityService
+        from src.services.rate_sync import sync_rates_for_property
+        from sqlalchemy import select
+
+        # Split property rate down to its WFs
+        bows_result = await db.execute(
+            select(WaterFeature).where(
+                WaterFeature.property_id == property_id,
+                WaterFeature.is_active == True,
+            )
+        )
+        wfs = bows_result.scalars().all()
+        if wfs:
+            new_rate = update_data["monthly_rate"] or 0
+            allocation = ProfitabilityService.allocate_rate_to_wfs(new_rate, wfs)
+            for wf in wfs:
+                alloc = allocation.get(wf.id, {})
+                wf.monthly_rate = alloc.get("allocated_rate", new_rate / len(wfs))
+                wf.rate_allocation_method = alloc.get("allocation_method", "equal")
+            await db.flush()
+
+        # Sync property + customer totals
+        await sync_rates_for_property(db, property_id)
     return PropertyResponse.model_validate(prop)
 
 

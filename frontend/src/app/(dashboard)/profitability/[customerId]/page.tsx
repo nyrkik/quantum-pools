@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft, Save } from "lucide-react";
+import { Loader2, ArrowLeft, Save, Pencil, X, Check } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -45,6 +45,168 @@ function formatCurrency(value: number) {
     style: "currency",
     currency: "USD",
   }).format(value);
+}
+
+interface WfCost {
+  wf_id: string;
+  wf_name: string | null;
+  water_type: string;
+  gallons: number;
+  service_minutes: number;
+  monthly_rate: number;
+  chemical_cost: number;
+  labor_cost: number;
+  travel_cost: number;
+  overhead_cost: number;
+  total_cost: number;
+  profit: number;
+  margin_pct: number;
+  suggested_rate: number;
+  rate_gap: number;
+}
+
+interface WfDifficulty {
+  access_difficulty: number;
+  chemical_demand: number;
+  equipment_effectiveness: number;
+  pool_design: number;
+  shade_exposure: number;
+  tree_debris: number;
+}
+
+function WfCostCard({ bc, onSaved }: { bc: WfCost; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [gallons, setGallons] = useState(bc.gallons);
+  const [minutes, setMinutes] = useState(bc.service_minutes);
+  const [rate, setRate] = useState(bc.monthly_rate);
+  const [diff, setDiff] = useState<WfDifficulty | null>(null);
+
+  useEffect(() => {
+    if (editing && !diff) {
+      api.get<WfDifficulty>(`/v1/water-features/${bc.wf_id}`)
+        .then((wf) => setDiff({
+          access_difficulty: wf.access_difficulty ?? 1,
+          chemical_demand: wf.chemical_demand ?? 1,
+          equipment_effectiveness: wf.equipment_effectiveness ?? 3,
+          pool_design: wf.pool_design ?? 3,
+          shade_exposure: wf.shade_exposure ?? 1,
+          tree_debris: wf.tree_debris ?? 1,
+        }))
+        .catch(() => setDiff({ access_difficulty: 1, chemical_demand: 1, equipment_effectiveness: 3, pool_design: 3, shade_exposure: 1, tree_debris: 1 }));
+    }
+  }, [editing, diff, bc.wf_id]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/v1/water-features/${bc.wf_id}`, {
+        pool_gallons: gallons,
+        estimated_service_minutes: minutes,
+        monthly_rate: rate,
+        ...(diff || {}),
+      });
+      toast.success("Updated");
+      setEditing(false);
+      onSaved();
+    } catch {
+      toast.error("Failed to update");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setGallons(bc.gallons);
+    setMinutes(bc.service_minutes);
+    setRate(bc.monthly_rate);
+    setEditing(false);
+  };
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 transition-colors ${editing ? "border-l-4 border-l-primary bg-muted/30" : "hover:bg-muted/30 cursor-pointer"}`}
+      onClick={!editing ? () => setEditing(true) : undefined}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold capitalize">{bc.wf_name || bc.water_type}</span>
+          {!editing && (
+            <span className="text-xs text-muted-foreground">{bc.gallons.toLocaleString()} gal · {bc.service_minutes} min</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {!editing ? (
+            <span className="text-sm text-muted-foreground">{formatCurrency(bc.monthly_rate)}/mo</span>
+          ) : (
+            <>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-green-600" onClick={(e) => { e.stopPropagation(); handleSave(); }}>
+                  <Check className="h-4 w-4" />
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); handleCancel(); }}>
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="space-y-3 mb-2" onClick={(e) => e.stopPropagation()}>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Gallons</Label>
+              <Input type="number" value={gallons} onChange={(e) => setGallons(parseInt(e.target.value) || 0)} className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Service Minutes</Label>
+              <Input type="number" value={minutes} onChange={(e) => setMinutes(parseInt(e.target.value) || 0)} className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Monthly Rate</Label>
+              <Input type="number" step="0.01" value={rate} onChange={(e) => setRate(parseFloat(e.target.value) || 0)} className="h-8 text-sm" />
+            </div>
+          </div>
+          {diff && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {([
+                { key: "access_difficulty" as const, label: "Access", desc: "1=easy, 5=difficult" },
+                { key: "chemical_demand" as const, label: "Chem Demand", desc: "1=stable, 5=chronic issues" },
+                { key: "equipment_effectiveness" as const, label: "Equipment", desc: "1=poor, 5=excellent" },
+                { key: "pool_design" as const, label: "Design/Flow", desc: "1=poor, 5=great" },
+                { key: "shade_exposure" as const, label: "Shade", desc: "1=full sun, 5=full shade" },
+                { key: "tree_debris" as const, label: "Tree Debris", desc: "1=none, 5=heavy" },
+              ]).map((f) => (
+                <div key={f.key} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">{f.label}</Label>
+                    <span className="text-xs font-medium">{diff[f.key].toFixed(1)}</span>
+                  </div>
+                  <Slider min={1} max={5} step={0.5} value={[diff[f.key]]} onValueChange={([v]) => setDiff({ ...diff, [f.key]: v })} />
+                  <p className="text-[10px] text-muted-foreground">{f.desc}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-4 gap-2 text-xs">
+        {[
+          { label: "Chemical", value: bc.chemical_cost },
+          { label: "Labor", value: bc.labor_cost },
+          { label: "Travel", value: bc.travel_cost },
+          { label: "Overhead", value: bc.overhead_cost },
+        ].map((item) => (
+          <div key={item.label} className="text-center">
+            <p className="text-muted-foreground">{item.label}</p>
+            <p className="font-medium">{formatCurrency(item.value)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function AccountDetailPage() {
@@ -72,13 +234,7 @@ export default function AccountDetailPage() {
         );
         setDifficulty(diff);
         setDiffForm({
-          access_difficulty_score: diff.access_difficulty_score,
           customer_demands_score: diff.customer_demands_score,
-          chemical_demand_score: diff.chemical_demand_score,
-          callback_frequency_score: diff.callback_frequency_score,
-          equipment_age_years: diff.equipment_age_years,
-          shade_exposure: diff.shade_exposure,
-          tree_debris_level: diff.tree_debris_level,
           enclosure_type: diff.enclosure_type,
         });
       }
@@ -131,10 +287,7 @@ export default function AccountDetailPage() {
   ];
 
   const scoreFields = [
-    { key: "access_difficulty_score", label: "Access Difficulty", description: "Locked gates, stairs, narrow paths" },
-    { key: "customer_demands_score", label: "Client Demands", description: "Frequent calls, complaints, special requests" },
-    { key: "chemical_demand_score", label: "Chemical Demand", description: "Chronic algae, unstable chemistry" },
-    { key: "callback_frequency_score", label: "Callback Frequency", description: "Rework rate" },
+    { key: "customer_demands_score", label: "Client Demands", description: "Frequent calls, complaints, callbacks, special requests" },
   ] as const;
 
   return (
@@ -149,13 +302,13 @@ export default function AccountDetailPage() {
           <h1 className="text-2xl font-bold">{account.customer_name}</h1>
           <p className="text-muted-foreground">{account.property_address}</p>
         </div>
-        <Link href={`/customers/${account.customer_id}?tab=bows`}>
+        <Link href={`/customers/${account.customer_id}?tab=wfs`}>
           <Button variant="outline" size="sm">Water Features</Button>
         </Link>
       </div>
 
       {/* Rate comparison */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Current Rate</CardTitle>
@@ -184,15 +337,6 @@ export default function AccountDetailPage() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Difficulty</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{account.difficulty_score.toFixed(1)}</div>
-            <p className="text-xs text-muted-foreground">{account.difficulty_multiplier.toFixed(2)}x multiplier</p>
-          </CardContent>
-        </Card>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -218,17 +362,47 @@ export default function AccountDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Difficulty Scores */}
+        {/* Property Factors + Difficulty Index */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">Difficulty Scoring</CardTitle>
-            {difficulty && (
-              <Badge variant="outline">
-                Composite: {difficulty.composite_score.toFixed(1)}
-              </Badge>
-            )}
+          <CardHeader>
+            <CardTitle className="text-base">Property Factors</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-5">
+            {/* Difficulty index */}
+            <div className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
+              <div>
+                <p className="text-xs text-muted-foreground">Difficulty Index</p>
+                <p className="text-3xl font-bold">{account.difficulty_score.toFixed(1)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Multiplier</p>
+                <p className="text-lg font-semibold">{account.difficulty_multiplier.toFixed(2)}x</p>
+              </div>
+            </div>
+
+            {/* Per-WF difficulty summary */}
+            {account.wf_costs && account.wf_costs.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Water Feature Difficulty</p>
+                {account.wf_costs.map((bc) => {
+                  const score = bc.difficulty_score;
+                  const pct = ((score - 1) / 4) * 100;
+                  return (
+                    <div key={bc.wf_id} className="flex items-center gap-2 text-xs">
+                      <span className="w-28 truncate capitalize font-medium">{bc.wf_name || bc.water_type}</span>
+                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${score >= 3.5 ? "bg-red-400" : score >= 2.5 ? "bg-amber-400" : "bg-green-400"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-7 text-right text-muted-foreground">{score.toFixed(1)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {scoreFields.map((field) => (
               <div key={field.key} className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -250,111 +424,30 @@ export default function AccountDetailPage() {
               </div>
             ))}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm">Shade Exposure</Label>
-                <Select
-                  value={diffForm.shade_exposure ?? ""}
-                  onValueChange={(v) => setDiffForm({ ...diffForm, shade_exposure: v || null })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="full_sun">Full Sun</SelectItem>
-                    <SelectItem value="partial_shade">Partial Shade</SelectItem>
-                    <SelectItem value="full_shade">Full Shade</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm">Tree Debris</Label>
-                <Select
-                  value={diffForm.tree_debris_level ?? ""}
-                  onValueChange={(v) => setDiffForm({ ...diffForm, tree_debris_level: v || null })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="moderate">Moderate</SelectItem>
-                    <SelectItem value="heavy">Heavy</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm">Equipment Age (years)</Label>
-              <Input
-                type="number"
-                className="max-w-[120px]"
-                value={diffForm.equipment_age_years ?? ""}
-                onChange={(e) =>
-                  setDiffForm({
-                    ...diffForm,
-                    equipment_age_years: e.target.value ? parseInt(e.target.value) : null,
-                  })
-                }
-              />
-            </div>
-
-            <Button onClick={handleSaveDifficulty} disabled={saving}>
-              {saving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
-              Save Difficulty
-            </Button>
+            {difficulty && diffForm.customer_demands_score !== difficulty.customer_demands_score && (
+              <Button onClick={handleSaveDifficulty} disabled={saving}>
+                {saving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Save
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Per-BOW Breakdown */}
-      {account.bow_costs && account.bow_costs.length > 0 && (
+      {/* Per-WF Breakdown */}
+      {account.wf_costs && account.wf_costs.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Per Water Feature Breakdown</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {account.bow_costs.map((bc) => (
-                <div key={bc.bow_id} className={`rounded-lg border px-4 py-3 ${bc.margin_pct < 35 ? "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20" : ""}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold capitalize">{bc.bow_name || bc.water_type}</span>
-                      <span className="text-xs text-muted-foreground">{bc.gallons.toLocaleString()} gal · {bc.service_minutes} min</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">{formatCurrency(bc.monthly_rate)}/mo</span>
-                      <Badge className={bc.margin_pct >= 35 ? "bg-green-600 text-white" : bc.margin_pct >= 15 ? "bg-amber-500 text-white" : "bg-red-600 text-white"}>
-                        {bc.margin_pct.toFixed(0)}%
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-5 gap-2 text-xs">
-                    {[
-                      { label: "Chemical", value: bc.chemical_cost },
-                      { label: "Labor", value: bc.labor_cost },
-                      { label: "Travel", value: bc.travel_cost },
-                      { label: "Overhead", value: bc.overhead_cost },
-                      { label: "Profit", value: bc.profit },
-                    ].map((item) => (
-                      <div key={item.label} className="text-center">
-                        <p className="text-muted-foreground">{item.label}</p>
-                        <p className={`font-medium ${item.label === "Profit" ? (item.value >= 0 ? "text-green-600" : "text-red-600") : ""}`}>
-                          {formatCurrency(item.value)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                  {bc.rate_gap > 0 && (
-                    <p className="text-xs text-amber-600 mt-1">Suggested: {formatCurrency(bc.suggested_rate)}/mo (+{formatCurrency(bc.rate_gap)})</p>
-                  )}
-                </div>
+              {account.wf_costs.map((bc) => (
+                <WfCostCard key={bc.wf_id} bc={bc} onSaved={loadData} />
               ))}
             </div>
           </CardContent>

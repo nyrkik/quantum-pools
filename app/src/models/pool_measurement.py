@@ -17,8 +17,8 @@ class PoolMeasurement(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    body_of_water_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), index=True
+    water_feature_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="SET NULL"), index=True
     )
     measured_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL")
@@ -59,4 +59,4 @@ class PoolMeasurement(Base):
     property = relationship("Property", back_populates="measurements", lazy="noload")
     organization = relationship("Organization", lazy="noload")
     user = relationship("User", lazy="noload")
-    body_of_water = relationship("BodyOfWater", back_populates="measurements", lazy="noload")
+    water_feature = relationship("WaterFeature", back_populates="measurements", lazy="noload")

@@ -17,8 +17,8 @@ class PropertyPhoto(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    body_of_water_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("bodies_of_water.id", ondelete="SET NULL"), nullable=True, index=True
+    water_feature_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("water_features.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -31,5 +31,5 @@ class PropertyPhoto(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     property = relationship("Property", back_populates="photos", lazy="noload")
-    body_of_water = relationship("BodyOfWater", lazy="noload")
+    water_feature = relationship("WaterFeature", lazy="noload")
     organization = relationship("Organization", lazy="noload")

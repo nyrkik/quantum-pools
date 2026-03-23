@@ -10,10 +10,10 @@ from src.models.org_cost_settings import OrgCostSettings
 from src.models.property_difficulty import PropertyDifficulty
 from src.models.property import Property
 from src.models.customer import Customer
-from src.models.body_of_water import BodyOfWater
+from src.models.water_feature import WaterFeature
 from src.schemas.profitability import (
     CostBreakdown,
-    BowCost,
+    WfCost,
     ProfitabilityAccount,
     ProfitabilityOverview,
     WhaleCurvePoint,
@@ -29,7 +29,8 @@ WEIGHTS = {
     "pool_gallons": 0.10,
     "pool_sqft": 0.05,
     "water_features": 0.08,
-    "equipment_age": 0.07,
+    "equipment_effectiveness": 0.07,
+    "pool_design": 0.05,
     "shade_debris": 0.05,
     "enclosure": 0.05,
     "chemical_demand": 0.12,
@@ -37,14 +38,12 @@ WEIGHTS = {
     "distance": 0.10,
     "access": 0.08,
     "customer_demands": 0.07,
-    "callback": 0.05,
 }
 
 # Gallon ranges → score 1-5
 GALLON_RANGES = [(10000, 1), (20000, 2), (30000, 3), (40000, 4)]
 SQFT_RANGES = [(400, 1), (700, 2), (1000, 3), (1500, 4)]
 SERVICE_TIME_RANGES = [(20, 1), (30, 2), (45, 3), (60, 4)]
-EQUIPMENT_AGE_RANGES = [(3, 1), (6, 2), (10, 3), (15, 4)]
 
 
 def _range_score(value: Optional[float], ranges: list[tuple]) -> float:
@@ -123,20 +122,20 @@ class ProfitabilityService:
 
     def compute_composite_score(
         self, prop: Property, diff: Optional[PropertyDifficulty],
-        bows: Optional[list[BodyOfWater]] = None,
+        wfs: Optional[list[WaterFeature]] = None,
     ) -> float:
         if diff and diff.override_composite is not None:
             return diff.override_composite
 
         scores = {}
 
-        # Aggregate from BOWs if available, else fall back to property fields
-        if bows:
-            total_gallons = sum(b.pool_gallons or 0 for b in bows) or None
-            total_sqft = sum(b.pool_sqft or 0 for b in bows) or None
-            total_service_minutes = sum(b.estimated_service_minutes or 0 for b in bows) or None
-            has_spa = any(b.water_type == "spa" for b in bows)
-            has_water_feature = any(b.water_type in ("water_feature", "fountain") for b in bows)
+        # Aggregate from WFs if available, else fall back to property fields
+        if wfs:
+            total_gallons = sum(b.pool_gallons or 0 for b in wfs) or None
+            total_sqft = sum(b.pool_sqft or 0 for b in wfs) or None
+            total_service_minutes = sum(b.estimated_service_minutes or 0 for b in wfs) or None
+            has_spa = any(b.water_type == "spa" for b in wfs)
+            has_water_feature = any(b.water_type in ("water_feature", "fountain") for b in wfs)
         else:
             total_gallons = prop.pool_gallons
             total_sqft = prop.pool_sqft
@@ -156,27 +155,30 @@ class ProfitabilityService:
             water_feature_score += 1.0
         scores["water_features"] = min(water_feature_score, 5.0)
 
+        # WF-level scores — average across WFs (these live on the WF now)
+        if wfs:
+            avg = lambda attr, default: sum(getattr(b, attr, default) for b in wfs) / len(wfs)
+            scores["equipment_effectiveness"] = 6.0 - avg("equipment_effectiveness", 3.0)
+            scores["pool_design"] = 6.0 - avg("pool_design", 3.0)
+            scores["chemical_demand"] = avg("chemical_demand", 1.0)
+            scores["access"] = avg("access_difficulty", 1.0)
+            scores["shade_debris"] = (avg("shade_exposure", 1.0) + avg("tree_debris", 1.0)) / 2.0
+        else:
+            scores["equipment_effectiveness"] = 3.0
+            scores["pool_design"] = 3.0
+            scores["chemical_demand"] = 1.0
+            scores["access"] = 1.0
+            scores["shade_debris"] = 1.0
+
+        # Property-level scores — from PropertyDifficulty
         if diff:
-            scores["equipment_age"] = _range_score(diff.equipment_age_years, EQUIPMENT_AGE_RANGES)
-            scores["shade_debris"] = (
-                _shade_score(diff.shade_exposure.value if diff.shade_exposure else None)
-                + _debris_score(diff.tree_debris_level.value if diff.tree_debris_level else None)
-            ) / 2.0
             scores["enclosure"] = _enclosure_score(
                 diff.enclosure_type.value if diff.enclosure_type else None
             )
-            scores["chemical_demand"] = diff.chemical_demand_score
-            scores["access"] = diff.access_difficulty_score
             scores["customer_demands"] = diff.customer_demands_score
-            scores["callback"] = diff.callback_frequency_score
         else:
-            scores["equipment_age"] = 1.0
-            scores["shade_debris"] = 1.0
             scores["enclosure"] = 3.5
-            scores["chemical_demand"] = 1.0
-            scores["access"] = 1.0
             scores["customer_demands"] = 1.0
-            scores["callback"] = 1.0
 
         # Distance — would need route data, default to 1.0
         scores["distance"] = 1.0
@@ -196,7 +198,7 @@ class ProfitabilityService:
         min_difficulty: Optional[float] = None,
         max_difficulty: Optional[float] = None,
     ) -> ProfitabilityOverview:
-        """Portfolio profitability overview — aggregated from per-BOW costs."""
+        """Portfolio profitability overview — aggregated from per-WF costs."""
         settings = await self.get_or_create_settings(org_id)
 
         # Get all active customers
@@ -206,55 +208,80 @@ class ProfitabilityService:
 
         accounts: list[ProfitabilityAccount] = []
         for customer in customers:
-            cost, bow_costs = await self.compute_account_cost(customer, org_id, settings)
-
-            if not bow_costs:
-                continue
-
-            # Compute aggregate stats from BOW data
-            total_gallons = sum(bc["gallons"] for bc in bow_costs)
-            total_svc_min = sum(bc["service_minutes"] for bc in bow_costs)
-            avg_difficulty = sum(bc["difficulty_score"] for bc in bow_costs) / len(bow_costs) if bow_costs else 2.5
-            avg_multiplier = sum(bc["difficulty_multiplier"] for bc in bow_costs) / len(bow_costs) if bow_costs else 1.0
-
-            # Apply filters
-            if min_margin is not None and cost.margin_pct < min_margin:
-                continue
-            if max_margin is not None and cost.margin_pct > max_margin:
-                continue
-            if min_difficulty is not None and avg_difficulty < min_difficulty:
-                continue
-            if max_difficulty is not None and avg_difficulty > max_difficulty:
-                continue
-
-            rate_per_gallon = None
-            if total_gallons and cost.revenue > 0:
-                rate_per_gallon = round(cost.revenue / total_gallons, 4)
-
-            # Get first property address for display
+            # Get all properties for this customer
             from src.models.property import Property as PropModel
-            prop_result = await self.db.execute(
-                select(PropModel).where(PropModel.customer_id == customer.id, PropModel.is_active == True).limit(1)
+            props_result = await self.db.execute(
+                select(PropModel).where(PropModel.customer_id == customer.id, PropModel.is_active == True)
             )
-            prop = prop_result.scalar_one_or_none()
+            props = props_result.scalars().all()
+            if not props:
+                continue
 
-            accounts.append(ProfitabilityAccount(
-                customer_id=customer.id,
-                customer_name=customer.display_name_col,
-                customer_type=customer.customer_type or "residential",
-                property_id=prop.id if prop else "",
-                property_address=prop.address if prop else "",
-                monthly_rate=cost.revenue,
-                pool_gallons=total_gallons,
-                pool_sqft=None,
-                estimated_service_minutes=total_svc_min,
-                difficulty_score=round(avg_difficulty, 2),
-                difficulty_multiplier=round(avg_multiplier, 2),
-                cost_breakdown=cost,
-                margin_pct=cost.margin_pct,
-                rate_per_gallon=rate_per_gallon,
-                bow_costs=[BowCost(**bc) for bc in bow_costs],
-            ))
+            # Compute per-property profitability
+            for prop in props:
+                prop_wf_costs = await self._compute_property_cost(prop, customer, settings)
+                if not prop_wf_costs:
+                    continue
+
+                total_gallons = sum(bc["gallons"] for bc in prop_wf_costs)
+                total_svc_min = sum(bc["service_minutes"] for bc in prop_wf_costs)
+                avg_difficulty = sum(bc["difficulty_score"] for bc in prop_wf_costs) / len(prop_wf_costs)
+                avg_multiplier = sum(bc["difficulty_multiplier"] for bc in prop_wf_costs) / len(prop_wf_costs)
+
+                total_cost = sum(bc["total_cost"] for bc in prop_wf_costs)
+                revenue = prop.monthly_rate or sum(bc["monthly_rate"] for bc in prop_wf_costs)
+                profit = revenue - total_cost
+                margin_pct = (profit / revenue * 100) if revenue > 0 else 0.0
+                target_margin = settings.target_margin_pct / 100.0
+                suggested_rate = total_cost / (1 - target_margin) if target_margin < 1 else total_cost * 2
+                rate_gap = suggested_rate - revenue
+
+                cost = CostBreakdown(
+                    chemical_cost=round(sum(bc["chemical_cost"] for bc in prop_wf_costs), 2),
+                    labor_cost=round(sum(bc["labor_cost"] for bc in prop_wf_costs), 2),
+                    travel_cost=round(sum(bc["travel_cost"] for bc in prop_wf_costs), 2),
+                    overhead_cost=round(sum(bc["overhead_cost"] for bc in prop_wf_costs), 2),
+                    total_cost=round(total_cost, 2),
+                    revenue=round(revenue, 2),
+                    profit=round(profit, 2),
+                    margin_pct=round(margin_pct, 1),
+                    suggested_rate=round(suggested_rate, 2),
+                    rate_gap=round(rate_gap, 2),
+                )
+
+                # Apply filters
+                if min_margin is not None and cost.margin_pct < min_margin:
+                    continue
+                if max_margin is not None and cost.margin_pct > max_margin:
+                    continue
+                if min_difficulty is not None and avg_difficulty < min_difficulty:
+                    continue
+                if max_difficulty is not None and avg_difficulty > max_difficulty:
+                    continue
+
+                rate_per_gallon = round(revenue / total_gallons, 4) if total_gallons and revenue > 0 else None
+
+                display_name = customer.display_name_col
+                if len(props) > 1:
+                    display_name = f"{display_name} — {prop.name or prop.address}"
+
+                accounts.append(ProfitabilityAccount(
+                    customer_id=customer.id,
+                    customer_name=display_name,
+                    customer_type=customer.customer_type or "residential",
+                    property_id=prop.id,
+                    property_address=prop.address,
+                    monthly_rate=round(revenue, 2),
+                    pool_gallons=total_gallons,
+                    pool_sqft=None,
+                    estimated_service_minutes=total_svc_min,
+                    difficulty_score=round(avg_difficulty, 2),
+                    difficulty_multiplier=round(avg_multiplier, 2),
+                    cost_breakdown=cost,
+                    margin_pct=cost.margin_pct,
+                    rate_per_gallon=rate_per_gallon,
+                    wf_costs=[WfCost(**bc) for bc in prop_wf_costs],
+                ))
 
         # Sort by margin ascending (worst first)
         accounts.sort(key=lambda a: a.margin_pct)
@@ -290,12 +317,12 @@ class ProfitabilityService:
         if not customer:
             raise NotFoundError("Customer not found")
 
-        cost, bow_costs = await self.compute_account_cost(customer, org_id, settings)
+        cost, wf_costs = await self.compute_account_cost(customer, org_id, settings)
 
-        total_gallons = sum(bc["gallons"] for bc in bow_costs)
-        total_svc_min = sum(bc["service_minutes"] for bc in bow_costs)
-        avg_difficulty = sum(bc["difficulty_score"] for bc in bow_costs) / len(bow_costs) if bow_costs else 2.5
-        avg_multiplier = sum(bc["difficulty_multiplier"] for bc in bow_costs) / len(bow_costs) if bow_costs else 1.0
+        total_gallons = sum(bc["gallons"] for bc in wf_costs)
+        total_svc_min = sum(bc["service_minutes"] for bc in wf_costs)
+        avg_difficulty = sum(bc["difficulty_score"] for bc in wf_costs) / len(wf_costs) if wf_costs else 2.5
+        avg_multiplier = sum(bc["difficulty_multiplier"] for bc in wf_costs) / len(wf_costs) if wf_costs else 1.0
 
         rate_per_gallon = None
         if total_gallons and cost.revenue > 0:
@@ -320,22 +347,22 @@ class ProfitabilityService:
             cost_breakdown=cost,
             margin_pct=cost.margin_pct,
             rate_per_gallon=rate_per_gallon,
-            bow_costs=[BowCost(**bc) for bc in bow_costs],
+            wf_costs=[WfCost(**bc) for bc in wf_costs],
         )]
 
     @staticmethod
-    def allocate_rate_to_bows(total_rate: float, bows: list[BodyOfWater]) -> dict[str, dict]:
-        """Allocate a property's total rate across its BOWs.
+    def allocate_rate_to_wfs(total_rate: float, wfs: list[WaterFeature]) -> dict[str, dict]:
+        """Allocate a property's total rate across its WFs.
 
-        Returns dict of bow_id -> {allocated_rate, allocation_method, weight}
+        Returns dict of wf_id -> {allocated_rate, allocation_method, weight}
 
         Priority: gallons > sqft > service_time > type_weighting
         """
-        if not bows or total_rate <= 0:
+        if not wfs or total_rate <= 0:
             return {}
 
-        if len(bows) == 1:
-            return {bows[0].id: {"allocated_rate": total_rate, "allocation_method": "sole", "weight": 1.0}}
+        if len(wfs) == 1:
+            return {wfs[0].id: {"allocated_rate": total_rate, "allocation_method": "sole", "weight": 1.0}}
 
         TYPE_WEIGHTS = {
             "pool": 1.0,
@@ -347,7 +374,7 @@ class ProfitabilityService:
         }
 
         # Try gallons
-        gallons = [(b, b.pool_gallons or 0) for b in bows]
+        gallons = [(b, b.pool_gallons or 0) for b in wfs]
         total_gal = sum(g for _, g in gallons)
         if total_gal > 0 and all(g > 0 for _, g in gallons):
             result = {}
@@ -357,7 +384,7 @@ class ProfitabilityService:
             return result
 
         # Try sqft
-        sqfts = [(b, b.pool_sqft or 0) for b in bows]
+        sqfts = [(b, b.pool_sqft or 0) for b in wfs]
         total_sqft = sum(s for _, s in sqfts)
         if total_sqft > 0 and all(s > 0 for _, s in sqfts):
             result = {}
@@ -367,7 +394,7 @@ class ProfitabilityService:
             return result
 
         # Try service time
-        times = [(b, b.estimated_service_minutes or 0) for b in bows]
+        times = [(b, b.estimated_service_minutes or 0) for b in wfs]
         total_time = sum(t for _, t in times)
         if total_time > 0 and all(t > 0 for _, t in times):
             result = {}
@@ -377,11 +404,11 @@ class ProfitabilityService:
             return result
 
         # Type weighting (always available)
-        weights = [(b, TYPE_WEIGHTS.get(b.water_type, 0.5)) for b in bows]
+        weights = [(b, TYPE_WEIGHTS.get(b.water_type, 0.5)) for b in wfs]
         total_w = sum(w for _, w in weights)
         result = {}
         for b, w in weights:
-            ratio = w / total_w if total_w > 0 else 1.0 / len(bows)
+            ratio = w / total_w if total_w > 0 else 1.0 / len(wfs)
             result[b.id] = {"allocated_rate": round(total_rate * ratio, 2), "allocation_method": "type_weight", "weight": round(ratio, 4)}
         return result
 
@@ -457,38 +484,38 @@ class ProfitabilityService:
         resp.difficulty_multiplier = multiplier
         return resp
 
-    def compute_bow_cost(
+    def compute_wf_cost(
         self,
         settings: OrgCostSettings,
-        bow: BodyOfWater,
+        wf: WaterFeature,
         difficulty_score: float,
-        num_bows_at_property: int,
+        num_wfs_at_property: int,
         customer_type: str = "residential",
         chemical_profile: Optional[ChemicalCostProfile] = None,
         difficulty: Optional[PropertyDifficulty] = None,
     ) -> dict:
-        """Compute cost breakdown for a single BOW.
+        """Compute cost breakdown for a single WF.
 
         Residential: flat dollar adjustments per visit from difficulty factors.
         Commercial: multiplier-based scaling from composite difficulty score.
-        Travel and overhead are split across BOWs at the same property.
+        Travel and overhead are split across WFs at the same property.
         """
         visits = settings.visits_per_month
 
         # Type-aware gallon defaults
-        if bow.pool_gallons:
-            gallons = bow.pool_gallons
-        elif bow.water_type in ("spa", "hot_tub"):
+        if wf.pool_gallons:
+            gallons = wf.pool_gallons
+        elif wf.water_type in ("spa", "hot_tub"):
             gallons = 800
-        elif bow.water_type in ("wading_pool",):
+        elif wf.water_type in ("wading_pool",):
             gallons = 800
-        elif bow.water_type in ("fountain", "water_feature"):
+        elif wf.water_type in ("fountain", "water_feature"):
             gallons = 500
         elif customer_type == "commercial":
             gallons = 25000
         else:
             gallons = 15000
-        service_minutes = bow.estimated_service_minutes or 30
+        service_minutes = wf.estimated_service_minutes or 30
 
         if customer_type == "commercial":
             # Commercial: multiplier-based (0.8x to 1.6x)
@@ -516,22 +543,22 @@ class ProfitabilityService:
         # Labor cost
         labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
 
-        # Travel cost — split across BOWs at the property (one trip)
+        # Travel cost — split across WFs at the property (one trip)
         full_travel = (
             (settings.avg_drive_minutes / 60.0) * settings.burdened_labor_rate
             + settings.avg_drive_miles * settings.vehicle_cost_per_mile
         ) * visits
-        travel_cost = full_travel / max(num_bows_at_property, 1)
+        travel_cost = full_travel / max(num_wfs_at_property, 1)
 
-        # Overhead — per account type, split across BOWs at property
+        # Overhead — per account type, split across WFs at property
         if customer_type == "commercial":
             full_overhead = settings.commercial_overhead_per_account
         else:
             full_overhead = settings.residential_overhead_per_account
-        overhead_cost = full_overhead / max(num_bows_at_property, 1)
+        overhead_cost = full_overhead / max(num_wfs_at_property, 1)
 
         total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost + difficulty_adjustment
-        revenue = bow.monthly_rate or 0.0
+        revenue = wf.monthly_rate or 0.0
         profit = revenue - total_cost
         margin_pct = (profit / revenue * 100) if revenue > 0 else 0.0
         target_margin = settings.target_margin_pct / 100.0
@@ -539,9 +566,9 @@ class ProfitabilityService:
         rate_gap = suggested_rate - revenue
 
         return {
-            "bow_id": bow.id,
-            "bow_name": bow.name,
-            "water_type": bow.water_type,
+            "wf_id": wf.id,
+            "bow_name": wf.name,
+            "water_type": wf.water_type,
             "gallons": gallons,
             "service_minutes": service_minutes,
             "monthly_rate": revenue,
@@ -559,21 +586,66 @@ class ProfitabilityService:
             "difficulty_multiplier": round(multiplier, 2),
         }
 
+    async def _compute_property_cost(
+        self,
+        prop: Property,
+        customer: Customer,
+        settings: OrgCostSettings,
+    ) -> list[dict]:
+        """Compute per-WF costs for a single property. Returns list of wf cost dicts."""
+        from collections import Counter
+
+        bows_result = await self.db.execute(
+            select(WaterFeature).where(WaterFeature.property_id == prop.id, WaterFeature.is_active == True)
+        )
+        wfs = bows_result.scalars().all()
+        if not wfs:
+            return []
+
+        num_bows = len(wfs)
+
+        diff_result = await self.db.execute(
+            select(PropertyDifficulty).where(PropertyDifficulty.property_id == prop.id)
+        )
+        diff = diff_result.scalar_one_or_none()
+
+        wf_ids = [b.id for b in wfs]
+        chem_result = await self.db.execute(
+            select(ChemicalCostProfile).where(ChemicalCostProfile.water_feature_id.in_(wf_ids))
+        )
+        chem_map = {cp.water_feature_id: cp for cp in chem_result.scalars().all()}
+
+        wf_costs = []
+        for wf in wfs:
+            score = self.compute_composite_score(prop, diff, wfs=[wf]) if diff else 2.5
+            bc = self.compute_wf_cost(
+                settings=settings,
+                wf=wf,
+                difficulty_score=score,
+                num_wfs_at_property=num_bows,
+                customer_type=customer.customer_type or "residential",
+                chemical_profile=chem_map.get(wf.id),
+                difficulty=diff,
+            )
+            wf_costs.append(bc)
+
+        return wf_costs
+
     async def compute_account_cost(
         self,
         customer: Customer,
         org_id: str,
         settings: Optional[OrgCostSettings] = None,
     ) -> tuple[CostBreakdown, list[dict]]:
-        """Compute account-level cost by aggregating per-BOW costs.
+        """Compute account-level cost by aggregating per-WF costs.
 
-        Returns (CostBreakdown, bow_costs) where CostBreakdown is the aggregate
-        and bow_costs is the per-BOW detail list.
+        Returns (CostBreakdown, wf_costs) where CostBreakdown is the aggregate
+        and wf_costs is the per-WF detail list.
         """
         if not settings:
             settings = await self.get_or_create_settings(org_id)
 
-        # Load BOWs with properties
+        # Load WFs with properties
         props_result = await self.db.execute(
             select(Property).where(Property.customer_id == customer.id, Property.is_active == True)
         )
@@ -588,20 +660,20 @@ class ProfitabilityService:
             ), []
 
         bows_result = await self.db.execute(
-            select(BodyOfWater).where(BodyOfWater.property_id.in_(prop_ids), BodyOfWater.is_active == True)
+            select(WaterFeature).where(WaterFeature.property_id.in_(prop_ids), WaterFeature.is_active == True)
         )
-        bows = bows_result.scalars().all()
+        wfs = bows_result.scalars().all()
 
-        if not bows:
+        if not wfs:
             return CostBreakdown(
                 chemical_cost=0, labor_cost=0, travel_cost=0, overhead_cost=0,
                 total_cost=0, revenue=0, profit=0, margin_pct=0,
                 suggested_rate=0, rate_gap=0,
             ), []
 
-        # Count BOWs per property for travel/overhead split
+        # Count WFs per property for travel/overhead split
         from collections import Counter
-        prop_bow_counts = Counter(b.property_id for b in bows)
+        prop_wf_counts = Counter(b.property_id for b in wfs)
 
         # Load difficulty scores
         diff_map = {}
@@ -613,44 +685,44 @@ class ProfitabilityService:
 
         # Load chemical profiles
         chem_map = {}
-        bow_ids = [b.id for b in bows]
+        wf_ids = [b.id for b in wfs]
         chem_result = await self.db.execute(
-            select(ChemicalCostProfile).where(ChemicalCostProfile.body_of_water_id.in_(bow_ids))
+            select(ChemicalCostProfile).where(ChemicalCostProfile.water_feature_id.in_(wf_ids))
         )
         for cp in chem_result.scalars().all():
-            chem_map[cp.body_of_water_id] = cp
+            chem_map[cp.water_feature_id] = cp
 
-        # Compute per-BOW costs
-        bow_costs = []
+        # Compute per-WF costs
+        wf_costs = []
         total_chem = 0.0
         total_labor = 0.0
         total_travel = 0.0
         total_overhead = 0.0
 
-        for bow in bows:
-            # Find property for this BOW
-            prop = next((p for p in properties if p.id == bow.property_id), None)
-            diff = diff_map.get(bow.property_id)
-            score = self.compute_composite_score(prop, diff, bows=[bow]) if diff and prop else 2.5
-            profile = chem_map.get(bow.id)
+        for wf in wfs:
+            # Find property for this WF
+            prop = next((p for p in properties if p.id == wf.property_id), None)
+            diff = diff_map.get(wf.property_id)
+            score = self.compute_composite_score(prop, diff, wfs=[wf]) if diff and prop else 2.5
+            profile = chem_map.get(wf.id)
 
-            bc = self.compute_bow_cost(
+            bc = self.compute_wf_cost(
                 settings=settings,
-                bow=bow,
+                wf=wf,
                 difficulty_score=score,
-                num_bows_at_property=prop_bow_counts[bow.property_id],
+                num_wfs_at_property=prop_wf_counts[wf.property_id],
                 customer_type=customer.customer_type or "residential",
                 chemical_profile=profile,
                 difficulty=diff,
             )
-            bow_costs.append(bc)
+            wf_costs.append(bc)
             total_chem += bc["chemical_cost"]
             total_labor += bc["labor_cost"]
             total_travel += bc["travel_cost"]
             total_overhead += bc["overhead_cost"]
 
         total_cost = total_chem + total_labor + total_travel + total_overhead
-        revenue = sum(b.monthly_rate or 0 for b in bows)
+        revenue = sum(b.monthly_rate or 0 for b in wfs)
         profit = revenue - total_cost
         margin_pct = (profit / revenue * 100) if revenue > 0 else 0.0
         target_margin = settings.target_margin_pct / 100.0
@@ -670,10 +742,10 @@ class ProfitabilityService:
             rate_gap=round(rate_gap, 2),
         )
 
-        return breakdown, bow_costs
+        return breakdown, wf_costs
 
     async def get_rate_allocation_preview(self, customer_id: str, org_id: str) -> dict:
-        """Preview rate allocation for a customer's BOWs without saving."""
+        """Preview rate allocation for a customer's WFs without saving."""
         customer = await self.db.execute(
             select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
         )
@@ -681,7 +753,7 @@ class ProfitabilityService:
         if not customer:
             raise NotFoundError("Customer not found")
 
-        # Get all properties + BOWs
+        # Get all properties + WFs
         props = await self.db.execute(
             select(Property).where(Property.customer_id == customer_id, Property.is_active == True)
         )
@@ -689,27 +761,27 @@ class ProfitabilityService:
         prop_ids = [p.id for p in properties]
 
         bows_result = await self.db.execute(
-            select(BodyOfWater).where(BodyOfWater.property_id.in_(prop_ids), BodyOfWater.is_active == True)
+            select(WaterFeature).where(WaterFeature.property_id.in_(prop_ids), WaterFeature.is_active == True)
         )
-        bows = bows_result.scalars().all()
+        wfs = bows_result.scalars().all()
 
-        if not bows:
+        if not wfs:
             return {"customer_id": customer_id, "total_rate": customer.monthly_rate, "allocations": [], "method": None}
 
-        allocation = self.allocate_rate_to_bows(customer.monthly_rate, bows)
+        allocation = self.allocate_rate_to_wfs(customer.monthly_rate, wfs)
 
         allocations = []
         method = None
-        for bow in bows:
-            alloc = allocation.get(bow.id, {})
+        for wf in wfs:
+            alloc = allocation.get(wf.id, {})
             method = alloc.get("allocation_method", method)
             allocations.append({
-                "bow_id": bow.id,
-                "bow_name": bow.name,
-                "water_type": bow.water_type,
-                "gallons": bow.pool_gallons,
-                "service_minutes": bow.estimated_service_minutes,
-                "current_rate": bow.monthly_rate,
+                "wf_id": wf.id,
+                "bow_name": wf.name,
+                "water_type": wf.water_type,
+                "gallons": wf.pool_gallons,
+                "service_minutes": wf.estimated_service_minutes,
+                "current_rate": wf.monthly_rate,
                 "proposed_rate": alloc.get("allocated_rate", 0),
                 "weight": alloc.get("weight", 0),
                 "allocation_method": alloc.get("allocation_method"),
@@ -724,7 +796,7 @@ class ProfitabilityService:
         }
 
     async def apply_rate_allocation(self, customer_id: str, org_id: str, rates: dict[str, float]) -> dict:
-        """Apply per-BOW rates. rates = {bow_id: rate}."""
+        """Apply per-WF rates. rates = {wf_id: rate}."""
         from datetime import datetime, timezone
 
         customer = await self.db.execute(
@@ -734,23 +806,32 @@ class ProfitabilityService:
         if not customer:
             raise NotFoundError("Customer not found")
 
+        from src.services.rate_sync import sync_rates_for_property
+
         updated = 0
-        for bow_id, rate in rates.items():
+        affected_property_ids = set()
+        for wf_id, rate in rates.items():
             result = await self.db.execute(
-                select(BodyOfWater).where(BodyOfWater.id == bow_id, BodyOfWater.organization_id == org_id)
+                select(WaterFeature).where(WaterFeature.id == wf_id, WaterFeature.organization_id == org_id)
             )
-            bow = result.scalar_one_or_none()
-            if bow:
-                bow.monthly_rate = round(rate, 2)
-                bow.rate_allocation_method = "manual"
-                bow.rate_allocated_at = datetime.now(timezone.utc)
+            wf = result.scalar_one_or_none()
+            if wf:
+                wf.monthly_rate = round(rate, 2)
+                wf.rate_allocation_method = "manual"
+                wf.rate_allocated_at = datetime.now(timezone.utc)
+                affected_property_ids.add(wf.property_id)
                 updated += 1
 
         await self.db.flush()
+
+        # Sync property + customer rates
+        for prop_id in affected_property_ids:
+            await sync_rates_for_property(self.db, prop_id)
+
         return {"updated": updated, "customer_id": customer_id}
 
     async def get_profit_gaps(self, org_id: str) -> list[dict]:
-        """Get all BOWs sorted by margin, flagging those below target."""
+        """Get all WFs sorted by margin, flagging those below target."""
         settings = await self.get_or_create_settings(org_id)
 
         # Count total active accounts
@@ -760,22 +841,22 @@ class ProfitabilityService:
         )
         total_accounts = count_result.scalar() or 1
 
-        # Load all active BOWs with their property + customer
+        # Load all active WFs with their property + customer
         result = await self.db.execute(
-            select(BodyOfWater, Property, Customer)
-            .join(Property, BodyOfWater.property_id == Property.id)
+            select(WaterFeature, Property, Customer)
+            .join(Property, WaterFeature.property_id == Property.id)
             .join(Customer, Property.customer_id == Customer.id)
             .where(
-                BodyOfWater.organization_id == org_id,
-                BodyOfWater.is_active == True,
+                WaterFeature.organization_id == org_id,
+                WaterFeature.is_active == True,
                 Customer.is_active == True,
             )
         )
         rows = result.all()
 
-        # Count BOWs per property for travel/overhead split
+        # Count WFs per property for travel/overhead split
         from collections import Counter
-        prop_bow_counts = Counter(r[1].id for r in rows)
+        prop_wf_counts = Counter(r[1].id for r in rows)
 
         # Load difficulty scores
         diff_map = {}
@@ -789,25 +870,25 @@ class ProfitabilityService:
 
         # Load chemical profiles
         chem_map = {}
-        bow_ids = [r[0].id for r in rows]
-        if bow_ids:
+        wf_ids = [r[0].id for r in rows]
+        if wf_ids:
             chem_result = await self.db.execute(
-                select(ChemicalCostProfile).where(ChemicalCostProfile.body_of_water_id.in_(bow_ids))
+                select(ChemicalCostProfile).where(ChemicalCostProfile.water_feature_id.in_(wf_ids))
             )
             for cp in chem_result.scalars().all():
-                chem_map[cp.body_of_water_id] = cp
+                chem_map[cp.water_feature_id] = cp
 
         gaps = []
-        for bow, prop, customer in rows:
+        for wf, prop, customer in rows:
             diff = diff_map.get(prop.id)
-            score = self.compute_composite_score(prop, diff, bows=[bow]) if diff else 2.5
-            profile = chem_map.get(bow.id)
+            score = self.compute_composite_score(prop, diff, wfs=[wf]) if diff else 2.5
+            profile = chem_map.get(wf.id)
 
-            cost_data = self.compute_bow_cost(
+            cost_data = self.compute_wf_cost(
                 settings=settings,
-                bow=bow,
+                wf=wf,
                 difficulty_score=score,
-                num_bows_at_property=prop_bow_counts[prop.id],
+                num_wfs_at_property=prop_wf_counts[prop.id],
                 customer_type=customer.customer_type or "residential",
                 chemical_profile=profile,
                 difficulty=diff,
@@ -853,7 +934,7 @@ class ProfitabilityService:
         service_minutes: int = 30, difficulty_score: float = 2.5,
         customer_type: str = "residential", tier_id: str | None = None,
     ) -> dict:
-        """Suggest a rate for a BOW.
+        """Suggest a rate for a WF.
 
         Residential: tier base_rate × difficulty_multiplier × volume_factor
         Commercial: cost-based calculation with target margin

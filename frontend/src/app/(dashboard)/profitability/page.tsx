@@ -28,6 +28,8 @@ import {
   AlertTriangle,
   Settings,
   Calculator,
+  Building2,
+  Home,
 } from "lucide-react";
 import {
   LineChart,
@@ -72,21 +74,21 @@ export default function ProfitabilityPage() {
   const [overview, setOverview] = useState<ProfitabilityOverview | null>(null);
   const [whaleCurve, setWhaleCurve] = useState<WhaleCurvePoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tableView, setTableView] = useState<"account" | "bow">("account");
+  const [tableView, setTableView] = useState<"account" | "wf">("account");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState<"all" | "residential" | "commercial">("all");
+  const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [sortCol, setSortCol] = useState<string>("margin");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [bowGaps, setBowGaps] = useState<any[] | null>(null);
+  const [wfGaps, setBowGaps] = useState<any[] | null>(null);
 
-  const loadBowGaps = useCallback(() => {
-    if (bowGaps !== null) return;
+  const loadWfGaps = useCallback(() => {
+    if (wfGaps !== null) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     api.get<any[]>("/v1/profitability/gaps")
       .then(setBowGaps)
       .catch(() => setBowGaps([]));
-  }, [bowGaps]);
+  }, [wfGaps]);
 
   const loadData = useCallback(async () => {
     try {
@@ -115,41 +117,34 @@ export default function ProfitabilityPage() {
     );
   }
 
-  const filteredAccounts = overview.accounts.filter(a => typeFilter === "all" || a.customer_type === typeFilter);
-  // Build per-BOW whale curve from filtered accounts
+  const filteredAccounts = overview.accounts.filter(a => typeFilter === null || a.customer_type === typeFilter);
+  // Build per-property whale curve from filtered accounts
   const filteredWhale = (() => {
-    const bowProfits = filteredAccounts.flatMap(a =>
-      (a.bow_costs && a.bow_costs.length > 0)
-        ? a.bow_costs.map(bc => ({ name: `${a.customer_name}${bc.bow_name ? ` — ${bc.bow_name}` : ""}`, profit: bc.profit, customer_id: a.customer_id }))
-        : [{ name: a.customer_name, profit: a.cost_breakdown.profit, customer_id: a.customer_id }]
-    );
-    bowProfits.sort((a, b) => b.profit - a.profit);
-    const totalProfit = bowProfits.reduce((s, b) => s + b.profit, 0);
+    const sorted = [...filteredAccounts].sort((a, b) => b.cost_breakdown.profit - a.cost_breakdown.profit);
+    const totalProfit = sorted.reduce((s, a) => s + a.cost_breakdown.profit, 0);
     let cumulative = 0;
-    return bowProfits.map((b, i) => {
-      cumulative += b.profit;
-      return { rank: i + 1, customer_name: b.name, customer_id: b.customer_id, cumulative_profit_pct: totalProfit !== 0 ? (cumulative / Math.abs(totalProfit) * 100) : 0, individual_profit: b.profit };
+    return sorted.map((a, i) => {
+      cumulative += a.cost_breakdown.profit;
+      return { rank: i + 1, customer_name: a.customer_name, customer_id: a.customer_id, cumulative_profit_pct: totalProfit !== 0 ? (cumulative / Math.abs(totalProfit) * 100) : 0, individual_profit: a.cost_breakdown.profit };
     });
   })();
 
-  // Build per-BOW scatter data instead of per-account
-  const scatterData = filteredAccounts.flatMap((a) =>
-    (a.bow_costs && a.bow_costs.length > 0)
-      ? a.bow_costs.map((bc) => ({
-          x: bc.monthly_rate,
-          y: bc.margin_pct,
-          z: bc.difficulty_score,
-          name: `${a.customer_name}${bc.bow_name ? ` — ${bc.bow_name}` : ""}`,
-          id: a.customer_id,
-        }))
-      : [{
-          x: a.monthly_rate,
-          y: a.margin_pct,
-          z: a.difficulty_score,
-          name: a.customer_name,
-          id: a.customer_id,
-        }]
-  );
+  // Build per-property scatter: $/hr vs margin %
+  const scatterData = filteredAccounts
+    .filter(a => a.estimated_service_minutes > 0 && a.monthly_rate > 0)
+    .map((a) => {
+      const visitsPerMonth = 4.33; // ~weekly
+      const hoursPerMonth = (a.estimated_service_minutes * visitsPerMonth) / 60;
+      return {
+        x: Math.round(a.monthly_rate / hoursPerMonth),
+        y: a.margin_pct,
+        z: a.difficulty_score,
+        name: a.customer_name,
+        id: a.customer_id,
+        rate: a.monthly_rate,
+        minutes: a.estimated_service_minutes,
+      };
+    });
 
   return (
     <div className="space-y-6">
@@ -162,9 +157,12 @@ export default function ProfitabilityPage() {
         </div>
         <div className="flex gap-2">
           <div className="flex gap-1">
-            {(["all", "residential", "commercial"] as const).map((t) => (
-              <Button key={t} variant={typeFilter === t ? "default" : "outline"} size="sm" className="h-8 text-xs capitalize" onClick={() => setTypeFilter(t)}>
-                {t === "all" ? "All" : t === "residential" ? "Residential" : "Commercial"}
+            {([
+              { value: "commercial", label: "Commercial", icon: Building2 },
+              { value: "residential", label: "Residential", icon: Home },
+            ] as const).map((t) => (
+              <Button key={t.value} variant={typeFilter === t.value ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={() => setTypeFilter(prev => prev === t.value ? null : t.value)}>
+                <t.icon className="h-3.5 w-3.5 mr-1" />{t.label}
               </Button>
             ))}
           </div>
@@ -295,7 +293,7 @@ export default function ProfitabilityPage() {
         {/* Profitability Quadrant */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Revenue vs Margin</CardTitle>
+            <CardTitle className="text-base">Rate per Hour vs Margin</CardTitle>
           </CardHeader>
           <CardContent>
             {scatterData.length > 0 ? (
@@ -305,8 +303,9 @@ export default function ProfitabilityPage() {
                   <XAxis
                     type="number"
                     dataKey="x"
-                    name="Revenue"
-                    label={{ value: "Monthly Rate ($)", position: "insideBottom", offset: -5 }}
+                    name="$/hr"
+                    label={{ value: "$/hr", position: "insideBottom", offset: -5 }}
+                    tickFormatter={(v) => `$${v}`}
                   />
                   <YAxis
                     type="number"
@@ -322,7 +321,8 @@ export default function ProfitabilityPage() {
                       return (
                         <div className="bg-background border rounded-md shadow-md px-3 py-2 text-sm">
                           <p className="font-semibold">{d.name}</p>
-                          <p className="text-muted-foreground">{formatCurrency(d.x)}/mo · {d.y.toFixed(1)}% margin</p>
+                          <p className="text-muted-foreground">${d.x}/hr · {d.y.toFixed(1)}% margin</p>
+                          <p className="text-muted-foreground text-xs">{formatCurrency(d.rate)}/mo · {d.minutes} min/visit</p>
                         </div>
                       );
                     }}
@@ -353,20 +353,20 @@ export default function ProfitabilityPage() {
         </Card>
       </div>
 
-      {/* Account Table + Per-BOW view */}
+      {/* Account Table + Per-WF view */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Margin Analysis</CardTitle>
             <div className="flex gap-1">
               <Button variant={tableView === "account" ? "default" : "outline"} size="sm" className="h-7 text-xs" onClick={() => setTableView("account")}>By Account</Button>
-              <Button variant={tableView === "bow" ? "default" : "outline"} size="sm" className="h-7 text-xs" onClick={() => { setTableView("bow"); loadBowGaps(); }}>By Water Feature</Button>
+              <Button variant={tableView === "wf" ? "default" : "outline"} size="sm" className="h-7 text-xs" onClick={() => { setTableView("wf"); loadWfGaps(); }}>By Water Feature</Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {tableView === "account" ? (() => {
-            const filtered = overview.accounts.filter(a => typeFilter === "all" || a.customer_type === typeFilter);
+            const filtered = overview.accounts.filter(a => typeFilter === null || a.customer_type === typeFilter);
             const sorted = [...filtered].sort((a, b) => {
               const dir = sortDir === "asc" ? 1 : -1;
               switch (sortCol) {
@@ -446,12 +446,12 @@ export default function ProfitabilityPage() {
               </TableBody>
             </Table>
             );
-          })() : bowGaps === null ? (
+          })() : wfGaps === null ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (() => {
-            const filteredGaps = bowGaps.filter((g: Record<string, unknown>) => typeFilter === "all" || g.customer_type === typeFilter);
+            const filteredGaps = wfGaps.filter((g: Record<string, unknown>) => typeFilter === null || g.customer_type === typeFilter);
             const sortedGaps = [...filteredGaps].sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
               const dir = sortDir === "asc" ? 1 : -1;
               switch (sortCol) {
@@ -486,7 +486,7 @@ export default function ProfitabilityPage() {
               </TableHeader>
               <TableBody>
                 {sortedGaps.map((gap: Record<string, unknown>, i: number) => (
-                  <TableRow key={gap.bow_id as string} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${hoveredId === gap.customer_id ? "bg-blue-100 dark:bg-blue-900" : gap.below_target ? "bg-red-50/50 dark:bg-red-950/10" : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`} onMouseEnter={() => setHoveredId(gap.customer_id as string)} onMouseLeave={() => setHoveredId(null)}>
+                  <TableRow key={gap.wf_id as string} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${hoveredId === gap.customer_id ? "bg-blue-100 dark:bg-blue-900" : gap.below_target ? "bg-red-50/50 dark:bg-red-950/10" : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`} onMouseEnter={() => setHoveredId(gap.customer_id as string)} onMouseLeave={() => setHoveredId(null)}>
                     <TableCell>
                       <Link
                         href={`/profitability/${gap.customer_id}`}
@@ -494,7 +494,7 @@ export default function ProfitabilityPage() {
                       >
                         {String(gap.customer_name)}
                       </Link>
-                      {gap.bow_name ? <span className="text-xs text-muted-foreground ml-1.5">{String(gap.bow_name)}</span> : null}
+                      {gap.wf_name ? <span className="text-xs text-muted-foreground ml-1.5">{String(gap.wf_name)}</span> : null}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground capitalize">{String(gap.water_type)}</TableCell>
                     <TableCell className="text-right text-sm">{(gap.gallons as number)?.toLocaleString()}</TableCell>

@@ -207,6 +207,8 @@ def _serialize_agent_msg(m: AgentMessage, include_body: bool = False) -> dict:
         "category": m.category,
         "urgency": m.urgency,
         "status": m.status,
+        "matched_customer_id": m.matched_customer_id,
+        "match_method": m.match_method,
         "customer_name": m.customer_name,
         "draft_response": m.draft_response,
         "final_response": m.final_response,
@@ -413,6 +415,10 @@ async def approve_agent_message(
     msg.approved_at = now
     msg.sent_at = now
     await db.commit()
+
+    # Save discovered contact info to customer record
+    from src.services.customer_agent import save_discovered_contact
+    await save_discovered_contact(message_id)
 
     return {"sent": True, "to": msg.from_email}
 

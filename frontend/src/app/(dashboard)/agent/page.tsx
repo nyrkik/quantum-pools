@@ -90,6 +90,8 @@ interface AgentMessage {
   category: string | null;
   urgency: string | null;
   status: string;
+  matched_customer_id: string | null;
+  match_method: string | null;
   customer_name: string | null;
   draft_response: string | null;
   final_response: string | null;
@@ -439,6 +441,17 @@ function MessageDetail({
         </div>
         <div className="text-sm space-y-1">
           <p><span className="text-muted-foreground">From:</span> {msg.customer_name ? `${msg.customer_name} <${msg.from_email}>` : msg.from_email}</p>
+          {msg.matched_customer_id && (
+            <p className="flex items-center gap-1">
+              <span className="text-muted-foreground">Matched:</span>
+              <Badge variant="outline" className="text-[10px] px-1.5 border-green-400 text-green-600 capitalize">
+                {(msg.match_method || "unknown").replace("_", " ")}
+              </Badge>
+            </p>
+          )}
+          {!msg.matched_customer_id && msg.status === "pending" && (
+            <p className="text-amber-600 text-xs font-medium">No customer match found</p>
+          )}
           <p><span className="text-muted-foreground">To:</span> {msg.to_email}</p>
           <p><span className="text-muted-foreground">Received:</span> {formatFullDate(msg.received_at)}</p>
           {msg.sent_at && (

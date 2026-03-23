@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime, Text, Boolean, Float
+from sqlalchemy import String, Integer, DateTime, Text, Boolean, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -25,6 +25,8 @@ class AgentMessage(Base):
     approved_by: Mapped[str | None] = mapped_column(String(50))  # phone number or name
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    matched_customer_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("customers.id"), index=True)
+    match_method: Mapped[str | None] = mapped_column(String(30))  # email, domain, company_name, sender_name, manual
     customer_name: Mapped[str | None] = mapped_column(String(200))
     property_address: Mapped[str | None] = mapped_column(String(300))
     notes: Mapped[str | None] = mapped_column(Text)

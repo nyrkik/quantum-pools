@@ -118,9 +118,24 @@ def extract_text_body(msg) -> str:
     return ""
 
 
-async def match_customer(from_email: str, subject: str, body: str) -> dict | None:
+def _extract_sender_name(from_header: str) -> str | None:
+    """Extract the display name from a From header like 'John Smith <john@example.com>'."""
+    # Try to get the name part before the email
+    match = re.match(r'^"?([^"<]+)"?\s*<', from_header)
+    if match:
+        name = match.group(1).strip()
+        if name and "@" not in name:
+            return name
+    return None
+
+
+async def match_customer(from_email: str, subject: str, body: str, from_header: str = "") -> dict | None:
     """Match an incoming email to a customer in the database. Returns context dict or None."""
+    match_method = None
+
     async with get_db_context() as db:
+        customer = None
+
         # 1. Direct email match
         result = await db.execute(
             select(Customer).where(
@@ -129,11 +144,30 @@ async def match_customer(from_email: str, subject: str, body: str) -> dict | Non
             )
         )
         customer = result.scalar_one_or_none()
+        if customer:
+            match_method = "email"
 
-        # 2. Fuzzy: check if from_email domain matches any customer email domain (for property managers)
+        # 2. Check previous messages — if we've matched this email before, reuse it
+        if not customer:
+            prev = await db.execute(
+                select(AgentMessage).where(
+                    AgentMessage.from_email == from_email,
+                    AgentMessage.matched_customer_id.isnot(None),
+                ).order_by(desc(AgentMessage.received_at)).limit(1)
+            )
+            prev_msg = prev.scalar_one_or_none()
+            if prev_msg:
+                cust_result = await db.execute(
+                    select(Customer).where(Customer.id == prev_msg.matched_customer_id)
+                )
+                customer = cust_result.scalar_one_or_none()
+                if customer:
+                    match_method = "previous_match"
+
+        # 3. Domain match (for property managers — same @company.com)
         if not customer:
             domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
-            if domain and domain not in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com"):
+            if domain and domain not in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "protonmail.com", "me.com"):
                 result = await db.execute(
                     select(Customer).where(
                         Customer.email.ilike(f"%@{domain}"),
@@ -141,8 +175,48 @@ async def match_customer(from_email: str, subject: str, body: str) -> dict | Non
                     ).limit(1)
                 )
                 customer = result.scalar_one_or_none()
+                if customer:
+                    match_method = "domain"
 
-        # 3. Search subject/body for known company names or addresses
+        # 4. Sender name match — extract name from "From: John Smith <john@example.com>"
+        if not customer:
+            sender_name = _extract_sender_name(from_header) if from_header else None
+            if not sender_name:
+                # Try extracting from email prefix: john.smith@... -> John Smith
+                prefix = from_email.split("@")[0] if "@" in from_email else ""
+                parts = re.split(r'[._-]', prefix)
+                if len(parts) >= 2 and all(p.isalpha() for p in parts[:2]):
+                    sender_name = " ".join(p.capitalize() for p in parts[:2])
+
+            if sender_name:
+                name_parts = sender_name.strip().split()
+                if len(name_parts) >= 2:
+                    first = name_parts[0]
+                    last = name_parts[-1]
+                    result = await db.execute(
+                        select(Customer).where(
+                            Customer.is_active == True,
+                            func.lower(Customer.first_name) == first.lower(),
+                            func.lower(Customer.last_name) == last.lower(),
+                        ).limit(1)
+                    )
+                    customer = result.scalar_one_or_none()
+                    if customer:
+                        match_method = "sender_name"
+                elif len(name_parts) == 1:
+                    # Single name — try last name match (more unique than first)
+                    result = await db.execute(
+                        select(Customer).where(
+                            Customer.is_active == True,
+                            func.lower(Customer.last_name) == name_parts[0].lower(),
+                        )
+                    )
+                    matches = result.scalars().all()
+                    if len(matches) == 1:  # Only use if unambiguous
+                        customer = matches[0]
+                        match_method = "sender_name"
+
+        # 5. Search subject/body for known company names
         if not customer:
             text_to_search = f"{subject} {body[:1000]}".lower()
             result = await db.execute(
@@ -152,9 +226,25 @@ async def match_customer(from_email: str, subject: str, body: str) -> dict | Non
                 )
             )
             for c in result.scalars().all():
-                if c.company_name and c.company_name.lower() in text_to_search:
+                if c.company_name and len(c.company_name) > 3 and c.company_name.lower() in text_to_search:
                     customer = c
+                    match_method = "company_name"
                     break
+
+        # 6. Search subject/body for customer last names (only if unique match)
+        if not customer:
+            text_to_search = f"{subject} {body[:1000]}".lower()
+            result = await db.execute(
+                select(Customer).where(Customer.is_active == True)
+            )
+            all_customers = result.scalars().all()
+            name_matches = []
+            for c in all_customers:
+                if c.last_name and len(c.last_name) > 2 and c.last_name.lower() in text_to_search:
+                    name_matches.append(c)
+            if len(name_matches) == 1:  # Only use if unambiguous
+                customer = name_matches[0]
+                match_method = "body_name"
 
         if not customer:
             return None
@@ -208,6 +298,7 @@ async def match_customer(from_email: str, subject: str, body: str) -> dict | Non
 
         ctx = {
             "customer_id": customer.id,
+            "match_method": match_method,
             "customer_name": customer.display_name,
             "customer_type": customer.customer_type,
             "company_name": customer.company_name,
@@ -360,10 +451,10 @@ def build_context_prompt(customer_ctx: dict | None, history: dict | None) -> str
     return "\n".join(parts) if parts else ""
 
 
-async def classify_and_draft(from_email: str, subject: str, body: str) -> dict:
+async def classify_and_draft(from_email: str, subject: str, body: str, from_header: str = "") -> dict:
     """Use Claude to classify the email and draft a response with customer context and learning."""
     # Build context from database
-    customer_ctx = await match_customer(from_email, subject, body)
+    customer_ctx = await match_customer(from_email, subject, body, from_header)
     history = await get_correction_history(from_email, None)
 
     context_block = build_context_prompt(customer_ctx, history)
@@ -394,6 +485,7 @@ async def classify_and_draft(from_email: str, subject: str, body: str) -> dict:
                 if not result.get("customer_name"):
                     result["customer_name"] = customer_ctx["customer_name"]
                 result["_matched_customer_id"] = customer_ctx["customer_id"]
+                result["_match_method"] = customer_ctx["match_method"]
                 result["_property_address"] = customer_ctx.get("property_address")
             return result
     except json.JSONDecodeError:
@@ -410,6 +502,7 @@ async def classify_and_draft(from_email: str, subject: str, body: str) -> dict:
     }
     if customer_ctx:
         result["_matched_customer_id"] = customer_ctx["customer_id"]
+        result["_match_method"] = customer_ctx["match_method"]
         result["_property_address"] = customer_ctx.get("property_address")
     return result
 
@@ -506,7 +599,7 @@ async def process_incoming_email(uid: str, msg):
             return
 
     # Classify and draft
-    result = await classify_and_draft(from_email, subject, body)
+    result = await classify_and_draft(from_email, subject, body, from_header=from_header)
 
     category = result.get("category", "general")
     if category in ("spam", "auto_reply"):
@@ -541,6 +634,8 @@ async def process_incoming_email(uid: str, msg):
             urgency=result.get("urgency", "medium"),
             draft_response=result.get("draft_response"),
             status="pending",
+            matched_customer_id=result.get("_matched_customer_id"),
+            match_method=result.get("_match_method"),
             customer_name=result.get("customer_name"),
             property_address=result.get("_property_address"),
             notes=result.get("internal_note"),
@@ -659,6 +754,43 @@ async def handle_sms_reply(from_number: str, body: str):
 
             summary = f"{agent_msg.customer_name or agent_msg.from_email}: {agent_msg.subject}"
             await notify_others(from_number, summary)
+
+
+async def save_discovered_contact(agent_msg_id: str):
+    """When a message is confirmed (approved/sent), save the sender's email to the matched customer if missing."""
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(AgentMessage).where(AgentMessage.id == agent_msg_id)
+        )
+        msg = result.scalar_one_or_none()
+        if not msg or not msg.matched_customer_id:
+            return
+
+        cust_result = await db.execute(
+            select(Customer).where(Customer.id == msg.matched_customer_id)
+        )
+        customer = cust_result.scalar_one_or_none()
+        if not customer:
+            return
+
+        updated = False
+        # Save email if customer doesn't have one
+        if not customer.email and msg.from_email:
+            customer.email = msg.from_email
+            updated = True
+            logger.info(f"Saved email {msg.from_email} to customer {customer.display_name}")
+
+        # If customer has a different email, and this is a confirmed match,
+        # log it but don't overwrite (might be a property manager emailing on behalf)
+        if customer.email and customer.email.lower() != msg.from_email.lower():
+            if not msg.notes:
+                msg.notes = ""
+            if msg.from_email not in (msg.notes or ""):
+                msg.notes = (msg.notes + f"\nAlternate email: {msg.from_email}").strip()
+                updated = True
+
+        if updated:
+            await db.commit()
 
 
 def poll_inbox():

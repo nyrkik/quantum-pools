@@ -33,6 +33,10 @@ def _to_response(ou: OrganizationUser) -> TeamMemberResponse:
         first_name=ou.user.first_name,
         last_name=ou.user.last_name,
         phone=ou.user.phone,
+        address=ou.user.address,
+        city=ou.user.city,
+        state=ou.user.state,
+        zip_code=ou.user.zip_code,
         role=ou.role.value,
         is_developer=ou.is_developer,
         is_active=ou.is_active,
@@ -206,6 +210,14 @@ async def update_member(
         member.user.last_name = body.last_name
     if body.phone is not None:
         member.user.phone = body.phone
+    if body.address is not None:
+        member.user.address = body.address
+    if body.city is not None:
+        member.user.city = body.city
+    if body.state is not None:
+        member.user.state = body.state
+    if body.zip_code is not None:
+        member.user.zip_code = body.zip_code
 
     await db.commit()
     await db.refresh(member)

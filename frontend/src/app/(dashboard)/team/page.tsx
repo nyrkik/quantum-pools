@@ -63,12 +63,35 @@ interface TeamMember {
   first_name: string;
   last_name: string;
   phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
   role: string;
   is_developer: boolean;
   is_active: boolean;
   is_verified: boolean;
   last_login: string | null;
   created_at: string;
+}
+
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+  "VA","WA","WV","WI","WY",
+];
+
+function formatPhone(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (digits.length === 0) return "";
+  if (digits.length <= 3) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function unformatPhone(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 10);
 }
 
 const ROLES = ["owner", "admin", "manager", "technician", "readonly"];
@@ -118,11 +141,28 @@ function MemberDetail({
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resending, setResending] = useState(false);
   const [form, setForm] = useState({
     first_name: member.first_name,
     last_name: member.last_name,
     phone: member.phone || "",
+    address: member.address || "",
+    city: member.city || "",
+    state: member.state || "",
+    zip_code: member.zip_code || "",
+    role: member.role,
   });
+
+  const isDirty = editing && (
+    form.first_name !== member.first_name ||
+    form.last_name !== member.last_name ||
+    form.phone !== (member.phone || "") ||
+    form.address !== (member.address || "") ||
+    form.city !== (member.city || "") ||
+    form.state !== (member.state || "") ||
+    form.zip_code !== (member.zip_code || "") ||
+    form.role !== member.role
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -130,13 +170,18 @@ function MemberDetail({
       await api.put(`/v1/team/${member.id}`, {
         first_name: form.first_name,
         last_name: form.last_name,
-        phone: form.phone || null,
+        phone: form.phone ? unformatPhone(form.phone) : null,
+        address: form.address || null,
+        city: form.city || null,
+        state: form.state || null,
+        zip_code: form.zip_code || null,
+        role: form.role !== member.role ? form.role : undefined,
       });
-      toast.success("Member updated");
+      toast.success("Profile updated");
       setEditing(false);
       onUpdate();
-    } catch {
-      toast.error("Failed to update");
+    } catch (err: unknown) {
+      toast.error((err as { message?: string })?.message || "Failed to update");
     } finally {
       setSaving(false);
     }
@@ -147,81 +192,87 @@ function MemberDetail({
       first_name: member.first_name,
       last_name: member.last_name,
       phone: member.phone || "",
+      address: member.address || "",
+      city: member.city || "",
+      state: member.state || "",
+      zip_code: member.zip_code || "",
+      role: member.role,
     });
     setEditing(false);
   };
 
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({ ...form, phone: formatPhone(e.target.value) });
+  };
+
+  const displayPhone = member.phone ? formatPhone(member.phone) : null;
+  const displayAddress = [member.address, member.city, member.state, member.zip_code]
+    .filter(Boolean).join(", ") || null;
+
   return (
     <div className="space-y-6 pt-2">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
-            {member.first_name[0]}{member.last_name[0]}
-          </div>
-          <div>
-            <p className="font-semibold text-lg">{member.first_name} {member.last_name}</p>
-            <p className="text-sm text-muted-foreground">{member.email}</p>
-          </div>
+      <div className="flex items-center gap-3">
+        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">
+          {member.first_name[0]}{member.last_name[0]}
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={roleBadgeVariant(member.role)}>{ROLE_LABELS[member.role]}</Badge>
-          {member.is_verified ? (
-            <Badge variant="outline" className="border-green-400 text-green-600 text-[10px]">
-              <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
-              <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
-            </Badge>
-          )}
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-lg">{member.first_name} {member.last_name}</p>
+          <p className="text-sm text-muted-foreground truncate">{member.email}</p>
+          <div className="flex items-center gap-1.5 mt-1">
+            <Badge variant={roleBadgeVariant(member.role)}>{ROLE_LABELS[member.role]}</Badge>
+            {member.is_verified ? (
+              <Badge variant="outline" className="border-green-400 text-green-600 text-[10px]">
+                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
+                <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
+              </Badge>
+            )}
+            {!member.is_active && (
+              <Badge variant="destructive" className="text-[10px]">Deactivated</Badge>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Details */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Details</p>
-          {!editing && member.role !== "owner" && (
-            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditing(true)}>
-              <Pencil className="h-3 w-3 mr-1" />Edit
+      {/* Edit / Save bar */}
+      <div className="flex items-center justify-between border-b pb-3">
+        {!editing ? (
+          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+            <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit Profile
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleSave} disabled={saving || !isDirty}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Check className="h-3.5 w-3.5 mr-1.5" />}
+              Save
             </Button>
-          )}
-          {editing && (
-            <div className="flex gap-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-green-600" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-              </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={handleCancel}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          )}
-        </div>
+            <Button variant="ghost" size="sm" onClick={handleCancel}>Cancel</Button>
+          </div>
+        )}
+      </div>
 
-        <div className="grid grid-cols-2 gap-4">
+      {/* Personal Info */}
+      <div className="space-y-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Personal Information</p>
+
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">First Name</Label>
             {editing ? (
-              <Input
-                value={form.first_name}
-                onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                className="h-8 text-sm"
-              />
+              <Input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} className="h-8 text-sm" />
             ) : (
-              <p className="text-sm">{member.first_name}</p>
+              <p className="text-sm font-medium">{member.first_name}</p>
             )}
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Last Name</Label>
             {editing ? (
-              <Input
-                value={form.last_name}
-                onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                className="h-8 text-sm"
-              />
+              <Input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} className="h-8 text-sm" />
             ) : (
-              <p className="text-sm">{member.last_name}</p>
+              <p className="text-sm font-medium">{member.last_name}</p>
             )}
           </div>
         </div>
@@ -236,12 +287,73 @@ function MemberDetail({
           {editing ? (
             <Input
               value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              onChange={handlePhoneChange}
               className="h-8 text-sm"
-              placeholder="(555) 555-5555"
+              placeholder="(916) 555-1234"
+              type="tel"
             />
           ) : (
-            <p className="text-sm">{member.phone || <span className="text-muted-foreground">Not set</span>}</p>
+            <p className="text-sm">{displayPhone || <span className="text-muted-foreground">—</span>}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Address */}
+      <div className="space-y-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Address</p>
+        {editing ? (
+          <>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Street</Label>
+              <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="h-8 text-sm" placeholder="123 Main St" />
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              <div className="col-span-2 space-y-1">
+                <Label className="text-xs text-muted-foreground">City</Label>
+                <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} className="h-8 text-sm" placeholder="Elk Grove" />
+              </div>
+              <div className="col-span-1 space-y-1">
+                <Label className="text-xs text-muted-foreground">State</Label>
+                <Select value={form.state} onValueChange={(v) => setForm({ ...form, state: v })}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {US_STATES.map((s) => (
+                      <SelectItem key={s} value={s} className="text-sm">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label className="text-xs text-muted-foreground">Zip</Label>
+                <Input value={form.zip_code} onChange={(e) => setForm({ ...form, zip_code: e.target.value.replace(/\D/g, "").slice(0, 5) })} className="h-8 text-sm" placeholder="95624" inputMode="numeric" />
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm">{displayAddress || <span className="text-muted-foreground">—</span>}</p>
+        )}
+      </div>
+
+      {/* Role & Access */}
+      <div className="space-y-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Role & Access</p>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Role</Label>
+          {editing && member.role !== "owner" ? (
+            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+              <SelectTrigger className="h-8 text-sm w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLES.filter(r => isOwner || r !== "owner").map(r => (
+                  <SelectItem key={r} value={r} className="text-sm">{ROLE_LABELS[r]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <p className="text-sm font-medium">{ROLE_LABELS[member.role]}</p>
           )}
         </div>
       </div>
@@ -249,24 +361,45 @@ function MemberDetail({
       {/* Account Info */}
       <div className="space-y-3">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Account</p>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
           <div>
             <p className="text-xs text-muted-foreground">Status</p>
-            <p>{member.is_active ? "Active" : "Deactivated"}</p>
+            <p className={!member.is_active ? "text-red-600 font-medium" : ""}>{member.is_active ? "Active" : "Deactivated"}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Verified</p>
-            <p>{member.is_verified ? "Yes" : "Pending setup"}</p>
+            <p className="text-xs text-muted-foreground">Verification</p>
+            <p className={!member.is_verified ? "text-amber-600" : ""}>{member.is_verified ? "Verified" : "Pending setup"}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Last Login</p>
             <p>{member.last_login ? formatDate(member.last_login) : "Never"}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Added</p>
+            <p className="text-xs text-muted-foreground">Member Since</p>
             <p>{new Date(member.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
           </div>
         </div>
+        {!member.is_verified && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={resending}
+            onClick={async () => {
+              setResending(true);
+              try {
+                await api.post(`/v1/team/${member.id}/resend-invite`, {});
+                toast.success("Invite email resent");
+              } catch {
+                toast.error("Failed to resend invite");
+              } finally {
+                setResending(false);
+              }
+            }}
+          >
+            {resending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Mail className="h-3.5 w-3.5 mr-1.5" />}
+            Resend Invite Email
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -504,25 +637,9 @@ export default function TeamPage() {
                         <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
                       </Badge>
                     ) : (
-                      <div className="flex items-center justify-center gap-1">
-                        <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
-                          <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-muted-foreground hover:text-primary"
-                          onClick={() => handleResendInvite(m.id)}
-                          disabled={resending === m.id}
-                          title="Resend invite"
-                        >
-                          {resending === m.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Mail className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
+                      <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
+                        <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
+                      </Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
@@ -580,8 +697,8 @@ export default function TeamPage() {
 
       {/* Member detail sheet */}
       <Sheet open={!!selectedMember} onOpenChange={(open) => { if (!open) setSelectedMember(null); }}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
-          <SheetHeader>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto px-4 sm:px-6">
+          <SheetHeader className="px-0">
             <SheetTitle>{selectedMember ? `${selectedMember.first_name} ${selectedMember.last_name}` : "Member"}</SheetTitle>
           </SheetHeader>
           {selectedMember && (

@@ -12,6 +12,10 @@ class TeamMemberResponse(BaseModel):
     first_name: str
     last_name: str
     phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
     role: str
     is_developer: bool
     is_active: bool
@@ -26,6 +30,10 @@ class TeamMemberUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
 
 
 class TeamDeveloperToggle(BaseModel):

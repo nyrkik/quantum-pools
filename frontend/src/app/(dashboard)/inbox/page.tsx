@@ -695,6 +695,174 @@ function MessageDetail({
   );
 }
 
+interface ActionComment {
+  id: string;
+  author: string;
+  text: string;
+  created_at: string;
+}
+
+interface ActionDetail extends AgentAction {
+  comments?: ActionComment[];
+  notes?: string | null;
+  from_email?: string;
+  customer_name?: string;
+  subject?: string;
+}
+
+function ActionDetailSheet({
+  actionId,
+  onClose,
+  onUpdate,
+}: {
+  actionId: string;
+  onClose: () => void;
+  onUpdate: () => void;
+}) {
+  const [detail, setDetail] = useState<ActionDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [comment, setComment] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
+
+  const loadDetail = useCallback(() => {
+    setLoading(true);
+    api.get<ActionDetail>(`/v1/admin/agent-actions/${actionId}`)
+      .then((d) => { setDetail(d); setNotes(d.notes || ""); })
+      .catch(() => toast.error("Failed to load action"))
+      .finally(() => setLoading(false));
+  }, [actionId]);
+
+  useEffect(() => { loadDetail(); }, [loadDetail]);
+
+  const handleAddComment = async () => {
+    if (!comment.trim()) return;
+    setPosting(true);
+    try {
+      await api.post(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
+      setComment("");
+      loadDetail();
+    } catch {
+      toast.error("Failed to add comment");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    setSavingNotes(true);
+    try {
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { notes });
+      setEditingNotes(false);
+      loadDetail();
+      onUpdate();
+    } catch {
+      toast.error("Failed to save notes");
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  }
+  if (!detail) return null;
+
+  return (
+    <div className="space-y-5 pt-2">
+      {/* Header */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <ActionStatusIcon status={detail.status} />
+          <ActionTypeBadge type={detail.action_type} />
+          {detail.due_date && isOverdue(detail.due_date) && detail.status !== "done" && (
+            <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>
+          )}
+        </div>
+        <p className="text-sm font-medium">{detail.description}</p>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span>{detail.customer_name || detail.from_email}</span>
+          {detail.assigned_to && <span>Assigned: {detail.assigned_to}</span>}
+          {detail.due_date && <span>{formatDueDate(detail.due_date)}</span>}
+        </div>
+      </div>
+
+      {/* Source email ref */}
+      {detail.subject && (
+        <div className="bg-muted/50 rounded-md p-3 text-sm">
+          <p className="text-xs text-muted-foreground mb-1">From email</p>
+          <p className="font-medium">{detail.subject}</p>
+        </div>
+      )}
+
+      {/* Notes */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Notes</p>
+          {!editingNotes && (
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditingNotes(true)}>
+              <Pencil className="h-3 w-3 mr-1" />{detail.notes ? "Edit" : "Add"}
+            </Button>
+          )}
+        </div>
+        {editingNotes ? (
+          <div className="space-y-2">
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="text-sm"
+              placeholder="What was done, findings, next steps..."
+            />
+            <div className="flex gap-2">
+              <Button size="sm" className="h-7" onClick={handleSaveNotes} disabled={savingNotes}>
+                {savingNotes ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Save
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7" onClick={() => { setEditingNotes(false); setNotes(detail.notes || ""); }}>Cancel</Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm">{detail.notes || <span className="text-muted-foreground">No notes yet</span>}</p>
+        )}
+      </div>
+
+      {/* Comments / Activity */}
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Activity</p>
+        {detail.comments && detail.comments.length > 0 ? (
+          <div className="space-y-2 mb-3">
+            {detail.comments.map((c) => (
+              <div key={c.id} className="bg-muted/50 rounded-md p-2.5">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs font-medium">{c.author}</span>
+                  <span className="text-[10px] text-muted-foreground">{formatTime(c.created_at)}</span>
+                </div>
+                <p className="text-sm">{c.text}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground mb-3">No comments yet</p>
+        )}
+        <div className="flex gap-2">
+          <Input
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Add a comment..."
+            className="text-sm h-8"
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
+          />
+          <Button size="sm" className="h-8" onClick={handleAddComment} disabled={posting || !comment.trim()}>
+            {posting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Post"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AgentPage() {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
@@ -705,6 +873,7 @@ export default function AgentPage() {
   const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"inbox" | "actions">("inbox");
   const [suggestion, setSuggestion] = useState<{ id: string; action_type: string; description: string; reasoning: string } | null>(null);
 
@@ -732,7 +901,10 @@ export default function AgentPage() {
       const [paginated, st, acts] = await Promise.all([
         api.get<PaginatedMessages>(`/v1/admin/agent-messages?${qs}`),
         api.get<AgentStats>("/v1/admin/agent-stats"),
-        api.get<AgentAction[]>("/v1/admin/agent-actions?status=open").catch(() => []),
+        Promise.all([
+              api.get<AgentAction[]>("/v1/admin/agent-actions?status=open").catch(() => []),
+              api.get<AgentAction[]>("/v1/admin/agent-actions?status=in_progress").catch(() => []),
+            ]).then(([a, b]) => [...a, ...b]),
       ]);
       setMessages(paginated.items);
       setTotalMessages(paginated.total);
@@ -1106,14 +1278,10 @@ export default function AgentPage() {
                             return (
                               <div
                                 key={a.id}
-                                className={`flex items-start gap-2 py-1.5 pl-2 rounded ${overdue ? "bg-red-50 dark:bg-red-950/20" : ""}`}
+                                className={`flex items-start gap-2 py-1.5 pl-2 rounded cursor-pointer ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}
+                                onClick={() => setSelectedActionId(a.id)}
                               >
-                                <button
-                                  className="mt-0.5 flex-shrink-0"
-                                  onClick={() => handleToggleAction(a.id, a.status)}
-                                >
-                                  <ActionStatusIcon status={a.status} />
-                                </button>
+                                <ActionStatusIcon status={a.status} />
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <ActionTypeBadge type={a.action_type} />
@@ -1148,20 +1316,34 @@ export default function AgentPage() {
                                     </Select>
                                   </div>
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-5 w-5 text-muted-foreground hover:text-destructive flex-shrink-0"
-                                  title="Cancel action"
-                                  onClick={async () => {
-                                    try {
-                                      await api.put(`/v1/admin/agent-actions/${a.id}`, { status: "cancelled" });
-                                      load();
-                                    } catch { toast.error("Failed to cancel"); }
-                                  }}
-                                >
-                                  <X className="h-3 w-3" />
-                                </Button>
+                                <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                                  {(a.status === "open" || a.status === "in_progress") && (
+                                    <>
+                                      <Button
+                                        variant="default"
+                                        size="sm"
+                                        className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700"
+                                        onClick={() => handleToggleAction(a.id, a.status)}
+                                      >
+                                        Done
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-5 w-5 text-muted-foreground hover:text-destructive"
+                                        title="Cancel"
+                                        onClick={async () => {
+                                          try {
+                                            await api.put(`/v1/admin/agent-actions/${a.id}`, { status: "cancelled" });
+                                            load();
+                                          } catch { toast.error("Failed"); }
+                                        }}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             );
                           })}
@@ -1189,6 +1371,22 @@ export default function AgentPage() {
               messageId={selectedId}
               onClose={() => setSelectedId(null)}
               onAction={load}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Action detail sheet */}
+      <Sheet open={!!selectedActionId} onOpenChange={(open) => { if (!open) setSelectedActionId(null); }}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto px-4 sm:px-6">
+          <SheetHeader>
+            <SheetTitle className="text-lg">Action Detail</SheetTitle>
+          </SheetHeader>
+          {selectedActionId && (
+            <ActionDetailSheet
+              actionId={selectedActionId}
+              onClose={() => setSelectedActionId(null)}
+              onUpdate={load}
             />
           )}
         </SheetContent>

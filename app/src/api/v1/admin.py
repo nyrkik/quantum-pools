@@ -15,7 +15,7 @@ from src.models.emd_violation import EMDViolation
 from src.models.property import Property
 from src.models.customer import Customer
 from src.models.agent_message import AgentMessage
-from src.models.agent_action import AgentAction
+from src.models.agent_action import AgentAction, AgentActionComment
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -333,8 +333,8 @@ async def get_agent_stats(
     }
 
 
-def _serialize_action(a: AgentAction) -> dict:
-    return {
+def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
+    d = {
         "id": a.id,
         "agent_message_id": a.agent_message_id,
         "action_type": a.action_type,
@@ -342,9 +342,16 @@ def _serialize_action(a: AgentAction) -> dict:
         "assigned_to": a.assigned_to,
         "due_date": a.due_date.isoformat() if a.due_date else None,
         "status": a.status,
+        "notes": a.notes,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
+    if include_comments and hasattr(a, "comments") and a.comments:
+        d["comments"] = [
+            {"id": c.id, "author": c.author, "text": c.text, "created_at": c.created_at.isoformat()}
+            for c in a.comments
+        ]
+    return d
 
 
 @router.get("/agent-messages/{message_id}")
@@ -571,6 +578,7 @@ class UpdateActionBody(BaseModel):
     assigned_to: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @router.put("/agent-actions/{action_id}")
@@ -601,6 +609,8 @@ async def update_agent_action(
         action.description = body.description
     if body.due_date is not None:
         action.due_date = datetime.fromisoformat(body.due_date) if body.due_date else None
+    if body.notes is not None:
+        action.notes = body.notes.strip() or None
 
     await db.commit()
 
@@ -635,6 +645,62 @@ async def update_agent_action(
     if suggestion:
         result["suggestion"] = suggestion
     return result
+
+
+@router.get("/agent-actions/{action_id}")
+async def get_agent_action(
+    action_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single action with comments."""
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(AgentAction)
+        .options(selectinload(AgentAction.comments))
+        .where(AgentAction.id == action_id)
+    )
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    d = _serialize_action(action, include_comments=True)
+    # Include parent message context
+    msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+    msg = msg_result.scalar_one_or_none()
+    if msg:
+        d["from_email"] = msg.from_email
+        d["customer_name"] = msg.customer_name
+        d["subject"] = msg.subject
+    return d
+
+
+class AddCommentBody(BaseModel):
+    text: str
+
+
+@router.post("/agent-actions/{action_id}/comments")
+async def add_action_comment(
+    action_id: str,
+    body: AddCommentBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a comment to an action item."""
+    result = await db.execute(select(AgentAction).where(AgentAction.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    comment = AgentActionComment(
+        action_id=action_id,
+        author=f"{ctx.user.first_name} {ctx.user.last_name}",
+        text=body.text.strip(),
+    )
+    db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+    return {"id": comment.id, "author": comment.author, "text": comment.text, "created_at": comment.created_at.isoformat()}
 
 
 # --- Twilio SMS Webhook ---

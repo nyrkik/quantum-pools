@@ -1041,9 +1041,12 @@ async def evaluate_next_action(action_id: str) -> dict | None:
         if not msg:
             return None
 
-        # Get all actions for this message
+        # Get all actions for this message with comments
+        from sqlalchemy.orm import selectinload
         siblings_result = await db.execute(
-            select(AgentAction).where(AgentAction.agent_message_id == msg.id)
+            select(AgentAction)
+            .options(selectinload(AgentAction.comments))
+            .where(AgentAction.agent_message_id == msg.id)
         )
         all_actions = siblings_result.scalars().all()
 
@@ -1053,7 +1056,13 @@ async def evaluate_next_action(action_id: str) -> dict | None:
             status_label = a.status
             if a.id == action_id:
                 status_label = "JUST COMPLETED"
-            actions_summary.append(f"- [{status_label}] {a.action_type}: {a.description}")
+            line = f"- [{status_label}] {a.action_type}: {a.description}"
+            if a.notes:
+                line += f"\n  Notes: {a.notes}"
+            if a.comments:
+                for c in a.comments:
+                    line += f"\n  Comment ({c.author}): {c.text}"
+            actions_summary.append(line)
 
         # Get customer context if matched
         customer_info = ""

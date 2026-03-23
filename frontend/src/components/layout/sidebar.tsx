@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { api } from "@/lib/api";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -40,7 +41,7 @@ const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
-  { href: "/agent", label: "Inbox", icon: Bot, check: "canViewSettings" as keyof Permissions },
+  { href: "/inbox", label: "Inbox", icon: Bot, check: "canViewSettings" as keyof Permissions, badge: "pending" as const },
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
@@ -64,6 +65,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, organizationName, branding, logout } = useAuth();
   const perms = usePermissions();
   const dev = useDevMode();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  const fetchPending = useCallback(() => {
+    if (perms.canViewSettings) {
+      api.get<{ pending: number }>("/v1/admin/agent-stats")
+        .then((s) => setPendingCount(s.pending ?? 0))
+        .catch(() => {});
+    }
+  }, [perms.canViewSettings]);
+
+  useEffect(() => {
+    fetchPending();
+    const interval = setInterval(fetchPending, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPending]);
 
   const visibleNav = navItems.filter(
     (item) => item.check === null || perms[item.check] === true
@@ -100,6 +116,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             >
               <item.icon className="h-4 w-4" />
               {item.label}
+              {"badge" in item && item.badge === "pending" && pendingCount > 0 && (
+                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
+                  {pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}

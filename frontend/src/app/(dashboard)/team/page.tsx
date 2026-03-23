@@ -527,7 +527,7 @@ export default function TeamPage() {
               <span className="sm:hidden">Invite</span>
             </Button>
           </DialogTrigger>
-          <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+          <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} onPointerDownOutside={(e) => e.preventDefault()}>
             <DialogHeader>
               <DialogTitle>Invite Team Member</DialogTitle>
             </DialogHeader>
@@ -553,16 +553,22 @@ export default function TeamPage() {
               </div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Select value={inviteDraft.role} onValueChange={(v) => setInviteDraft({ ...inviteDraft, role: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ROLES.filter(r => isOwner || r !== "owner").map(r => (
-                      <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap gap-2">
+                  {ROLES.filter(r => isOwner || r !== "owner").map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setInviteDraft({ ...inviteDraft, role: r })}
+                      className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+                        inviteDraft.role === r
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-muted-foreground border-input hover:bg-accent hover:text-foreground"
+                      }`}
+                    >
+                      {ROLE_LABELS[r]}
+                    </button>
+                  ))}
+                </div>
               </div>
               <Button type="submit" className="w-full">Send Invite</Button>
             </form>

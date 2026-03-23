@@ -14,6 +14,7 @@ from src.models.emd_inspection import EMDInspection
 from src.models.emd_violation import EMDViolation
 from src.models.property import Property
 from src.models.customer import Customer
+from src.models.agent_message import AgentMessage
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -191,3 +192,62 @@ async def unmatch_facility(
     facility.matched_at = None
     await db.flush()
     return {"unmatched": True}
+
+
+# --- Agent Message Log ---
+
+@router.get("/agent-messages")
+async def list_agent_messages(
+    limit: int = Query(50, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List recent agent messages."""
+    query = select(AgentMessage).order_by(desc(AgentMessage.received_at)).limit(limit)
+    if status:
+        query = query.where(AgentMessage.status == status)
+    result = await db.execute(query)
+    messages = result.scalars().all()
+    return [
+        {
+            "id": m.id,
+            "direction": m.direction,
+            "from_email": m.from_email,
+            "to_email": m.to_email,
+            "subject": m.subject,
+            "category": m.category,
+            "urgency": m.urgency,
+            "status": m.status,
+            "customer_name": m.customer_name,
+            "draft_response": m.draft_response,
+            "final_response": m.final_response,
+            "approved_by": m.approved_by,
+            "received_at": m.received_at.isoformat() if m.received_at else None,
+            "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+        }
+        for m in messages
+    ]
+
+
+# --- Twilio SMS Webhook ---
+
+from fastapi import Request, Response
+
+@router.post("/twilio-webhook")
+async def twilio_sms_webhook(request: Request):
+    """Handle incoming SMS from Twilio (approval replies)."""
+    form = await request.form()
+    from_number = form.get("From", "")
+    body = form.get("Body", "")
+
+    if from_number and body:
+        from src.services.customer_agent import handle_sms_reply
+        import asyncio
+        asyncio.create_task(handle_sms_reply(from_number, body))
+
+    # Return empty TwiML to acknowledge
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        media_type="application/xml",
+    )

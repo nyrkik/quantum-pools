@@ -62,6 +62,20 @@ interface PropertyOption {
   emd_fa_number: string | null;
 }
 
+interface AgentMsg {
+  id: string;
+  direction: string;
+  from_email: string;
+  subject: string | null;
+  category: string | null;
+  urgency: string | null;
+  status: string;
+  customer_name: string | null;
+  draft_response: string | null;
+  received_at: string | null;
+  sent_at: string | null;
+}
+
 function formatDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-US", {
@@ -171,6 +185,7 @@ export default function AdminPage() {
   const [runs, setRuns] = useState<ScraperRun[]>([]);
   const [stats, setStats] = useState<EmdStats | null>(null);
   const [unmatched, setUnmatched] = useState<UnmatchedFacility[]>([]);
+  const [agentMsgs, setAgentMsgs] = useState<AgentMsg[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
@@ -178,8 +193,9 @@ export default function AdminPage() {
       api.get<ScraperRun[]>("/v1/admin/scraper-runs"),
       api.get<EmdStats>("/v1/admin/emd-stats"),
       api.get<UnmatchedFacility[]>("/v1/admin/emd-unmatched"),
+      api.get<AgentMsg[]>("/v1/admin/agent-messages").catch(() => []),
     ])
-      .then(([r, s, u]) => { setRuns(r); setStats(s); setUnmatched(u); })
+      .then(([r, s, u, a]) => { setRuns(r); setStats(s); setUnmatched(u); setAgentMsgs(a); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -282,6 +298,50 @@ export default function AdminPage() {
                 <TableBody>
                   {unmatched.map((f) => (
                     <MatchRow key={f.id} facility={f} onMatched={load} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Agent Message Log */}
+      {agentMsgs.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Customer Agent Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-100 dark:bg-slate-800">
+                    <TableHead className="text-xs font-medium uppercase tracking-wide">Time</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wide">From</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wide">Subject</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wide">Category</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wide">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {agentMsgs.map((m, i) => (
+                    <TableRow key={m.id} className={`${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                      <TableCell className="text-sm">{formatDate(m.received_at)}</TableCell>
+                      <TableCell className="text-sm">{m.customer_name || m.from_email}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground truncate max-w-48">{m.subject}</TableCell>
+                      <TableCell>
+                        {m.category && <Badge variant="outline" className="text-xs capitalize">{m.category}</Badge>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={m.status === "sent" || m.status === "auto_sent" ? "default" : m.status === "pending" ? "outline" : "secondary"}
+                          className={m.status === "sent" || m.status === "auto_sent" ? "bg-green-600" : m.status === "pending" ? "border-amber-400 text-amber-600" : ""}
+                        >
+                          {m.status === "auto_sent" ? "auto" : m.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
                   ))}
                 </TableBody>
               </Table>

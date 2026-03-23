@@ -72,16 +72,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      <div className="flex items-center gap-3 border-b px-4 py-4">
-        <Image src={logoSrc} alt={displayName} width={72} height={72} className="object-contain" unoptimized />
-        <div className="min-w-0">
-          <span className="text-lg font-semibold block truncate" style={branding.primaryColor ? { color: branding.primaryColor } : undefined}>
+      <div className="flex flex-col items-center gap-1 border-b px-4 py-4">
+        <Image src={logoSrc} alt={displayName} width={160} height={60} className="object-contain max-h-14" unoptimized />
+        {!branding.logoUrl && (
+          <span className="text-lg font-semibold text-center leading-tight" style={branding.primaryColor ? { color: branding.primaryColor } : undefined}>
             {displayName}
           </span>
-          {branding.tagline && (
-            <span className="text-[10px] text-muted-foreground block truncate">{branding.tagline}</span>
-          )}
-        </div>
+        )}
       </div>
 
       <nav className="flex-1 space-y-1 px-2 py-3">

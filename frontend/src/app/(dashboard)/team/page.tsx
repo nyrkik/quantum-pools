@@ -48,7 +48,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plus, Trash2, Code2, Mail, CheckCircle2, Clock, Loader2, Users } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Plus, Trash2, Code2, Mail, CheckCircle2, Clock, Loader2, Users, Pencil, Check, X } from "lucide-react";
 
 interface TeamMember {
   id: string;
@@ -99,6 +105,173 @@ function formatDate(iso: string | null) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function MemberDetail({
+  member,
+  isOwner,
+  onUpdate,
+  onClose,
+}: {
+  member: TeamMember;
+  isOwner: boolean;
+  onUpdate: () => void;
+  onClose: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    first_name: member.first_name,
+    last_name: member.last_name,
+    phone: member.phone || "",
+  });
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/v1/team/${member.id}`, {
+        first_name: form.first_name,
+        last_name: form.last_name,
+        phone: form.phone || null,
+      });
+      toast.success("Member updated");
+      setEditing(false);
+      onUpdate();
+    } catch {
+      toast.error("Failed to update");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setForm({
+      first_name: member.first_name,
+      last_name: member.last_name,
+      phone: member.phone || "",
+    });
+    setEditing(false);
+  };
+
+  return (
+    <div className="space-y-6 pt-2">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
+            {member.first_name[0]}{member.last_name[0]}
+          </div>
+          <div>
+            <p className="font-semibold text-lg">{member.first_name} {member.last_name}</p>
+            <p className="text-sm text-muted-foreground">{member.email}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant={roleBadgeVariant(member.role)}>{ROLE_LABELS[member.role]}</Badge>
+          {member.is_verified ? (
+            <Badge variant="outline" className="border-green-400 text-green-600 text-[10px]">
+              <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px]">
+              <Clock className="h-2.5 w-2.5 mr-0.5" />Pending
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {/* Details */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Details</p>
+          {!editing && member.role !== "owner" && (
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditing(true)}>
+              <Pencil className="h-3 w-3 mr-1" />Edit
+            </Button>
+          )}
+          {editing && (
+            <div className="flex gap-1">
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-green-600" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              </Button>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={handleCancel}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">First Name</Label>
+            {editing ? (
+              <Input
+                value={form.first_name}
+                onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                className="h-8 text-sm"
+              />
+            ) : (
+              <p className="text-sm">{member.first_name}</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Last Name</Label>
+            {editing ? (
+              <Input
+                value={form.last_name}
+                onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                className="h-8 text-sm"
+              />
+            ) : (
+              <p className="text-sm">{member.last_name}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Email</Label>
+          <p className="text-sm">{member.email}</p>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Phone</Label>
+          {editing ? (
+            <Input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              className="h-8 text-sm"
+              placeholder="(555) 555-5555"
+            />
+          ) : (
+            <p className="text-sm">{member.phone || <span className="text-muted-foreground">Not set</span>}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Account Info */}
+      <div className="space-y-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Account</p>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Status</p>
+            <p>{member.is_active ? "Active" : "Deactivated"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Verified</p>
+            <p>{member.is_verified ? "Yes" : "Pending setup"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Last Login</p>
+            <p>{member.last_login ? formatDate(member.last_login) : "Never"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Added</p>
+            <p>{new Date(member.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TeamPage() {
   const { role: myRole } = useAuth();
   const isOwner = myRole === "owner";
@@ -106,6 +279,7 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [resending, setResending] = useState<string | null>(null);
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -292,7 +466,7 @@ export default function TeamPage() {
               </TableRow>
             ) : (
               members.map((m, i) => (
-                <TableRow key={m.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
+                <TableRow key={m.id} className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`} onClick={() => setSelectedMember(m)}>
                   <TableCell>
                     <div>
                       <span className="font-medium">{m.first_name} {m.last_name}</span>
@@ -403,6 +577,23 @@ export default function TeamPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Member detail sheet */}
+      <Sheet open={!!selectedMember} onOpenChange={(open) => { if (!open) setSelectedMember(null); }}>
+        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>{selectedMember ? `${selectedMember.first_name} ${selectedMember.last_name}` : "Member"}</SheetTitle>
+          </SheetHeader>
+          {selectedMember && (
+            <MemberDetail
+              member={selectedMember}
+              isOwner={isOwner}
+              onUpdate={() => { load(); }}
+              onClose={() => setSelectedMember(null)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

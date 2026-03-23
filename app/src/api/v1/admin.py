@@ -447,6 +447,28 @@ async def reject_agent_message(
     return {"rejected": True}
 
 
+@router.post("/agent-messages/{message_id}/dismiss")
+async def dismiss_agent_message(
+    message_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dismiss a message — no reply, no learning impact."""
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.status not in ("pending",):
+        raise HTTPException(status_code=400, detail=f"Cannot dismiss message with status '{msg.status}'")
+
+    msg.status = "ignored"
+    msg.notes = (msg.notes or "") + "\nDismissed by " + f"{ctx.user.first_name} {ctx.user.last_name}"
+    msg.notes = msg.notes.strip()
+    await db.commit()
+
+    return {"dismissed": True}
+
+
 # --- Agent Actions ---
 
 @router.get("/agent-actions")

@@ -40,6 +40,7 @@ const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
+  { href: "/agent", label: "Inbox", icon: Bot, check: "canViewSettings" as keyof Permissions },
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
@@ -48,13 +49,14 @@ const navItems = [
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
-  { href: "/agent", label: "Inbox", icon: Bot, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 
+import { getBackendOrigin } from "@/lib/api";
+
 function getBackendUrl(path: string) {
   if (typeof window === "undefined") return path;
-  return `${window.location.protocol}//${window.location.hostname}:7061${path}`;
+  return `${getBackendOrigin()}${path}`;
 }
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {

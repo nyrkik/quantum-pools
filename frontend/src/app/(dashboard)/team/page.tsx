@@ -408,6 +408,7 @@ export default function TeamPage() {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteDraft, setInviteDraft] = useState({ first_name: "", last_name: "", email: "", phone: "", role: "technician" });
   const [resending, setResending] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
 
@@ -427,16 +428,16 @@ export default function TeamPage() {
 
   const handleInvite = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
     try {
       await api.post("/v1/team/invite", {
-        email: form.get("email"),
-        first_name: form.get("first_name"),
-        last_name: form.get("last_name"),
-        role: form.get("role"),
-        phone: form.get("phone") || undefined,
+        email: inviteDraft.email,
+        first_name: inviteDraft.first_name,
+        last_name: inviteDraft.last_name,
+        role: inviteDraft.role,
+        phone: inviteDraft.phone || undefined,
       });
       toast.success("Invite sent");
+      setInviteDraft({ first_name: "", last_name: "", email: "", phone: "", role: "technician" });
       setInviteOpen(false);
       load();
     } catch (err: unknown) {
@@ -526,7 +527,7 @@ export default function TeamPage() {
               <span className="sm:hidden">Invite</span>
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
             <DialogHeader>
               <DialogTitle>Invite Team Member</DialogTitle>
             </DialogHeader>
@@ -534,25 +535,25 @@ export default function TeamPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="first_name">First Name</Label>
-                  <Input id="first_name" name="first_name" required />
+                  <Input id="first_name" value={inviteDraft.first_name} onChange={(e) => setInviteDraft({ ...inviteDraft, first_name: e.target.value })} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="last_name">Last Name</Label>
-                  <Input id="last_name" name="last_name" required />
+                  <Input id="last_name" value={inviteDraft.last_name} onChange={(e) => setInviteDraft({ ...inviteDraft, last_name: e.target.value })} required />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" required />
+                <Input id="email" type="email" value={inviteDraft.email} onChange={(e) => setInviteDraft({ ...inviteDraft, email: e.target.value })} required />
                 <p className="text-xs text-muted-foreground">They'll receive an email to set up their password</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone (optional)</Label>
-                <Input id="phone" name="phone" type="tel" />
+                <Input id="phone" type="tel" value={inviteDraft.phone} onChange={(e) => setInviteDraft({ ...inviteDraft, phone: formatPhone(e.target.value) })} placeholder="(916) 555-1234" />
               </div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Select name="role" defaultValue="technician">
+                <Select value={inviteDraft.role} onValueChange={(v) => setInviteDraft({ ...inviteDraft, role: v })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>

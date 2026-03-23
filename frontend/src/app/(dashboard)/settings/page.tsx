@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { api } from "@/lib/api";
+import { api, getBackendOrigin } from "@/lib/api";
 import { toast } from "sonner";
 import { Loader2, Save, Plus, Pencil, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -142,7 +142,7 @@ function BrandingSection() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api/v1/branding/logo`;
+      const backendUrl = `${getBackendOrigin()}/api/v1/branding/logo`;
       const res = await fetch(backendUrl, { method: "POST", body: formData, credentials: "include" });
       if (!res.ok) throw new Error("Upload failed");
       toast.success("Logo uploaded");
@@ -157,7 +157,7 @@ function BrandingSection() {
   };
 
   const logoSrc = branding?.logo_url
-    ? `${typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:7061` : ""}${branding.logo_url}`
+    ? `${getBackendOrigin()}${branding.logo_url}`
     : null;
 
   if (loading) return null;

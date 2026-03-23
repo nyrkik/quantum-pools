@@ -69,7 +69,8 @@ import { AddWfForm } from "@/components/water-features/add-wf-form";
 import { AddPropertyForm } from "@/components/properties/add-property-form";
 import { PropertySiteDetails } from "@/components/properties/property-site-details";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.121.52.15:7061";
+import { getBackendOrigin } from "@/lib/api";
+const API_BASE = typeof window !== "undefined" ? getBackendOrigin() : "http://localhost:7061";
 
 interface Customer {
   id: string;

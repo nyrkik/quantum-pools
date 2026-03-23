@@ -393,6 +393,20 @@ function MessageDetail({
     }
   };
 
+  const handleDismiss = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-messages/${messageId}/dismiss`, {});
+      toast.success("Message dismissed");
+      onAction();
+      onClose();
+    } catch {
+      toast.error("Failed to dismiss");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleAddAction = async () => {
     if (!newAction.description.trim()) return;
     const dueDate = newAction.due_days
@@ -614,6 +628,9 @@ function MessageDetail({
               Cancel Edit
             </Button>
           )}
+          <Button variant="secondary" disabled={sending} onClick={handleDismiss}>
+            Dismiss
+          </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" disabled={sending}>
@@ -646,7 +663,7 @@ export default function AgentPage() {
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"inbox" | "actions">("inbox");

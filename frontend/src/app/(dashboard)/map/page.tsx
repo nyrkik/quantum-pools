@@ -81,7 +81,8 @@ import type { MapActions, PropertyGroup } from "@/components/maps/satellite-map"
 import { usePermissions } from "@/lib/permissions";
 import DifficultyModal from "@/components/profitability/difficulty-modal";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.121.52.15:7061";
+import { getBackendOrigin } from "@/lib/api";
+const API_BASE = typeof window !== "undefined" ? getBackendOrigin() : "http://localhost:7061";
 
 type StatusFilter = "analyzed" | "pinned" | "not_analyzed";
 type MapMode = "pools" | "routes" | "profitability";

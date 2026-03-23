@@ -5,6 +5,18 @@ export interface ApiError {
   message?: string;
 }
 
+/** Returns the backend base URL for direct API calls (bypassing Next.js proxy). */
+export function getBackendOrigin(): string {
+  if (typeof window === "undefined") return "http://localhost:7061";
+  const host = window.location.hostname;
+  // If accessed via tunnel domain, use api subdomain
+  if (host.endsWith("quantumpoolspro.com")) {
+    return `${window.location.protocol}//api.quantumpoolspro.com`;
+  }
+  // Local/Tailscale: use same host, port 7061
+  return `${window.location.protocol}//${host}:7061`;
+}
+
 class ApiClient {
   private baseUrl: string;
   private refreshPromise: Promise<boolean> | null = null;
@@ -106,7 +118,7 @@ class ApiClient {
 
   async postDirect<T>(path: string, body?: unknown): Promise<T> {
     // POST directly to the backend, bypassing Next.js rewrite proxy
-    const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api${path}`;
+    const backendUrl = `${getBackendOrigin()}/api${path}`;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.viewAsRole) headers["X-View-As-Role"] = this.viewAsRole;
     const response = await fetch(backendUrl, {
@@ -140,7 +152,7 @@ class ApiClient {
   async upload<T>(path: string, formData: FormData): Promise<T> {
     // Upload directly to the backend, bypassing Next.js rewrite proxy
     // which has body size limits that reject large photo uploads
-    const backendUrl = `${window.location.protocol}//${window.location.hostname}:7061/api${path}`;
+    const backendUrl = `${getBackendOrigin()}/api${path}`;
     const uploadHeaders: Record<string, string> = {};
     if (this.viewAsRole) {
       uploadHeaders["X-View-As-Role"] = this.viewAsRole;

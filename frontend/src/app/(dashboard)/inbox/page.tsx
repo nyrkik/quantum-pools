@@ -841,7 +841,7 @@ function MessageDetail({
               <AlertDialogHeader>
                 <AlertDialogTitle>Dismiss this message?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  No reply will be sent. Associated action items will be cancelled. This won't affect AI learning.
+                  No reply will be sent. Action items will remain open.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -1030,10 +1030,12 @@ function ActionDetailSheet({
     if (!comment.trim()) return;
     setPosting(true);
     try {
-      const result = await api.post<{ action_resolved?: boolean }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
+      const result = await api.post<{ action_resolved?: boolean; action_updated?: boolean; new_description?: string }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
       setComment("");
       if (result.action_resolved) {
         toast.success("Action marked complete — your comment resolved it");
+      } else if (result.action_updated && result.new_description) {
+        toast.success(`Action updated: ${result.new_description.slice(0, 60)}`);
       }
       loadDetail();
       onUpdate();

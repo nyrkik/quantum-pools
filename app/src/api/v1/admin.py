@@ -467,7 +467,7 @@ async def dismiss_agent_message(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dismiss a message — no reply, no learning impact. Cancels associated actions."""
+    """Dismiss a message — no reply needed, keeps action items open."""
     result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
     msg = result.scalar_one_or_none()
     if not msg:
@@ -478,16 +478,6 @@ async def dismiss_agent_message(
     msg.status = "ignored"
     msg.notes = (msg.notes or "") + "\nDismissed by " + f"{ctx.user.first_name} {ctx.user.last_name}"
     msg.notes = msg.notes.strip()
-
-    # Cancel associated actions
-    actions_result = await db.execute(
-        select(AgentAction).where(
-            AgentAction.agent_message_id == message_id,
-            AgentAction.status.in_(("open", "in_progress")),
-        )
-    )
-    for action in actions_result.scalars().all():
-        action.status = "cancelled"
 
     await db.commit()
     return {"dismissed": True}
@@ -761,28 +751,46 @@ Comments:
 Latest comment by {ctx.user.first_name}: {body.text.strip()}
 
 Respond with JSON:
-{{"resolved": true/false, "reason": "brief explanation"}}
+{{
+  "resolved": true/false,
+  "update_description": "new description if the comment changes the scope of the action, or null if no change",
+  "update_type": "new action_type if changed, or null",
+  "reason": "brief explanation"
+}}
 
 Rules:
 - "resolved" = true if the comment provides the answer, completes the task, or makes it clear no further work is needed
 - Examples: someone provides the requested info, confirms work is done, answers the question
-- If the comment is just a status update or partial info that doesn't fully resolve it, return false"""
+- If the comment is just a status update or partial info that doesn't fully resolve it, return resolved: false
+- If the comment changes the scope (e.g., "skip inspection, just replace" or "already done, just need to invoice"), update the description to reflect the new scope
+- update_description: set ONLY if the comment changes what needs to be done. Keep it concise.
+- update_type: set ONLY if the action type should change (e.g., site_visit → equipment)"""
 
             client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
             response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=100,
+                max_tokens=200,
                 messages=[{"role": "user", "content": eval_prompt}],
             )
             json_match = re_mod.search(r"\{.*\}", response.content[0].text, re_mod.DOTALL)
             if json_match:
                 result_data = json_mod.loads(json_match.group())
+
+                updated_desc = None
+                # Update description if scope changed
+                if result_data.get("update_description"):
+                    action.description = result_data["update_description"]
+                    updated_desc = action.description
+                if result_data.get("update_type"):
+                    action.action_type = result_data["update_type"]
+
                 if result_data.get("resolved"):
                     from datetime import datetime, timezone
                     action.status = "done"
                     action.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
                     resolved = True
+
+                await db.commit()
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Comment resolution eval failed: {e}")
@@ -793,6 +801,8 @@ Rules:
         "text": comment.text,
         "created_at": comment.created_at.isoformat(),
         "action_resolved": resolved,
+        "action_updated": updated_desc is not None,
+        "new_description": updated_desc,
     }
 
 

@@ -252,13 +252,13 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Open Actions */}
+          {/* Open Jobs */}
           <Card className={`shadow-sm ${agentStats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""}`}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ClipboardList className="h-4 w-4 text-purple-500" />
-                  <CardTitle className="text-base">Action Items</CardTitle>
+                  <CardTitle className="text-base">Jobs</CardTitle>
                   {agentStats.open_actions > 0 && (
                     <Badge variant="outline" className="border-purple-400 text-purple-600 text-xs">
                       {agentStats.open_actions}
@@ -281,7 +281,7 @@ export default function DashboardPage() {
               {openActions.length === 0 ? (
                 <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  No open actions
+                  No open jobs
                 </div>
               ) : (
                 <div className="space-y-2">

@@ -686,11 +686,11 @@ function MessageDetail({
         </div>
       )}
 
-      {/* Action Items */}
+      {/* Jobs */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-            <ClipboardList className="h-3 w-3" />Action Items
+            <ClipboardList className="h-3 w-3" />Jobs
             {msg.actions && msg.actions.length > 0 && (
               <span className="ml-1 text-[10px] bg-muted rounded-full px-1.5">{msg.actions.filter(a => a.status !== "done" && a.status !== "cancelled").length} open</span>
             )}
@@ -752,7 +752,7 @@ function MessageDetail({
             ))}
           </div>
         ) : !addingAction ? (
-          <p className="text-xs text-muted-foreground py-2">No action items</p>
+          <p className="text-xs text-muted-foreground py-2">No jobs</p>
         ) : null}
       </div>
 
@@ -861,7 +861,7 @@ function MessageDetail({
             <AlertDialogHeader>
               <AlertDialogTitle>Delete this message?</AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently remove the message and all associated action items. This cannot be undone.
+                This will permanently remove the message and all associated jobs. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -1033,9 +1033,9 @@ function ActionDetailSheet({
       const result = await api.post<{ action_resolved?: boolean; action_updated?: boolean; new_description?: string }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
       setComment("");
       if (result.action_resolved) {
-        toast.success("Action marked complete — your comment resolved it");
+        toast.success("Job marked complete — your comment resolved it");
       } else if (result.action_updated && result.new_description) {
-        toast.success(`Action updated: ${result.new_description.slice(0, 60)}`);
+        toast.success(`Job updated: ${result.new_description.slice(0, 60)}`);
       }
       loadDetail();
       onUpdate();
@@ -1283,12 +1283,12 @@ function ActionDetailSheet({
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive">
-                <Trash2 className="h-3 w-3 mr-1" />Delete Action
+                <Trash2 className="h-3 w-3 mr-1" />Delete Job
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete this action item?</AlertDialogTitle>
+                <AlertDialogTitle>Delete this job?</AlertDialogTitle>
                 <AlertDialogDescription>
                   This will permanently remove the action and all its comments. This cannot be undone.
                 </AlertDialogDescription>
@@ -1429,7 +1429,7 @@ export default function AgentPage() {
             <CardHeader className="pb-0">
               <div className="flex items-center gap-2">
                 <ClipboardList className="h-4 w-4 text-purple-500" />
-                <CardTitle className="text-sm font-medium">Open Actions</CardTitle>
+                <CardTitle className="text-sm font-medium">Open Jobs</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
@@ -1500,7 +1500,7 @@ export default function AgentPage() {
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === "actions" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           onClick={() => setActiveTab("actions")}
         >
-          Action Items
+          Jobs
           {actions.length > 0 && (
             <span className="bg-primary text-primary-foreground text-[10px] rounded-full px-1.5 py-0.5 leading-none">
               {actions.length}
@@ -1638,10 +1638,10 @@ export default function AgentPage() {
 
         return (
           <>
-          {/* New Action button + form */}
+          {/* New Job button + form */}
           <div className="flex justify-end">
             <Button variant="outline" size="sm" onClick={() => setNewActionOpen(!newActionOpen)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />{newActionOpen ? "Cancel" : "New Action"}
+              <Plus className="h-3.5 w-3.5 mr-1.5" />{newActionOpen ? "Cancel" : "New Job"}
             </Button>
           </div>
           {newActionOpen && (
@@ -1724,7 +1724,7 @@ export default function AgentPage() {
                         setNewAction({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3", customer_name: "", property_address: "" });
                         setNewActionOpen(false);
                         load();
-                        toast.success("Action created");
+                        toast.success("Job created");
                       } catch { toast.error("Failed to create action"); }
                     }}
                   >
@@ -1740,7 +1740,7 @@ export default function AgentPage() {
               {actions.length === 0 && !newActionOpen ? (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <CheckCircle2 className="h-10 w-10 mb-3 opacity-40" />
-                  <p className="text-sm">All caught up — no open actions</p>
+                  <p className="text-sm">All caught up — no open jobs</p>
                 </div>
               ) : (
                 <div className="divide-y">

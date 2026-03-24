@@ -11,6 +11,7 @@ class AgentAction(Base):
     __tablename__ = "agent_actions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     agent_message_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_messages.id"), nullable=True, index=True)
     thread_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_threads.id"), index=True)
     # For standalone actions (not from email)
@@ -34,6 +35,7 @@ class AgentActionComment(Base):
     __tablename__ = "agent_action_comments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     action_id: Mapped[str] = mapped_column(String(36), ForeignKey("agent_actions.id"), index=True)
     author: Mapped[str] = mapped_column(String(100))  # user name
     text: Mapped[str] = mapped_column(Text)

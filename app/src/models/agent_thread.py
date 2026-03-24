@@ -11,6 +11,7 @@ class AgentThread(Base):
     __tablename__ = "agent_threads"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     thread_key: Mapped[str] = mapped_column(String(500), unique=True, index=True)  # normalized_subject|contact_email
     contact_email: Mapped[str] = mapped_column(String(255))
     subject: Mapped[str | None] = mapped_column(String(500))  # original subject from first message

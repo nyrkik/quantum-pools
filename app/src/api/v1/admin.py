@@ -509,6 +509,42 @@ async def delete_agent_message(
     return {"deleted": True}
 
 
+@router.get("/client-search")
+async def search_clients(
+    q: str = Query(..., min_length=2),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search customers + properties for autocomplete."""
+    search = f"%{q}%"
+    result = await db.execute(
+        select(Customer, Property)
+        .join(Property, Customer.id == Property.customer_id)
+        .where(
+            Property.organization_id == ctx.organization_id,
+            Customer.is_active == True,
+        )
+        .where(
+            Customer.first_name.ilike(search)
+            | Customer.last_name.ilike(search)
+            | Customer.company_name.ilike(search)
+            | Customer.display_name_col.ilike(search)
+            | Property.address.ilike(search)
+            | Property.name.ilike(search)
+        )
+        .order_by(Customer.first_name)
+        .limit(10)
+    )
+    return [
+        {
+            "customer_name": cust.display_name,
+            "property_address": prop.full_address,
+            "property_name": prop.name,
+        }
+        for cust, prop in result.all()
+    ]
+
+
 # --- Agent Actions ---
 
 @router.get("/agent-actions")

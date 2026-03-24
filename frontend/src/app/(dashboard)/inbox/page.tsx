@@ -1313,6 +1313,72 @@ function ActionDetailSheet({
   );
 }
 
+function ClientPropertySearch({
+  customerName,
+  propertyAddress,
+  onChange,
+}: {
+  customerName: string;
+  propertyAddress: string;
+  onChange: (name: string, address: string) => void;
+}) {
+  const [query, setQuery] = useState(customerName);
+  const [results, setResults] = useState<{ customer_name: string; property_address: string; property_name: string | null }[]>([]);
+  const [showResults, setShowResults] = useState(false);
+
+  useEffect(() => {
+    if (query.length < 2) { setResults([]); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.get<{ customer_name: string; property_address: string; property_name: string | null }[]>(`/v1/admin/client-search?q=${encodeURIComponent(query)}`);
+        setResults(data);
+        setShowResults(true);
+      } catch { setResults([]); }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); onChange(e.target.value, propertyAddress); }}
+          placeholder="Search client or address..."
+          className="text-sm h-8"
+          onFocus={() => results.length > 0 && setShowResults(true)}
+        />
+        {showResults && results.length > 0 && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setShowResults(false)} />
+            <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-lg">
+              {results.map((r, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="w-full px-3 py-2 text-left hover:bg-muted/50 text-sm"
+                  onClick={() => {
+                    setQuery(r.customer_name);
+                    onChange(r.customer_name, r.property_address);
+                    setShowResults(false);
+                  }}
+                >
+                  <span className="font-medium">{r.customer_name}</span>
+                  {r.property_name && <span className="text-muted-foreground ml-1">({r.property_name})</span>}
+                  <span className="text-xs text-muted-foreground block">{r.property_address}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      {propertyAddress && (
+        <p className="text-xs text-muted-foreground px-1">{propertyAddress}</p>
+      )}
+    </div>
+  );
+}
+
 export default function AgentPage() {
   const { user } = useAuth();
   const myName = user?.first_name || "";
@@ -1698,20 +1764,11 @@ export default function AgentPage() {
                     ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    value={newAction.customer_name}
-                    onChange={(e) => setNewAction({ ...newAction, customer_name: e.target.value })}
-                    placeholder="Client name"
-                    className="text-sm h-8"
-                  />
-                  <Input
-                    value={newAction.property_address}
-                    onChange={(e) => setNewAction({ ...newAction, property_address: e.target.value })}
-                    placeholder="Property address"
-                    className="text-sm h-8"
-                  />
-                </div>
+                <ClientPropertySearch
+                  customerName={newAction.customer_name}
+                  propertyAddress={newAction.property_address}
+                  onChange={(name, addr) => setNewAction({ ...newAction, customer_name: name, property_address: addr })}
+                />
                 <div className="grid grid-cols-3 gap-2">
                   <Select value={newAction.assigned_to || ""} onValueChange={(v) => setNewAction({ ...newAction, assigned_to: v })}>
                     <SelectTrigger className="h-8 text-sm">

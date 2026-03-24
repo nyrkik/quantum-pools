@@ -894,6 +894,7 @@ async def process_incoming_email(uid: str, msg):
                 description=action["description"],
                 due_date=due_date,
                 status="open",
+                created_by="DeepBlue",
             ))
 
         await db.commit()

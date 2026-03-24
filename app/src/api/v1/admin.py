@@ -352,6 +352,7 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
         "notes": a.notes,
         "customer_name": a.customer_name,
         "property_address": a.property_address,
+        "created_by": a.created_by,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -616,6 +617,7 @@ async def create_agent_action(
         due_date=due,
         customer_name=body.customer_name,
         property_address=body.property_address,
+        created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
         status="open",
     )
     db.add(action)
@@ -680,6 +682,7 @@ async def update_agent_action(
                     description=rec["description"],
                     due_date=due_date,
                     status="suggested",
+                    created_by="DeepBlue",
                 )
                 db.add(suggested)
                 await db.commit()

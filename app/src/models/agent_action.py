@@ -20,6 +20,7 @@ class AgentAction(Base):
     assigned_to: Mapped[str | None] = mapped_column(String(100))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, suggested, cancelled
+    created_by: Mapped[str | None] = mapped_column(String(100))  # user name or "DeepBlue"
     notes: Mapped[str | None] = mapped_column(Text)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

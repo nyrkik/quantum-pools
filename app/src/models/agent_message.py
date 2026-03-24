@@ -29,6 +29,9 @@ class AgentMessage(Base):
     match_method: Mapped[str | None] = mapped_column(String(30))  # email, domain, company_name, sender_name, manual
     customer_name: Mapped[str | None] = mapped_column(String(200))
     property_address: Mapped[str | None] = mapped_column(String(300))
+    thread_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_threads.id"), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    thread = relationship("AgentThread", back_populates="messages")

@@ -19,6 +19,7 @@ from twilio.rest import Client as TwilioClient
 from sqlalchemy import select, desc, and_, or_, func
 from sqlalchemy.orm import selectinload
 from src.core.database import get_db_context
+from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction
 from src.models.customer import Customer
@@ -160,36 +161,120 @@ def _normalize_subject(subject: str) -> str:
     return s
 
 
-async def _find_thread(from_email: str, subject: str, message_id_header: str | None = None) -> AgentMessage | None:
-    """Find the most recent message in the same thread (same sender + normalized subject)."""
-    normalized = _normalize_subject(subject)
-    if not normalized:
-        return None
+def _make_thread_key(contact_email: str, subject: str) -> str:
+    """Create a thread key from contact email and normalized subject."""
+    return f"{_normalize_subject(subject)}|{contact_email}".lower()
+
+
+async def get_or_create_thread(
+    contact_email: str, subject: str,
+    customer_id: str | None = None, customer_name: str | None = None,
+    property_address: str | None = None, category: str | None = None,
+    urgency: str | None = None,
+) -> "AgentThread":
+    """Find existing thread or create new one."""
+    from src.models.agent_thread import AgentThread
+
+    thread_key = _make_thread_key(contact_email, subject)
 
     async with get_db_context() as db:
-        # Look for recent messages from same sender with same base subject
         result = await db.execute(
-            select(AgentMessage)
-            .where(
-                AgentMessage.from_email == from_email,
-                AgentMessage.status.in_(("sent", "auto_sent", "pending")),
-            )
-            .order_by(desc(AgentMessage.received_at))
-            .limit(10)
+            select(AgentThread).where(AgentThread.thread_key == thread_key)
         )
-        for msg in result.scalars().all():
-            if msg.subject and _normalize_subject(msg.subject) == normalized:
-                return msg
-    return None
+        thread = result.scalar_one_or_none()
+
+        if not thread:
+            thread = AgentThread(
+                thread_key=thread_key,
+                contact_email=contact_email,
+                subject=subject,
+                matched_customer_id=customer_id,
+                customer_name=customer_name,
+                property_address=property_address,
+                status="pending",
+                urgency=urgency,
+                category=category,
+                message_count=0,
+            )
+            db.add(thread)
+            await db.commit()
+            await db.refresh(thread)
+        else:
+            # Update customer info if we have better data now
+            if customer_id and not thread.matched_customer_id:
+                thread.matched_customer_id = customer_id
+            if customer_name and not thread.customer_name:
+                thread.customer_name = customer_name
+            if property_address and not thread.property_address:
+                thread.property_address = property_address
+            await db.commit()
+
+        return thread
 
 
-async def _get_thread_open_actions(thread_msg: AgentMessage) -> list[str]:
-    """Get descriptions of open action items for a thread message."""
+async def update_thread_status(thread_id: str):
+    """Recalculate denormalized thread fields from its messages."""
+    from src.models.agent_thread import AgentThread
+
+    async with get_db_context() as db:
+        thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+        if not thread:
+            return
+
+        msgs = (await db.execute(
+            select(AgentMessage)
+            .where(AgentMessage.thread_id == thread_id)
+            .order_by(AgentMessage.received_at)
+        )).scalars().all()
+
+        if not msgs:
+            return
+
+        has_pending = any(m.status == "pending" for m in msgs)
+        has_sent = any(m.status in ("sent", "auto_sent") for m in msgs)
+
+        thread.message_count = len(msgs)
+        thread.has_pending = has_pending
+        thread.status = "pending" if has_pending else ("handled" if has_sent else "ignored")
+
+        last = msgs[-1]
+        thread.last_message_at = last.received_at
+        thread.last_direction = last.direction
+        thread.last_snippet = (last.body or "")[:200]
+
+        # Highest urgency
+        prio = {"high": 3, "medium": 2, "low": 1}
+        best_urg = None
+        for m in msgs:
+            if m.urgency and prio.get(m.urgency, 0) > prio.get(best_urg or "", 0):
+                best_urg = m.urgency
+        thread.urgency = best_urg
+
+        # Latest inbound category
+        for m in reversed(msgs):
+            if m.direction == "inbound" and m.category:
+                thread.category = m.category
+                break
+
+        # Check open actions
+        action_result = await db.execute(
+            select(func.count(AgentAction.id)).where(
+                AgentAction.thread_id == thread_id,
+                AgentAction.status.in_(("open", "in_progress")),
+            )
+        )
+        thread.has_open_actions = (action_result.scalar() or 0) > 0
+
+        await db.commit()
+
+
+async def _get_thread_open_actions(thread_id: str) -> list[str]:
+    """Get descriptions of open action items for a thread."""
     async with get_db_context() as db:
         result = await db.execute(
             select(AgentAction)
             .where(
-                AgentAction.agent_message_id == thread_msg.id,
+                AgentAction.thread_id == thread_id,
                 AgentAction.status.in_(("open", "in_progress")),
             )
         )
@@ -804,21 +889,33 @@ async def process_incoming_email(uid: str, msg):
             logger.info(f"Already processed: {uid}")
             return
 
-    # --- Thread detection ---
-    thread_parent = await _find_thread(from_email, subject, message_id_header)
+    # --- Thread: get or create ---
+    # We don't have customer match yet, so create thread with just email/subject
+    # Customer info will be added after classification
+    thread = await get_or_create_thread(from_email, subject)
     thread_context = ""
     existing_action_descriptions = []
-    if thread_parent:
-        logger.info(f"Thread detected: reply to message {thread_parent.id[:8]}")
-        # Build thread context for Claude
-        thread_context = f"\n\n=== THIS IS A FOLLOW-UP ===\nThis email is a reply in an existing thread. Previous message status: {thread_parent.status}."
-        if thread_parent.final_response:
-            thread_context += f"\nOur last reply: {thread_parent.final_response[:300]}"
-        elif thread_parent.draft_response:
-            thread_context += f"\nDraft (not yet sent): {thread_parent.draft_response[:300]}"
-        thread_context += "\nDo NOT create duplicate action items. Only add new actions if this email introduces genuinely new work."
-        # Get existing actions to prevent duplicates
-        existing_action_descriptions = await _get_thread_open_actions(thread_parent)
+
+    # Build thread context from existing messages
+    if thread.message_count > 0:
+        async with get_db_context() as db:
+            prev_msgs = (await db.execute(
+                select(AgentMessage)
+                .where(AgentMessage.thread_id == thread.id)
+                .order_by(desc(AgentMessage.received_at))
+                .limit(5)
+            )).scalars().all()
+
+            if prev_msgs:
+                logger.info(f"Thread {thread.id[:8]}: {thread.message_count} existing messages")
+                thread_context = "\n\n=== THIS IS A FOLLOW-UP IN AN EXISTING THREAD ==="
+                for pm in reversed(prev_msgs):
+                    direction = "Client" if pm.direction == "inbound" else "Us"
+                    thread_context += f"\n[{direction}] {pm.subject}: {(pm.body or '')[:200]}"
+                    if pm.final_response and pm.direction == "inbound":
+                        thread_context += f"\n[Us] Reply: {pm.final_response[:200]}"
+                thread_context += "\nDo NOT create duplicate action items. Only add new actions if this email introduces genuinely new work."
+                existing_action_descriptions = await _get_thread_open_actions(thread.id)
 
     # Classify and draft
     result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
@@ -838,13 +935,25 @@ async def process_incoming_email(uid: str, msg):
                 urgency="low",
                 status="ignored",
                 customer_name=result.get("customer_name"),
+                thread_id=thread.id,
             )
             db.add(agent_msg)
             await db.commit()
+        await update_thread_status(thread.id)
         return
 
     # Save to DB
     async with get_db_context() as db:
+        # Update thread with customer info from classification
+        thread_obj = (await db.execute(select(AgentThread).where(AgentThread.id == thread.id))).scalar_one_or_none()
+        if thread_obj:
+            if result.get("_matched_customer_id") and not thread_obj.matched_customer_id:
+                thread_obj.matched_customer_id = result["_matched_customer_id"]
+            if result.get("customer_name") and not thread_obj.customer_name:
+                thread_obj.customer_name = result["customer_name"]
+            if result.get("_property_address") and not thread_obj.property_address:
+                thread_obj.property_address = result["_property_address"]
+
         agent_msg = AgentMessage(
             email_uid=uid,
             direction="inbound",
@@ -861,6 +970,7 @@ async def process_incoming_email(uid: str, msg):
             customer_name=result.get("customer_name"),
             property_address=result.get("_property_address"),
             notes=result.get("internal_note"),
+            thread_id=thread.id,
         )
         db.add(agent_msg)
         await db.flush()
@@ -890,6 +1000,7 @@ async def process_incoming_email(uid: str, msg):
             due_date = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
             db.add(AgentAction(
                 agent_message_id=agent_msg.id,
+                thread_id=thread.id,
                 action_type=action.get("action_type", "other"),
                 description=action["description"],
                 due_date=due_date,
@@ -931,6 +1042,9 @@ async def process_incoming_email(uid: str, msg):
                 if _is_business_hours() and not _should_throttle_alert(f"auto_{from_email}"):
                     for number in APPROVAL_NUMBERS:
                         await send_sms(number, f"📤 Auto-replied to {from_email}: {result.get('summary', subject)[:100]}")
+
+    # Update thread status
+    await update_thread_status(thread.id)
 
 
 async def handle_sms_reply(from_number: str, body: str):

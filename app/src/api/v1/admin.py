@@ -1333,6 +1333,12 @@ async def add_action_comment(
             customer_context = ""
             customer_id = None
 
+            # First: use job's own address if it has one (may differ from customer record)
+            if action.property_address:
+                customer_context += f"\nJob address: {action.property_address}"
+            if action.customer_name:
+                customer_context += f"\nJob contact: {action.customer_name}"
+
             # Try to find customer from linked message
             if action.agent_message_id:
                 msg_check = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id, AgentMessage.organization_id == ctx.organization_id))
@@ -1390,17 +1396,19 @@ async def add_action_comment(
 
             if customer_context:
                 # Ask Claude if the comment asks for info we have
-                info_prompt = f"""A team member commented on a job. Does their comment ask for information that's available in our database?
+                info_prompt = f"""A team member commented on a job. Does their comment ask for information that's available?
 
 Job: {action.description}
 Comment: {body.text.strip()}
 
-Customer data on file:{customer_context}
+Available data:{customer_context}
 
-If the comment asks for info we already have (address, phone, gate code, service day, equipment, etc.), respond with JSON:
-{{"has_answer": true, "answer": "the relevant info from the database, formatted naturally"}}
+IMPORTANT: The job may be for a different address than the customer record (e.g., a property manager's personal home vs their managed property). If the job has its own address, use that — not the customer's commercial property address.
 
-If the comment doesn't ask for info, or we don't have what they need:
+If the comment asks for info we have (address, phone, gate code, service day, equipment, etc.), respond with JSON:
+{{"has_answer": true, "answer": "the relevant info, formatted naturally"}}
+
+If the comment doesn't ask for info, or the info isn't available, or the job address differs from customer records and we don't have the right address:
 {{"has_answer": false}}
 
 Only answer with data that directly addresses what was asked. Don't volunteer unrelated info."""

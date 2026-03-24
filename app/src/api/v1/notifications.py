@@ -18,6 +18,7 @@ async def get_unread_count(
 ):
     count = (await db.execute(
         select(func.count(Notification.id)).where(
+            Notification.organization_id == ctx.organization_id,
             Notification.user_id == ctx.user.id,
             Notification.is_read == False,
         )
@@ -33,7 +34,7 @@ async def list_notifications(
 ):
     result = await db.execute(
         select(Notification)
-        .where(Notification.user_id == ctx.user.id)
+        .where(Notification.organization_id == ctx.organization_id, Notification.user_id == ctx.user.id)
         .order_by(desc(Notification.created_at))
         .limit(limit)
     )
@@ -58,7 +59,7 @@ async def mark_all_read(
 ):
     await db.execute(
         update(Notification)
-        .where(Notification.user_id == ctx.user.id, Notification.is_read == False)
+        .where(Notification.organization_id == ctx.organization_id, Notification.user_id == ctx.user.id, Notification.is_read == False)
         .values(is_read=True)
     )
     await db.commit()
@@ -74,6 +75,7 @@ async def mark_read(
     result = await db.execute(
         select(Notification).where(
             Notification.id == notification_id,
+            Notification.organization_id == ctx.organization_id,
             Notification.user_id == ctx.user.id,
         )
     )

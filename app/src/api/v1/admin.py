@@ -1327,6 +1327,7 @@ Only answer with data that directly addresses what was asked. Don't volunteer un
                     if info_data.get("has_answer") and info_data.get("answer"):
                         # Post an auto-comment with the info
                         auto_reply = AgentActionComment(
+                            organization_id=ctx.organization_id,
                             action_id=action_id,
                             author="DeepBlue",
                             text=info_data["answer"],
@@ -1432,7 +1433,7 @@ async def draft_followup(
     import os
     from sqlalchemy.orm import selectinload
 
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -1441,7 +1442,7 @@ async def draft_followup(
     actions_result = await db.execute(
         select(AgentAction)
         .options(selectinload(AgentAction.comments))
-        .where(AgentAction.agent_message_id == message_id)
+        .where(AgentAction.agent_message_id == message_id, AgentAction.organization_id == ctx.organization_id)
     )
     all_actions = actions_result.scalars().all()
 
@@ -1513,7 +1514,7 @@ async def send_followup(
     from datetime import datetime, timezone
     from src.services.customer_agent import send_email_response
 
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -1540,6 +1541,7 @@ async def send_followup(
         .options(selectinload(AgentAction.comments))
         .where(
             AgentAction.agent_message_id == message_id,
+            AgentAction.organization_id == ctx.organization_id,
             AgentAction.status.in_(("open", "in_progress")),
         )
     )
@@ -1626,13 +1628,13 @@ async def draft_invoice_from_action(
     result = await db.execute(
         select(AgentAction)
         .options(selectinload(AgentAction.comments))
-        .where(AgentAction.id == action_id)
+        .where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id)
     )
     action = result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
-    msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+    msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = msg_result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Parent message not found")
@@ -1730,7 +1732,7 @@ async def revise_draft(
     import anthropic
     import os
 
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")

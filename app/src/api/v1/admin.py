@@ -237,7 +237,7 @@ async def list_agent_messages(
     db: AsyncSession = Depends(get_db),
 ):
     """List agent messages with pagination."""
-    base = select(AgentMessage)
+    base = select(AgentMessage).where(AgentMessage.organization_id == ctx.organization_id)
     if status:
         base = base.where(AgentMessage.status == status)
     if category:
@@ -273,40 +273,43 @@ async def get_agent_stats(
     """Agent message statistics."""
     from datetime import datetime, timezone, timedelta
 
-    total = (await db.execute(select(func.count(AgentMessage.id)))).scalar() or 0
+    org_filter = AgentMessage.organization_id == ctx.organization_id
+    total = (await db.execute(select(func.count(AgentMessage.id)).where(org_filter))).scalar() or 0
 
     status_counts = {}
     for s in ("pending", "sent", "auto_sent", "rejected", "ignored"):
         c = (await db.execute(
-            select(func.count(AgentMessage.id)).where(AgentMessage.status == s)
+            select(func.count(AgentMessage.id)).where(org_filter, AgentMessage.status == s)
         )).scalar() or 0
         status_counts[s] = c
 
     cat_result = await db.execute(
         select(AgentMessage.category, func.count(AgentMessage.id))
-        .where(AgentMessage.category.isnot(None))
+        .where(org_filter, AgentMessage.category.isnot(None))
         .group_by(AgentMessage.category)
     )
     by_category = {row[0]: row[1] for row in cat_result.all()}
 
     urg_result = await db.execute(
         select(AgentMessage.urgency, func.count(AgentMessage.id))
-        .where(AgentMessage.urgency.isnot(None))
+        .where(org_filter, AgentMessage.urgency.isnot(None))
         .group_by(AgentMessage.urgency)
     )
     by_urgency = {row[0]: row[1] for row in urg_result.all()}
 
     since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
     recent = (await db.execute(
-        select(func.count(AgentMessage.id)).where(AgentMessage.received_at >= since_24h)
+        select(func.count(AgentMessage.id)).where(org_filter, AgentMessage.received_at >= since_24h)
     )).scalar() or 0
 
     # Action item counts
+    action_org = AgentAction.organization_id == ctx.organization_id
     open_actions = (await db.execute(
-        select(func.count(AgentAction.id)).where(AgentAction.status.in_(("open", "in_progress")))
+        select(func.count(AgentAction.id)).where(action_org, AgentAction.status.in_(("open", "in_progress")))
     )).scalar() or 0
     overdue_actions = (await db.execute(
         select(func.count(AgentAction.id)).where(
+            action_org,
             AgentAction.status.in_(("open", "in_progress")),
             AgentAction.due_date < datetime.now(timezone.utc),
         )
@@ -316,7 +319,7 @@ async def get_agent_stats(
     from sqlalchemy import extract
     avg_result = await db.execute(
         select(func.avg(extract("epoch", AgentMessage.sent_at) - extract("epoch", AgentMessage.received_at)))
-        .where(AgentMessage.status.in_(("sent", "auto_sent")), AgentMessage.sent_at.isnot(None))
+        .where(org_filter, AgentMessage.status.in_(("sent", "auto_sent")), AgentMessage.sent_at.isnot(None))
     )
     avg_response_sec = avg_result.scalar()
 
@@ -324,6 +327,7 @@ async def get_agent_stats(
     stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
     stale_pending = (await db.execute(
         select(func.count(AgentMessage.id)).where(
+            org_filter,
             AgentMessage.status == "pending",
             AgentMessage.received_at < stale_cutoff,
         )
@@ -373,14 +377,14 @@ async def get_agent_message(
     db: AsyncSession = Depends(get_db),
 ):
     """Get full agent message detail."""
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
     d = _serialize_agent_msg(msg, include_body=True)
     # Include actions
     actions_result = await db.execute(
-        select(AgentAction).where(AgentAction.agent_message_id == message_id).order_by(AgentAction.created_at)
+        select(AgentAction).where(AgentAction.agent_message_id == message_id, AgentAction.organization_id == ctx.organization_id).order_by(AgentAction.created_at)
     )
     d["actions"] = [_serialize_action(a) for a in actions_result.scalars().all()]
     # Response time
@@ -417,7 +421,7 @@ async def approve_agent_message(
     from datetime import datetime, timezone
     from src.services.customer_agent import send_email_response
 
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -456,7 +460,7 @@ async def reject_agent_message(
     """Reject an agent message."""
     from datetime import datetime, timezone
 
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -478,7 +482,7 @@ async def dismiss_agent_message(
     db: AsyncSession = Depends(get_db),
 ):
     """Dismiss a message — no reply needed, keeps action items open."""
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -500,14 +504,14 @@ async def delete_agent_message(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a message and its actions entirely — for test/spam that got through."""
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
 
     # Delete associated actions first
     actions_result = await db.execute(
-        select(AgentAction).where(AgentAction.agent_message_id == message_id)
+        select(AgentAction).where(AgentAction.agent_message_id == message_id, AgentAction.organization_id == ctx.organization_id)
     )
     for action in actions_result.scalars().all():
         await db.delete(action)
@@ -566,7 +570,7 @@ async def list_threads(
     db: AsyncSession = Depends(get_db),
 ):
     """List conversation threads."""
-    base = select(AgentThread)
+    base = select(AgentThread).where(AgentThread.organization_id == ctx.organization_id)
     if status == "pending":
         base = base.where(AgentThread.has_pending == True)
     elif status == "handled":
@@ -622,22 +626,24 @@ async def get_thread_stats(
     """Thread-level stats."""
     from datetime import datetime, timezone, timedelta
 
-    total = (await db.execute(select(func.count(AgentThread.id)))).scalar() or 0
+    thread_org = AgentThread.organization_id == ctx.organization_id
+    total = (await db.execute(select(func.count(AgentThread.id)).where(thread_org))).scalar() or 0
     pending = (await db.execute(
-        select(func.count(AgentThread.id)).where(AgentThread.has_pending == True)
+        select(func.count(AgentThread.id)).where(thread_org, AgentThread.has_pending == True)
     )).scalar() or 0
 
     # Stale: pending threads where last_message_at > 30 min ago
     stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
     stale = (await db.execute(
         select(func.count(AgentThread.id)).where(
+            thread_org,
             AgentThread.has_pending == True,
             AgentThread.last_message_at < stale_cutoff,
         )
     )).scalar() or 0
 
     open_actions = (await db.execute(
-        select(func.count(AgentAction.id)).where(AgentAction.status.in_(("open", "in_progress")))
+        select(func.count(AgentAction.id)).where(AgentAction.organization_id == ctx.organization_id, AgentAction.status.in_(("open", "in_progress")))
     )).scalar() or 0
 
     return {
@@ -657,7 +663,7 @@ async def get_thread(
     """Get thread with full conversation timeline."""
     from sqlalchemy.orm import selectinload
 
-    result = await db.execute(select(AgentThread).where(AgentThread.id == thread_id))
+    result = await db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == ctx.organization_id))
     thread = result.scalar_one_or_none()
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -665,7 +671,7 @@ async def get_thread(
     # Get all messages in thread
     msgs_result = await db.execute(
         select(AgentMessage)
-        .where(AgentMessage.thread_id == thread_id)
+        .where(AgentMessage.thread_id == thread_id, AgentMessage.organization_id == ctx.organization_id)
         .order_by(AgentMessage.received_at)
     )
     messages = msgs_result.scalars().all()
@@ -718,7 +724,7 @@ async def get_thread(
     actions_result = await db.execute(
         select(AgentAction)
         .options(selectinload(AgentAction.comments))
-        .where(AgentAction.thread_id == thread_id)
+        .where(AgentAction.thread_id == thread_id, AgentAction.organization_id == ctx.organization_id)
         .order_by(AgentAction.created_at)
     )
     actions = [_serialize_action(a, include_comments=True) for a in actions_result.scalars().all()]
@@ -755,7 +761,7 @@ async def approve_thread(
     # Find the latest pending inbound message in this thread
     result = await db.execute(
         select(AgentMessage)
-        .where(AgentMessage.thread_id == thread_id, AgentMessage.status == "pending", AgentMessage.direction == "inbound")
+        .where(AgentMessage.thread_id == thread_id, AgentMessage.organization_id == ctx.organization_id, AgentMessage.status == "pending", AgentMessage.direction == "inbound")
         .order_by(desc(AgentMessage.received_at))
         .limit(1)
     )
@@ -780,6 +786,7 @@ async def approve_thread(
 
     # Create outbound message row
     outbound = AgentMessage(
+        organization_id=ctx.organization_id,
         direction="outbound",
         from_email=os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com"),
         to_email=msg.from_email,
@@ -816,6 +823,7 @@ async def dismiss_thread(
     result = await db.execute(
         select(AgentMessage).where(
             AgentMessage.thread_id == thread_id,
+            AgentMessage.organization_id == ctx.organization_id,
             AgentMessage.status == "pending",
         )
     )
@@ -839,7 +847,7 @@ async def send_thread_followup(
     from datetime import datetime, timezone
     from src.services.customer_agent import send_email_response, update_thread_status
 
-    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == ctx.organization_id))).scalar_one_or_none()
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -853,6 +861,7 @@ async def send_thread_followup(
 
     now = datetime.now(timezone.utc)
     outbound = AgentMessage(
+        organization_id=ctx.organization_id,
         direction="outbound",
         from_email=os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com"),
         to_email=thread.contact_email,
@@ -882,7 +891,7 @@ async def revise_thread_draft(
     """Revise the draft on the latest pending message in a thread."""
     import anthropic, os
 
-    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == ctx.organization_id))).scalar_one_or_none()
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -924,13 +933,13 @@ async def draft_thread_followup(
     import anthropic, os
     from sqlalchemy.orm import selectinload
 
-    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == ctx.organization_id))).scalar_one_or_none()
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
 
     # Get conversation
     msgs = (await db.execute(
-        select(AgentMessage).where(AgentMessage.thread_id == thread_id).order_by(AgentMessage.received_at)
+        select(AgentMessage).where(AgentMessage.thread_id == thread_id, AgentMessage.organization_id == ctx.organization_id).order_by(AgentMessage.received_at)
     )).scalars().all()
 
     convo = ""
@@ -940,7 +949,7 @@ async def draft_thread_followup(
 
     # Get actions + comments
     actions_result = await db.execute(
-        select(AgentAction).options(selectinload(AgentAction.comments)).where(AgentAction.thread_id == thread_id)
+        select(AgentAction).options(selectinload(AgentAction.comments)).where(AgentAction.thread_id == thread_id, AgentAction.organization_id == ctx.organization_id)
     )
     actions_ctx = ""
     for a in actions_result.scalars().all():
@@ -993,7 +1002,7 @@ async def list_agent_actions(
     """List jobs — both email-linked and standalone."""
     query = select(AgentAction, AgentMessage).outerjoin(
         AgentMessage, AgentAction.agent_message_id == AgentMessage.id
-    ).order_by(
+    ).where(AgentAction.organization_id == ctx.organization_id).order_by(
         # Open first, then by due date
         desc(AgentAction.status.in_(("open", "in_progress"))),
         AgentAction.due_date.asc().nulls_last(),
@@ -1043,6 +1052,7 @@ async def create_agent_action(
     from datetime import datetime, timezone
     due = datetime.fromisoformat(body.due_date) if body.due_date else None
     action = AgentAction(
+        organization_id=ctx.organization_id,
         agent_message_id=body.agent_message_id or None,
         action_type=body.action_type,
         description=body.description,
@@ -1076,7 +1086,7 @@ async def update_agent_action(
 ):
     """Update an action item (status, assignment, etc)."""
     from datetime import datetime, timezone
-    result = await db.execute(select(AgentAction).where(AgentAction.id == action_id))
+    result = await db.execute(select(AgentAction).where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id))
     action = result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
@@ -1110,6 +1120,7 @@ async def update_agent_action(
                 due_days = rec.get("due_days", 3)
                 due_date = datetime.now(timezone.utc) + __import__("datetime").timedelta(days=due_days) if due_days else None
                 suggested = AgentAction(
+                    organization_id=ctx.organization_id,
                     agent_message_id=rec["agent_message_id"],
                     action_type=rec["action_type"],
                     description=rec["description"],
@@ -1145,7 +1156,7 @@ async def get_agent_action(
     result = await db.execute(
         select(AgentAction)
         .options(selectinload(AgentAction.comments))
-        .where(AgentAction.id == action_id)
+        .where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id)
     )
     action = result.scalar_one_or_none()
     if not action:
@@ -1200,12 +1211,13 @@ async def add_action_comment(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a comment to an action item."""
-    result = await db.execute(select(AgentAction).where(AgentAction.id == action_id))
+    result = await db.execute(select(AgentAction).where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id))
     action = result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
     comment = AgentActionComment(
+        organization_id=ctx.organization_id,
         action_id=action_id,
         author=f"{ctx.user.first_name} {ctx.user.last_name}",
         text=body.text.strip(),
@@ -1231,6 +1243,7 @@ async def add_action_comment(
         assignee_ou = ou_result.scalar_one_or_none()
         if assignee_ou:
             db.add(Notification(
+                organization_id=ctx.organization_id,
                 user_id=assignee_ou.user_id,
                 type="action_comment",
                 title=f"Comment on: {action.description[:60]}",

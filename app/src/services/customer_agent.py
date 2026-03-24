@@ -174,6 +174,7 @@ def _make_thread_key(contact_email: str, subject: str) -> str:
 
 async def get_or_create_thread(
     contact_email: str, subject: str,
+    organization_id: str = "",
     customer_id: str | None = None, customer_name: str | None = None,
     property_address: str | None = None, category: str | None = None,
     urgency: str | None = None,
@@ -191,6 +192,7 @@ async def get_or_create_thread(
 
         if not thread:
             thread = AgentThread(
+                organization_id=organization_id,
                 thread_key=thread_key,
                 contact_email=contact_email,
                 subject=subject,
@@ -866,7 +868,7 @@ async def notify_others(approver: str, summary: str):
             await send_sms(number, f"✅ {approver_name} handled: {summary[:100]}")
 
 
-async def process_incoming_email(uid: str, msg):
+async def process_incoming_email(uid: str, msg, organization_id: str = ""):
     """Process a single incoming email."""
     from_header = decode_email_header(msg.get("From", ""))
     subject = decode_email_header(msg.get("Subject", ""))
@@ -898,7 +900,7 @@ async def process_incoming_email(uid: str, msg):
     # --- Thread: get or create ---
     # We don't have customer match yet, so create thread with just email/subject
     # Customer info will be added after classification
-    thread = await get_or_create_thread(from_email, subject)
+    thread = await get_or_create_thread(from_email, subject, organization_id=organization_id)
     thread_context = ""
     existing_action_descriptions = []
 
@@ -931,6 +933,7 @@ async def process_incoming_email(uid: str, msg):
         logger.info(f"Skipping {category}: {subject}")
         async with get_db_context() as db:
             agent_msg = AgentMessage(
+                organization_id=organization_id,
                 email_uid=uid,
                 direction="inbound",
                 from_email=from_email,
@@ -961,6 +964,7 @@ async def process_incoming_email(uid: str, msg):
                 thread_obj.property_address = result["_property_address"]
 
         agent_msg = AgentMessage(
+            organization_id=organization_id,
             email_uid=uid,
             direction="inbound",
             from_email=from_email,
@@ -1005,6 +1009,7 @@ async def process_incoming_email(uid: str, msg):
             due_days = action.get("due_days", 3)
             due_date = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
             db.add(AgentAction(
+                organization_id=organization_id,
                 agent_message_id=agent_msg.id,
                 thread_id=thread.id,
                 action_type=action.get("action_type", "other"),
@@ -1354,14 +1359,35 @@ def mark_processed(uid: str):
         logger.error(f"Failed to mark processed {uid}: {e}")
 
 
+async def _get_default_org_id() -> str:
+    """Get the first active org with agent enabled. Falls back to first org."""
+    from src.models.organization import Organization
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(Organization).where(Organization.agent_enabled == True).order_by(Organization.created_at).limit(1)
+        )
+        org = result.scalar_one_or_none()
+        if org:
+            return org.id
+        # Fallback
+        result = await db.execute(select(Organization).order_by(Organization.created_at).limit(1))
+        org = result.scalar_one_or_none()
+        return org.id if org else ""
+
+
 async def run_poll_cycle():
     """Single poll cycle — check for new emails and process them."""
+    org_id = await _get_default_org_id()
+    if not org_id:
+        logger.error("No organization found — cannot process emails")
+        return 0
+
     messages = poll_inbox()
     if messages:
         logger.info(f"Found {len(messages)} new emails")
         for uid, msg in messages:
             try:
-                await process_incoming_email(uid, msg)
+                await process_incoming_email(uid, msg, organization_id=org_id)
                 mark_processed(uid)
             except Exception as e:
                 logger.error(f"Error processing email {uid}: {e}")

@@ -802,7 +802,7 @@ async def add_action_comment(
                 type="action_comment",
                 title=f"Comment on: {action.description[:60]}",
                 body=f"{ctx.user.first_name}: {body.text.strip()[:100]}",
-                link="/inbox",
+                link=f"/jobs?action={action_id}",
             ))
 
     await db.commit()

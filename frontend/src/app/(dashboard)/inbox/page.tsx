@@ -135,7 +135,7 @@ interface AgentStats {
   stale_pending: number;
 }
 
-const STATUS_FILTERS = ["all", "clients", "pending", "sent", "auto_sent", "ignored"] as const;
+const STATUS_FILTERS = ["clients", "all", "sent", "auto_sent", "ignored"] as const;
 const ACTION_TYPES = ["follow_up", "bid", "schedule_change", "site_visit", "callback", "repair", "equipment", "other"];
 // Dynamic team member list
 let _cachedTeam: string[] | null = null;
@@ -617,8 +617,8 @@ function MessageDetail({
         </div>
       </div>
 
-      {/* Draft response */}
-      {msg.draft_response && (
+      {/* Draft response — only show for pending messages */}
+      {msg.draft_response && msg.status === "pending" && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -686,8 +686,8 @@ function MessageDetail({
         </div>
       )}
 
-      {/* Final response (if different from draft) */}
-      {msg.final_response && msg.final_response !== msg.draft_response && (
+      {/* Sent response */}
+      {msg.final_response && msg.status !== "pending" && (
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Sent Response</p>
           <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-md p-3 text-sm whitespace-pre-wrap">
@@ -1452,8 +1452,9 @@ export default function AgentPage() {
   const [totalMessages, setTotalMessages] = useState(0);
   const [page, setPage] = useState(0);
   const [stats, setStats] = useState<AgentStats | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<AgentMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("pending");
+  const [statusFilter, setStatusFilter] = useState<string>("clients");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -1471,13 +1472,15 @@ export default function AgentPage() {
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(page * PAGE_SIZE));
       const qs = params.toString();
-      const [paginated, st] = await Promise.all([
+      const [paginated, st, pending] = await Promise.all([
         api.get<PaginatedMessages>(`/v1/admin/agent-messages?${qs}`),
         api.get<AgentStats>("/v1/admin/agent-stats"),
+        api.get<PaginatedMessages>("/v1/admin/agent-messages?status=pending&limit=10").catch(() => ({ items: [], total: 0, limit: 10, offset: 0 })),
       ]);
       setMessages(paginated.items);
       setTotalMessages(paginated.total);
       setStats(st);
+      setPendingMessages(pending.items);
     } catch {
       toast.error("Failed to load agent data");
     } finally {
@@ -1564,6 +1567,43 @@ export default function AgentPage() {
             </div>
           </div>
 
+          {/* Pending section */}
+          {pendingMessages.length > 0 && statusFilter !== "pending" && (
+            <Card className="shadow-sm border-l-4 border-amber-400">
+              <CardHeader className="pb-2 pt-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  <CardTitle className="text-sm font-medium">Needs Attention ({pendingMessages.length})</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0 pb-2">
+                <div className="divide-y">
+                  {pendingMessages.map((m) => {
+                    const stale = isStale(m.received_at);
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex items-center gap-3 py-2 cursor-pointer hover:bg-muted/50 rounded px-1 ${stale ? "bg-red-50 dark:bg-red-950/20" : ""}`}
+                        onClick={() => setSelectedId(m.id)}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">{m.customer_name || m.from_email}</span>
+                            <CategoryBadge category={m.category} />
+                            <UrgencyBadge urgency={m.urgency} />
+                            {stale && <AlertTriangle className="h-3 w-3 text-red-500 flex-shrink-0" />}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{m.subject}</p>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground flex-shrink-0">{formatTime(m.received_at)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Message table */}
           <Card className="shadow-sm">
             <CardContent className="p-0">
@@ -1591,7 +1631,7 @@ export default function AgentPage() {
                         return (
                           <TableRow
                             key={m.id}
-                            className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""} ${m.status === "pending" ? "font-medium" : ""} ${stale ? "!bg-red-50 dark:!bg-red-950/20" : ""}`}
+                            className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""} ${m.status === "pending" ? "font-medium border-l-3 border-amber-400" : ""} ${stale ? "!bg-red-50 dark:!bg-red-950/20" : ""}`}
                             onClick={() => setSelectedId(m.id)}
                           >
                             <TableCell className="text-sm text-muted-foreground">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
@@ -1027,13 +1028,14 @@ function ActionDetailSheet({
 
 export default function JobsPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const myName = user?.first_name || "";
   const teamMembers = useTeamMembers();
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [stats, setStats] = useState<AgentStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedActionId, setSelectedActionId] = useState<string | null>(
-    null
+    searchParams.get("action")
   );
   const [suggestion, setSuggestion] = useState<{
     id: string;
@@ -1437,19 +1439,6 @@ export default function JobsPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {!msgId.startsWith("standalone-") && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-muted-foreground hover:text-primary"
-                            title="View message"
-                            onClick={() =>
-                              window.open(`/inbox?msg=${msgId}`, "_self")
-                            }
-                          >
-                            <Mail className="h-3 w-3" />
-                          </Button>
-                        )}
                       </div>
                     </div>
                     {/* Actions under this event */}

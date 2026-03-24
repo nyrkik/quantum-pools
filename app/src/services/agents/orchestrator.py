@@ -88,6 +88,20 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
     body = extract_text_body(msg)
     message_id_header = msg.get("Message-ID", "")
 
+    # Parse actual email date
+    from email.utils import parsedate_to_datetime
+    email_date = None
+    try:
+        date_header = msg.get("Date", "")
+        if date_header:
+            email_date = parsedate_to_datetime(date_header)
+            if email_date.tzinfo is None:
+                email_date = email_date.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    if not email_date:
+        email_date = datetime.now(timezone.utc)
+
     # Extract email address from From header
     email_match = re.search(r"<(.+?)>", from_header)
     from_email = email_match.group(1) if email_match else from_header
@@ -157,6 +171,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 urgency="low",
                 status="ignored",
                 customer_name=result.get("customer_name"),
+                received_at=email_date,
                 thread_id=thread.id,
             )
             db.add(agent_msg)
@@ -188,6 +203,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             urgency=result.get("urgency", "medium"),
             draft_response=result.get("draft_response"),
             status="pending",
+            received_at=email_date,
             matched_customer_id=result.get("_matched_customer_id"),
             match_method=result.get("_match_method"),
             customer_name=result.get("customer_name"),

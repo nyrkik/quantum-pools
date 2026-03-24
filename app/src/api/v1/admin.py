@@ -816,6 +816,55 @@ async def send_followup(
     return {"sent": True, "to": msg.from_email}
 
 
+class ReviseDraftBody(BaseModel):
+    draft: str
+    instruction: str
+
+
+@router.post("/agent-messages/{message_id}/revise-draft")
+async def revise_draft(
+    message_id: str,
+    body: ReviseDraftBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revise a draft based on user instruction."""
+    import anthropic
+    import os
+
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    prompt = f"""Revise this email draft based on the instruction below.
+
+Original email from {msg.from_email}:
+Subject: {msg.subject}
+
+Current draft:
+{body.draft}
+
+Instruction: {body.instruction}
+
+Rules:
+- Apply the instruction to the draft
+- Keep the same general structure and signature
+- Never admit fault or accept blame
+- Return ONLY the revised email text, nothing else"""
+
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"draft": response.content[0].text.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to revise: {str(e)}")
+
+
 # --- Twilio SMS Webhook ---
 
 from fastapi import Request, Response

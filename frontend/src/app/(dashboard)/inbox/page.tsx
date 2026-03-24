@@ -355,6 +355,8 @@ function MessageDetail({
   const [followUpText, setFollowUpText] = useState("");
   const [draftingFollowUp, setDraftingFollowUp] = useState(false);
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
+  const [reviseInstruction, setReviseInstruction] = useState("");
+  const [revising, setRevising] = useState(false);
 
   const loadMsg = useCallback(() => {
     setLoading(true);
@@ -439,6 +441,23 @@ function MessageDetail({
       toast.error("Failed to send");
     } finally {
       setSendingFollowUp(false);
+    }
+  };
+
+  const handleRevise = async () => {
+    if (!reviseInstruction.trim() || !followUpText) return;
+    setRevising(true);
+    try {
+      const result = await api.post<{ draft: string }>(`/v1/admin/agent-messages/${messageId}/revise-draft`, {
+        draft: followUpText,
+        instruction: reviseInstruction,
+      });
+      setFollowUpText(result.draft);
+      setReviseInstruction("");
+    } catch {
+      toast.error("Failed to revise");
+    } finally {
+      setRevising(false);
     }
   };
 
@@ -729,12 +748,26 @@ function MessageDetail({
               className="text-sm"
             />
           </div>
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <Input
+                value={reviseInstruction}
+                onChange={(e) => setReviseInstruction(e.target.value)}
+                placeholder="Tell AI how to change it..."
+                className="text-sm h-8"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRevise(); } }}
+              />
+            </div>
+            <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
+              {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+            </Button>
+          </div>
           <div className="flex gap-2">
             <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
               {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
               Send Follow-up
             </Button>
-            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); }}>
+            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setReviseInstruction(""); }}>
               Cancel
             </Button>
           </div>
@@ -799,6 +832,8 @@ function ActionDetailSheet({
   const [followUpText, setFollowUpText] = useState("");
   const [draftingFollowUp, setDraftingFollowUp] = useState(false);
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
+  const [reviseInstruction, setReviseInstruction] = useState("");
+  const [revising, setRevising] = useState(false);
 
   const handleDraftFollowUp = async () => {
     if (!detail) return;
@@ -827,6 +862,23 @@ function ActionDetailSheet({
       toast.error("Failed to send");
     } finally {
       setSendingFollowUp(false);
+    }
+  };
+
+  const handleRevise = async () => {
+    if (!detail || !reviseInstruction.trim() || !followUpText) return;
+    setRevising(true);
+    try {
+      const result = await api.post<{ draft: string }>(`/v1/admin/agent-messages/${detail.agent_message_id}/revise-draft`, {
+        draft: followUpText,
+        instruction: reviseInstruction,
+      });
+      setFollowUpText(result.draft);
+      setReviseInstruction("");
+    } catch {
+      toast.error("Failed to revise");
+    } finally {
+      setRevising(false);
     }
   };
 
@@ -948,12 +1000,26 @@ function ActionDetailSheet({
               className="text-sm"
             />
           </div>
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <Input
+                value={reviseInstruction}
+                onChange={(e) => setReviseInstruction(e.target.value)}
+                placeholder="Tell AI how to change it..."
+                className="text-sm h-8"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRevise(); } }}
+              />
+            </div>
+            <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
+              {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+            </Button>
+          </div>
           <div className="flex gap-2">
             <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
               {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
               Send
             </Button>
-            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); }}>
+            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setReviseInstruction(""); }}>
               Cancel
             </Button>
           </div>

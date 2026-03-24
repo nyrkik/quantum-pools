@@ -979,9 +979,13 @@ function ActionDetailSheet({
     if (!comment.trim()) return;
     setPosting(true);
     try {
-      await api.post(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
+      const result = await api.post<{ action_resolved?: boolean }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
       setComment("");
+      if (result.action_resolved) {
+        toast.success("Action marked complete — your comment resolved it");
+      }
       loadDetail();
+      onUpdate();
     } catch {
       toast.error("Failed to add comment");
     } finally {
@@ -1231,7 +1235,7 @@ export default function AgentPage() {
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <Card
             className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${stats.pending > 0 ? "border-l-4 border-amber-400" : ""} ${statusFilter === "pending" && activeTab === "inbox" ? "ring-2 ring-primary" : ""}`}
             onClick={() => { setActiveTab("inbox"); setStatusFilter("pending"); setPage(0); }}
@@ -1250,48 +1254,6 @@ export default function AgentPage() {
             </CardContent>
           </Card>
           <Card
-            className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${statusFilter === "sent" && activeTab === "inbox" ? "ring-2 ring-primary" : ""}`}
-            onClick={() => { setActiveTab("inbox"); setStatusFilter("sent"); setPage(0); }}
-          >
-            <CardHeader className="pb-0">
-              <div className="flex items-center gap-2">
-                <MailCheck className="h-4 w-4 text-green-500" />
-                <CardTitle className="text-sm font-medium">Sent</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{stats.sent}</p>
-            </CardContent>
-          </Card>
-          <Card
-            className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${statusFilter === "auto_sent" && activeTab === "inbox" ? "ring-2 ring-primary" : ""}`}
-            onClick={() => { setActiveTab("inbox"); setStatusFilter("auto_sent"); setPage(0); }}
-          >
-            <CardHeader className="pb-0">
-              <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-blue-500" />
-                <CardTitle className="text-sm font-medium">Auto-sent</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{stats.auto_sent}</p>
-            </CardContent>
-          </Card>
-          <Card
-            className="shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md"
-            onClick={() => { setActiveTab("inbox"); setStatusFilter("all"); setPage(0); }}
-          >
-            <CardHeader className="pb-0">
-              <div className="flex items-center gap-2">
-                <Timer className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-sm font-medium">Avg Response</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatDuration(stats.avg_response_seconds)}</p>
-            </CardContent>
-          </Card>
-          <Card
             className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${stats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""} ${activeTab === "actions" ? "ring-2 ring-primary" : ""}`}
             onClick={() => setActiveTab("actions")}
           >
@@ -1306,20 +1268,6 @@ export default function AgentPage() {
               {stats.overdue_actions > 0 && (
                 <p className="text-xs text-red-600 font-medium">{stats.overdue_actions} overdue</p>
               )}
-            </CardContent>
-          </Card>
-          <Card
-            className="shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md"
-            onClick={() => { setActiveTab("inbox"); setStatusFilter("all"); setPage(0); }}
-          >
-            <CardHeader className="pb-0">
-              <div className="flex items-center gap-2">
-                <Inbox className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-sm font-medium">Last 24h</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{stats.recent_24h}</p>
             </CardContent>
           </Card>
         </div>

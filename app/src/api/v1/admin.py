@@ -734,7 +734,66 @@ async def add_action_comment(
 
     await db.commit()
     await db.refresh(comment)
-    return {"id": comment.id, "author": comment.author, "text": comment.text, "created_at": comment.created_at.isoformat()}
+
+    # Evaluate if the comment resolves the action
+    resolved = False
+    if action.status in ("open", "in_progress"):
+        try:
+            import anthropic, os, re as re_mod, json as json_mod
+            from sqlalchemy.orm import selectinload
+
+            # Reload action with all comments
+            action_result = await db.execute(
+                select(AgentAction).options(selectinload(AgentAction.comments)).where(AgentAction.id == action_id)
+            )
+            action_full = action_result.scalar_one()
+
+            comments_text = "\n".join(f"- {c.author}: {c.text}" for c in action_full.comments)
+
+            eval_prompt = f"""An action item for a pool service company just received a new comment. Does this comment resolve/answer the action?
+
+Action: [{action_full.action_type}] {action_full.description}
+Assigned to: {action_full.assigned_to or 'unassigned'}
+
+Comments:
+{comments_text}
+
+Latest comment by {ctx.user.first_name}: {body.text.strip()}
+
+Respond with JSON:
+{{"resolved": true/false, "reason": "brief explanation"}}
+
+Rules:
+- "resolved" = true if the comment provides the answer, completes the task, or makes it clear no further work is needed
+- Examples: someone provides the requested info, confirms work is done, answers the question
+- If the comment is just a status update or partial info that doesn't fully resolve it, return false"""
+
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=100,
+                messages=[{"role": "user", "content": eval_prompt}],
+            )
+            json_match = re_mod.search(r"\{.*\}", response.content[0].text, re_mod.DOTALL)
+            if json_match:
+                result_data = json_mod.loads(json_match.group())
+                if result_data.get("resolved"):
+                    from datetime import datetime, timezone
+                    action.status = "done"
+                    action.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    resolved = True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Comment resolution eval failed: {e}")
+
+    return {
+        "id": comment.id,
+        "author": comment.author,
+        "text": comment.text,
+        "created_at": comment.created_at.isoformat(),
+        "action_resolved": resolved,
+    }
 
 
 @router.post("/agent-messages/{message_id}/draft-followup")

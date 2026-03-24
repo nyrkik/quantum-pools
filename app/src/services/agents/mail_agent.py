@@ -99,6 +99,46 @@ def decode_email_header(header):
     return " ".join(result)
 
 
+def strip_quoted_reply(text: str) -> str:
+    """Remove quoted reply chains from email body, keeping only the new content."""
+    if not text:
+        return text
+
+    # Pattern 1: "On <date>, <person> wrote:" (Apple Mail, Gmail)
+    match = re.search(r'\nOn .{10,80} wrote:\s*\n', text)
+    if match:
+        return text[:match.start()].strip()
+
+    # Pattern 2: "From: ... To: ... Date: ... Subject:" block (Outlook)
+    match = re.search(r'\nFrom:\s*.+\nTo:\s*.+\n(?:Date|Sent):\s*.+\nSubject:', text)
+    if match:
+        return text[:match.start()].strip()
+
+    # Pattern 3: "---------- Forwarded message" or "-------- Original Message"
+    match = re.search(r'\n-{3,}\s*(Forwarded|Original)\s', text)
+    if match:
+        return text[:match.start()].strip()
+
+    # Pattern 4: Line starting with ">" (traditional quoting)
+    lines = text.split('\n')
+    new_lines = []
+    hit_quote = False
+    for line in lines:
+        if line.strip().startswith('>'):
+            hit_quote = True
+            continue
+        if hit_quote and not line.strip():
+            continue  # Skip blank lines after quotes
+        if hit_quote:
+            break  # Stop at first non-quote, non-blank after quotes
+        new_lines.append(line)
+
+    if hit_quote and new_lines:
+        return '\n'.join(new_lines).strip()
+
+    return text
+
+
 def _clean_html(html: str) -> str:
     """Convert HTML to clean plain text."""
     from html import unescape
@@ -119,7 +159,8 @@ def _clean_html(html: str) -> str:
 
 
 def extract_text_body(msg) -> str:
-    """Extract plain text body from email message."""
+    """Extract plain text body from email message, stripping quoted reply chains."""
+    raw = ""
     if msg.is_multipart():
         for part in msg.walk():
             content_type = part.get_content_type()
@@ -127,20 +168,22 @@ def extract_text_body(msg) -> str:
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
-                    return payload.decode(charset, errors="replace")
-        # Fallback to HTML if no plain text
-        for part in msg.walk():
-            if part.get_content_type() == "text/html":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    return _clean_html(payload.decode(charset, errors="replace"))
+                    raw = payload.decode(charset, errors="replace")
+                    break
+        if not raw:
+            # Fallback to HTML if no plain text
+            for part in msg.walk():
+                if part.get_content_type() == "text/html":
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or "utf-8"
+                        raw = _clean_html(payload.decode(charset, errors="replace"))
+                        break
     else:
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or "utf-8"
             text = payload.decode(charset, errors="replace")
-            if msg.get_content_type() == "text/html":
-                return _clean_html(text)
-            return text
-    return ""
+            raw = _clean_html(text) if msg.get_content_type() == "text/html" else text
+
+    return strip_quoted_reply(raw) if raw else ""

@@ -117,7 +117,7 @@ interface PaginatedThreads {
 
 const PAGE_SIZE = 25;
 
-const STATUS_FILTERS = ["clients", "all", "handled", "ignored"] as const;
+const STATUS_FILTERS = ["clients", "all", "handled"] as const;
 
 // --- Helpers ---
 
@@ -610,14 +610,15 @@ export default function InboxPage() {
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE),
       offset: String(page * PAGE_SIZE),
-      exclude_spam: "true",
     });
     if (filter === "clients") {
-      // Show pending + handled threads (exclude ignored/spam)
+      params.set("exclude_spam", "true");
       params.set("exclude_ignored", "true");
-    } else if (filter === "handled") params.set("status", "handled");
-    else if (filter === "ignored") params.set("status", "ignored");
-    // "all" sends no status filter
+    } else if (filter === "handled") {
+      params.set("status", "handled");
+    } else if (filter === "all") {
+      params.set("exclude_spam", "false");
+    }
     if (search) params.set("search", search);
 
     api.get<PaginatedThreads>(`/v1/admin/agent-threads?${params}`)

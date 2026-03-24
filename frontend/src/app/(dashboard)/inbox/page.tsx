@@ -193,6 +193,31 @@ function CategoryBadge({ category }: { category: string | null }) {
   );
 }
 
+const COLLAPSE_THRESHOLD = 300; // chars before collapsing
+
+function CollapsibleBody({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > COLLAPSE_THRESHOLD;
+
+  if (!isLong) {
+    return <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>;
+  }
+
+  return (
+    <div>
+      <div className={`whitespace-pre-wrap text-sm leading-relaxed ${expanded ? "" : "line-clamp-4"}`}>
+        {text}
+      </div>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs text-primary hover:underline mt-1"
+      >
+        {expanded ? "Show less" : "Show more"}
+      </button>
+    </div>
+  );
+}
+
 // --- Thread Detail Sheet ---
 
 function ThreadDetailSheet({
@@ -427,9 +452,7 @@ function ThreadDetailSheet({
                 {msg.subject && (
                   <p className="text-xs font-medium text-muted-foreground">{msg.subject}</p>
                 )}
-                <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                  {msg.body || "No content"}
-                </div>
+                <CollapsibleBody text={msg.body || "No content"} />
               </div>
             </div>
           );
@@ -870,7 +893,7 @@ export default function InboxPage() {
 
       {/* Thread detail sheet */}
       <Sheet open={!!selectedThreadId} onOpenChange={(open) => { if (!open) setSelectedThreadId(null); }}>
-        <SheetContent className="w-full sm:max-w-lg flex flex-col h-full">
+        <SheetContent className="w-full sm:max-w-lg flex flex-col h-full px-4 sm:px-6">
           <SheetHeader className="flex-shrink-0">
             <SheetTitle className="text-base">Conversation</SheetTitle>
           </SheetHeader>

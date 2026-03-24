@@ -319,7 +319,7 @@ function ClientPropertySearch({
   );
 }
 
-// ─── Action Detail Sheet ────────────────────────────────────────────
+// ─── Job Detail Sheet ────────────────────────────────────────────
 
 function ActionDetailSheet({
   actionId,
@@ -527,8 +527,12 @@ function ActionDetailSheet({
         action_resolved?: boolean;
         action_updated?: boolean;
         new_description?: string;
+        auto_comment?: { author: string; text: string };
       }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
       setComment("");
+      if (result.auto_comment) {
+        toast.success(`QP Assistant: ${result.auto_comment.text.slice(0, 80)}`);
+      }
       if (result.action_resolved) {
         toast.success("Job marked complete — your comment resolved it");
       } else if (result.action_updated && result.new_description) {
@@ -1576,7 +1580,7 @@ export default function JobsPage() {
       >
         <SheetContent className="w-full sm:max-w-md flex flex-col h-full">
           <SheetHeader className="px-4 sm:px-6 flex-shrink-0">
-            <SheetTitle className="text-lg">Action Detail</SheetTitle>
+            <SheetTitle className="text-lg">Job Detail</SheetTitle>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6">
             {selectedActionId && (

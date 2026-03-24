@@ -805,6 +805,91 @@ async def add_action_comment(
     await db.commit()
     await db.refresh(comment)
 
+    # Auto-answer: check if the comment asks for info we have in the database
+    auto_comment = None
+    if action.status in ("open", "in_progress"):
+        try:
+            import anthropic, os, re as re_mod, json as json_mod
+            from sqlalchemy.orm import selectinload
+
+            # Get customer/property context for this action
+            customer_context = ""
+            customer_id = None
+            if action.agent_message_id:
+                msg_check = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+                parent_msg = msg_check.scalar_one_or_none()
+                if parent_msg and parent_msg.matched_customer_id:
+                    customer_id = parent_msg.matched_customer_id
+
+            if customer_id:
+                from src.models.customer import Customer as Cust
+                from src.models.property import Property as Prop
+                from src.models.water_feature import WaterFeature as WF
+
+                cust = (await db.execute(select(Cust).where(Cust.id == customer_id))).scalar_one_or_none()
+                if cust:
+                    customer_context += f"\nCustomer: {cust.display_name}"
+                    if cust.email: customer_context += f"\nEmail: {cust.email}"
+                    if cust.phone: customer_context += f"\nPhone: {cust.phone}"
+                    if cust.preferred_day: customer_context += f"\nService days: {cust.preferred_day}"
+                    if cust.monthly_rate: customer_context += f"\nRate: ${cust.monthly_rate:.2f}/mo"
+
+                    props = (await db.execute(select(Prop).where(Prop.customer_id == customer_id, Prop.is_active == True))).scalars().all()
+                    for p in props:
+                        customer_context += f"\nProperty: {p.full_address}"
+                        if p.gate_code: customer_context += f" (Gate: {p.gate_code})"
+                        if p.access_instructions: customer_context += f" Access: {p.access_instructions}"
+                        if p.dog_on_property: customer_context += " DOG"
+                        wfs = (await db.execute(select(WF).where(WF.property_id == p.id, WF.is_active == True))).scalars().all()
+                        for wf in wfs:
+                            parts = [wf.name or wf.water_type]
+                            if wf.pool_gallons: parts.append(f"{wf.pool_gallons:,} gal")
+                            if wf.filter_type: parts.append(f"filter: {wf.filter_type}")
+                            if wf.pump_type: parts.append(f"pump: {wf.pump_type}")
+                            if wf.sanitizer_type: parts.append(f"sanitizer: {wf.sanitizer_type}")
+                            customer_context += f"\n  {', '.join(parts)}"
+
+            if customer_context:
+                # Ask Claude if the comment asks for info we have
+                info_prompt = f"""A team member commented on a job. Does their comment ask for information that's available in our database?
+
+Job: {action.description}
+Comment: {body.text.strip()}
+
+Customer data on file:{customer_context}
+
+If the comment asks for info we already have (address, phone, gate code, service day, equipment, etc.), respond with JSON:
+{{"has_answer": true, "answer": "the relevant info from the database, formatted naturally"}}
+
+If the comment doesn't ask for info, or we don't have what they need:
+{{"has_answer": false}}
+
+Only answer with data that directly addresses what was asked. Don't volunteer unrelated info."""
+
+                ai_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+                info_response = ai_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": info_prompt}],
+                )
+                info_match = re_mod.search(r"\{.*\}", info_response.content[0].text, re_mod.DOTALL)
+                if info_match:
+                    info_data = json_mod.loads(info_match.group())
+                    if info_data.get("has_answer") and info_data.get("answer"):
+                        # Post an auto-comment with the info
+                        auto_reply = AgentActionComment(
+                            action_id=action_id,
+                            author="QP Assistant",
+                            text=info_data["answer"],
+                        )
+                        db.add(auto_reply)
+                        await db.commit()
+                        await db.refresh(auto_reply)
+                        auto_comment = {"author": "QP Assistant", "text": info_data["answer"]}
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Auto-answer failed: {e}")
+
     # Evaluate if the comment resolves the action
     resolved = False
     if action.status in ("open", "in_progress"):
@@ -883,6 +968,7 @@ Rules:
         "action_resolved": resolved,
         "action_updated": updated_desc is not None,
         "new_description": updated_desc,
+        "auto_comment": auto_comment,
     }
 
 

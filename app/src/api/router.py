@@ -21,6 +21,7 @@ from src.api.v1.billing import router as billing_router
 from src.api.v1.service_tiers import router as service_tiers_router
 from src.api.v1.notifications import router as notifications_router
 from src.api.v1.branding import router as branding_router
+from src.api.v1.agent_ops import router as agent_ops_router
 from src.api.v1.admin import router as admin_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -44,4 +45,5 @@ api_router.include_router(billing_router)
 api_router.include_router(service_tiers_router)
 api_router.include_router(notifications_router)
 api_router.include_router(branding_router)
+api_router.include_router(agent_ops_router)
 api_router.include_router(admin_router)

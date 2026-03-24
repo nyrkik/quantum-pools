@@ -43,6 +43,8 @@ from src.models.scraper_run import ScraperRun
 from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
+from src.services.agents.observability import AgentLog
+from src.services.agents.evals import AgentEvalCase, AgentEvalResult
 from src.models.notification import Notification
 
 __all__ = [

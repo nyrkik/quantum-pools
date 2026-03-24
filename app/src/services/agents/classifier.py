@@ -252,14 +252,18 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
 
     user_msg = f"From: {from_email}\nSubject: {subject}\n\n{body[:2000]}"
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=500,
-        system=full_system,
-        messages=[{"role": "user", "content": user_msg}],
-    )
+    from .observability import AgentTimer, log_agent_call
+    with AgentTimer() as timer:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            system=full_system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
 
     text = response.content[0].text
+    usage = response.usage
+
     # Parse JSON from response
     try:
         json_match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -286,6 +290,21 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
                     result["_matched_customer_id"] = customer_ctx["customer_id"]
                     result["_match_method"] = customer_ctx["match_method"]
                     result["_property_address"] = customer_ctx.get("property_address")
+            return result
+            # Log successful classification
+            import asyncio
+            asyncio.ensure_future(log_agent_call(
+                organization_id="",  # Set by orchestrator
+                agent_name="classifier",
+                action="classify_and_draft",
+                input_summary=f"{from_email}: {subject}",
+                output_summary=f"category={result.get('category')}, needs_approval={result.get('needs_approval')}",
+                success=True,
+                model="claude-haiku-4-5-20251001",
+                input_tokens=getattr(usage, 'input_tokens', None),
+                output_tokens=getattr(usage, 'output_tokens', None),
+                duration_ms=timer.duration_ms,
+            ))
             return result
     except json.JSONDecodeError:
         pass

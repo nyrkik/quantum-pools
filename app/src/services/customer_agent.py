@@ -1076,6 +1076,11 @@ async def evaluate_next_action(action_id: str) -> dict | None:
                 if customer.company_name:
                     customer_info += f" — {customer.company_name}"
 
+    # Check if a follow-up was recently sent
+    followup_note = ""
+    if msg.notes and "Follow-up sent" in msg.notes:
+        followup_note = f"\n\nIMPORTANT: A follow-up email was already sent to the client. Notes: {msg.notes}"
+
     prompt = f"""An action item was just completed for a pool service company. Based on the context, determine if there is a logical next step.
 
 Original email from {msg.from_email}:
@@ -1083,7 +1088,7 @@ Subject: {msg.subject}
 {msg.body[:500] if msg.body else 'No body'}
 {customer_info}
 
-Our response: {msg.final_response[:300] if msg.final_response else msg.draft_response[:300] if msg.draft_response else 'Not yet responded'}
+Our response: {msg.final_response[:300] if msg.final_response else msg.draft_response[:300] if msg.draft_response else 'Not yet responded'}{followup_note}
 
 Action items for this event:
 {chr(10).join(actions_summary)}
@@ -1102,6 +1107,7 @@ Respond with JSON:
 Rules:
 - Only recommend a next step if it's genuinely needed — don't create busywork
 - If all necessary work is covered by existing open actions, return has_next: false
+- If a follow-up email was already sent to the client about this issue, do NOT suggest calling or emailing them again about the same thing
 - Common patterns: site_visit done → report findings to client or schedule repair; repair done → follow up to confirm satisfaction; bid sent → follow up if no response in a few days
 - Keep description concise — one task, not multiple steps"""
 
@@ -1130,16 +1136,41 @@ Rules:
     return None
 
 
+QP_LABEL = "QP-Processed"
+_label_ensured = False
+
+
+def _ensure_label(client: IMAPClient):
+    """Create the QP-Processed label if it doesn't exist."""
+    global _label_ensured
+    if _label_ensured:
+        return
+    try:
+        folders = [f[2] for f in client.list_folders()]
+        if QP_LABEL not in folders:
+            client.create_folder(QP_LABEL)
+            logger.info(f"Created Gmail label: {QP_LABEL}")
+        _label_ensured = True
+    except Exception as e:
+        logger.error(f"Failed to ensure label: {e}")
+        _label_ensured = True  # Don't retry every cycle
+
+
 def poll_inbox():
-    """Connect to Gmail IMAP and fetch unread emails. Returns list of (uid, email.message)."""
+    """Connect to Gmail IMAP and fetch emails not yet processed by QP.
+    Uses a Gmail label instead of UNSEEN to avoid missing emails opened elsewhere."""
     messages = []
     try:
         client = IMAPClient(IMAP_HOST, ssl=True)
         client.login(GMAIL_USER, GMAIL_PASSWORD)
+
+        _ensure_label(client)
+
         client.select_folder("INBOX")
 
-        # Get unread messages
-        uids = client.search(["UNSEEN"])
+        # Search for emails NOT labeled QP-Processed
+        # Gmail IMAP uses X-GM-LABELS for label queries
+        uids = client.gmail_search(f"-label:{QP_LABEL} newer_than:2d")
         if not uids:
             client.logout()
             return []
@@ -1160,6 +1191,21 @@ def poll_inbox():
     return messages
 
 
+def mark_processed(uid: str):
+    """Add the QP-Processed label to a message after processing."""
+    try:
+        client = IMAPClient(IMAP_HOST, ssl=True)
+        client.login(GMAIL_USER, GMAIL_PASSWORD)
+        client.select_folder("INBOX")
+
+        # Add the label using Gmail's IMAP extension
+        client.add_gmail_labels([int(uid)], [QP_LABEL])
+
+        client.logout()
+    except Exception as e:
+        logger.error(f"Failed to mark processed {uid}: {e}")
+
+
 async def run_poll_cycle():
     """Single poll cycle — check for new emails and process them."""
     messages = poll_inbox()
@@ -1168,6 +1214,7 @@ async def run_poll_cycle():
         for uid, msg in messages:
             try:
                 await process_incoming_email(uid, msg)
+                mark_processed(uid)
             except Exception as e:
                 logger.error(f"Error processing email {uid}: {e}")
     return len(messages)

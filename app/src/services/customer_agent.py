@@ -210,6 +210,25 @@ def decode_email_header(header):
     return " ".join(result)
 
 
+def _clean_html(html: str) -> str:
+    """Convert HTML to clean plain text."""
+    from html import unescape
+    # Replace block elements with newlines
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</?(p|div|tr|li|h[1-6])[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Strip remaining tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Decode HTML entities (&nbsp; &amp; etc)
+    text = unescape(text)
+    # Collapse whitespace within lines but preserve line breaks
+    lines = text.split("\n")
+    lines = [" ".join(line.split()) for line in lines]
+    # Remove excessive blank lines
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def extract_text_body(msg) -> str:
     """Extract plain text body from email message."""
     if msg.is_multipart():
@@ -226,14 +245,15 @@ def extract_text_body(msg) -> str:
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
-                    html = payload.decode(charset, errors="replace")
-                    # Strip HTML tags roughly
-                    return re.sub(r"<[^>]+>", " ", html).strip()
+                    return _clean_html(payload.decode(charset, errors="replace"))
     else:
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or "utf-8"
-            return payload.decode(charset, errors="replace")
+            text = payload.decode(charset, errors="replace")
+            if msg.get_content_type() == "text/html":
+                return _clean_html(text)
+            return text
     return ""
 
 

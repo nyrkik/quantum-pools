@@ -357,6 +357,28 @@ function MessageDetail({
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [reviseInstruction, setReviseInstruction] = useState("");
   const [revising, setRevising] = useState(false);
+  const [draftReviseInstruction, setDraftReviseInstruction] = useState("");
+  const [draftRevising, setDraftRevising] = useState(false);
+
+  const handleReviseDraft = async () => {
+    if (!draftReviseInstruction.trim()) return;
+    const currentDraft = editText || msg?.draft_response || "";
+    if (!currentDraft) return;
+    setDraftRevising(true);
+    try {
+      const result = await api.post<{ draft: string }>(`/v1/admin/agent-messages/${messageId}/revise-draft`, {
+        draft: currentDraft,
+        instruction: draftReviseInstruction,
+      });
+      setEditText(result.draft);
+      setEditing(true);
+      setDraftReviseInstruction("");
+    } catch {
+      toast.error("Failed to revise");
+    } finally {
+      setDraftRevising(false);
+    }
+  };
 
   const loadMsg = useCallback(() => {
     setLoading(true);
@@ -588,15 +610,56 @@ function MessageDetail({
             )}
           </div>
           {editing ? (
-            <Textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={5}
-              className="text-sm"
-            />
+            <div className="space-y-2">
+              <Textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                rows={5}
+                className="text-sm"
+              />
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <Input
+                    value={draftReviseInstruction}
+                    onChange={(e) => setDraftReviseInstruction(e.target.value)}
+                    placeholder="Tell AI how to change it..."
+                    className="text-sm h-8"
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleReviseDraft(); } }}
+                  />
+                </div>
+                <Button variant="outline" size="sm" className="h-8" onClick={handleReviseDraft} disabled={draftRevising || !draftReviseInstruction.trim()}>
+                  {draftRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm whitespace-pre-wrap">
               {msg.draft_response}
+            </div>
+          )}
+          {msg.status === "pending" && !editing && (
+            <div className="flex gap-2 items-end mt-2">
+              <div className="flex-1">
+                <Input
+                  value={draftReviseInstruction}
+                  onChange={(e) => setDraftReviseInstruction(e.target.value)}
+                  placeholder="Tell AI how to change it..."
+                  className="text-sm h-8"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (!editing) { setEditing(true); setEditText(msg.draft_response || ""); }
+                      handleReviseDraft();
+                    }
+                  }}
+                />
+              </div>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => {
+                if (!editing) { setEditing(true); setEditText(msg.draft_response || ""); }
+                handleReviseDraft();
+              }} disabled={draftRevising || !draftReviseInstruction.trim()}>
+                {draftRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+              </Button>
             </div>
           )}
         </div>
@@ -706,9 +769,6 @@ function MessageDetail({
               Cancel Edit
             </Button>
           )}
-          <Button variant="secondary" disabled={sending} onClick={handleDismiss}>
-            Dismiss
-          </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" disabled={sending}>
@@ -784,12 +844,33 @@ function MessageDetail({
         </div>
       )}
 
-      {/* Delete — available for any status */}
-      <div className="pt-2 border-t">
+      {/* Dismiss + Delete — bottom, behind confirmations */}
+      <div className="pt-2 border-t flex justify-between">
+        {msg.status === "pending" && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={sending}>
+                Dismiss
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Dismiss this message?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  No reply will be sent. Associated action items will be cancelled. This won't affect AI learning.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDismiss}>Dismiss</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive" disabled={sending}>
-              <Trash2 className="h-3 w-3 mr-1" />Delete Message
+              <Trash2 className="h-3 w-3 mr-1" />Delete
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
@@ -1044,6 +1125,38 @@ function ActionDetailSheet({
               Cancel
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Delete action */}
+      {detail.status !== "cancelled" && (
+        <div className="pt-3 border-t flex justify-end">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive">
+                <Trash2 className="h-3 w-3 mr-1" />Delete Action
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this action item?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove the action and all its comments. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={async () => {
+                  try {
+                    await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" });
+                    toast.success("Action deleted");
+                    onClose();
+                    onUpdate();
+                  } catch { toast.error("Failed"); }
+                }}>Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
     </div>
@@ -1446,7 +1559,6 @@ export default function AgentPage() {
                             <span className="text-xs text-muted-foreground truncate hidden sm:inline">— {group.label}</span>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-[10px] text-muted-foreground">{doneCount}/{group.actions.length}</span>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1505,30 +1617,14 @@ export default function AgentPage() {
                                 </div>
                                 <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                                   {(a.status === "open" || a.status === "in_progress") && (
-                                    <>
-                                      <Button
-                                        variant="default"
-                                        size="sm"
-                                        className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700"
-                                        onClick={() => handleToggleAction(a.id, a.status)}
-                                      >
-                                        Done
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-5 w-5 text-muted-foreground hover:text-destructive"
-                                        title="Cancel"
-                                        onClick={async () => {
-                                          try {
-                                            await api.put(`/v1/admin/agent-actions/${a.id}`, { status: "cancelled" });
-                                            load();
-                                          } catch { toast.error("Failed"); }
-                                        }}
-                                      >
-                                        <X className="h-3 w-3" />
-                                      </Button>
-                                    </>
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700"
+                                      onClick={() => handleToggleAction(a.id, a.status)}
+                                    >
+                                      Done
+                                    </Button>
                                   )}
                                 </div>
                               </div>

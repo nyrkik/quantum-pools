@@ -987,6 +987,113 @@ Rules:
     }
 
 
+@router.post("/agent-actions/{action_id}/draft-invoice")
+async def draft_invoice_from_action(
+    action_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI drafts invoice line items from action context (comments, description, customer)."""
+    import anthropic, os, json as json_mod, re
+    from sqlalchemy.orm import selectinload
+
+    # Load action with comments + parent message
+    result = await db.execute(
+        select(AgentAction)
+        .options(selectinload(AgentAction.comments))
+        .where(AgentAction.id == action_id)
+    )
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+    msg = msg_result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Parent message not found")
+
+    # Get customer ID
+    customer_id = msg.matched_customer_id
+    customer_name = msg.customer_name or msg.from_email
+
+    # Build context
+    comments_text = ""
+    if action.comments:
+        comments_text = "\n".join(f"- {c.author}: {c.text}" for c in action.comments)
+
+    # Get all sibling actions for full picture
+    siblings = await db.execute(
+        select(AgentAction)
+        .options(selectinload(AgentAction.comments))
+        .where(AgentAction.agent_message_id == msg.id)
+    )
+    all_actions_text = ""
+    for a in siblings.scalars().all():
+        all_actions_text += f"\n- [{a.status}] {a.action_type}: {a.description}"
+        if a.comments:
+            for c in a.comments:
+                all_actions_text += f"\n  {c.author}: {c.text}"
+
+    prompt = f"""Generate invoice line items for a pool service company based on this context.
+
+Customer: {customer_name}
+Original email subject: {msg.subject}
+
+Action item: {action.action_type} — {action.description}
+
+All action items and comments for this event:{all_actions_text}
+
+Based on the work described, generate invoice line items. Extract specific services, parts, and costs from the comments and descriptions.
+
+Respond with JSON:
+{{
+  "subject": "Brief invoice subject (e.g., 'Pool Valve Repair - Pinebrook Village')",
+  "line_items": [
+    {{
+      "description": "what was done or provided",
+      "quantity": 1,
+      "unit_price": 0.00
+    }}
+  ],
+  "notes": "any notes for the invoice"
+}}
+
+Rules:
+- Extract actual dollar amounts mentioned in comments if available
+- If no price was mentioned, use unit_price: 0 and note "Price TBD" in description
+- Separate labor from parts/materials if both mentioned
+- Keep descriptions clear and professional
+- Include a subject line suitable for the invoice header"""
+
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        json_match = re.search(r"\{.*\}", response.content[0].text, re.DOTALL)
+        if json_match:
+            draft = json_mod.loads(json_match.group())
+            return {
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "subject": draft.get("subject", f"Service - {customer_name}"),
+                "line_items": draft.get("line_items", []),
+                "notes": draft.get("notes", ""),
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to draft invoice: {str(e)}")
+
+    return {
+        "customer_id": customer_id,
+        "customer_name": customer_name,
+        "subject": f"Service - {customer_name}",
+        "line_items": [],
+        "notes": "",
+    }
+
+
 class ReviseDraftBody(BaseModel):
     draft: str
     instruction: str

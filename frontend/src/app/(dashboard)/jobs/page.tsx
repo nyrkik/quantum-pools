@@ -1298,8 +1298,8 @@ export default function JobsPage() {
               value={teamMembers.includes(jobFilter) ? jobFilter : ""}
               onValueChange={(v) => setJobFilter(v)}
             >
-              <SelectTrigger className="h-7 w-28 text-xs">
-                <SelectValue placeholder="Team..." />
+              <SelectTrigger className="h-7 w-40 text-xs">
+                <SelectValue placeholder="Team member..." />
               </SelectTrigger>
               <SelectContent>
                 {teamMembers.map((name) => (
@@ -1322,7 +1322,9 @@ export default function JobsPage() {
 
       {/* New Job form */}
       {newActionOpen && (
-        <Card className="shadow-sm">
+        <>
+        <div className="fixed inset-0 z-30" onClick={() => setNewActionOpen(false)} />
+        <Card className="shadow-sm relative z-40">
           <CardContent className="py-3 px-4 space-y-3">
             <Input
               value={newAction.description}
@@ -1361,7 +1363,7 @@ export default function JobsPage() {
               }
             />
             <div className="flex flex-wrap gap-2 items-end">
-              <div className="w-44">
+              <div className="w-48">
                 <Select
                   value={newAction.assigned_to || ""}
                   onValueChange={(v) =>
@@ -1434,6 +1436,7 @@ export default function JobsPage() {
             </div>
           </CardContent>
         </Card>
+        </>
       )}
 
       {/* Grouped jobs list */}

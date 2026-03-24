@@ -198,24 +198,49 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         db.add(agent_msg)
         await db.flush()
 
-        # Create action items — skip duplicates from thread
+        # Create action items — skip duplicates
+        # Check both thread-level and org-wide open actions for same customer/property
+        all_open_descriptions = list(existing_action_descriptions)  # thread-level
+        if result.get("customer_name") or result.get("_property_address"):
+            # Also check org-wide open actions for same customer/property
+            org_open_query = select(AgentAction.description, AgentAction.action_type).where(
+                AgentAction.organization_id == organization_id,
+                AgentAction.status.in_(("open", "in_progress")),
+            )
+            if result.get("customer_name"):
+                org_open_query = org_open_query.where(
+                    AgentAction.customer_name == result.get("customer_name")
+                )
+            org_open = (await db.execute(org_open_query)).all()
+            for desc, atype in org_open:
+                if desc not in all_open_descriptions:
+                    all_open_descriptions.append(desc)
+
         actions = result.get("actions", [])
         for action in actions:
             if not action.get("description"):
                 continue
-            # Skip if similar action already exists in thread
+            # Skip if similar action already exists (thread or org-wide)
             desc_lower = action["description"].lower()
+            action_type = action.get("action_type", "other")
             is_duplicate = False
-            for existing_desc in existing_action_descriptions:
-                # Fuzzy match: if >60% of words overlap, it's a duplicate
+            for existing_desc in all_open_descriptions:
                 existing_words = set(existing_desc.lower().split())
                 new_words = set(desc_lower.split())
                 if existing_words and new_words:
+                    # Word overlap check
                     overlap = len(existing_words & new_words) / max(len(existing_words), len(new_words))
-                    if overlap > 0.6:
+                    if overlap > 0.5:  # Lowered from 0.6 to catch more duplicates
                         is_duplicate = True
-                        logger.info(f"Skipping duplicate action: {action['description'][:60]}")
+                        logger.info(f"Skipping duplicate action (word overlap {overlap:.0%}): {action['description'][:60]}")
                         break
+                    # Same address + same action type = likely duplicate
+                    if result.get("_property_address"):
+                        addr = result["_property_address"].lower()
+                        if addr[:20] in existing_desc.lower() and action_type in existing_desc.lower():
+                            is_duplicate = True
+                            logger.info(f"Skipping duplicate action (same address+type): {action['description'][:60]}")
+                            break
             if is_duplicate:
                 continue
 

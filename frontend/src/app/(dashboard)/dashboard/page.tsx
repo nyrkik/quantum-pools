@@ -137,10 +137,10 @@ export default function DashboardPage() {
 
         if (perms.canViewInbox) {
           promises.push(
-            api.get<AgentStats>("/v1/admin/agent-stats"),
-            api.get<{ items: AgentMessage[] }>("/v1/admin/agent-messages?status=pending&limit=5"),
+            api.get<AgentStats>("/v1/admin/agent-threads/stats"),
+            api.get<{ items: AgentMessage[] }>("/v1/admin/agent-threads?status=pending&limit=5"),
             api.get<AgentAction[]>("/v1/admin/agent-actions?status=open&limit=5"),
-            api.get<{ items: AgentMessage[] }>("/v1/admin/agent-messages?limit=5"),
+            api.get<{ items: AgentMessage[] }>("/v1/admin/agent-threads?limit=5&exclude_spam=true"),
           );
         }
 

@@ -73,7 +73,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   const fetchPending = useCallback(() => {
     if (perms.canViewInbox) {
-      api.get<{ pending: number }>("/v1/admin/agent-stats")
+      api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
         .then((s) => setPendingCount(s.pending ?? 0))
         .catch(() => {});
     }
@@ -214,7 +214,7 @@ export function Sidebar() {
   useEffect(() => {
     const fetch = () => {
       if (perms.canViewInbox) {
-        api.get<{ pending: number }>("/v1/admin/agent-stats")
+        api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
           .then((s) => setMobilePending(s.pending ?? 0))
           .catch(() => {});
       }

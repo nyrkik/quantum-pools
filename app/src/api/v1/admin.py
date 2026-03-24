@@ -16,7 +16,7 @@ from src.models.emd_violation import EMDViolation
 from src.models.property import Property
 from src.models.customer import Customer
 from src.models.agent_thread import AgentThread
-from src.services.agents.mail_agent import strip_quoted_reply
+from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
 
@@ -689,7 +689,7 @@ async def get_thread(
             "from_email": m.from_email,
             "to_email": m.to_email,
             "subject": m.subject,
-            "body": strip_quoted_reply(m.body) if m.body else None,
+            "body": strip_email_signature(strip_quoted_reply(m.body)) if m.body else None,
             "body_full": m.body,  # raw for debugging
             "category": m.category,
             "urgency": m.urgency,

@@ -144,6 +144,43 @@ def strip_quoted_reply(text: str) -> str:
     return text
 
 
+def strip_email_signature(text: str) -> str:
+    """Remove email signature block and everything after it."""
+    if not text:
+        return text
+
+    # Common signature separators
+    # "-- " (standard sig separator), "---", "___"
+    match = re.search(r'\n-- ?\n', text)
+    if match:
+        return text[:match.start()].strip()
+
+    # Look for sign-off lines followed by name/title/contact block
+    # Match: "Best," / "Thanks," / "Regards," / "Thank you," etc. at start of line
+    # followed by a name line (short, no punctuation)
+    signoffs = r'(?:Best|Thanks|Thank you|Regards|Kind regards|Sincerely|Cheers|Warm regards|All the best|Respectfully|Take care),?\s*\n'
+    match = re.search(signoffs, text, re.IGNORECASE)
+    if match:
+        # Keep the sign-off line itself but strip everything after the name
+        after = text[match.end():]
+        lines_after = after.split('\n')
+        # Keep up to 2 lines after sign-off (name + maybe title), strip rest
+        kept = []
+        for line in lines_after[:3]:
+            stripped = line.strip()
+            if not stripped:
+                break
+            # Stop at phone numbers, emails, URLs, long lines (company info)
+            if re.search(r'[0-9]{3}[.\-\s]?[0-9]{3}|@|http|www\.|\.com', stripped):
+                break
+            if len(stripped) > 60:
+                break
+            kept.append(stripped)
+        return text[:match.end()].strip() + ('\n' + '\n'.join(kept) if kept else '')
+
+    return text
+
+
 def _clean_html(html: str) -> str:
     """Convert HTML to clean plain text."""
     from html import unescape

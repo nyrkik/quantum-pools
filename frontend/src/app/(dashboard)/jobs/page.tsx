@@ -531,7 +531,7 @@ function ActionDetailSheet({
       }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
       setComment("");
       if (result.auto_comment) {
-        toast.success(`QP Assistant: ${result.auto_comment.text.slice(0, 80)}`);
+        toast.success(`DeepBlue: ${result.auto_comment.text.slice(0, 80)}`);
       }
       if (result.action_resolved) {
         toast.success("Job marked complete — your comment resolved it");

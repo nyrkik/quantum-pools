@@ -879,13 +879,13 @@ Only answer with data that directly addresses what was asked. Don't volunteer un
                         # Post an auto-comment with the info
                         auto_reply = AgentActionComment(
                             action_id=action_id,
-                            author="QP Assistant",
+                            author="DeepBlue",
                             text=info_data["answer"],
                         )
                         db.add(auto_reply)
                         await db.commit()
                         await db.refresh(auto_reply)
-                        auto_comment = {"author": "QP Assistant", "text": info_data["answer"]}
+                        auto_comment = {"author": "DeepBlue", "text": info_data["answer"]}
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Auto-answer failed: {e}")

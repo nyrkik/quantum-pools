@@ -64,7 +64,7 @@ When classifying emails, respond with JSON:
 Guidelines:
 - category "auto_reply" means no-reply addresses, bounce notifications, marketing — ignore these
 - category "spam" — junk, ignore
-- category "no_response" — client emails that don't need a reply: "thank you", "thanks", "got it", "ok", "sounds good", "perfect", thumbs up, single-word acknowledgments, forwarded FYI emails with no question. Log but don't draft a response or alert anyone.
+- category "no_response" — ONLY for truly empty acknowledgments with zero actionable content: "thank you", "thanks", "got it", "ok", "sounds good", "perfect", thumbs up, single-word replies. If the email contains ANY instructions, approvals, questions, requests, decisions, or new information — even brief ones — it is NOT no_response. When in doubt, classify as "general" with needs_approval=true. A short reply like "go ahead" or "you can replace it" IS actionable and needs a response.
 - needs_approval = false ONLY for: gate code confirmations where no action needed
 - needs_approval = true for: schedule changes, complaints, billing questions, service requests, anything requiring a decision or a real reply
 - Draft responses should be warm, professional, concise. Sign as "Sapphire Pools" not a specific person.

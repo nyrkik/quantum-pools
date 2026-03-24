@@ -795,6 +795,41 @@ function ActionDetailSheet({
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
+  const [followUpText, setFollowUpText] = useState("");
+  const [draftingFollowUp, setDraftingFollowUp] = useState(false);
+  const [sendingFollowUp, setSendingFollowUp] = useState(false);
+
+  const handleDraftFollowUp = async () => {
+    if (!detail) return;
+    setDraftingFollowUp(true);
+    try {
+      const result = await api.post<{ draft: string; to: string; subject: string }>(`/v1/admin/agent-messages/${detail.agent_message_id}/draft-followup`, {});
+      setFollowUp(result);
+      setFollowUpText(result.draft);
+    } catch {
+      toast.error("Failed to draft follow-up");
+    } finally {
+      setDraftingFollowUp(false);
+    }
+  };
+
+  const handleSendFollowUp = async () => {
+    if (!detail || !followUpText.trim()) return;
+    setSendingFollowUp(true);
+    try {
+      await api.post(`/v1/admin/agent-messages/${detail.agent_message_id}/send-followup`, { response_text: followUpText });
+      toast.success("Follow-up sent");
+      setFollowUp(null);
+      setFollowUpText("");
+      onUpdate();
+    } catch {
+      toast.error("Failed to send");
+    } finally {
+      setSendingFollowUp(false);
+    }
+  };
+
   const loadDetail = useCallback(() => {
     setLoading(true);
     api.get<ActionDetail>(`/v1/admin/agent-actions/${actionId}`)
@@ -885,6 +920,45 @@ function ActionDetailSheet({
           </div>
         </div>
       </div>
+
+      {/* Draft Follow-up */}
+      {!followUp && (
+        <div className="pt-2 border-t">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDraftFollowUp}
+            disabled={draftingFollowUp}
+          >
+            {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+            Draft Follow-up Email
+          </Button>
+        </div>
+      )}
+
+      {followUp && (
+        <div className="pt-2 border-t space-y-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Follow-up Draft</p>
+            <p className="text-xs text-muted-foreground mb-2">To: {followUp.to} — Re: {followUp.subject}</p>
+            <Textarea
+              value={followUpText}
+              onChange={(e) => setFollowUpText(e.target.value)}
+              rows={6}
+              className="text-sm"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
+              {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+              Send
+            </Button>
+            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

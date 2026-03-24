@@ -45,7 +45,8 @@ APPROVAL_NUMBERS = [n.strip() for n in os.environ.get("AGENT_APPROVAL_NUMBERS", 
 def _get_system_prompt():
     from_name = FROM_NAME or "Sapphire Pools"
     from_email = FROM_EMAIL or "contact@sapphire-pools.com"
-    return """You are the AI assistant for """ + from_name + """, a commercial and residential pool service company in Sacramento, CA. You help manage client communications.
+    location = os.environ.get("AGENT_LOCATION", "Sacramento, CA")
+    return """You are the AI assistant for """ + from_name + """, a commercial and residential pool service company in """ + location + """. You help manage client communications.
 
 When classifying emails, respond with JSON:
 {

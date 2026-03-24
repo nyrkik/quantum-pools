@@ -1325,6 +1325,8 @@ export default function AgentPage() {
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"inbox" | "actions">("inbox");
   const [suggestion, setSuggestion] = useState<{ id: string; action_type: string; description: string; reasoning: string } | null>(null);
+  const [newActionOpen, setNewActionOpen] = useState(false);
+  const [newAction, setNewAction] = useState({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3", customer_name: "", property_address: "" });
 
   const handleToggleAction = async (actionId: string, currentStatus: string) => {
     const newStatus = currentStatus === "done" ? "open" : "done";
@@ -1619,10 +1621,10 @@ export default function AgentPage() {
       )}
 
       {activeTab === "actions" && (() => {
-        // Group actions by parent message (event)
+        // Group actions by parent message (event) or standalone
         const grouped = new Map<string, { label: string; from: string; actions: AgentAction[] }>();
         for (const a of actions) {
-          const key = a.agent_message_id;
+          const key = a.agent_message_id || `standalone-${a.id}`;
           if (!grouped.has(key)) {
             grouped.set(key, {
               label: a.subject || "Unknown",
@@ -1635,9 +1637,107 @@ export default function AgentPage() {
         const groups = Array.from(grouped.entries());
 
         return (
+          <>
+          {/* New Action button + form */}
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setNewActionOpen(!newActionOpen)}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />{newActionOpen ? "Cancel" : "New Action"}
+            </Button>
+          </div>
+          {newActionOpen && (
+            <Card className="shadow-sm">
+              <CardContent className="py-3 px-4 space-y-3">
+                <Input
+                  value={newAction.description}
+                  onChange={(e) => setNewAction({ ...newAction, description: e.target.value })}
+                  placeholder="What needs to be done?"
+                  className="text-sm"
+                  autoFocus
+                />
+                <div className="flex flex-wrap gap-2">
+                  <div className="flex gap-1 flex-wrap">
+                    {ACTION_TYPES.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setNewAction({ ...newAction, action_type: t })}
+                        className={`px-2 py-1 text-[10px] rounded-md border transition-colors capitalize ${
+                          newAction.action_type === t
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background text-muted-foreground border-input hover:bg-accent"
+                        }`}
+                      >
+                        {t.replace("_", " ")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={newAction.customer_name}
+                    onChange={(e) => setNewAction({ ...newAction, customer_name: e.target.value })}
+                    placeholder="Client name"
+                    className="text-sm h-8"
+                  />
+                  <Input
+                    value={newAction.property_address}
+                    onChange={(e) => setNewAction({ ...newAction, property_address: e.target.value })}
+                    placeholder="Property address"
+                    className="text-sm h-8"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Select value={newAction.assigned_to || ""} onValueChange={(v) => setNewAction({ ...newAction, assigned_to: v })}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Assign..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TEAM_MEMBERS.map((name) => (
+                        <SelectItem key={name} value={name} className="text-sm">{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    value={newAction.due_days}
+                    onChange={(e) => setNewAction({ ...newAction, due_days: e.target.value })}
+                    className="h-8 text-sm"
+                    placeholder="Due in days"
+                  />
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    disabled={!newAction.description.trim()}
+                    onClick={async () => {
+                      const dueDate = newAction.due_days
+                        ? new Date(Date.now() + parseInt(newAction.due_days) * 86400000).toISOString()
+                        : undefined;
+                      try {
+                        await api.post("/v1/admin/agent-actions", {
+                          action_type: newAction.action_type,
+                          description: newAction.description,
+                          assigned_to: newAction.assigned_to || undefined,
+                          due_date: dueDate,
+                          customer_name: newAction.customer_name || undefined,
+                          property_address: newAction.property_address || undefined,
+                        });
+                        setNewAction({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3", customer_name: "", property_address: "" });
+                        setNewActionOpen(false);
+                        load();
+                        toast.success("Action created");
+                      } catch { toast.error("Failed to create action"); }
+                    }}
+                  >
+                    Create
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="shadow-sm">
             <CardContent className="p-0">
-              {actions.length === 0 ? (
+              {actions.length === 0 && !newActionOpen ? (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <CheckCircle2 className="h-10 w-10 mb-3 opacity-40" />
                   <p className="text-sm">All caught up — no open actions</p>
@@ -1735,6 +1835,7 @@ export default function AgentPage() {
               )}
             </CardContent>
           </Card>
+          </>
         );
       })()}
 

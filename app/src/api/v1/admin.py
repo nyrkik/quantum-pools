@@ -350,6 +350,8 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
         "due_date": a.due_date.isoformat() if a.due_date else None,
         "status": a.status,
         "notes": a.notes,
+        "customer_name": a.customer_name,
+        "property_address": a.property_address,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -516,8 +518,9 @@ async def list_agent_actions(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """List agent action items."""
-    query = select(AgentAction, AgentMessage).join(
+    """List action items — both email-linked and standalone."""
+    from sqlalchemy.orm import aliased
+    query = select(AgentAction, AgentMessage).outerjoin(
         AgentMessage, AgentAction.agent_message_id == AgentMessage.id
     ).order_by(
         # Open first, then by due date
@@ -528,23 +531,32 @@ async def list_agent_actions(
         query = query.where(AgentAction.status == status)
     result = await db.execute(query)
     rows = result.all()
-    return [
-        {
-            **_serialize_action(action),
-            "from_email": msg.from_email,
-            "customer_name": msg.customer_name,
-            "subject": msg.subject,
-        }
-        for action, msg in rows
+    items = []
+    for action, msg in rows:
+        d = _serialize_action(action)
+        # Use message data if linked, otherwise use action's own fields
+        if msg:
+            d["from_email"] = msg.from_email
+            d["customer_name"] = msg.customer_name or action.customer_name
+            d["subject"] = msg.subject
+        else:
+            d["from_email"] = None
+            d["customer_name"] = action.customer_name
+            d["subject"] = None
+        d["property_address"] = action.property_address
+        items.append(d)
+    return items
     ]
 
 
 class CreateActionBody(BaseModel):
-    agent_message_id: str
+    agent_message_id: Optional[str] = None
     action_type: str
     description: str
     assigned_to: Optional[str] = None
     due_date: Optional[str] = None
+    customer_name: Optional[str] = None
+    property_address: Optional[str] = None
 
 
 @router.post("/agent-actions")
@@ -553,15 +565,17 @@ async def create_agent_action(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually create an action item."""
+    """Create an action item — standalone or linked to a message."""
     from datetime import datetime, timezone
     due = datetime.fromisoformat(body.due_date) if body.due_date else None
     action = AgentAction(
-        agent_message_id=body.agent_message_id,
+        agent_message_id=body.agent_message_id or None,
         action_type=body.action_type,
         description=body.description,
         assigned_to=body.assigned_to,
         due_date=due,
+        customer_name=body.customer_name,
+        property_address=body.property_address,
         status="open",
     )
     db.add(action)

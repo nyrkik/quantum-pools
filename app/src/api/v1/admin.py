@@ -1409,9 +1409,10 @@ If the comment asks for info we have (address, phone, gate code, service day, eq
 {{"has_answer": true, "answer": "the relevant info, formatted naturally"}}
 
 If the comment doesn't ask for info, or the info isn't available, or the job address differs from customer records and we don't have the right address:
-{{"has_answer": false}}
+{{"has_answer": false, "needs_info": "what info is missing (e.g., 'residential address for this client')"}}
 
-Only answer with data that directly addresses what was asked. Don't volunteer unrelated info."""
+Only answer with data that directly addresses what was asked. Don't volunteer unrelated info.
+If info is missing and the comment is asking for it, set needs_info to describe what's needed."""
 
                 ai_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
                 info_response = ai_client.messages.create(
@@ -1434,6 +1435,47 @@ Only answer with data that directly addresses what was asked. Don't volunteer un
                         await db.commit()
                         await db.refresh(auto_reply)
                         auto_comment = {"author": "DeepBlue", "text": info_data["answer"]}
+                    elif info_data.get("needs_info"):
+                        # Escalate: notify job creator or assignee that info is missing
+                        from src.models.notification import Notification
+                        from src.models.organization_user import OrganizationUser
+                        from src.models.user import User
+
+                        missing_info = info_data["needs_info"]
+
+                        # Post a DeepBlue comment noting the gap
+                        gap_comment = AgentActionComment(
+                            organization_id=ctx.organization_id,
+                            action_id=action_id,
+                            author="DeepBlue",
+                            text=f"I don't have this info on file: {missing_info}. Can someone provide it?",
+                        )
+                        db.add(gap_comment)
+                        auto_comment = {"author": "DeepBlue", "text": gap_comment.text}
+
+                        # Notify the creator or assignee
+                        notify_target = action.created_by or action.assigned_to
+                        if notify_target and notify_target != "DeepBlue":
+                            target_ou = await db.execute(
+                                select(OrganizationUser)
+                                .join(User, OrganizationUser.user_id == User.id)
+                                .where(
+                                    OrganizationUser.organization_id == ctx.organization_id,
+                                    User.first_name == notify_target.split()[0],
+                                    User.id != ctx.user.id,
+                                )
+                            )
+                            target = target_ou.scalar_one_or_none()
+                            if target:
+                                db.add(Notification(
+                                    organization_id=ctx.organization_id,
+                                    user_id=target.user_id,
+                                    type="info_needed",
+                                    title=f"Info needed: {action.description[:50]}",
+                                    body=f"Missing: {missing_info}",
+                                    link=f"/jobs?action={action_id}",
+                                ))
+                        await db.commit()
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Auto-answer failed: {e}")

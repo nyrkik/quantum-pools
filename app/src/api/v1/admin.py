@@ -883,7 +883,69 @@ async def send_thread_followup(
     await db.commit()
     await update_thread_status(thread_id)
 
-    return {"sent": True, "to": thread.contact_email}
+    # Evaluate if open jobs for this thread should be closed
+    closed_actions = []
+    try:
+        import anthropic, json as json_mod, re as re_mod
+        from sqlalchemy.orm import selectinload
+
+        actions_result = await db.execute(
+            select(AgentAction)
+            .options(selectinload(AgentAction.comments))
+            .where(
+                AgentAction.thread_id == thread_id,
+                AgentAction.organization_id == ctx.organization_id,
+                AgentAction.status.in_(("open", "in_progress")),
+            )
+        )
+        open_actions = actions_result.scalars().all()
+
+        if open_actions:
+            actions_list = []
+            for a in open_actions:
+                comments_text = ""
+                if a.comments:
+                    comments_text = " | Comments: " + "; ".join(c.text for c in a.comments)
+                actions_list.append(f"- ID:{a.id[:8]} [{a.action_type}] {a.description}{comments_text}")
+
+            eval_prompt = f"""A follow-up email was just sent in a conversation thread. Based on its content, determine which open jobs are now complete.
+
+Follow-up email sent:
+{response_text}
+
+Open jobs:
+{chr(10).join(actions_list)}
+
+For each job, respond with JSON array:
+[{{"id": "first8chars", "status": "done|open", "reason": "why"}}]
+
+Rules:
+- "done" = the follow-up clearly addresses/completes this job
+- "open" = still needs work
+- Be conservative — only mark done if clearly covered"""
+
+            ai_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            eval_response = ai_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=300,
+                messages=[{"role": "user", "content": eval_prompt}],
+            )
+            json_match = re_mod.search(r"\[.*\]", eval_response.content[0].text, re_mod.DOTALL)
+            if json_match:
+                evaluations = json_mod.loads(json_match.group())
+                for ev in evaluations:
+                    if ev.get("status") == "done":
+                        for a in open_actions:
+                            if a.id.startswith(ev.get("id", "")):
+                                a.status = "done"
+                                a.completed_at = now
+                                closed_actions.append({"description": a.description})
+                await db.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Thread follow-up job eval failed: {e}")
+
+    return {"sent": True, "to": thread.contact_email, "closed_actions": closed_actions}
 
 
 @router.post("/agent-threads/{thread_id}/revise-draft")
@@ -1270,11 +1332,33 @@ async def add_action_comment(
             # Get customer/property context for this action
             customer_context = ""
             customer_id = None
+
+            # Try to find customer from linked message
             if action.agent_message_id:
                 msg_check = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id, AgentMessage.organization_id == ctx.organization_id))
                 parent_msg = msg_check.scalar_one_or_none()
                 if parent_msg and parent_msg.matched_customer_id:
                     customer_id = parent_msg.matched_customer_id
+
+            # For standalone actions, find customer by name
+            if not customer_id and action.customer_name:
+                from src.models.customer import Customer as Cust
+                from sqlalchemy import or_
+                cust_match = await db.execute(
+                    select(Cust).where(
+                        Cust.organization_id == ctx.organization_id,
+                        Cust.is_active == True,
+                        or_(
+                            Cust.display_name_col.ilike(f"%{action.customer_name}%"),
+                            Cust.first_name.ilike(f"%{action.customer_name}%"),
+                            Cust.last_name.ilike(f"%{action.customer_name}%"),
+                            Cust.company_name.ilike(f"%{action.customer_name}%"),
+                        )
+                    ).limit(1)
+                )
+                matched = cust_match.scalar_one_or_none()
+                if matched:
+                    customer_id = matched.id
 
             if customer_id:
                 from src.models.customer import Customer as Cust

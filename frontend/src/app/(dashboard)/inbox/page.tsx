@@ -50,6 +50,7 @@ import {
   Trash2,
   Mail,
   MessageSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -193,27 +194,23 @@ function CategoryBadge({ category }: { category: string | null }) {
   );
 }
 
-const COLLAPSE_THRESHOLD = 300; // chars before collapsing
-
 function CollapsibleBody({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > COLLAPSE_THRESHOLD;
 
-  if (!isLong) {
+  // Short messages (one line) don't need collapse
+  if (text.length < 80 && !text.includes('\n')) {
     return <div className="whitespace-pre-wrap text-sm leading-relaxed">{text}</div>;
   }
 
   return (
-    <div>
-      <div className={`whitespace-pre-wrap text-sm leading-relaxed ${expanded ? "" : "line-clamp-4"}`}>
+    <div
+      className="cursor-pointer"
+      onClick={() => setExpanded(!expanded)}
+    >
+      <div className={`whitespace-pre-wrap text-sm leading-relaxed ${expanded ? "" : "max-h-[5.5rem] overflow-hidden"}`}>
         {text}
       </div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="text-xs text-primary hover:underline mt-1"
-      >
-        {expanded ? "Show less" : "Show more"}
-      </button>
+      <ChevronDown className={`h-3 w-3 text-muted-foreground mx-auto mt-0.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
     </div>
   );
 }
@@ -589,25 +586,6 @@ function ThreadDetailSheet({
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive" disabled={sending}>
-                <Trash2 className="h-3 w-3 mr-1" />Delete
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete this thread?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently remove the thread and all messages. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       </div>
     </div>
@@ -714,10 +692,14 @@ export default function InboxPage() {
               </div>
             )}
             {stats.open_actions > 0 && (
-              <div className="flex items-center gap-1.5">
+              <a
+                href="/jobs"
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1.5 hover:underline"
+              >
                 <MessageSquare className="h-4 w-4 text-blue-600" />
                 <span className="text-blue-600">{stats.open_actions} open jobs</span>
-              </div>
+              </a>
             )}
           </div>
         </button>

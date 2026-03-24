@@ -265,19 +265,32 @@ function ClientPropertySearch({
     return () => clearTimeout(timer);
   }, [query]);
 
+  const [manualAddress, setManualAddress] = useState(false);
+
   return (
     <div className="space-y-2">
       <div className="relative">
-        <Input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            onChange(e.target.value, propertyAddress);
-          }}
-          placeholder="Search client or address..."
-          className="text-sm h-8"
-          onFocus={() => results.length > 0 && setShowResults(true)}
-        />
+        <div className="relative">
+          <Input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              onChange(e.target.value, propertyAddress);
+            }}
+            placeholder="Client name (search or type)"
+            className="text-sm h-8 pr-7"
+            onFocus={() => results.length > 0 && setShowResults(true)}
+          />
+          {(query || propertyAddress) && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => { setQuery(""); onChange("", ""); setManualAddress(false); setResults([]); }}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
         {showResults && results.length > 0 && (
           <>
             <div
@@ -294,6 +307,7 @@ function ClientPropertySearch({
                     setQuery(r.customer_name);
                     onChange(r.customer_name, r.property_address);
                     setShowResults(false);
+                    setManualAddress(false);
                   }}
                 >
                   <span className="font-medium">{r.customer_name}</span>
@@ -311,10 +325,17 @@ function ClientPropertySearch({
           </>
         )}
       </div>
-      {propertyAddress && (
-        <p className="text-xs text-muted-foreground px-1">
+      {propertyAddress && !manualAddress ? (
+        <p className="text-xs text-muted-foreground px-1 cursor-pointer hover:text-foreground" onClick={() => setManualAddress(true)}>
           {propertyAddress}
         </p>
+      ) : (
+        <Input
+          value={propertyAddress}
+          onChange={(e) => onChange(query, e.target.value)}
+          placeholder="Address"
+          className="text-sm h-8"
+        />
       )}
     </div>
   );
@@ -974,9 +995,29 @@ function ActionDetailSheet({
         </div>
       )}
 
-      {/* Delete action */}
+      {/* Actions */}
+      {(detail.status === "open" || detail.status === "in_progress") && (
+        <div className="pt-3 border-t">
+          <Button
+            className="w-full bg-green-600 hover:bg-green-700"
+            onClick={async () => {
+              try {
+                await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "done" });
+                toast.success("Job marked done");
+                loadDetail();
+                onUpdate();
+              } catch { toast.error("Failed"); }
+            }}
+          >
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Mark Done
+          </Button>
+        </div>
+      )}
+
+      {/* Delete */}
       {detail.status !== "cancelled" && (
-        <div className="pt-3 border-t flex justify-end">
+        <div className="pt-2 flex justify-end">
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
@@ -1048,7 +1089,7 @@ export default function JobsPage() {
     action_type: "follow_up",
     description: "",
     assigned_to: "",
-    due_days: "3",
+    due_days: "",
     customer_name: "",
     property_address: "",
   });
@@ -1151,33 +1192,25 @@ export default function JobsPage() {
         <h1 className="text-2xl font-bold">Jobs</h1>
       </div>
 
-      {/* Open Jobs stat tile */}
-      {stats && (
-        <Card
-          className={`shadow-sm py-4 gap-2 max-w-xs ${
-            stats.overdue_actions > 0
-              ? "border-l-4 border-red-500"
-              : ""
-          }`}
-        >
-          <CardHeader className="pb-0">
-            <div className="flex items-center gap-2">
+      {/* Open Jobs tile + New Job */}
+      <div className="flex items-center justify-between gap-4">
+        {stats && (
+          <Card className={`shadow-sm py-3 px-4 ${stats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""}`}>
+            <div className="flex items-center gap-3">
               <ClipboardList className="h-4 w-4 text-purple-500" />
-              <CardTitle className="text-sm font-medium">
-                Open Jobs
-              </CardTitle>
+              <span className="text-sm font-medium">Open Jobs</span>
+              <span className="text-2xl font-bold">{stats.open_actions}</span>
+              {stats.overdue_actions > 0 && (
+                <Badge variant="destructive" className="text-[10px]">{stats.overdue_actions} overdue</Badge>
+              )}
             </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{stats.open_actions}</p>
-            {stats.overdue_actions > 0 && (
-              <p className="text-xs text-red-600 font-medium">
-                {stats.overdue_actions} overdue
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          </Card>
+        )}
+        <Button onClick={() => setNewActionOpen(!newActionOpen)}>
+          <Plus className="h-4 w-4 mr-2" />
+          New Job
+        </Button>
+      </div>
 
       {/* AI Suggestion banner */}
       {suggestion && (
@@ -1243,19 +1276,39 @@ export default function JobsPage() {
 
       {/* Job filters + New Job */}
       <div className="flex flex-col sm:flex-row gap-3 justify-between">
-        <div className="flex gap-1 flex-wrap items-center">
-          {["mine", "all", ...teamMembers].map((f) => (
-            <Button
-              key={f}
-              variant={jobFilter === f ? "default" : "outline"}
-              size="sm"
-              className="text-xs capitalize h-7"
-              onClick={() => setJobFilter(f)}
+        <div className="flex gap-2 items-center">
+          <Button
+            variant={jobFilter === "mine" ? "default" : "outline"}
+            size="sm"
+            className="h-7"
+            onClick={() => setJobFilter("mine")}
+          >
+            My Jobs
+          </Button>
+          <Button
+            variant={jobFilter === "all" ? "default" : "outline"}
+            size="sm"
+            className="h-7"
+            onClick={() => setJobFilter("all")}
+          >
+            All
+          </Button>
+          {teamMembers.length > 0 && (
+            <Select
+              value={teamMembers.includes(jobFilter) ? jobFilter : ""}
+              onValueChange={(v) => setJobFilter(v)}
             >
-              {f === "mine" ? "My Jobs" : f === "all" ? "All" : f}
-            </Button>
-          ))}
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground ml-2 cursor-pointer">
+              <SelectTrigger className="h-7 w-28 text-xs">
+                <SelectValue placeholder="Team..." />
+              </SelectTrigger>
+              <SelectContent>
+                {teamMembers.map((name) => (
+                  <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={showCompleted}
@@ -1265,15 +1318,6 @@ export default function JobsPage() {
             Done
           </label>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7"
-          onClick={() => setNewActionOpen(!newActionOpen)}
-        >
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
-          {newActionOpen ? "Cancel" : "New Job"}
-        </Button>
       </div>
 
       {/* New Job form */}
@@ -1292,26 +1336,19 @@ export default function JobsPage() {
               className="text-sm"
               autoFocus
             />
-            <div className="flex flex-wrap gap-2">
-              <div className="flex gap-1 flex-wrap">
+            <Select
+              value={newAction.action_type}
+              onValueChange={(v) => setNewAction({ ...newAction, action_type: v })}
+            >
+              <SelectTrigger className="h-8 text-sm w-40">
+                <SelectValue placeholder="Job type..." />
+              </SelectTrigger>
+              <SelectContent>
                 {ACTION_TYPES.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() =>
-                      setNewAction({ ...newAction, action_type: t })
-                    }
-                    className={`px-2 py-1 text-[10px] rounded-md border transition-colors capitalize ${
-                      newAction.action_type === t
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background text-muted-foreground border-input hover:bg-accent"
-                    }`}
-                  >
-                    {t.replace("_", " ")}
-                  </button>
+                  <SelectItem key={t} value={t} className="text-sm capitalize">{t.replace("_", " ")}</SelectItem>
                 ))}
-              </div>
-            </div>
+              </SelectContent>
+            </Select>
             <ClientPropertySearch
               customerName={newAction.customer_name}
               propertyAddress={newAction.property_address}
@@ -1323,50 +1360,51 @@ export default function JobsPage() {
                 })
               }
             />
-            <div className="grid grid-cols-3 gap-2">
-              <Select
-                value={newAction.assigned_to || ""}
-                onValueChange={(v) =>
-                  setNewAction({ ...newAction, assigned_to: v })
-                }
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Assign..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {teamMembers.map((name) => (
-                    <SelectItem
-                      key={name}
-                      value={name}
-                      className="text-sm"
-                    >
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                type="number"
-                value={newAction.due_days}
-                onChange={(e) =>
-                  setNewAction({
-                    ...newAction,
-                    due_days: e.target.value,
-                  })
-                }
-                className="h-8 text-sm"
-                placeholder="Due in days"
-              />
+            <div className="flex flex-wrap gap-2 items-end">
+              <div className="w-44">
+                <Select
+                  value={newAction.assigned_to || ""}
+                  onValueChange={(v) =>
+                    setNewAction({ ...newAction, assigned_to: v })
+                  }
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Assign..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {teamMembers.map((name) => (
+                      <SelectItem
+                        key={name}
+                        value={name}
+                        className="text-sm"
+                      >
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-36">
+                <Input
+                  type="date"
+                  value={newAction.due_days}
+                  onChange={(e) =>
+                    setNewAction({
+                      ...newAction,
+                      due_days: e.target.value,
+                    })
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
               <Button
                 size="sm"
-                className="h-8"
                 disabled={!newAction.description.trim()}
                 onClick={async () => {
                   const dueDate = newAction.due_days
-                    ? new Date(
-                        Date.now() +
-                          parseInt(newAction.due_days) * 86400000
-                      ).toISOString()
+                    ? new Date(newAction.due_days + "T23:59:59").toISOString()
                     : undefined;
                   try {
                     await api.post("/v1/admin/agent-actions", {
@@ -1374,28 +1412,24 @@ export default function JobsPage() {
                       description: newAction.description,
                       assigned_to: newAction.assigned_to || undefined,
                       due_date: dueDate,
-                      customer_name:
-                        newAction.customer_name || undefined,
-                      property_address:
-                        newAction.property_address || undefined,
+                      customer_name: newAction.customer_name || undefined,
+                      property_address: newAction.property_address || undefined,
                     });
-                    setNewAction({
-                      action_type: "follow_up",
-                      description: "",
-                      assigned_to: "",
-                      due_days: "3",
-                      customer_name: "",
-                      property_address: "",
-                    });
+                    setNewAction({ action_type: "follow_up", description: "", assigned_to: "", due_days: "", customer_name: "", property_address: "" });
                     setNewActionOpen(false);
                     load();
                     toast.success("Job created");
-                  } catch {
-                    toast.error("Failed to create action");
-                  }
+                  } catch { toast.error("Failed to create"); }
                 }}
               >
                 Create
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setNewActionOpen(false)}
+              >
+                Cancel
               </Button>
             </div>
           </CardContent>
@@ -1527,25 +1561,9 @@ export default function JobsPage() {
                                 </Select>
                               </div>
                             </div>
-                            <div
-                              className="flex items-center gap-1 flex-shrink-0"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {(a.status === "open" ||
-                                a.status === "in_progress") && (
-                                <Button
-                                  variant="default"
-                                  size="sm"
-                                  className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700"
-                                  onClick={() =>
-                                    handleToggleAction(
-                                      a.id,
-                                      a.status
-                                    )
-                                  }
-                                >
-                                  Done
-                                </Button>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {a.assigned_to && (
+                                <span className="text-[10px] text-muted-foreground">{a.assigned_to}</span>
                               )}
                             </div>
                           </div>

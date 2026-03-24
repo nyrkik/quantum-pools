@@ -1,5 +1,6 @@
 """Admin endpoints — platform admin operations."""
 
+import os
 from typing import Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -700,7 +701,7 @@ async def get_thread(
                 timeline.append({
                     "id": f"{m.id}-reply",
                     "direction": "outbound",
-                    "from_email": "contact@sapphire-pools.com",
+                    "from_email": os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com"),
                     "to_email": m.from_email,
                     "subject": f"Re: {m.subject}" if m.subject else None,
                     "body": m.final_response,
@@ -780,7 +781,7 @@ async def approve_thread(
     # Create outbound message row
     outbound = AgentMessage(
         direction="outbound",
-        from_email="contact@sapphire-pools.com",
+        from_email=os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com"),
         to_email=msg.from_email,
         subject=f"Re: {msg.subject}" if msg.subject and not msg.subject.startswith("Re:") else msg.subject,
         body=response_text,
@@ -853,7 +854,7 @@ async def send_thread_followup(
     now = datetime.now(timezone.utc)
     outbound = AgentMessage(
         direction="outbound",
-        from_email="contact@sapphire-pools.com",
+        from_email=os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com"),
         to_email=thread.contact_email,
         subject=f"Re: {thread.subject}" if thread.subject and not thread.subject.startswith("Re:") else thread.subject,
         body=response_text,
@@ -962,7 +963,7 @@ Rules:
 - Professional, friendly tone
 - Never admit fault
 - Keep it concise — 2-4 sentences
-- End with: Best,\\nThe Sapphire Pools Team\\ncontact@sapphire-pools.com
+- End with: Best,\\nThe {os.environ.get("AGENT_FROM_NAME", "Sapphire Pools")} Team\\n{os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com")}
 
 Return ONLY the email body text."""
 
@@ -1470,8 +1471,8 @@ Rules:
 - End with the signature:
 
 Best,
-The Sapphire Pools Team
-contact@sapphire-pools.com
+The {os.environ.get("AGENT_FROM_NAME", "Sapphire Pools")} Team
+{os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com")}
 
 Return ONLY the email body text, no JSON, no subject line."""
 

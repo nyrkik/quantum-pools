@@ -42,7 +42,10 @@ TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")
 APPROVAL_NUMBERS = [n.strip() for n in os.environ.get("AGENT_APPROVAL_NUMBERS", "").split(",") if n.strip()]
 
-SYSTEM_PROMPT = """You are the AI assistant for Sapphire Pools, a commercial and residential pool service company in Sacramento, CA. You help manage client communications.
+def _get_system_prompt():
+    from_name = FROM_NAME or "Sapphire Pools"
+    from_email = FROM_EMAIL or "contact@sapphire-pools.com"
+    return """You are the AI assistant for """ + from_name + """, a commercial and residential pool service company in Sacramento, CA. You help manage client communications.
 
 When classifying emails, respond with JSON:
 {
@@ -68,7 +71,7 @@ Guidelines:
 - category "no_response" — ONLY for truly empty acknowledgments with zero actionable content: "thank you", "thanks", "got it", "ok", "sounds good", "perfect", thumbs up, single-word replies. If the email contains ANY instructions, approvals, questions, requests, decisions, or new information — even brief ones — it is NOT no_response. When in doubt, classify as "general" with needs_approval=true. A short reply like "go ahead" or "you can replace it" IS actionable and needs a response.
 - needs_approval = false ONLY for: gate code confirmations where no action needed
 - needs_approval = true for: schedule changes, complaints, billing questions, service requests, anything requiring a decision or a real reply
-- Draft responses should be warm, professional, concise. Sign as "Sapphire Pools" not a specific person.
+- Draft responses should be warm, professional, concise. Sign as the company team, not a specific person.
 - Never promise specific dates/times without approval
 - If the email mentions a property name you recognize, include it in the response
 - Keep responses under 3 sentences unless the situation requires more
@@ -84,10 +87,12 @@ CRITICAL TONE RULES — follow these exactly:
 - Don't use "family" as a suffix (e.g., "Blomquist family"). Just use their name.
 - Don't over-promise urgency. "We'll look into this" or "we'll follow up" is fine — avoid "prioritizing", "right away", "ASAP" unless truly critical.
 - Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines, then the signature. Use \\n for line breaks in the JSON string.
-- Always end with this exact signature (no variations):\\n\\nBest,\\nThe Sapphire Pools Team\\ncontact@sapphire-pools.com
+- Always end with this exact signature (no variations):\\n\\nBest,\\nThe """ + from_name + """ Team\\n""" + from_email + """
 - "actions" array: extract follow-up work the team needs to do. ONE action per distinct task — do NOT split a single task into steps. For example, "inspect pool and report back" is ONE action, not two. Include due_days (business days). Leave empty [] if no action needed.
 - Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)
 - Action descriptions should be specific — include property address, client name, part numbers, and any details from the email. "Replace filter" is too vague. "Replace spa filter at 751 Central Park Dr for Ashley Overton (Coventry Park)" is good."""
+
+SYSTEM_PROMPT = _get_system_prompt()
 
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
@@ -1082,7 +1087,7 @@ async def handle_sms_reply(from_number: str, body: str):
         else:
             # Use the reply as instructions to redraft — include customer context
             customer_ctx = await match_customer(agent_msg.from_email, agent_msg.subject or "", agent_msg.body or "")
-            redraft_system = "You write email responses for Sapphire Pools, a pool service company. Write a brief, professional response based on the instructions given. Sign as 'Sapphire Pools'. Keep it under 3 sentences."
+            redraft_system = f"You write email responses for {FROM_NAME}, a pool service company. Write a brief, professional response based on the instructions given. Sign as '{FROM_NAME}'. Keep it under 3 sentences."
             if customer_ctx:
                 redraft_system += f"\n\nCustomer: {customer_ctx['customer_name']}"
                 if customer_ctx.get("company_name"):

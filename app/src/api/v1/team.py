@@ -289,13 +289,14 @@ async def _send_invite_email(user: User, organization_id: str, db: AsyncSession)
     result = await db.execute(select(Organization).where(Organization.id == organization_id))
     org = result.scalar_one_or_none()
     org_name = org.name if org else "QuantumPools"
+    org_email = (org.email if org and org.email else os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"))
 
     # Build setup URL — frontend handles the token
     base_url = os.environ.get("FRONTEND_URL", "http://100.121.52.15:7060")
     setup_url = f"{base_url}/setup-account?token={user.verification_token}&email={user.email}"
 
     msg = MIMEMultipart("alternative")
-    msg["From"] = f"{org_name} <contact@sapphire-pools.com>"
+    msg["From"] = f"{org_name} <{org_email}>"
     msg["To"] = user.email
     msg["Subject"] = f"You've been invited to {org_name}"
 

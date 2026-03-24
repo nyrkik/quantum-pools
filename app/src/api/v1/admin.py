@@ -546,7 +546,6 @@ async def list_agent_actions(
         d["property_address"] = action.property_address
         items.append(d)
     return items
-    ]
 
 
 class CreateActionBody(BaseModel):

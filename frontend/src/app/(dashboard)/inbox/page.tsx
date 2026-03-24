@@ -247,6 +247,7 @@ function ActionTypeBadge({ type }: { type: string }) {
     callback: "border-cyan-400 text-cyan-600",
     repair: "border-red-400 text-red-600",
     equipment: "border-orange-400 text-orange-600",
+    invoice: "border-emerald-400 text-emerald-600",
     other: "",
   };
   return (

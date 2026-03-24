@@ -54,7 +54,7 @@ When classifying emails, respond with JSON:
   "internal_note": "note for the team if any",
   "actions": [
     {
-      "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|other",
+      "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
       "description": "short description of what needs to happen",
       "due_days": 1
     }
@@ -1118,7 +1118,7 @@ Based on the completed action and the overall situation, is there a natural next
 Respond with JSON:
 {{
   "has_next": true/false,
-  "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|other",
+  "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
   "description": "what needs to happen next",
   "due_days": 3,
   "reasoning": "why this is the logical next step"
@@ -1128,7 +1128,13 @@ Rules:
 - Only recommend a next step if it's genuinely needed — don't create busywork
 - If all necessary work is covered by existing open actions, return has_next: false
 - If a follow-up email was already sent to the client about this issue, do NOT suggest calling or emailing them again about the same thing
-- Common patterns: site_visit done → report findings to client or schedule repair; repair done → follow up to confirm satisfaction; bid sent → follow up if no response in a few days
+- Common patterns:
+  - site_visit done → report findings to client or schedule repair
+  - repair/equipment done → send invoice for the work (action_type: "invoice")
+  - bid sent → follow up if no response in a few days
+  - invoice sent → follow up on payment if overdue
+- When physical work is completed (repair, equipment replacement, site_visit with billable work), ALWAYS suggest sending an invoice as the next step unless one was already mentioned
+- action_type "invoice" means "create and send invoice for this work"
 - Keep description concise — one task, not multiple steps"""
 
     try:

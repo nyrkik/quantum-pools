@@ -612,8 +612,10 @@ export default function InboxPage() {
       offset: String(page * PAGE_SIZE),
       exclude_spam: "true",
     });
-    if (filter === "clients") params.set("status", "pending");
-    else if (filter === "handled") params.set("status", "handled");
+    if (filter === "clients") {
+      // Show pending + handled threads (exclude ignored/spam)
+      params.set("exclude_ignored", "true");
+    } else if (filter === "handled") params.set("status", "handled");
     else if (filter === "ignored") params.set("status", "ignored");
     // "all" sends no status filter
     if (search) params.set("search", search);

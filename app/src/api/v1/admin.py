@@ -566,6 +566,7 @@ async def list_threads(
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     exclude_spam: bool = Query(True),
+    exclude_ignored: bool = Query(False),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -579,6 +580,8 @@ async def list_threads(
         base = base.where(AgentThread.status == "ignored")
     if exclude_spam:
         base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
+    if exclude_ignored:
+        base = base.where(AgentThread.status != "ignored")
     if search:
         q = f"%{search}%"
         base = base.where(

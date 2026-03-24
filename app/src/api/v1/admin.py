@@ -703,6 +703,119 @@ async def add_action_comment(
     return {"id": comment.id, "author": comment.author, "text": comment.text, "created_at": comment.created_at.isoformat()}
 
 
+@router.post("/agent-messages/{message_id}/draft-followup")
+async def draft_followup(
+    message_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Draft a follow-up email using full thread context including action comments."""
+    import anthropic
+    import os
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Get all actions + comments for this message
+    actions_result = await db.execute(
+        select(AgentAction)
+        .options(selectinload(AgentAction.comments))
+        .where(AgentAction.agent_message_id == message_id)
+    )
+    all_actions = actions_result.scalars().all()
+
+    actions_context = ""
+    for a in all_actions:
+        actions_context += f"\n- [{a.status}] {a.action_type}: {a.description}"
+        if a.comments:
+            for c in a.comments:
+                actions_context += f"\n  Comment ({c.author}): {c.text}"
+
+    # Get customer context
+    customer_info = ""
+    if msg.matched_customer_id:
+        from src.models.customer import Customer
+        cust = (await db.execute(select(Customer).where(Customer.id == msg.matched_customer_id))).scalar_one_or_none()
+        if cust:
+            customer_info = f"\nCustomer: {cust.display_name}"
+            if cust.company_name:
+                customer_info += f" ({cust.company_name})"
+
+    prompt = f"""Draft a follow-up email for a pool service company. Use the full context below.
+
+Original email from {msg.from_email}:
+Subject: {msg.subject}
+{msg.body[:1000] if msg.body else ''}
+{customer_info}
+
+Our previous reply:
+{msg.final_response or msg.draft_response or 'No reply sent yet'}
+
+Action items and team comments:{actions_context or ' None'}
+
+Based on the action items and comments, draft a follow-up email to the client. This should continue the conversation naturally — reference what's been done, what was found, and any next steps.
+
+Rules:
+- Professional, friendly tone
+- Never admit fault or accept blame
+- Reference specific findings from the comments
+- Keep it concise — 2-4 sentences
+- End with the signature:
+
+Best,
+The Sapphire Pools Team
+contact@sapphire-pools.com
+
+Return ONLY the email body text, no JSON, no subject line."""
+
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        draft = response.content[0].text.strip()
+        return {"draft": draft, "to": msg.from_email, "subject": msg.subject}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to draft: {str(e)}")
+
+
+@router.post("/agent-messages/{message_id}/send-followup")
+async def send_followup(
+    message_id: str,
+    body: ApproveBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a follow-up email."""
+    from datetime import datetime, timezone
+    from src.services.customer_agent import send_email_response
+
+    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    response_text = body.response_text
+    if not response_text:
+        raise HTTPException(status_code=400, detail="No response text provided")
+
+    success = await send_email_response(msg.from_email, msg.subject or "", response_text)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send email")
+
+    # Log as a note on the message
+    msg.notes = (msg.notes or "") + f"\nFollow-up sent by {ctx.user.first_name} {ctx.user.last_name} at {datetime.now(timezone.utc).isoformat()}"
+    msg.notes = msg.notes.strip()
+    await db.commit()
+
+    return {"sent": True, "to": msg.from_email}
+
+
 # --- Twilio SMS Webhook ---
 
 from fastapi import Request, Response

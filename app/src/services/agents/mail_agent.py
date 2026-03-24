@@ -105,17 +105,22 @@ def strip_quoted_reply(text: str) -> str:
         return text
 
     # Pattern 1: "On <date>, <person> wrote:" (Apple Mail, Gmail)
-    match = re.search(r'\nOn .{10,80} wrote:\s*\n', text)
+    match = re.search(r'On .{10,80} wrote:\s', text)
     if match:
         return text[:match.start()].strip()
 
-    # Pattern 2: "From: ... To: ... Date: ... Subject:" block (Outlook)
-    match = re.search(r'\nFrom:\s*.+\nTo:\s*.+\n(?:Date|Sent):\s*.+\nSubject:', text)
+    # Pattern 2: "Sent from my iPhone/iPad" then quoted content
+    match = re.search(r'Sent from my (iPhone|iPad|Galaxy|device)', text)
     if match:
         return text[:match.start()].strip()
 
-    # Pattern 3: "---------- Forwarded message" or "-------- Original Message"
-    match = re.search(r'\n-{3,}\s*(Forwarded|Original)\s', text)
+    # Pattern 3: "From: ... To: ... Date: ... Subject:" block (Outlook)
+    match = re.search(r'From:\s*.+\nTo:\s*.+\n(?:Date|Sent):\s*.+\nSubject:', text)
+    if match:
+        return text[:match.start()].strip()
+
+    # Pattern 4: "---------- Forwarded message" or "-------- Original Message"
+    match = re.search(r'-{3,}\s*(Forwarded|Original)\s', text)
     if match:
         return text[:match.start()].strip()
 

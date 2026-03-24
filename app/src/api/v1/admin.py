@@ -1165,7 +1165,7 @@ async def get_agent_action(
     d = _serialize_action(action, include_comments=True)
     # Include parent message context + sibling actions for full history
     if action.agent_message_id:
-        msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+        msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id, AgentMessage.organization_id == ctx.organization_id))
         msg = msg_result.scalar_one_or_none()
         if msg:
             d["from_email"] = msg.from_email
@@ -1180,6 +1180,7 @@ async def get_agent_action(
                 .options(selectinload(AgentAction.comments))
                 .where(
                     AgentAction.agent_message_id == action.agent_message_id,
+                    AgentAction.organization_id == ctx.organization_id,
                     AgentAction.id != action.id,
                 )
                 .order_by(AgentAction.created_at)
@@ -1265,7 +1266,7 @@ async def add_action_comment(
             customer_context = ""
             customer_id = None
             if action.agent_message_id:
-                msg_check = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+                msg_check = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id, AgentMessage.organization_id == ctx.organization_id))
                 parent_msg = msg_check.scalar_one_or_none()
                 if parent_msg and parent_msg.matched_customer_id:
                     customer_id = parent_msg.matched_customer_id
@@ -1349,7 +1350,7 @@ Only answer with data that directly addresses what was asked. Don't volunteer un
 
             # Reload action with all comments
             action_result = await db.execute(
-                select(AgentAction).options(selectinload(AgentAction.comments)).where(AgentAction.id == action_id)
+                select(AgentAction).options(selectinload(AgentAction.comments)).where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id)
             )
             action_full = action_result.scalar_one()
 
@@ -1652,7 +1653,7 @@ async def draft_invoice_from_action(
     siblings = await db.execute(
         select(AgentAction)
         .options(selectinload(AgentAction.comments))
-        .where(AgentAction.agent_message_id == msg.id)
+        .where(AgentAction.agent_message_id == msg.id, AgentAction.organization_id == ctx.organization_id)
     )
     all_actions_text = ""
     for a in siblings.scalars().all():

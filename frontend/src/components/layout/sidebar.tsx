@@ -37,6 +37,7 @@ import {
   Bot,
   Mail,
   Bell,
+  ClipboardList,
 } from "lucide-react";
 
 const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
@@ -44,6 +45,7 @@ const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
   { href: "/inbox", label: "Inbox", icon: Bot, check: "canViewInbox" as keyof Permissions, badge: "pending" as const },
+  { href: "/jobs", label: "Jobs", icon: ClipboardList, check: "canViewInbox" as keyof Permissions },
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },

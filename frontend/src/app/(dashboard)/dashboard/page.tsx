@@ -265,7 +265,7 @@ export default function DashboardPage() {
                     </Badge>
                   )}
                 </div>
-                <Link href="/inbox">
+                <Link href="/jobs">
                   <Button variant="ghost" size="sm" className="text-xs">
                     View All <ArrowRight className="h-3 w-3 ml-1" />
                   </Button>

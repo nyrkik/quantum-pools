@@ -1449,29 +1449,10 @@ export default function AgentPage() {
   const [totalMessages, setTotalMessages] = useState(0);
   const [page, setPage] = useState(0);
   const [stats, setStats] = useState<AgentStats | null>(null);
-  const [actions, setActions] = useState<AgentAction[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"inbox" | "actions">("inbox");
-  const [suggestion, setSuggestion] = useState<{ id: string; action_type: string; description: string; reasoning: string } | null>(null);
-  const [newActionOpen, setNewActionOpen] = useState(false);
-  const [newAction, setNewAction] = useState({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3", customer_name: "", property_address: "" });
-  const [jobFilter, setJobFilter] = useState<string>("mine");
-  const [showCompleted, setShowCompleted] = useState(false);
-
-  const handleToggleAction = async (actionId: string, currentStatus: string) => {
-    const newStatus = currentStatus === "done" ? "open" : "done";
-    try {
-      const result = await api.put<{ suggestion?: { id: string; action_type: string; description: string; reasoning: string } }>(`/v1/admin/agent-actions/${actionId}`, { status: newStatus });
-      if (result.suggestion) {
-        setSuggestion(result.suggestion);
-      }
-      load();
-    } catch { toast.error("Failed to update"); }
-  };
 
   const totalPages = Math.ceil(totalMessages / PAGE_SIZE);
 
@@ -1487,28 +1468,19 @@ export default function AgentPage() {
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(page * PAGE_SIZE));
       const qs = params.toString();
-      const [paginated, st, acts] = await Promise.all([
+      const [paginated, st] = await Promise.all([
         api.get<PaginatedMessages>(`/v1/admin/agent-messages?${qs}`),
         api.get<AgentStats>("/v1/admin/agent-stats"),
-        (async () => {
-              const assigneeParam = jobFilter === "mine" && myName ? `&assigned_to=${encodeURIComponent(myName)}` : jobFilter !== "mine" && jobFilter !== "all" ? `&assigned_to=${encodeURIComponent(jobFilter)}` : "";
-              const statuses = showCompleted ? ["open", "in_progress", "done"] : ["open", "in_progress"];
-              const results = await Promise.all(
-                statuses.map(s => api.get<AgentAction[]>(`/v1/admin/agent-actions?status=${s}${assigneeParam}`).catch(() => []))
-              );
-              return results.flat();
-            })(),
       ]);
       setMessages(paginated.items);
       setTotalMessages(paginated.total);
       setStats(st);
-      setActions(acts);
     } catch {
       toast.error("Failed to load agent data");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, searchQuery, page, jobFilter, showCompleted, myName]);
+  }, [statusFilter, searchQuery, page]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1544,8 +1516,8 @@ export default function AgentPage() {
       {stats && (
         <div className="grid grid-cols-2 gap-4">
           <Card
-            className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${stats.pending > 0 ? "border-l-4 border-amber-400" : ""} ${statusFilter === "pending" && activeTab === "inbox" ? "ring-2 ring-primary" : ""}`}
-            onClick={() => { setActiveTab("inbox"); setStatusFilter("pending"); setPage(0); }}
+            className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${stats.pending > 0 ? "border-l-4 border-amber-400" : ""} ${statusFilter === "pending" && true ? "ring-2 ring-primary" : ""}`}
+            onClick={() => { setStatusFilter("pending"); setPage(0); }}
           >
             <CardHeader className="pb-0">
               <div className="flex items-center gap-2">
@@ -1560,95 +1532,9 @@ export default function AgentPage() {
               )}
             </CardContent>
           </Card>
-          <Card
-            className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${stats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""} ${activeTab === "actions" ? "ring-2 ring-primary" : ""}`}
-            onClick={() => setActiveTab("actions")}
-          >
-            <CardHeader className="pb-0">
-              <div className="flex items-center gap-2">
-                <ClipboardList className="h-4 w-4 text-purple-500" />
-                <CardTitle className="text-sm font-medium">Open Jobs</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{stats.open_actions}</p>
-              {stats.overdue_actions > 0 && (
-                <p className="text-xs text-red-600 font-medium">{stats.overdue_actions} overdue</p>
-              )}
-            </CardContent>
-          </Card>
         </div>
       )}
 
-      {/* AI Suggestion banner */}
-      {suggestion && (
-        <Card className="shadow-sm border-l-4 border-blue-500 bg-blue-50/50 dark:bg-blue-950/20">
-          <CardContent className="py-3 px-4">
-            <div className="flex items-start gap-3">
-              <Bot className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">Suggested next step</p>
-                <p className="text-sm mt-0.5">{suggestion.description}</p>
-                <p className="text-xs text-muted-foreground mt-1">{suggestion.reasoning}</p>
-              </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                <Button
-                  size="sm"
-                  className="h-7"
-                  onClick={async () => {
-                    try {
-                      await api.put(`/v1/admin/agent-actions/${suggestion.id}`, { status: "open" });
-                      toast.success("Action accepted");
-                      setSuggestion(null);
-                      load();
-                    } catch { toast.error("Failed"); }
-                  }}
-                >
-                  Accept
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7"
-                  onClick={async () => {
-                    try {
-                      await api.put(`/v1/admin/agent-actions/${suggestion.id}`, { status: "cancelled" });
-                      setSuggestion(null);
-                      load();
-                    } catch { toast.error("Failed"); }
-                  }}
-                >
-                  Dismiss
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Tab toggle */}
-      <div className="flex gap-1 border-b">
-        <button
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "inbox" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setActiveTab("inbox")}
-        >
-          Inbox
-        </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === "actions" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setActiveTab("actions")}
-        >
-          Jobs
-          {actions.length > 0 && (
-            <span className="bg-primary text-primary-foreground text-[10px] rounded-full px-1.5 py-0.5 leading-none">
-              {actions.length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {activeTab === "inbox" && (
-        <>
           {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex gap-1 flex-wrap">
@@ -1755,235 +1641,6 @@ export default function AgentPage() {
               )}
             </CardContent>
           </Card>
-        </>
-      )}
-
-      {activeTab === "actions" && (() => {
-        // Group actions by parent message (event) or standalone
-        const grouped = new Map<string, { label: string; from: string; actions: AgentAction[] }>();
-        for (const a of actions) {
-          const key = a.agent_message_id || `standalone-${a.id}`;
-          if (!grouped.has(key)) {
-            grouped.set(key, {
-              label: a.subject || "Unknown",
-              from: a.customer_name || a.from_email || "",
-              actions: [],
-            });
-          }
-          grouped.get(key)!.actions.push(a);
-        }
-        const groups = Array.from(grouped.entries());
-
-        return (
-          <>
-          {/* Job filters + New Job */}
-          <div className="flex flex-col sm:flex-row gap-3 justify-between">
-            <div className="flex gap-1 flex-wrap items-center">
-              {["mine", "all", ...teamMembers].map((f) => (
-                <Button
-                  key={f}
-                  variant={jobFilter === f ? "default" : "outline"}
-                  size="sm"
-                  className="text-xs capitalize h-7"
-                  onClick={() => setJobFilter(f)}
-                >
-                  {f === "mine" ? "My Jobs" : f === "all" ? "All" : f}
-                </Button>
-              ))}
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground ml-2 cursor-pointer">
-                <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} className="rounded" />
-                Done
-              </label>
-            </div>
-            <Button variant="outline" size="sm" className="h-7" onClick={() => setNewActionOpen(!newActionOpen)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />{newActionOpen ? "Cancel" : "New Job"}
-            </Button>
-          </div>
-          {newActionOpen && (
-            <Card className="shadow-sm">
-              <CardContent className="py-3 px-4 space-y-3">
-                <Input
-                  value={newAction.description}
-                  onChange={(e) => setNewAction({ ...newAction, description: e.target.value })}
-                  placeholder="What needs to be done?"
-                  className="text-sm"
-                  autoFocus
-                />
-                <div className="flex flex-wrap gap-2">
-                  <div className="flex gap-1 flex-wrap">
-                    {ACTION_TYPES.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setNewAction({ ...newAction, action_type: t })}
-                        className={`px-2 py-1 text-[10px] rounded-md border transition-colors capitalize ${
-                          newAction.action_type === t
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-background text-muted-foreground border-input hover:bg-accent"
-                        }`}
-                      >
-                        {t.replace("_", " ")}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <ClientPropertySearch
-                  customerName={newAction.customer_name}
-                  propertyAddress={newAction.property_address}
-                  onChange={(name, addr) => setNewAction({ ...newAction, customer_name: name, property_address: addr })}
-                />
-                <div className="grid grid-cols-3 gap-2">
-                  <Select value={newAction.assigned_to || ""} onValueChange={(v) => setNewAction({ ...newAction, assigned_to: v })}>
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Assign..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teamMembers.map((name) => (
-                        <SelectItem key={name} value={name} className="text-sm">{name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    type="number"
-                    value={newAction.due_days}
-                    onChange={(e) => setNewAction({ ...newAction, due_days: e.target.value })}
-                    className="h-8 text-sm"
-                    placeholder="Due in days"
-                  />
-                  <Button
-                    size="sm"
-                    className="h-8"
-                    disabled={!newAction.description.trim()}
-                    onClick={async () => {
-                      const dueDate = newAction.due_days
-                        ? new Date(Date.now() + parseInt(newAction.due_days) * 86400000).toISOString()
-                        : undefined;
-                      try {
-                        await api.post("/v1/admin/agent-actions", {
-                          action_type: newAction.action_type,
-                          description: newAction.description,
-                          assigned_to: newAction.assigned_to || undefined,
-                          due_date: dueDate,
-                          customer_name: newAction.customer_name || undefined,
-                          property_address: newAction.property_address || undefined,
-                        });
-                        setNewAction({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3", customer_name: "", property_address: "" });
-                        setNewActionOpen(false);
-                        load();
-                        toast.success("Job created");
-                      } catch { toast.error("Failed to create action"); }
-                    }}
-                  >
-                    Create
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card className="shadow-sm">
-            <CardContent className="p-0">
-              {actions.length === 0 && !newActionOpen ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <CheckCircle2 className="h-10 w-10 mb-3 opacity-40" />
-                  <p className="text-sm">All caught up — no open jobs</p>
-                </div>
-              ) : (
-                <div className="divide-y">
-                  {groups.map(([msgId, group]) => {
-                    const doneCount = group.actions.filter(a => a.status === "done").length;
-                    const hasOverdue = group.actions.some(a => a.status !== "done" && a.status !== "cancelled" && isOverdue(a.due_date));
-                    return (
-                      <div key={msgId} className={hasOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}>
-                        {/* Event header */}
-                        <div className="flex items-center justify-between px-4 pt-3 pb-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <p className="text-sm font-medium truncate">{group.from}</p>
-                            <span className="text-xs text-muted-foreground truncate hidden sm:inline">— {group.label}</span>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-muted-foreground hover:text-primary"
-                              title="View message"
-                              onClick={() => { setSelectedId(msgId); setActiveTab("inbox"); }}
-                            >
-                              <Mail className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                        {/* Actions under this event */}
-                        <div className="px-4 pb-3 space-y-1">
-                          {group.actions.map((a) => {
-                            const overdue = a.status !== "done" && a.status !== "cancelled" && isOverdue(a.due_date);
-                            return (
-                              <div
-                                key={a.id}
-                                className={`flex items-start gap-2 py-1.5 pl-2 rounded cursor-pointer ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}
-                                onClick={() => setSelectedActionId(a.id)}
-                              >
-                                <ActionStatusIcon status={a.status} />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <ActionTypeBadge type={a.action_type} />
-                                    {overdue && <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>}
-                                    {a.due_date && (
-                                      <span className={`text-[10px] ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
-                                        {formatDueDate(a.due_date)}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className={`text-sm mt-0.5 ${a.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-                                    {a.description}
-                                  </p>
-                                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                                    <Select
-                                      value={a.assigned_to || ""}
-                                      onValueChange={async (v) => {
-                                        try {
-                                          await api.put(`/v1/admin/agent-actions/${a.id}`, { assigned_to: v });
-                                          load();
-                                        } catch { toast.error("Failed to assign"); }
-                                      }}
-                                    >
-                                      <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
-                                        <SelectValue placeholder="Assign..." />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {teamMembers.map((name) => (
-                                          <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                                  {(a.status === "open" || a.status === "in_progress") && (
-                                    <Button
-                                      variant="default"
-                                      size="sm"
-                                      className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700"
-                                      onClick={() => handleToggleAction(a.id, a.status)}
-                                    >
-                                      Done
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          </>
-        );
-      })()}
 
       {/* Detail sheet */}
       <Sheet open={!!selectedId} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
@@ -2005,23 +1662,6 @@ export default function AgentPage() {
         </SheetContent>
       </Sheet>
 
-      {/* Action detail sheet */}
-      <Sheet open={!!selectedActionId} onOpenChange={(open) => { if (!open) setSelectedActionId(null); }}>
-        <SheetContent className="w-full sm:max-w-md flex flex-col h-full">
-          <SheetHeader className="px-4 sm:px-6 flex-shrink-0">
-            <SheetTitle className="text-lg">Action Detail</SheetTitle>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6">
-            {selectedActionId && (
-              <ActionDetailSheet
-                actionId={selectedActionId}
-                onClose={() => setSelectedActionId(null)}
-                onUpdate={load}
-              />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

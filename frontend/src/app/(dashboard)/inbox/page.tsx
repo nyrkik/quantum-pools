@@ -137,7 +137,22 @@ interface AgentStats {
 
 const STATUS_FILTERS = ["all", "clients", "pending", "sent", "auto_sent", "ignored"] as const;
 const ACTION_TYPES = ["follow_up", "bid", "schedule_change", "site_visit", "callback", "repair", "equipment", "other"];
-const TEAM_MEMBERS = ["Brian", "Chance", "Kim"];
+// Dynamic team member list
+let _cachedTeam: string[] | null = null;
+function useTeamMembers() {
+  const [members, setMembers] = useState<string[]>(_cachedTeam || []);
+  useEffect(() => {
+    if (_cachedTeam) return;
+    api.get<{ first_name: string; is_verified: boolean; is_active: boolean }[]>("/v1/team")
+      .then((data) => {
+        const names = data.filter((m) => m.is_verified && m.is_active).map((m) => m.first_name);
+        _cachedTeam = names;
+        setMembers(names);
+      })
+      .catch(() => {});
+  }, []);
+  return members;
+}
 
 function formatTime(iso: string | null) {
   if (!iso) return "—";
@@ -274,6 +289,7 @@ function ActionStatusIcon({ status }: { status: string }) {
 }
 
 function ActionItem({ action, onUpdate }: { action: AgentAction; onUpdate: () => void }) {
+  const teamMembers = useTeamMembers();
   const [updating, setUpdating] = useState(false);
 
   const updateStatus = async (newStatus: string) => {
@@ -323,7 +339,7 @@ function ActionItem({ action, onUpdate }: { action: AgentAction; onUpdate: () =>
               <SelectValue placeholder="Unassigned" />
             </SelectTrigger>
             <SelectContent>
-              {TEAM_MEMBERS.map((name) => (
+              {teamMembers.map((name) => (
                 <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
               ))}
             </SelectContent>
@@ -348,6 +364,7 @@ function MessageDetail({
   onClose: () => void;
   onAction: () => void;
 }) {
+  const teamMembers = useTeamMembers();
   const [msg, setMsg] = useState<AgentMessage | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -719,7 +736,7 @@ function MessageDetail({
                   <SelectValue placeholder="Assign..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {TEAM_MEMBERS.map((name) => (
+                  {teamMembers.map((name) => (
                     <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -911,6 +928,7 @@ function ActionDetailSheet({
   onClose: () => void;
   onUpdate: () => void;
 }) {
+  const teamMembers = useTeamMembers();
   const [detail, setDetail] = useState<ActionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
@@ -1426,6 +1444,7 @@ function ClientPropertySearch({
 export default function AgentPage() {
   const { user } = useAuth();
   const myName = user?.first_name || "";
+  const teamMembers = useTeamMembers();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
   const [page, setPage] = useState(0);
@@ -1760,7 +1779,7 @@ export default function AgentPage() {
           {/* Job filters + New Job */}
           <div className="flex flex-col sm:flex-row gap-3 justify-between">
             <div className="flex gap-1 flex-wrap items-center">
-              {["mine", "all", ...TEAM_MEMBERS].map((f) => (
+              {["mine", "all", ...teamMembers].map((f) => (
                 <Button
                   key={f}
                   variant={jobFilter === f ? "default" : "outline"}
@@ -1819,7 +1838,7 @@ export default function AgentPage() {
                       <SelectValue placeholder="Assign..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {TEAM_MEMBERS.map((name) => (
+                      {teamMembers.map((name) => (
                         <SelectItem key={name} value={name} className="text-sm">{name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1932,7 +1951,7 @@ export default function AgentPage() {
                                         <SelectValue placeholder="Assign..." />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        {TEAM_MEMBERS.map((name) => (
+                                        {teamMembers.map((name) => (
                                           <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
                                         ))}
                                       </SelectContent>

@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
@@ -29,13 +28,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -49,113 +41,88 @@ import {
 import { toast } from "sonner";
 import {
   Loader2,
-  MailCheck,
-  MailX,
   Clock,
   Search,
   Send,
-  X,
   Pencil,
   Bot,
-  Inbox,
   AlertTriangle,
-  CheckCircle2,
-  Circle,
-  Timer,
-  ClipboardList,
-  Plus,
   Trash2,
   Mail,
-  DollarSign,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
-interface AgentAction {
+// --- Types ---
+
+interface Thread {
   id: string;
-  agent_message_id: string;
-  action_type: string;
-  description: string;
-  assigned_to: string | null;
-  due_date: string | null;
+  contact_email: string;
+  subject: string | null;
+  customer_name: string | null;
+  matched_customer_id: string | null;
   status: string;
-  completed_at: string | null;
-  created_at: string | null;
-  // Joined from message
-  from_email?: string;
-  customer_name?: string;
-  subject?: string;
+  urgency: string | null;
+  category: string | null;
+  message_count: number;
+  last_message_at: string | null;
+  last_direction: string;
+  last_snippet: string | null;
+  has_pending: boolean;
+  has_open_actions: boolean;
 }
 
-interface AgentMessage {
+interface TimelineMessage {
   id: string;
   direction: string;
   from_email: string;
   to_email: string;
   subject: string | null;
-  body?: string;
+  body: string | null;
   category: string | null;
   urgency: string | null;
   status: string;
-  matched_customer_id: string | null;
-  match_method: string | null;
-  customer_name: string | null;
   draft_response: string | null;
-  final_response: string | null;
-  approved_by: string | null;
-  notes: string | null;
   received_at: string | null;
-  approved_at: string | null;
   sent_at: string | null;
-  actions?: AgentAction[];
-  response_time_seconds?: number | null;
-  waiting_seconds?: number | null;
+  approved_by: string | null;
 }
 
-interface PaginatedMessages {
-  items: AgentMessage[];
+interface ThreadDetail {
+  id: string;
+  contact_email: string;
+  subject: string | null;
+  customer_name: string | null;
+  status: string;
+  urgency: string | null;
+  category: string | null;
+  message_count: number;
+  has_pending: boolean;
+  timeline: TimelineMessage[];
+  actions: unknown[];
+}
+
+interface ThreadStats {
   total: number;
-  limit: number;
-  offset: number;
+  pending: number;
+  stale_pending: number;
+  open_actions: number;
+}
+
+interface PaginatedThreads {
+  items: Thread[];
+  total: number;
 }
 
 const PAGE_SIZE = 25;
 
-interface AgentStats {
-  total: number;
-  pending: number;
-  sent: number;
-  auto_sent: number;
-  rejected: number;
-  ignored: number;
-  by_category: Record<string, number>;
-  by_urgency: Record<string, number>;
-  recent_24h: number;
-  open_actions: number;
-  overdue_actions: number;
-  avg_response_seconds: number | null;
-  stale_pending: number;
-}
+const STATUS_FILTERS = ["clients", "all", "handled", "ignored"] as const;
 
-const STATUS_FILTERS = ["clients", "all", "sent", "auto_sent", "ignored"] as const;
-const ACTION_TYPES = ["follow_up", "bid", "schedule_change", "site_visit", "callback", "repair", "equipment", "other"];
-// Dynamic team member list
-let _cachedTeam: string[] | null = null;
-function useTeamMembers() {
-  const [members, setMembers] = useState<string[]>(_cachedTeam || []);
-  useEffect(() => {
-    if (_cachedTeam) return;
-    api.get<{ first_name: string; is_verified: boolean; is_active: boolean }[]>("/v1/team")
-      .then((data) => {
-        const names = data.filter((m) => m.is_verified && m.is_active).map((m) => m.first_name);
-        _cachedTeam = names;
-        setMembers(names);
-      })
-      .catch(() => {});
-  }, []);
-  return members;
-}
+// --- Helpers ---
 
 function formatTime(iso: string | null) {
-  if (!iso) return "—";
+  if (!iso) return "\u2014";
   const d = new Date(iso);
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
@@ -168,37 +135,11 @@ function formatTime(iso: string | null) {
 }
 
 function formatFullDate(iso: string | null) {
-  if (!iso) return "—";
+  if (!iso) return "\u2014";
   return new Date(iso).toLocaleString("en-US", {
     month: "short", day: "numeric", year: "numeric",
     hour: "numeric", minute: "2-digit",
   });
-}
-
-function formatDuration(seconds: number | null | undefined) {
-  if (!seconds) return "—";
-  if (seconds < 60) return `${seconds}s`;
-  const min = Math.floor(seconds / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  const remMin = min % 60;
-  return remMin > 0 ? `${hr}h ${remMin}m` : `${hr}h`;
-}
-
-function formatDueDate(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const now = new Date();
-  const diffDays = Math.ceil((d.getTime() - now.getTime()) / 86400000);
-  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
-  if (diffDays === 0) return "Due today";
-  if (diffDays === 1) return "Due tomorrow";
-  return `Due in ${diffDays}d`;
-}
-
-function isOverdue(iso: string | null) {
-  if (!iso) return false;
-  return new Date(iso) < new Date();
 }
 
 function isStale(receivedAt: string | null) {
@@ -206,16 +147,14 @@ function isStale(receivedAt: string | null) {
   return (Date.now() - new Date(receivedAt).getTime()) > 30 * 60 * 1000;
 }
 
+// --- Badge components ---
+
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
     case "pending":
       return <Badge variant="outline" className="border-amber-400 text-amber-600">Pending</Badge>;
-    case "sent":
-      return <Badge variant="default" className="bg-green-600">Sent</Badge>;
-    case "auto_sent":
-      return <Badge variant="default" className="bg-blue-600">Auto</Badge>;
-    case "rejected":
-      return <Badge variant="destructive">Rejected</Badge>;
+    case "handled":
+      return <Badge variant="default" className="bg-green-600">Handled</Badge>;
     case "ignored":
       return <Badge variant="secondary">Ignored</Badge>;
     default:
@@ -254,170 +193,66 @@ function CategoryBadge({ category }: { category: string | null }) {
   );
 }
 
-function ActionTypeBadge({ type }: { type: string }) {
-  const styles: Record<string, string> = {
-    bid: "border-green-400 text-green-600",
-    follow_up: "border-blue-400 text-blue-600",
-    schedule_change: "border-purple-400 text-purple-600",
-    site_visit: "border-amber-400 text-amber-600",
-    callback: "border-cyan-400 text-cyan-600",
-    repair: "border-red-400 text-red-600",
-    equipment: "border-orange-400 text-orange-600",
-    invoice: "border-emerald-400 text-emerald-600",
-    other: "",
-  };
-  return (
-    <Badge variant="outline" className={`text-[10px] px-1.5 capitalize ${styles[type] || ""}`}>
-      {type.replace("_", " ")}
-    </Badge>
-  );
-}
+// --- Thread Detail Sheet ---
 
-function ActionStatusIcon({ status }: { status: string }) {
-  switch (status) {
-    case "open":
-      return <Circle className="h-3.5 w-3.5 text-amber-500" />;
-    case "in_progress":
-      return <Timer className="h-3.5 w-3.5 text-blue-500" />;
-    case "done":
-      return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
-    case "cancelled":
-      return <X className="h-3.5 w-3.5 text-muted-foreground" />;
-    default:
-      return <Circle className="h-3.5 w-3.5 text-muted-foreground" />;
-  }
-}
-
-function ActionItem({ action, onUpdate }: { action: AgentAction; onUpdate: () => void }) {
-  const teamMembers = useTeamMembers();
-  const [updating, setUpdating] = useState(false);
-
-  const updateStatus = async (newStatus: string) => {
-    setUpdating(true);
-    try {
-      await api.put(`/v1/admin/agent-actions/${action.id}`, { status: newStatus });
-      onUpdate();
-    } catch {
-      toast.error("Failed to update action");
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const updateAssignee = async (assignee: string) => {
-    try {
-      await api.put(`/v1/admin/agent-actions/${action.id}`, { assigned_to: assignee });
-      onUpdate();
-    } catch {
-      toast.error("Failed to assign");
-    }
-  };
-
-  const overdue = action.status !== "done" && action.status !== "cancelled" && isOverdue(action.due_date);
-
-  return (
-    <div className={`flex items-start gap-2 p-2 rounded-md text-sm ${overdue ? "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800" : "bg-muted/50"}`}>
-      <button onClick={() => updateStatus(action.status === "done" ? "open" : "done")} disabled={updating} className="mt-0.5">
-        {updating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ActionStatusIcon status={action.status} />}
-      </button>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <ActionTypeBadge type={action.action_type} />
-          {overdue && <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>}
-        </div>
-        <p className={`mt-0.5 ${action.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-          {action.description}
-        </p>
-        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-          {action.due_date && (
-            <span className={overdue ? "text-red-600 font-medium" : ""}>
-              {formatDueDate(action.due_date)}
-            </span>
-          )}
-          <Select value={action.assigned_to || ""} onValueChange={updateAssignee}>
-            <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
-              <SelectValue placeholder="Unassigned" />
-            </SelectTrigger>
-            <SelectContent>
-              {teamMembers.map((name) => (
-                <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {action.status !== "done" && action.status !== "cancelled" && (
-            <button className="hover:text-foreground" onClick={() => updateStatus("in_progress")}>
-              {action.status === "open" ? "Start" : ""}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MessageDetail({
-  messageId,
+function ThreadDetailSheet({
+  threadId,
   onClose,
   onAction,
 }: {
-  messageId: string;
+  threadId: string;
   onClose: () => void;
   onAction: () => void;
 }) {
-  const teamMembers = useTeamMembers();
-  const [msg, setMsg] = useState<AgentMessage | null>(null);
+  const [thread, setThread] = useState<ThreadDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+
+  // Draft editing (for pending messages)
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [addingAction, setAddingAction] = useState(false);
-  const [newAction, setNewAction] = useState({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3" });
+  const [reviseInstruction, setReviseInstruction] = useState("");
+  const [revising, setRevising] = useState(false);
+
+  // Follow-up (for handled threads)
   const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
   const [followUpText, setFollowUpText] = useState("");
   const [draftingFollowUp, setDraftingFollowUp] = useState(false);
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
-  const [reviseInstruction, setReviseInstruction] = useState("");
-  const [revising, setRevising] = useState(false);
-  const [draftReviseInstruction, setDraftReviseInstruction] = useState("");
-  const [draftRevising, setDraftRevising] = useState(false);
+  const [followUpRevise, setFollowUpRevise] = useState("");
+  const [followUpRevising, setFollowUpRevising] = useState(false);
 
-  const handleReviseDraft = async () => {
-    if (!draftReviseInstruction.trim()) return;
-    const currentDraft = editText || msg?.draft_response || "";
-    if (!currentDraft) return;
-    setDraftRevising(true);
-    try {
-      const result = await api.post<{ draft: string }>(`/v1/admin/agent-messages/${messageId}/revise-draft`, {
-        draft: currentDraft,
-        instruction: draftReviseInstruction,
-      });
-      setEditText(result.draft);
-      setEditing(true);
-      setDraftReviseInstruction("");
-    } catch {
-      toast.error("Failed to revise");
-    } finally {
-      setDraftRevising(false);
-    }
-  };
+  const timelineEndRef = useRef<HTMLDivElement>(null);
 
-  const loadMsg = useCallback(() => {
+  const loadThread = useCallback(() => {
     setLoading(true);
-    api.get<AgentMessage>(`/v1/admin/agent-messages/${messageId}`)
-      .then((m) => {
-        setMsg(m);
-        setEditText(m.draft_response || "");
+    api.get<ThreadDetail>(`/v1/admin/agent-threads/${threadId}`)
+      .then((t) => {
+        setThread(t);
+        // Find latest pending message draft
+        const pendingMsg = t.timeline.find((m) => m.status === "pending" && m.direction === "inbound" && m.draft_response);
+        if (pendingMsg) {
+          setEditText(pendingMsg.draft_response || "");
+        }
       })
-      .catch(() => toast.error("Failed to load message"))
+      .catch(() => toast.error("Failed to load thread"))
       .finally(() => setLoading(false));
-  }, [messageId]);
+  }, [threadId]);
 
-  useEffect(() => { loadMsg(); }, [loadMsg]);
+  useEffect(() => { loadThread(); }, [loadThread]);
+
+  useEffect(() => {
+    if (!loading && timelineEndRef.current) {
+      timelineEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [loading, thread]);
+
+  const pendingMessage = thread?.timeline.find((m) => m.status === "pending" && m.direction === "inbound");
 
   const handleApprove = async (responseText?: string) => {
     setSending(true);
     try {
-      await api.post(`/v1/admin/agent-messages/${messageId}/approve`, {
+      await api.post(`/v1/admin/agent-threads/${threadId}/approve`, {
         response_text: responseText || undefined,
       });
       toast.success("Reply sent");
@@ -430,25 +265,11 @@ function MessageDetail({
     }
   };
 
-  const handleReject = async () => {
-    setSending(true);
-    try {
-      await api.post(`/v1/admin/agent-messages/${messageId}/reject`, {});
-      toast.success("Message rejected");
-      onAction();
-      onClose();
-    } catch {
-      toast.error("Failed to reject");
-    } finally {
-      setSending(false);
-    }
-  };
-
   const handleDismiss = async () => {
     setSending(true);
     try {
-      await api.post(`/v1/admin/agent-messages/${messageId}/dismiss`, {});
-      toast.success("Message dismissed");
+      await api.post(`/v1/admin/agent-threads/${threadId}/dismiss`, {});
+      toast.success("Thread dismissed");
       onAction();
       onClose();
     } catch {
@@ -458,10 +279,30 @@ function MessageDetail({
     }
   };
 
+  const handleReviseDraft = async () => {
+    if (!reviseInstruction.trim()) return;
+    const currentDraft = editing ? editText : (pendingMessage?.draft_response || "");
+    if (!currentDraft) return;
+    setRevising(true);
+    try {
+      const result = await api.post<{ draft: string }>(`/v1/admin/agent-threads/${threadId}/revise-draft`, {
+        draft: currentDraft,
+        instruction: reviseInstruction,
+      });
+      setEditText(result.draft);
+      setEditing(true);
+      setReviseInstruction("");
+    } catch {
+      toast.error("Failed to revise");
+    } finally {
+      setRevising(false);
+    }
+  };
+
   const handleDraftFollowUp = async () => {
     setDraftingFollowUp(true);
     try {
-      const result = await api.post<{ draft: string; to: string; subject: string }>(`/v1/admin/agent-messages/${messageId}/draft-followup`, {});
+      const result = await api.post<{ draft: string; to: string; subject: string }>(`/v1/admin/agent-threads/${threadId}/draft-followup`, {});
       setFollowUp(result);
       setFollowUpText(result.draft);
     } catch {
@@ -475,21 +316,13 @@ function MessageDetail({
     if (!followUpText.trim()) return;
     setSendingFollowUp(true);
     try {
-      const result = await api.post<{ sent: boolean; closed_actions: { description: string }[]; ask_actions: { id: string; description: string; reason: string }[] }>(`/v1/admin/agent-messages/${messageId}/send-followup`, { response_text: followUpText });
-      if (result.closed_actions?.length) {
-        toast.success(`Follow-up sent. Completed: ${result.closed_actions.map(a => a.description.slice(0, 40)).join(", ")}`);
-      } else {
-        toast.success("Follow-up sent");
-      }
-      if (result.ask_actions?.length) {
-        for (const a of result.ask_actions) {
-          toast(`Does this close "${a.description.slice(0, 50)}"? ${a.reason}`, { duration: 10000 });
-        }
-      }
+      await api.post(`/v1/admin/agent-threads/${threadId}/send-followup`, { response_text: followUpText });
+      toast.success("Follow-up sent");
       setFollowUp(null);
       setFollowUpText("");
-      setReviseInstruction("");
+      setFollowUpRevise("");
       onAction();
+      loadThread();
     } catch {
       toast.error("Failed to send");
     } finally {
@@ -497,56 +330,34 @@ function MessageDetail({
     }
   };
 
-  const handleRevise = async () => {
-    if (!reviseInstruction.trim() || !followUpText) return;
-    setRevising(true);
+  const handleReviseFollowUp = async () => {
+    if (!followUpRevise.trim() || !followUpText) return;
+    setFollowUpRevising(true);
     try {
-      const result = await api.post<{ draft: string }>(`/v1/admin/agent-messages/${messageId}/revise-draft`, {
+      const result = await api.post<{ draft: string }>(`/v1/admin/agent-threads/${threadId}/revise-draft`, {
         draft: followUpText,
-        instruction: reviseInstruction,
+        instruction: followUpRevise,
       });
       setFollowUpText(result.draft);
-      setReviseInstruction("");
+      setFollowUpRevise("");
     } catch {
       toast.error("Failed to revise");
     } finally {
-      setRevising(false);
+      setFollowUpRevising(false);
     }
   };
 
   const handleDelete = async () => {
     setSending(true);
     try {
-      await api.delete(`/v1/admin/agent-messages/${messageId}`);
-      toast.success("Message deleted");
+      await api.delete(`/v1/admin/agent-threads/${threadId}`);
+      toast.success("Thread deleted");
       onAction();
       onClose();
     } catch {
       toast.error("Failed to delete");
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleAddAction = async () => {
-    if (!newAction.description.trim()) return;
-    const dueDate = newAction.due_days
-      ? new Date(Date.now() + parseInt(newAction.due_days) * 86400000).toISOString()
-      : undefined;
-    try {
-      await api.post("/v1/admin/agent-actions", {
-        agent_message_id: messageId,
-        action_type: newAction.action_type,
-        description: newAction.description,
-        assigned_to: newAction.assigned_to || undefined,
-        due_date: dueDate,
-      });
-      setAddingAction(false);
-      setNewAction({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3" });
-      loadMsg();
-      onAction();
-    } catch {
-      toast.error("Failed to create action");
     }
   };
 
@@ -558,1153 +369,519 @@ function MessageDetail({
     );
   }
 
-  if (!msg) return null;
+  if (!thread) return null;
 
   return (
-    <div className="space-y-4">
-      {/* Header info */}
-      <div className="space-y-2">
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex-shrink-0 space-y-2 pb-4 border-b">
         <div className="flex items-center gap-2 flex-wrap">
-          <StatusBadge status={msg.status} />
-          <UrgencyBadge urgency={msg.urgency} />
-          <CategoryBadge category={msg.category} />
-          {msg.status === "pending" && isStale(msg.received_at) && (
+          <StatusBadge status={thread.status} />
+          <UrgencyBadge urgency={thread.urgency} />
+          <CategoryBadge category={thread.category} />
+          {thread.has_pending && isStale(thread.timeline[thread.timeline.length - 1]?.received_at) && (
             <Badge variant="destructive" className="text-[10px] px-1.5">
               <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />Stale
             </Badge>
           )}
         </div>
-        <div className="text-sm space-y-1">
-          <p><span className="text-muted-foreground">From:</span> {msg.customer_name ? `${msg.customer_name} <${msg.from_email}>` : msg.from_email}</p>
-          {msg.matched_customer_id && (
-            <p className="flex items-center gap-1">
-              <span className="text-muted-foreground">Matched:</span>
-              <Badge variant="outline" className="text-[10px] px-1.5 border-green-400 text-green-600 capitalize">
-                {(msg.match_method || "unknown").replace("_", " ")}
-              </Badge>
-            </p>
-          )}
-          {!msg.matched_customer_id && msg.status === "pending" && (
-            <p className="text-amber-600 text-xs font-medium">No customer match found</p>
-          )}
-          <p><span className="text-muted-foreground">To:</span> {msg.to_email}</p>
-          <p><span className="text-muted-foreground">Received:</span> {formatFullDate(msg.received_at)}</p>
-          {msg.sent_at && (
-            <p>
-              <span className="text-muted-foreground">Sent:</span> {formatFullDate(msg.sent_at)}
-              {msg.response_time_seconds != null && (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  (responded in {formatDuration(msg.response_time_seconds)})
-                </span>
+        <p className="text-sm font-medium">
+          {thread.customer_name || thread.contact_email}
+        </p>
+        <p className="text-xs text-muted-foreground">{thread.contact_email}</p>
+        {thread.subject && (
+          <p className="text-sm text-muted-foreground">Re: {thread.subject}</p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {thread.message_count} message{thread.message_count !== 1 ? "s" : ""}
+        </p>
+      </div>
+
+      {/* Conversation timeline */}
+      <div className="flex-1 overflow-y-auto py-4 space-y-4">
+        {thread.timeline.map((msg) => {
+          const isInbound = msg.direction === "inbound";
+          const isPending = msg.status === "pending" && isInbound;
+          const timestamp = isInbound ? msg.received_at : msg.sent_at;
+
+          return (
+            <div key={msg.id} className={`flex ${isInbound ? "justify-start" : "justify-end"}`}>
+              <div
+                className={`max-w-[85%] rounded-lg p-3 text-sm space-y-1 ${
+                  isPending
+                    ? "bg-amber-50 dark:bg-amber-950/30 border-l-4 border-amber-400"
+                    : isInbound
+                    ? "bg-muted/50"
+                    : "bg-blue-50 dark:bg-blue-950/30"
+                }`}
+              >
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium">
+                    {isInbound ? (msg.from_email.split("@")[0]) : "Sapphire Pools"}
+                  </span>
+                  <span>{formatTime(timestamp)}</span>
+                  {!isInbound && msg.approved_by && (
+                    <span className="text-[10px]">by {msg.approved_by}</span>
+                  )}
+                </div>
+                {msg.subject && (
+                  <p className="text-xs font-medium text-muted-foreground">{msg.subject}</p>
+                )}
+                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  {msg.body || "No content"}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={timelineEndRef} />
+      </div>
+
+      {/* Bottom action area */}
+      <div className="flex-shrink-0 border-t pt-4 space-y-3">
+        {/* Draft area for pending messages */}
+        {pendingMessage && pendingMessage.draft_response && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Draft Response</p>
+              {!editing && (
+                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditing(true)}>
+                  <Pencil className="h-3 w-3 mr-1" />Edit
+                </Button>
               )}
-            </p>
-          )}
-          {msg.status === "pending" && msg.waiting_seconds != null && (
-            <p className={msg.waiting_seconds > 1800 ? "text-red-600 font-medium" : "text-amber-600"}>
-              <Clock className="h-3 w-3 inline mr-1" />
-              Waiting {formatDuration(msg.waiting_seconds)}
-            </p>
-          )}
-          {msg.approved_by && <p><span className="text-muted-foreground">Handled by:</span> {msg.approved_by}</p>}
-        </div>
-      </div>
-
-      {/* Email body */}
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Email Body</p>
-        <div className="bg-muted/50 rounded-md p-3 text-sm whitespace-pre-wrap max-h-64 overflow-y-auto">
-          {msg.body || "No body content"}
-        </div>
-      </div>
-
-      {/* Draft response — only show for pending messages */}
-      {msg.draft_response && msg.status === "pending" && (
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {msg.status === "pending" ? "Draft Response" : "Draft"}
-            </p>
-            {msg.status === "pending" && !editing && (
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditing(true)}>
-                <Pencil className="h-3 w-3 mr-1" />Edit
-              </Button>
-            )}
-          </div>
-          {editing ? (
-            <div className="space-y-2">
+            </div>
+            {editing ? (
               <Textarea
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
                 rows={5}
                 className="text-sm"
               />
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <Input
-                    value={draftReviseInstruction}
-                    onChange={(e) => setDraftReviseInstruction(e.target.value)}
-                    placeholder="Tell AI how to change it..."
-                    className="text-sm h-8"
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleReviseDraft(); } }}
-                  />
-                </div>
-                <Button variant="outline" size="sm" className="h-8" onClick={handleReviseDraft} disabled={draftRevising || !draftReviseInstruction.trim()}>
-                  {draftRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-                </Button>
+            ) : (
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm whitespace-pre-wrap max-h-40 overflow-y-auto">
+                {pendingMessage.draft_response}
               </div>
-            </div>
-          ) : (
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm whitespace-pre-wrap">
-              {msg.draft_response}
-            </div>
-          )}
-          {msg.status === "pending" && !editing && (
-            <div className="flex gap-2 items-end mt-2">
+            )}
+            <div className="flex gap-2 items-end">
               <div className="flex-1">
                 <Input
-                  value={draftReviseInstruction}
-                  onChange={(e) => setDraftReviseInstruction(e.target.value)}
+                  value={reviseInstruction}
+                  onChange={(e) => setReviseInstruction(e.target.value)}
                   placeholder="Tell AI how to change it..."
                   className="text-sm h-8"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      if (!editing) { setEditing(true); setEditText(msg.draft_response || ""); }
-                      handleReviseDraft();
-                    }
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleReviseDraft(); } }}
                 />
               </div>
-              <Button variant="outline" size="sm" className="h-8" onClick={() => {
-                if (!editing) { setEditing(true); setEditText(msg.draft_response || ""); }
-                handleReviseDraft();
-              }} disabled={draftRevising || !draftReviseInstruction.trim()}>
-                {draftRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+              <Button variant="outline" size="sm" className="h-8" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
+                {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
               </Button>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Sent response */}
-      {msg.final_response && msg.status !== "pending" && (
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Sent Response</p>
-          <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-md p-3 text-sm whitespace-pre-wrap">
-            {msg.final_response}
-          </div>
-        </div>
-      )}
-
-      {/* Notes */}
-      {msg.notes && (
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Internal Note</p>
-          <p className="text-sm text-muted-foreground">{msg.notes}</p>
-        </div>
-      )}
-
-      {/* Jobs */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-            <ClipboardList className="h-3 w-3" />Jobs
-            {msg.actions && msg.actions.length > 0 && (
-              <span className="ml-1 text-[10px] bg-muted rounded-full px-1.5">{msg.actions.filter(a => a.status !== "done" && a.status !== "cancelled").length} open</span>
-            )}
-          </p>
-          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setAddingAction(!addingAction)}>
-            <Plus className="h-3 w-3 mr-1" />Add
-          </Button>
-        </div>
-
-        {addingAction && (
-          <div className="space-y-2 p-3 bg-muted/50 rounded-md mb-2">
-            <div className="flex gap-2">
-              <Select value={newAction.action_type} onValueChange={(v) => setNewAction({ ...newAction, action_type: v })}>
-                <SelectTrigger className="h-8 text-xs w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ACTION_TYPES.map((t) => (
-                    <SelectItem key={t} value={t} className="text-xs capitalize">{t.replace("_", " ")}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={newAction.assigned_to} onValueChange={(v) => setNewAction({ ...newAction, assigned_to: v })}>
-                <SelectTrigger className="h-8 text-xs w-28">
-                  <SelectValue placeholder="Assign..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {teamMembers.map((name) => (
-                    <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                type="number"
-                placeholder="Days"
-                value={newAction.due_days}
-                onChange={(e) => setNewAction({ ...newAction, due_days: e.target.value })}
-                className="h-8 text-xs w-16"
-              />
-            </div>
-            <Input
-              placeholder="What needs to happen?"
-              value={newAction.description}
-              onChange={(e) => setNewAction({ ...newAction, description: e.target.value })}
-              className="h-8 text-sm"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <Button size="sm" className="h-7 text-xs" onClick={handleAddAction}>Add</Button>
-              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setAddingAction(false)}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {msg.actions && msg.actions.length > 0 ? (
-          <div className="space-y-1.5">
-            {msg.actions.map((a) => (
-              <ActionItem key={a.id} action={a} onUpdate={() => { loadMsg(); onAction(); }} />
-            ))}
-          </div>
-        ) : !addingAction ? (
-          <p className="text-xs text-muted-foreground py-2">No jobs</p>
-        ) : null}
-      </div>
-
-      {/* Approve/Send button */}
-      {msg.status === "pending" && (
-        <div className="flex items-center gap-2 pt-2 border-t">
-          <Button
-            onClick={() => handleApprove(editing ? editText : undefined)}
-            disabled={sending}
-            className="flex-1"
-          >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-            {editing ? "Send Edited" : "Approve & Send"}
-          </Button>
-          {editing && (
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-              Cancel Edit
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* Follow-up — for sent messages */}
-      {(msg.status === "sent" || msg.status === "auto_sent") && !followUp && (
-        <div className="pt-2 border-t">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDraftFollowUp}
-            disabled={draftingFollowUp}
-          >
-            {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
-            Draft Follow-up
-          </Button>
-        </div>
-      )}
-
-      {followUp && (
-        <div className="pt-2 border-t space-y-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Follow-up Draft</p>
-            <p className="text-xs text-muted-foreground mb-2">To: {followUp.to} — Re: {followUp.subject}</p>
-            <Textarea
-              value={followUpText}
-              onChange={(e) => setFollowUpText(e.target.value)}
-              rows={6}
-              className="text-sm"
-            />
-          </div>
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
-              <Input
-                value={reviseInstruction}
-                onChange={(e) => setReviseInstruction(e.target.value)}
-                placeholder="Tell AI how to change it..."
-                className="text-sm h-8"
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRevise(); } }}
-              />
-            </div>
-            <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
-              {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-            </Button>
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
-              {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-              Send Follow-up
-            </Button>
-            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setReviseInstruction(""); }}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Dismiss + Delete — bottom, behind confirmations */}
-      <div className="pt-2 border-t flex justify-between">
-        {msg.status === "pending" && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={sending}>
-                Dismiss
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => handleApprove(editing ? editText : undefined)}
+                disabled={sending}
+                className="flex-1"
+              >
+                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                {editing ? "Send Edited" : "Approve & Send"}
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Dismiss this message?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  No reply will be sent. Action items will remain open.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDismiss}>Dismiss</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive" disabled={sending}>
-              <Trash2 className="h-3 w-3 mr-1" />Delete
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete this message?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove the message and all associated jobs. This cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    </div>
-  );
-}
-
-interface ActionComment {
-  id: string;
-  author: string;
-  text: string;
-  created_at: string;
-}
-
-interface RelatedJob {
-  id: string;
-  action_type: string;
-  description: string;
-  status: string;
-  comments: { author: string; text: string }[];
-}
-
-interface ActionDetail extends AgentAction {
-  comments?: ActionComment[];
-  notes?: string | null;
-  from_email?: string;
-  customer_name?: string;
-  subject?: string;
-  email_body?: string;
-  our_response?: string;
-  related_jobs?: RelatedJob[];
-}
-
-function ActionDetailSheet({
-  actionId,
-  onClose,
-  onUpdate,
-}: {
-  actionId: string;
-  onClose: () => void;
-  onUpdate: () => void;
-}) {
-  const teamMembers = useTeamMembers();
-  const [detail, setDetail] = useState<ActionDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [comment, setComment] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
-  const [followUpText, setFollowUpText] = useState("");
-  const [draftingFollowUp, setDraftingFollowUp] = useState(false);
-  const [sendingFollowUp, setSendingFollowUp] = useState(false);
-  const [reviseInstruction, setReviseInstruction] = useState("");
-  const [revising, setRevising] = useState(false);
-  const [invoiceDraft, setInvoiceDraft] = useState<{ customer_id: string | null; customer_name: string; subject: string; line_items: { description: string; quantity: number; unit_price: number }[]; notes: string } | null>(null);
-  const [draftingInvoice, setDraftingInvoice] = useState(false);
-  const [creatingInvoice, setCreatingInvoice] = useState(false);
-
-  const handleDraftInvoice = async () => {
-    setDraftingInvoice(true);
-    try {
-      const result = await api.post<{ customer_id: string | null; customer_name: string; subject: string; line_items: { description: string; quantity: number; unit_price: number }[]; notes: string }>(`/v1/admin/agent-actions/${actionId}/draft-invoice`, {});
-      setInvoiceDraft(result);
-    } catch {
-      toast.error("Failed to draft invoice");
-    } finally {
-      setDraftingInvoice(false);
-    }
-  };
-
-  const handleCreateInvoice = async () => {
-    if (!invoiceDraft || !invoiceDraft.customer_id) {
-      toast.error("No customer matched — can't create invoice");
-      return;
-    }
-    setCreatingInvoice(true);
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-      await api.post("/v1/invoices", {
-        customer_id: invoiceDraft.customer_id,
-        subject: invoiceDraft.subject,
-        issue_date: today,
-        due_date: due,
-        notes: invoiceDraft.notes,
-        line_items: invoiceDraft.line_items.map((li, i) => ({
-          description: li.description,
-          quantity: li.quantity,
-          unit_price: li.unit_price,
-          is_taxed: false,
-          sort_order: i,
-        })),
-      });
-      toast.success("Invoice created");
-      setInvoiceDraft(null);
-      onUpdate();
-    } catch (err: unknown) {
-      toast.error((err as { message?: string })?.message || "Failed to create invoice");
-    } finally {
-      setCreatingInvoice(false);
-    }
-  };
-
-  const handleDraftFollowUp = async () => {
-    if (!detail) return;
-    setDraftingFollowUp(true);
-    try {
-      const result = await api.post<{ draft: string; to: string; subject: string }>(`/v1/admin/agent-messages/${detail.agent_message_id}/draft-followup`, {});
-      setFollowUp(result);
-      setFollowUpText(result.draft);
-    } catch {
-      toast.error("Failed to draft follow-up");
-    } finally {
-      setDraftingFollowUp(false);
-    }
-  };
-
-  const handleSendFollowUp = async () => {
-    if (!detail || !followUpText.trim()) return;
-    setSendingFollowUp(true);
-    try {
-      const result = await api.post<{ sent: boolean; closed_actions: { description: string }[]; ask_actions: { id: string; description: string; reason: string }[] }>(`/v1/admin/agent-messages/${detail.agent_message_id}/send-followup`, { response_text: followUpText });
-      if (result.closed_actions?.length) {
-        toast.success(`Follow-up sent. Completed: ${result.closed_actions.map(a => a.description.slice(0, 40)).join(", ")}`);
-      } else {
-        toast.success("Follow-up sent");
-      }
-      if (result.ask_actions?.length) {
-        for (const a of result.ask_actions) {
-          toast(`Does this close "${a.description.slice(0, 50)}"? ${a.reason}`, { duration: 10000 });
-        }
-      }
-      setFollowUp(null);
-      setFollowUpText("");
-      setReviseInstruction("");
-      loadDetail();
-      onUpdate();
-    } catch {
-      toast.error("Failed to send");
-    } finally {
-      setSendingFollowUp(false);
-    }
-  };
-
-  const handleRevise = async () => {
-    if (!detail || !reviseInstruction.trim() || !followUpText) return;
-    setRevising(true);
-    try {
-      const result = await api.post<{ draft: string }>(`/v1/admin/agent-messages/${detail.agent_message_id}/revise-draft`, {
-        draft: followUpText,
-        instruction: reviseInstruction,
-      });
-      setFollowUpText(result.draft);
-      setReviseInstruction("");
-    } catch {
-      toast.error("Failed to revise");
-    } finally {
-      setRevising(false);
-    }
-  };
-
-  const loadDetail = useCallback(() => {
-    setLoading(true);
-    api.get<ActionDetail>(`/v1/admin/agent-actions/${actionId}`)
-      .then((d) => { setDetail(d); })
-      .catch(() => toast.error("Failed to load action"))
-      .finally(() => setLoading(false));
-  }, [actionId]);
-
-  useEffect(() => { loadDetail(); }, [loadDetail]);
-
-  const handleAddComment = async () => {
-    if (!comment.trim()) return;
-    setPosting(true);
-    try {
-      const result = await api.post<{ action_resolved?: boolean; action_updated?: boolean; new_description?: string; auto_comment?: { author: string; text: string } }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
-      setComment("");
-      if (result.auto_comment) {
-        toast.success(`DeepBlue: ${result.auto_comment.text.slice(0, 80)}`);
-      }
-      if (result.action_resolved) {
-        toast.success("Job marked complete — your comment resolved it");
-      } else if (result.action_updated && result.new_description) {
-        toast.success(`Job updated: ${result.new_description.slice(0, 60)}`);
-      }
-      loadDetail();
-      onUpdate();
-    } catch {
-      toast.error("Failed to add comment");
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
-  }
-  if (!detail) return null;
-
-  return (
-    <div className="space-y-5 pt-2">
-      {/* Header */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <ActionStatusIcon status={detail.status} />
-          <ActionTypeBadge type={detail.action_type} />
-          {detail.due_date && isOverdue(detail.due_date) && detail.status !== "done" && (
-            <Badge variant="destructive" className="text-[10px] px-1.5">Overdue</Badge>
-          )}
-        </div>
-        <p className="text-sm font-medium">{detail.description}</p>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span>{detail.customer_name || detail.from_email}</span>
-          {detail.assigned_to && <span>Assigned: {detail.assigned_to}</span>}
-          {detail.due_date && <span>{formatDueDate(detail.due_date)}</span>}
-        </div>
-      </div>
-
-      {/* Context trail */}
-      {(detail.subject || detail.related_jobs) && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Context</p>
-
-          {detail.subject && (
-            <div className="bg-muted/50 rounded-md p-3 text-sm space-y-1">
-              <p className="text-xs text-muted-foreground">Email: {detail.from_email}</p>
-              <p className="font-medium">{detail.subject}</p>
-              {detail.email_body && (
-                <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4">{detail.email_body}</p>
-              )}
-            </div>
-          )}
-
-          {detail.our_response && (
-            <div className="bg-green-50 dark:bg-green-950/20 rounded-md p-3 text-sm">
-              <p className="text-xs text-muted-foreground mb-1">Our reply</p>
-              <p className="text-xs whitespace-pre-wrap line-clamp-3">{detail.our_response}</p>
-            </div>
-          )}
-
-          {detail.related_jobs?.map((job) => (
-            <div key={job.id} className="bg-muted/30 rounded-md p-2.5 text-sm">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <ActionStatusIcon status={job.status} />
-                <ActionTypeBadge type={job.action_type} />
-              </div>
-              <p className={`text-xs ${job.status === "done" ? "line-through text-muted-foreground" : ""}`}>{job.description}</p>
-              {job.comments.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {job.comments.map((c, i) => (
-                    <p key={i} className="text-[10px] text-muted-foreground">{c.author}: {c.text}</p>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Comments / Activity */}
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Activity</p>
-        {detail.comments && detail.comments.length > 0 ? (
-          <div className="space-y-2 mb-3">
-            {detail.comments.map((c) => (
-              <div key={c.id} className="bg-muted/50 rounded-md p-2.5">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-xs font-medium">{c.author}</span>
-                  <span className="text-[10px] text-muted-foreground">{formatTime(c.created_at)}</span>
-                </div>
-                <p className="text-sm">{c.text}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground mb-3">No comments yet</p>
-        )}
-        <div className="flex gap-2 items-end">
-          <Textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Add a comment..."
-            className="text-sm min-h-[2.5rem] resize-none flex-1"
-            rows={2}
-          />
-          <Button size="sm" className="h-9 flex-shrink-0" onClick={handleAddComment} disabled={posting || !comment.trim()}>
-            {posting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Post"}
-          </Button>
-        </div>
-      </div>
-
-      {/* Actions row */}
-      {!followUp && !invoiceDraft && (
-        <div className="pt-2 border-t flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDraftFollowUp}
-            disabled={draftingFollowUp}
-          >
-            {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
-            Draft Follow-up
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDraftInvoice}
-            disabled={draftingInvoice}
-          >
-            {draftingInvoice ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <DollarSign className="h-3.5 w-3.5 mr-1.5" />}
-            Create Invoice
-          </Button>
-        </div>
-      )}
-
-      {/* Invoice draft */}
-      {invoiceDraft && (
-        <div className="pt-2 border-t space-y-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Invoice Draft</p>
-          <div className="space-y-2">
-            <div className="text-sm">
-              <span className="text-muted-foreground">Customer: </span>
-              <span className="font-medium">{invoiceDraft.customer_name}</span>
-              {!invoiceDraft.customer_id && <span className="text-red-600 text-xs ml-2">(no match)</span>}
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Subject</Label>
-              <Input
-                value={invoiceDraft.subject}
-                onChange={(e) => setInvoiceDraft({ ...invoiceDraft, subject: e.target.value })}
-                className="h-8 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Line Items</p>
-            {invoiceDraft.line_items.map((li, i) => (
-              <div key={i} className="flex gap-2 items-start bg-muted/50 rounded-md p-2">
-                <div className="flex-1 space-y-1">
-                  <Input
-                    value={li.description}
-                    onChange={(e) => {
-                      const items = [...invoiceDraft.line_items];
-                      items[i] = { ...items[i], description: e.target.value };
-                      setInvoiceDraft({ ...invoiceDraft, line_items: items });
-                    }}
-                    className="h-7 text-sm"
-                    placeholder="Description"
-                  />
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      value={li.quantity}
-                      onChange={(e) => {
-                        const items = [...invoiceDraft.line_items];
-                        items[i] = { ...items[i], quantity: parseFloat(e.target.value) || 0 };
-                        setInvoiceDraft({ ...invoiceDraft, line_items: items });
-                      }}
-                      className="h-7 text-sm w-16"
-                      placeholder="Qty"
-                    />
-                    <Input
-                      type="number"
-                      value={li.unit_price}
-                      onChange={(e) => {
-                        const items = [...invoiceDraft.line_items];
-                        items[i] = { ...items[i], unit_price: parseFloat(e.target.value) || 0 };
-                        setInvoiceDraft({ ...invoiceDraft, line_items: items });
-                      }}
-                      className="h-7 text-sm w-24"
-                      placeholder="Price"
-                      step="0.01"
-                    />
-                    <span className="text-sm text-muted-foreground self-center w-20 text-right">
-                      ${(li.quantity * li.unit_price).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 text-muted-foreground hover:text-destructive mt-1"
-                  onClick={() => {
-                    const items = invoiceDraft.line_items.filter((_, j) => j !== i);
-                    setInvoiceDraft({ ...invoiceDraft, line_items: items });
-                  }}
-                >
-                  <X className="h-3 w-3" />
+              {editing && (
+                <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setEditText(pendingMessage.draft_response || ""); }}>
+                  Cancel Edit
                 </Button>
-              </div>
-            ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs"
-              onClick={() => setInvoiceDraft({
-                ...invoiceDraft,
-                line_items: [...invoiceDraft.line_items, { description: "", quantity: 1, unit_price: 0 }],
-              })}
-            >
-              <Plus className="h-3 w-3 mr-1" />Add Line
-            </Button>
+              )}
+            </div>
           </div>
+        )}
 
-          <div className="flex items-center justify-between text-sm font-medium pt-1 border-t">
-            <span>Total</span>
-            <span>${invoiceDraft.line_items.reduce((sum, li) => sum + li.quantity * li.unit_price, 0).toFixed(2)}</span>
-          </div>
+        {/* Follow-up area for handled threads */}
+        {!thread.has_pending && thread.status === "handled" && !followUp && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDraftFollowUp}
+            disabled={draftingFollowUp}
+          >
+            {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+            Draft Follow-up
+          </Button>
+        )}
 
-          <div className="flex gap-2">
-            <Button onClick={handleCreateInvoice} disabled={creatingInvoice || !invoiceDraft.customer_id}>
-              {creatingInvoice ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <DollarSign className="h-4 w-4 mr-2" />}
-              Create Invoice
-            </Button>
-            <Button variant="ghost" onClick={() => setInvoiceDraft(null)}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {followUp && (
-        <div className="pt-2 border-t space-y-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Follow-up Draft</p>
-            <p className="text-xs text-muted-foreground mb-2">To: {followUp.to} — Re: {followUp.subject}</p>
+        {followUp && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Follow-up Draft</p>
+            <p className="text-xs text-muted-foreground">To: {followUp.to} — Re: {followUp.subject}</p>
             <Textarea
               value={followUpText}
               onChange={(e) => setFollowUpText(e.target.value)}
-              rows={6}
+              rows={5}
               className="text-sm"
             />
-          </div>
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
-              <Input
-                value={reviseInstruction}
-                onChange={(e) => setReviseInstruction(e.target.value)}
-                placeholder="Tell AI how to change it..."
-                className="text-sm h-8"
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRevise(); } }}
-              />
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Input
+                  value={followUpRevise}
+                  onChange={(e) => setFollowUpRevise(e.target.value)}
+                  placeholder="Tell AI how to change it..."
+                  className="text-sm h-8"
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleReviseFollowUp(); } }}
+                />
+              </div>
+              <Button variant="outline" size="sm" className="h-8" onClick={handleReviseFollowUp} disabled={followUpRevising || !followUpRevise.trim()}>
+                {followUpRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+              </Button>
             </div>
-            <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
-              {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
+                {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                Send Follow-up
+              </Button>
+              <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setFollowUpRevise(""); }}>
+                Cancel
+              </Button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
-              {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-              Send
-            </Button>
-            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setReviseInstruction(""); }}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* Delete action */}
-      {detail.status !== "cancelled" && (
-        <div className="pt-3 border-t flex justify-end">
+        {/* Dismiss + Delete */}
+        <div className="flex justify-between pt-2 border-t">
+          {thread.has_pending && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={sending}>
+                  Dismiss
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Dismiss this thread?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    No reply will be sent for the pending message.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDismiss}>Dismiss</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive">
-                <Trash2 className="h-3 w-3 mr-1" />Delete Job
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive" disabled={sending}>
+                <Trash2 className="h-3 w-3 mr-1" />Delete
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete this job?</AlertDialogTitle>
+                <AlertDialogTitle>Delete this thread?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will permanently remove the action and all its comments. This cannot be undone.
+                  This will permanently remove the thread and all messages. This cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={async () => {
-                  try {
-                    await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" });
-                    toast.success("Action deleted");
-                    onClose();
-                    onUpdate();
-                  } catch { toast.error("Failed"); }
-                }}>Delete</AlertDialogAction>
+                <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-function ClientPropertySearch({
-  customerName,
-  propertyAddress,
-  onChange,
-}: {
-  customerName: string;
-  propertyAddress: string;
-  onChange: (name: string, address: string) => void;
-}) {
-  const [query, setQuery] = useState(customerName);
-  const [results, setResults] = useState<{ customer_name: string; property_address: string; property_name: string | null }[]>([]);
-  const [showResults, setShowResults] = useState(false);
+// --- Main Page ---
 
-  useEffect(() => {
-    if (query.length < 2) { setResults([]); return; }
-    const timer = setTimeout(async () => {
-      try {
-        const data = await api.get<{ customer_name: string; property_address: string; property_name: string | null }[]>(`/v1/admin/client-search?q=${encodeURIComponent(query)}`);
-        setResults(data);
-        setShowResults(true);
-      } catch { setResults([]); }
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [query]);
+export default function InboxPage() {
+  const { user } = useAuth();
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState<ThreadStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<typeof STATUS_FILTERS[number]>("clients");
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [page, setPage] = useState(0);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+
+  const loadThreads = useCallback(() => {
+    setLoading(true);
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(page * PAGE_SIZE),
+      exclude_spam: "true",
+    });
+    if (filter === "clients") params.set("status", "pending");
+    else if (filter === "handled") params.set("status", "handled");
+    else if (filter === "ignored") params.set("status", "ignored");
+    // "all" sends no status filter
+    if (search) params.set("search", search);
+
+    api.get<PaginatedThreads>(`/v1/admin/agent-threads?${params}`)
+      .then((data) => {
+        setThreads(data.items);
+        setTotal(data.total);
+      })
+      .catch(() => toast.error("Failed to load threads"))
+      .finally(() => setLoading(false));
+  }, [filter, search, page]);
+
+  const loadStats = useCallback(() => {
+    api.get<ThreadStats>("/v1/admin/agent-threads/stats")
+      .then(setStats)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { loadThreads(); }, [loadThreads]);
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  const handleFilterChange = (f: typeof STATUS_FILTERS[number]) => {
+    setFilter(f);
+    setPage(0);
+  };
+
+  const handleSearch = () => {
+    setSearch(searchInput);
+    setPage(0);
+  };
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  // Pending threads for "Needs Attention"
+  const pendingThreads = filter === "clients" ? threads.filter((t) => t.has_pending) : [];
+
+  if (!user) return null;
 
   return (
-    <div className="space-y-2">
-      <div className="relative">
-        <Input
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); onChange(e.target.value, propertyAddress); }}
-          placeholder="Search client or address..."
-          className="text-sm h-8"
-          onFocus={() => results.length > 0 && setShowResults(true)}
-        />
-        {showResults && results.length > 0 && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowResults(false)} />
-            <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-lg">
-              {results.map((r, i) => (
+    <div className="p-4 sm:p-6 pt-16 sm:pt-6 space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <Bot className="h-5 w-5 text-muted-foreground" />
+        <h1 className="text-xl font-semibold">Inbox</h1>
+      </div>
+
+      {/* Stats tile */}
+      {stats && (
+        <button
+          type="button"
+          onClick={() => handleFilterChange("clients")}
+          className={`w-full text-left rounded-lg border p-3 shadow-sm transition-colors ${
+            stats.pending > 0
+              ? "border-amber-300 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-950/50"
+              : "bg-background hover:bg-muted/50"
+          }`}
+        >
+          <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-1.5">
+              <Mail className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">{stats.total}</span>
+              <span className="text-muted-foreground">threads</span>
+            </div>
+            {stats.pending > 0 && (
+              <div className="flex items-center gap-1.5">
+                <Clock className="h-4 w-4 text-amber-600" />
+                <span className="font-medium text-amber-600">{stats.pending} pending</span>
+                {stats.stale_pending > 0 && (
+                  <span className="text-xs text-red-600">({stats.stale_pending} stale)</span>
+                )}
+              </div>
+            )}
+            {stats.open_actions > 0 && (
+              <div className="flex items-center gap-1.5">
+                <MessageSquare className="h-4 w-4 text-blue-600" />
+                <span className="text-blue-600">{stats.open_actions} open jobs</span>
+              </div>
+            )}
+          </div>
+        </button>
+      )}
+
+      {/* Needs Attention */}
+      {filter === "clients" && pendingThreads.length > 0 && (
+        <Card className="shadow-sm border-amber-200 dark:border-amber-800">
+          <CardHeader className="py-2 px-4">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+              Needs Attention
+              <Badge variant="outline" className="border-amber-400 text-amber-600 ml-1 text-[10px] px-1.5">
+                {pendingThreads.length}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3 pt-0">
+            <div className="space-y-1">
+              {pendingThreads.slice(0, 5).map((t) => (
                 <button
-                  key={i}
+                  key={t.id}
                   type="button"
-                  className="w-full px-3 py-2 text-left hover:bg-muted/50 text-sm"
-                  onClick={() => {
-                    setQuery(r.customer_name);
-                    onChange(r.customer_name, r.property_address);
-                    setShowResults(false);
-                  }}
+                  onClick={() => setSelectedThreadId(t.id)}
+                  className="w-full text-left flex items-center gap-3 py-1.5 px-2 rounded hover:bg-amber-50 dark:hover:bg-amber-950/30 text-sm transition-colors"
                 >
-                  <span className="font-medium">{r.customer_name}</span>
-                  {r.property_name && <span className="text-muted-foreground ml-1">({r.property_name})</span>}
-                  <span className="text-xs text-muted-foreground block">{r.property_address}</span>
+                  <span className="font-medium truncate flex-shrink-0 w-32">
+                    {t.customer_name || t.contact_email.split("@")[0]}
+                  </span>
+                  <span className="text-muted-foreground truncate flex-1">
+                    {t.last_snippet || t.subject || "No subject"}
+                  </span>
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                    {formatTime(t.last_message_at)}
+                  </span>
                 </button>
               ))}
-            </div>
-          </>
-        )}
-      </div>
-      {propertyAddress && (
-        <p className="text-xs text-muted-foreground px-1">{propertyAddress}</p>
-      )}
-    </div>
-  );
-}
-
-export default function AgentPage() {
-  const { user } = useAuth();
-  const myName = user?.first_name || "";
-  const teamMembers = useTeamMembers();
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [totalMessages, setTotalMessages] = useState(0);
-  const [page, setPage] = useState(0);
-  const [stats, setStats] = useState<AgentStats | null>(null);
-  const [pendingMessages, setPendingMessages] = useState<AgentMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("clients");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const totalPages = Math.ceil(totalMessages / PAGE_SIZE);
-
-  const load = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (statusFilter === "clients") {
-        params.set("exclude_categories", "spam,auto_reply,no_response");
-      } else if (statusFilter !== "all") {
-        params.set("status", statusFilter);
-      }
-      if (searchQuery) params.set("search", searchQuery);
-      params.set("limit", String(PAGE_SIZE));
-      params.set("offset", String(page * PAGE_SIZE));
-      const qs = params.toString();
-      const [paginated, st, pending] = await Promise.all([
-        api.get<PaginatedMessages>(`/v1/admin/agent-messages?${qs}`),
-        api.get<AgentStats>("/v1/admin/agent-stats"),
-        api.get<PaginatedMessages>("/v1/admin/agent-messages?status=pending&limit=10").catch(() => ({ items: [], total: 0, limit: 10, offset: 0 })),
-      ]);
-      setMessages(paginated.items);
-      setTotalMessages(paginated.total);
-      setStats(st);
-      setPendingMessages(pending.items);
-    } catch {
-      toast.error("Failed to load agent data");
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, searchQuery, page]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Poll every 30s
-  useEffect(() => {
-    const interval = setInterval(load, 30000);
-    return () => clearInterval(interval);
-  }, [load]);
-
-  // Debounced search — reset to page 0
-  const [searchInput, setSearchInput] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => { setSearchQuery(searchInput); setPage(0); }, 300);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Bot className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Inbox</h1>
-      </div>
-
-      {/* Stats */}
-      {stats && (
-        <div className="grid grid-cols-2 gap-4">
-          <Card
-            className={`shadow-sm py-4 gap-2 cursor-pointer transition-shadow hover:shadow-md ${stats.pending > 0 ? "border-l-4 border-amber-400" : ""} ${statusFilter === "pending" && true ? "ring-2 ring-primary" : ""}`}
-            onClick={() => { setStatusFilter("pending"); setPage(0); }}
-          >
-            <CardHeader className="pb-0">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-amber-500" />
-                <CardTitle className="text-sm font-medium">Pending</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{stats.pending}</p>
-              {stats.stale_pending > 0 && (
-                <p className="text-xs text-red-600 font-medium">{stats.stale_pending} stale</p>
+              {pendingThreads.length > 5 && (
+                <p className="text-xs text-muted-foreground pl-2">+ {pendingThreads.length - 5} more</p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filters + Search */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {STATUS_FILTERS.map((f) => (
+          <Button
+            key={f}
+            variant={filter === f ? "default" : "outline"}
+            size="sm"
+            className="capitalize"
+            onClick={() => handleFilterChange(f)}
+          >
+            {f}
+          </Button>
+        ))}
+        <div className="flex items-center gap-1 ml-auto">
+          <Input
+            placeholder="Search..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+            className="h-8 w-48 text-sm"
+          />
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSearch}>
+            <Search className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Thread table */}
+      <Card className="shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-slate-100 dark:bg-slate-800">
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Time</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide">From</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide">Subject</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-16 text-center">Msgs</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-28">Category</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-12">
+                  <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
+                </TableCell>
+              </TableRow>
+            ) : threads.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                  No threads found
+                </TableCell>
+              </TableRow>
+            ) : (
+              threads.map((t, i) => (
+                <TableRow
+                  key={t.id}
+                  className={`cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-950 ${
+                    i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""
+                  } ${t.has_pending ? "border-l-4 border-l-amber-400 font-medium" : ""}`}
+                  onClick={() => setSelectedThreadId(t.id)}
+                >
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatTime(t.last_message_at)}
+                  </TableCell>
+                  <TableCell className="truncate max-w-[180px]">
+                    <span className={t.has_pending ? "font-medium" : ""}>
+                      {t.customer_name || t.contact_email.split("@")[0]}
+                    </span>
+                  </TableCell>
+                  <TableCell className="truncate max-w-[250px] text-sm">
+                    <span className={t.has_pending ? "" : "text-muted-foreground"}>
+                      {t.subject || t.last_snippet || "No subject"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {t.message_count > 1 && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5">
+                        {t.message_count}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <CategoryBadge category={t.category} />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <StatusBadge status={t.status} />
+                      <UrgencyBadge urgency={t.urgency} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {page * PAGE_SIZE + 1}\u2013{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="px-2">{page + 1} / {totalPages}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(page + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       )}
 
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex gap-1 flex-wrap">
-              {STATUS_FILTERS.map((s) => (
-                <Button
-                  key={s}
-                  variant={statusFilter === s ? "default" : "outline"}
-                  size="sm"
-                  className="text-xs capitalize"
-                  onClick={() => { setStatusFilter(s); setPage(0); }}
-                >
-                  {s === "auto_sent" ? "Auto" : s === "clients" ? "Clients" : s}
-                </Button>
-              ))}
-            </div>
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Search by name, email, subject..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-8 h-9 text-sm"
-              />
-            </div>
-          </div>
-
-          {/* Pending section */}
-          {pendingMessages.length > 0 && statusFilter !== "pending" && (
-            <Card className="shadow-sm border-l-4 border-amber-400">
-              <CardHeader className="pb-2 pt-3">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-amber-500" />
-                  <CardTitle className="text-sm font-medium">Needs Attention ({pendingMessages.length})</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0 pb-2">
-                <div className="divide-y">
-                  {pendingMessages.map((m) => {
-                    const stale = isStale(m.received_at);
-                    return (
-                      <div
-                        key={m.id}
-                        className={`flex items-center gap-3 py-2 cursor-pointer hover:bg-muted/50 rounded px-1 ${stale ? "bg-red-50 dark:bg-red-950/20" : ""}`}
-                        onClick={() => setSelectedId(m.id)}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium truncate">{m.customer_name || m.from_email}</span>
-                            <CategoryBadge category={m.category} />
-                            <UrgencyBadge urgency={m.urgency} />
-                            {stale && <AlertTriangle className="h-3 w-3 text-red-500 flex-shrink-0" />}
-                          </div>
-                          <p className="text-xs text-muted-foreground truncate">{m.subject}</p>
-                        </div>
-                        <span className="text-[10px] text-muted-foreground flex-shrink-0">{formatTime(m.received_at)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Message table */}
-          <Card className="shadow-sm">
-            <CardContent className="p-0">
-              {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <Inbox className="h-10 w-10 mb-3 opacity-40" />
-                  <p className="text-sm">No messages found</p>
-                </div>
-              ) : (
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-100 dark:bg-slate-800">
-                        <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Time</TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide">From</TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide">Subject</TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Category</TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide w-16">Urgency</TableHead>
-                        <TableHead className="text-xs font-medium uppercase tracking-wide w-20">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {messages.map((m, i) => {
-                        const stale = m.status === "pending" && isStale(m.received_at);
-                        return (
-                          <TableRow
-                            key={m.id}
-                            className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""} ${m.status === "pending" ? "font-medium border-l-3 border-amber-400" : ""} ${stale ? "!bg-red-50 dark:!bg-red-950/20" : ""}`}
-                            onClick={() => setSelectedId(m.id)}
-                          >
-                            <TableCell className="text-sm text-muted-foreground">
-                              {formatTime(m.received_at)}
-                              {stale && <AlertTriangle className="h-3 w-3 text-red-500 inline ml-1" />}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {m.customer_name || m.from_email}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground truncate max-w-64">
-                              {m.subject}
-                            </TableCell>
-                            <TableCell><CategoryBadge category={m.category} /></TableCell>
-                            <TableCell><UrgencyBadge urgency={m.urgency} /></TableCell>
-                            <TableCell><StatusBadge status={m.status} /></TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-              {/* Pagination */}
-              {totalMessages > PAGE_SIZE && (
-                <div className="flex items-center justify-between px-4 py-3 border-t">
-                  <p className="text-xs text-muted-foreground">
-                    {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalMessages)} of {totalMessages}
-                  </p>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      disabled={page === 0}
-                      onClick={() => setPage(page - 1)}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      disabled={page >= totalPages - 1}
-                      onClick={() => setPage(page + 1)}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-      {/* Detail sheet */}
-      <Sheet open={!!selectedId} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+      {/* Thread detail sheet */}
+      <Sheet open={!!selectedThreadId} onOpenChange={(open) => { if (!open) setSelectedThreadId(null); }}>
         <SheetContent className="w-full sm:max-w-lg flex flex-col h-full">
-          <SheetHeader className="px-4 sm:px-6 flex-shrink-0">
-            <SheetTitle className="text-lg">
-              {messages.find((m) => m.id === selectedId)?.subject || "Message Detail"}
-            </SheetTitle>
+          <SheetHeader className="flex-shrink-0">
+            <SheetTitle className="text-base">Conversation</SheetTitle>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6">
-            {selectedId && (
-              <MessageDetail
-                messageId={selectedId}
-                onClose={() => setSelectedId(null)}
-                onAction={load}
+          {selectedThreadId && (
+            <div className="flex-1 overflow-hidden">
+              <ThreadDetailSheet
+                threadId={selectedThreadId}
+                onClose={() => setSelectedThreadId(null)}
+                onAction={() => { loadThreads(); loadStats(); }}
               />
-            )}
-          </div>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
-
     </div>
   );
 }

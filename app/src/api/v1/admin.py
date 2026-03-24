@@ -229,6 +229,7 @@ async def list_agent_messages(
     offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
+    exclude_categories: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
@@ -239,6 +240,12 @@ async def list_agent_messages(
         base = base.where(AgentMessage.status == status)
     if category:
         base = base.where(AgentMessage.category == category)
+    if exclude_categories:
+        excluded = [c.strip() for c in exclude_categories.split(",") if c.strip()]
+        if excluded:
+            base = base.where(
+                AgentMessage.category.notin_(excluded) | AgentMessage.category.is_(None)
+            )
     if search:
         q = f"%{search}%"
         base = base.where(
@@ -698,6 +705,33 @@ async def add_action_comment(
         text=body.text.strip(),
     )
     db.add(comment)
+
+    # Notify assignee if someone else commented
+    if action.assigned_to:
+        from src.models.notification import Notification
+        from src.models.organization_user import OrganizationUser
+        from src.models.user import User
+
+        # Find user by first name match against assigned_to
+        ou_result = await db.execute(
+            select(OrganizationUser)
+            .join(User, OrganizationUser.user_id == User.id)
+            .where(
+                OrganizationUser.organization_id == ctx.organization_id,
+                User.first_name == action.assigned_to,
+                User.id != ctx.user.id,  # Don't notify yourself
+            )
+        )
+        assignee_ou = ou_result.scalar_one_or_none()
+        if assignee_ou:
+            db.add(Notification(
+                user_id=assignee_ou.user_id,
+                type="action_comment",
+                title=f"Comment on: {action.description[:60]}",
+                body=f"{ctx.user.first_name}: {body.text.strip()[:100]}",
+                link="/inbox",
+            ))
+
     await db.commit()
     await db.refresh(comment)
     return {"id": comment.id, "author": comment.author, "text": comment.text, "created_at": comment.created_at.isoformat()}

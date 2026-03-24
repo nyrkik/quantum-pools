@@ -42,6 +42,7 @@ from src.models.emd_lookup import EMDLookup
 from src.models.scraper_run import ScraperRun
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
+from src.models.notification import Notification
 
 __all__ = [
     "Base",

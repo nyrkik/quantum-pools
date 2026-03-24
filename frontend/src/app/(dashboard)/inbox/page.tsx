@@ -132,7 +132,7 @@ interface AgentStats {
   stale_pending: number;
 }
 
-const STATUS_FILTERS = ["all", "pending", "sent", "auto_sent", "rejected", "ignored"] as const;
+const STATUS_FILTERS = ["all", "clients", "pending", "sent", "auto_sent", "ignored"] as const;
 const ACTION_TYPES = ["follow_up", "bid", "schedule_change", "site_visit", "callback", "repair", "equipment", "other"];
 const TEAM_MEMBERS = ["Brian", "Chance", "Kim"];
 
@@ -753,7 +753,7 @@ function MessageDetail({
         ) : null}
       </div>
 
-      {/* Approve/Reject buttons */}
+      {/* Approve/Send button */}
       {msg.status === "pending" && (
         <div className="flex items-center gap-2 pt-2 border-t">
           <Button
@@ -769,25 +769,6 @@ function MessageDetail({
               Cancel Edit
             </Button>
           )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" disabled={sending}>
-                <X className="h-4 w-4 mr-1" />Reject
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Reject this message?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  No reply will be sent to {msg.from_email}. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleReject}>Reject</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       )}
 
@@ -1058,20 +1039,17 @@ function ActionDetailSheet({
         ) : (
           <p className="text-xs text-muted-foreground mb-3">No comments yet</p>
         )}
-        <div className="space-y-2">
+        <div className="flex gap-2 items-end">
           <Textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             placeholder="Add a comment..."
-            className="text-sm min-h-[2.5rem] resize-none"
+            className="text-sm min-h-[2.5rem] resize-none flex-1"
             rows={2}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
           />
-          <div className="flex justify-end">
-            <Button size="sm" className="h-7" onClick={handleAddComment} disabled={posting || !comment.trim()}>
-              {posting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Post
-            </Button>
-          </div>
+          <Button size="sm" className="h-9 flex-shrink-0" onClick={handleAddComment} disabled={posting || !comment.trim()}>
+            {posting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Post"}
+          </Button>
         </div>
       </div>
 
@@ -1193,7 +1171,11 @@ export default function AgentPage() {
   const load = useCallback(async () => {
     try {
       const params = new URLSearchParams();
-      if (statusFilter !== "all") params.set("status", statusFilter);
+      if (statusFilter === "clients") {
+        params.set("exclude_categories", "spam,auto_reply,no_response");
+      } else if (statusFilter !== "all") {
+        params.set("status", statusFilter);
+      }
       if (searchQuery) params.set("search", searchQuery);
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String(page * PAGE_SIZE));
@@ -1423,7 +1405,7 @@ export default function AgentPage() {
                   className="text-xs capitalize"
                   onClick={() => { setStatusFilter(s); setPage(0); }}
                 >
-                  {s === "auto_sent" ? "Auto" : s}
+                  {s === "auto_sent" ? "Auto" : s === "clients" ? "Clients" : s}
                 </Button>
               ))}
             </div>

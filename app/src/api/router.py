@@ -19,6 +19,7 @@ from src.api.v1.chemical_costs import router as chemical_costs_router
 from src.api.v1.emd import router as emd_router
 from src.api.v1.billing import router as billing_router
 from src.api.v1.service_tiers import router as service_tiers_router
+from src.api.v1.notifications import router as notifications_router
 from src.api.v1.branding import router as branding_router
 from src.api.v1.admin import router as admin_router
 
@@ -41,5 +42,6 @@ api_router.include_router(chemical_costs_router)
 api_router.include_router(emd_router)
 api_router.include_router(billing_router)
 api_router.include_router(service_tiers_router)
+api_router.include_router(notifications_router)
 api_router.include_router(branding_router)
 api_router.include_router(admin_router)

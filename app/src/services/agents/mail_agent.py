@@ -191,4 +191,4 @@ def extract_text_body(msg) -> str:
             text = payload.decode(charset, errors="replace")
             raw = _clean_html(text) if msg.get_content_type() == "text/html" else text
 
-    return strip_quoted_reply(raw) if raw else ""
+    return raw

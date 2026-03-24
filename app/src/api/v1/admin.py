@@ -514,12 +514,13 @@ async def delete_agent_message(
 @router.get("/agent-actions")
 async def list_agent_actions(
     status: Optional[str] = Query(None),
+    assigned_to: Optional[str] = Query(None),
+    action_type: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """List action items — both email-linked and standalone."""
-    from sqlalchemy.orm import aliased
+    """List jobs — both email-linked and standalone."""
     query = select(AgentAction, AgentMessage).outerjoin(
         AgentMessage, AgentAction.agent_message_id == AgentMessage.id
     ).order_by(
@@ -529,6 +530,10 @@ async def list_agent_actions(
     ).limit(limit)
     if status:
         query = query.where(AgentAction.status == status)
+    if assigned_to:
+        query = query.where(AgentAction.assigned_to == assigned_to)
+    if action_type:
+        query = query.where(AgentAction.action_type == action_type)
     result = await db.execute(query)
     rows = result.all()
     items = []

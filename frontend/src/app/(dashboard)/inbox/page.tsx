@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1313,6 +1314,8 @@ function ActionDetailSheet({
 }
 
 export default function AgentPage() {
+  const { user } = useAuth();
+  const myName = user?.first_name || "";
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
   const [page, setPage] = useState(0);
@@ -1327,6 +1330,8 @@ export default function AgentPage() {
   const [suggestion, setSuggestion] = useState<{ id: string; action_type: string; description: string; reasoning: string } | null>(null);
   const [newActionOpen, setNewActionOpen] = useState(false);
   const [newAction, setNewAction] = useState({ action_type: "follow_up", description: "", assigned_to: "", due_days: "3", customer_name: "", property_address: "" });
+  const [jobFilter, setJobFilter] = useState<string>("mine");
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const handleToggleAction = async (actionId: string, currentStatus: string) => {
     const newStatus = currentStatus === "done" ? "open" : "done";
@@ -1356,10 +1361,14 @@ export default function AgentPage() {
       const [paginated, st, acts] = await Promise.all([
         api.get<PaginatedMessages>(`/v1/admin/agent-messages?${qs}`),
         api.get<AgentStats>("/v1/admin/agent-stats"),
-        Promise.all([
-              api.get<AgentAction[]>("/v1/admin/agent-actions?status=open").catch(() => []),
-              api.get<AgentAction[]>("/v1/admin/agent-actions?status=in_progress").catch(() => []),
-            ]).then(([a, b]) => [...a, ...b]),
+        (async () => {
+              const assigneeParam = jobFilter === "mine" && myName ? `&assigned_to=${encodeURIComponent(myName)}` : jobFilter !== "mine" && jobFilter !== "all" ? `&assigned_to=${encodeURIComponent(jobFilter)}` : "";
+              const statuses = showCompleted ? ["open", "in_progress", "done"] : ["open", "in_progress"];
+              const results = await Promise.all(
+                statuses.map(s => api.get<AgentAction[]>(`/v1/admin/agent-actions?status=${s}${assigneeParam}`).catch(() => []))
+              );
+              return results.flat();
+            })(),
       ]);
       setMessages(paginated.items);
       setTotalMessages(paginated.total);
@@ -1370,7 +1379,7 @@ export default function AgentPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, searchQuery, page]);
+  }, [statusFilter, searchQuery, page, jobFilter, showCompleted, myName]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1638,9 +1647,26 @@ export default function AgentPage() {
 
         return (
           <>
-          {/* New Job button + form */}
-          <div className="flex justify-end">
-            <Button variant="outline" size="sm" onClick={() => setNewActionOpen(!newActionOpen)}>
+          {/* Job filters + New Job */}
+          <div className="flex flex-col sm:flex-row gap-3 justify-between">
+            <div className="flex gap-1 flex-wrap items-center">
+              {["mine", "all", ...TEAM_MEMBERS].map((f) => (
+                <Button
+                  key={f}
+                  variant={jobFilter === f ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs capitalize h-7"
+                  onClick={() => setJobFilter(f)}
+                >
+                  {f === "mine" ? "My Jobs" : f === "all" ? "All" : f}
+                </Button>
+              ))}
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground ml-2 cursor-pointer">
+                <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} className="rounded" />
+                Done
+              </label>
+            </div>
+            <Button variant="outline" size="sm" className="h-7" onClick={() => setNewActionOpen(!newActionOpen)}>
               <Plus className="h-3.5 w-3.5 mr-1.5" />{newActionOpen ? "Cancel" : "New Job"}
             </Button>
           </div>

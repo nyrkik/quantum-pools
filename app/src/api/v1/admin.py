@@ -14,6 +14,7 @@ from src.models.emd_inspection import EMDInspection
 from src.models.emd_violation import EMDViolation
 from src.models.property import Property
 from src.models.customer import Customer
+from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
 
@@ -399,6 +400,11 @@ class ApproveBody(BaseModel):
     response_text: Optional[str] = None
 
 
+class ReviseDraftBody(BaseModel):
+    draft: str
+    instruction: str
+
+
 @router.post("/agent-messages/{message_id}/approve")
 async def approve_agent_message(
     message_id: str,
@@ -544,6 +550,432 @@ async def search_clients(
         }
         for cust, prop in result.all()
     ]
+
+
+# --- Conversation Threads ---
+
+@router.get("/agent-threads")
+async def list_threads(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    exclude_spam: bool = Query(True),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List conversation threads."""
+    base = select(AgentThread)
+    if status == "pending":
+        base = base.where(AgentThread.has_pending == True)
+    elif status == "handled":
+        base = base.where(AgentThread.status == "handled")
+    elif status == "ignored":
+        base = base.where(AgentThread.status == "ignored")
+    if exclude_spam:
+        base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
+    if search:
+        q = f"%{search}%"
+        base = base.where(
+            AgentThread.contact_email.ilike(q)
+            | AgentThread.subject.ilike(q)
+            | AgentThread.customer_name.ilike(q)
+        )
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    result = await db.execute(
+        base.order_by(
+            desc(AgentThread.has_pending),
+            desc(AgentThread.last_message_at),
+        ).offset(offset).limit(limit)
+    )
+    threads = result.scalars().all()
+    return {
+        "items": [
+            {
+                "id": t.id,
+                "contact_email": t.contact_email,
+                "subject": t.subject,
+                "customer_name": t.customer_name,
+                "matched_customer_id": t.matched_customer_id,
+                "status": t.status,
+                "urgency": t.urgency,
+                "category": t.category,
+                "message_count": t.message_count,
+                "last_message_at": t.last_message_at.isoformat() if t.last_message_at else None,
+                "last_direction": t.last_direction,
+                "last_snippet": t.last_snippet,
+                "has_pending": t.has_pending,
+                "has_open_actions": t.has_open_actions,
+            }
+            for t in threads
+        ],
+        "total": total,
+    }
+
+
+@router.get("/agent-threads/stats")
+async def get_thread_stats(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Thread-level stats."""
+    from datetime import datetime, timezone, timedelta
+
+    total = (await db.execute(select(func.count(AgentThread.id)))).scalar() or 0
+    pending = (await db.execute(
+        select(func.count(AgentThread.id)).where(AgentThread.has_pending == True)
+    )).scalar() or 0
+
+    # Stale: pending threads where last_message_at > 30 min ago
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    stale = (await db.execute(
+        select(func.count(AgentThread.id)).where(
+            AgentThread.has_pending == True,
+            AgentThread.last_message_at < stale_cutoff,
+        )
+    )).scalar() or 0
+
+    open_actions = (await db.execute(
+        select(func.count(AgentAction.id)).where(AgentAction.status.in_(("open", "in_progress")))
+    )).scalar() or 0
+
+    return {
+        "total": total,
+        "pending": pending,
+        "stale_pending": stale,
+        "open_actions": open_actions,
+    }
+
+
+@router.get("/agent-threads/{thread_id}")
+async def get_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get thread with full conversation timeline."""
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(select(AgentThread).where(AgentThread.id == thread_id))
+    thread = result.scalar_one_or_none()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Get all messages in thread
+    msgs_result = await db.execute(
+        select(AgentMessage)
+        .where(AgentMessage.thread_id == thread_id)
+        .order_by(AgentMessage.received_at)
+    )
+    messages = msgs_result.scalars().all()
+
+    # Build conversation timeline — include outbound from final_response on inbound msgs
+    timeline = []
+    for m in messages:
+        timeline.append({
+            "id": m.id,
+            "direction": m.direction,
+            "from_email": m.from_email,
+            "to_email": m.to_email,
+            "subject": m.subject,
+            "body": m.body,
+            "category": m.category,
+            "urgency": m.urgency,
+            "status": m.status,
+            "draft_response": m.draft_response if m.status == "pending" else None,
+            "received_at": m.received_at.isoformat() if m.received_at else None,
+            "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+            "approved_by": m.approved_by,
+        })
+        # If inbound message was sent and has final_response, add outbound bubble
+        # (for historical messages before we started creating outbound rows)
+        if m.direction == "inbound" and m.final_response and m.status in ("sent", "auto_sent"):
+            # Check if there's already an outbound message right after
+            has_outbound = any(
+                om.direction == "outbound" and om.sent_at and m.sent_at
+                and abs((om.sent_at - m.sent_at).total_seconds()) < 60
+                for om in messages
+            )
+            if not has_outbound:
+                timeline.append({
+                    "id": f"{m.id}-reply",
+                    "direction": "outbound",
+                    "from_email": "contact@sapphire-pools.com",
+                    "to_email": m.from_email,
+                    "subject": f"Re: {m.subject}" if m.subject else None,
+                    "body": m.final_response,
+                    "category": None,
+                    "urgency": None,
+                    "status": "sent",
+                    "draft_response": None,
+                    "received_at": m.sent_at.isoformat() if m.sent_at else m.received_at.isoformat(),
+                    "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+                    "approved_by": m.approved_by,
+                })
+
+    # Get actions for this thread
+    actions_result = await db.execute(
+        select(AgentAction)
+        .options(selectinload(AgentAction.comments))
+        .where(AgentAction.thread_id == thread_id)
+        .order_by(AgentAction.created_at)
+    )
+    actions = [_serialize_action(a, include_comments=True) for a in actions_result.scalars().all()]
+
+    return {
+        "id": thread.id,
+        "contact_email": thread.contact_email,
+        "subject": thread.subject,
+        "customer_name": thread.customer_name,
+        "matched_customer_id": thread.matched_customer_id,
+        "property_address": thread.property_address,
+        "status": thread.status,
+        "urgency": thread.urgency,
+        "category": thread.category,
+        "message_count": thread.message_count,
+        "has_pending": thread.has_pending,
+        "has_open_actions": thread.has_open_actions,
+        "timeline": timeline,
+        "actions": actions,
+    }
+
+
+@router.post("/agent-threads/{thread_id}/approve")
+async def approve_thread(
+    thread_id: str,
+    body: ApproveBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve the latest pending message in a thread."""
+    from datetime import datetime, timezone
+    from src.services.customer_agent import send_email_response, update_thread_status
+
+    # Find the latest pending inbound message in this thread
+    result = await db.execute(
+        select(AgentMessage)
+        .where(AgentMessage.thread_id == thread_id, AgentMessage.status == "pending", AgentMessage.direction == "inbound")
+        .order_by(desc(AgentMessage.received_at))
+        .limit(1)
+    )
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=400, detail="No pending message in this thread")
+
+    response_text = body.response_text or msg.draft_response
+    if not response_text:
+        raise HTTPException(status_code=400, detail="No response text provided")
+
+    success = await send_email_response(msg.from_email, msg.subject or "", response_text)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send email")
+
+    now = datetime.now(timezone.utc)
+    msg.status = "sent"
+    msg.final_response = response_text
+    msg.approved_by = f"{ctx.user.first_name} {ctx.user.last_name}"
+    msg.approved_at = now
+    msg.sent_at = now
+
+    # Create outbound message row
+    outbound = AgentMessage(
+        direction="outbound",
+        from_email="contact@sapphire-pools.com",
+        to_email=msg.from_email,
+        subject=f"Re: {msg.subject}" if msg.subject and not msg.subject.startswith("Re:") else msg.subject,
+        body=response_text,
+        status="sent",
+        thread_id=thread_id,
+        matched_customer_id=msg.matched_customer_id,
+        customer_name=msg.customer_name,
+        sent_at=now,
+        received_at=now,
+    )
+    db.add(outbound)
+    await db.commit()
+
+    await update_thread_status(thread_id)
+
+    # Save discovered contact
+    from src.services.customer_agent import save_discovered_contact
+    await save_discovered_contact(msg.id)
+
+    return {"sent": True, "to": msg.from_email}
+
+
+@router.post("/agent-threads/{thread_id}/dismiss")
+async def dismiss_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dismiss all pending messages in a thread."""
+    from src.services.customer_agent import update_thread_status
+
+    result = await db.execute(
+        select(AgentMessage).where(
+            AgentMessage.thread_id == thread_id,
+            AgentMessage.status == "pending",
+        )
+    )
+    for msg in result.scalars().all():
+        msg.status = "ignored"
+        msg.notes = (msg.notes or "") + f"\nDismissed by {ctx.user.first_name} {ctx.user.last_name}"
+        msg.notes = msg.notes.strip()
+    await db.commit()
+    await update_thread_status(thread_id)
+    return {"dismissed": True}
+
+
+@router.post("/agent-threads/{thread_id}/send-followup")
+async def send_thread_followup(
+    thread_id: str,
+    body: ApproveBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a follow-up in a thread."""
+    from datetime import datetime, timezone
+    from src.services.customer_agent import send_email_response, update_thread_status
+
+    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    response_text = body.response_text
+    if not response_text:
+        raise HTTPException(status_code=400, detail="No response text")
+
+    success = await send_email_response(thread.contact_email, thread.subject or "", response_text)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send")
+
+    now = datetime.now(timezone.utc)
+    outbound = AgentMessage(
+        direction="outbound",
+        from_email="contact@sapphire-pools.com",
+        to_email=thread.contact_email,
+        subject=f"Re: {thread.subject}" if thread.subject and not thread.subject.startswith("Re:") else thread.subject,
+        body=response_text,
+        status="sent",
+        thread_id=thread_id,
+        matched_customer_id=thread.matched_customer_id,
+        customer_name=thread.customer_name,
+        sent_at=now,
+        received_at=now,
+    )
+    db.add(outbound)
+    await db.commit()
+    await update_thread_status(thread_id)
+
+    return {"sent": True, "to": thread.contact_email}
+
+
+@router.post("/agent-threads/{thread_id}/revise-draft")
+async def revise_thread_draft(
+    thread_id: str,
+    body: ReviseDraftBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revise the draft on the latest pending message in a thread."""
+    import anthropic, os
+
+    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    prompt = f"""Revise this email draft based on the instruction below.
+
+Conversation with {thread.customer_name or thread.contact_email}:
+Subject: {thread.subject}
+
+Current draft:
+{body.draft}
+
+Instruction: {body.instruction}
+
+Rules:
+- Apply the instruction to the draft
+- Keep the same general structure and signature
+- Never admit fault or accept blame
+- Return ONLY the revised email text, nothing else"""
+
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"draft": response.content[0].text.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed: {str(e)}")
+
+
+@router.post("/agent-threads/{thread_id}/draft-followup")
+async def draft_thread_followup(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Draft a follow-up for a thread using full conversation context."""
+    import anthropic, os
+    from sqlalchemy.orm import selectinload
+
+    thread = (await db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Get conversation
+    msgs = (await db.execute(
+        select(AgentMessage).where(AgentMessage.thread_id == thread_id).order_by(AgentMessage.received_at)
+    )).scalars().all()
+
+    convo = ""
+    for m in msgs:
+        who = "Client" if m.direction == "inbound" else "Us"
+        convo += f"\n[{who}]: {(m.body or m.final_response or '')[:300]}"
+
+    # Get actions + comments
+    actions_result = await db.execute(
+        select(AgentAction).options(selectinload(AgentAction.comments)).where(AgentAction.thread_id == thread_id)
+    )
+    actions_ctx = ""
+    for a in actions_result.scalars().all():
+        actions_ctx += f"\n- [{a.status}] {a.action_type}: {a.description}"
+        if a.comments:
+            for c in a.comments:
+                actions_ctx += f"\n  {c.author}: {c.text}"
+
+    prompt = f"""Draft a follow-up email for a pool service company.
+
+Conversation with {thread.customer_name or thread.contact_email}:
+Subject: {thread.subject}
+{convo}
+
+Jobs and comments:{actions_ctx or ' None'}
+
+Draft a follow-up email continuing this conversation. Reference what's been discussed and any work done.
+
+Rules:
+- Professional, friendly tone
+- Never admit fault
+- Keep it concise — 2-4 sentences
+- End with: Best,\\nThe Sapphire Pools Team\\ncontact@sapphire-pools.com
+
+Return ONLY the email body text."""
+
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"draft": response.content[0].text.strip(), "to": thread.contact_email, "subject": thread.subject}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed: {str(e)}")
 
 
 # --- Agent Actions ---
@@ -1271,11 +1703,6 @@ Rules:
         "line_items": [],
         "notes": "",
     }
-
-
-class ReviseDraftBody(BaseModel):
-    draft: str
-    instruction: str
 
 
 @router.post("/agent-messages/{message_id}/revise-draft")

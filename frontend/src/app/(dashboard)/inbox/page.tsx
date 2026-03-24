@@ -432,10 +432,20 @@ function MessageDetail({
     if (!followUpText.trim()) return;
     setSendingFollowUp(true);
     try {
-      await api.post(`/v1/admin/agent-messages/${messageId}/send-followup`, { response_text: followUpText });
-      toast.success("Follow-up sent");
+      const result = await api.post<{ sent: boolean; closed_actions: { description: string }[]; ask_actions: { id: string; description: string; reason: string }[] }>(`/v1/admin/agent-messages/${messageId}/send-followup`, { response_text: followUpText });
+      if (result.closed_actions?.length) {
+        toast.success(`Follow-up sent. Completed: ${result.closed_actions.map(a => a.description.slice(0, 40)).join(", ")}`);
+      } else {
+        toast.success("Follow-up sent");
+      }
+      if (result.ask_actions?.length) {
+        for (const a of result.ask_actions) {
+          toast(`Does this close "${a.description.slice(0, 50)}"? ${a.reason}`, { duration: 10000 });
+        }
+      }
       setFollowUp(null);
       setFollowUpText("");
+      setReviseInstruction("");
       onAction();
     } catch {
       toast.error("Failed to send");
@@ -853,10 +863,21 @@ function ActionDetailSheet({
     if (!detail || !followUpText.trim()) return;
     setSendingFollowUp(true);
     try {
-      await api.post(`/v1/admin/agent-messages/${detail.agent_message_id}/send-followup`, { response_text: followUpText });
-      toast.success("Follow-up sent");
+      const result = await api.post<{ sent: boolean; closed_actions: { description: string }[]; ask_actions: { id: string; description: string; reason: string }[] }>(`/v1/admin/agent-messages/${detail.agent_message_id}/send-followup`, { response_text: followUpText });
+      if (result.closed_actions?.length) {
+        toast.success(`Follow-up sent. Completed: ${result.closed_actions.map(a => a.description.slice(0, 40)).join(", ")}`);
+      } else {
+        toast.success("Follow-up sent");
+      }
+      if (result.ask_actions?.length) {
+        for (const a of result.ask_actions) {
+          toast(`Does this close "${a.description.slice(0, 50)}"? ${a.reason}`, { duration: 10000 });
+        }
+      }
       setFollowUp(null);
       setFollowUpText("");
+      setReviseInstruction("");
+      loadDetail();
       onUpdate();
     } catch {
       toast.error("Failed to send");

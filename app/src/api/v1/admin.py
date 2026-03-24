@@ -813,7 +813,85 @@ async def send_followup(
     msg.notes = msg.notes.strip()
     await db.commit()
 
-    return {"sent": True, "to": msg.from_email}
+    # Evaluate if open actions should be closed based on the follow-up content
+    import anthropic, os, json as json_mod
+    from sqlalchemy.orm import selectinload
+
+    actions_result = await db.execute(
+        select(AgentAction)
+        .options(selectinload(AgentAction.comments))
+        .where(
+            AgentAction.agent_message_id == message_id,
+            AgentAction.status.in_(("open", "in_progress")),
+        )
+    )
+    open_actions = actions_result.scalars().all()
+
+    closed_actions = []
+    ask_actions = []
+
+    if open_actions:
+        actions_list = []
+        for a in open_actions:
+            comments_text = ""
+            if a.comments:
+                comments_text = " | Comments: " + "; ".join(c.text for c in a.comments)
+            actions_list.append(f"- ID:{a.id[:8]} [{a.action_type}] {a.description}{comments_text}")
+
+        eval_prompt = f"""A follow-up email was just sent to a client. Based on its content, determine which open action items (if any) are now complete.
+
+Follow-up email sent:
+{response_text}
+
+Open action items:
+{chr(10).join(actions_list)}
+
+For each action, respond with JSON array:
+[
+  {{"id": "first8chars", "status": "done|open|ask", "reason": "why"}}
+]
+
+Rules:
+- "done" = the follow-up clearly addresses/completes this action
+- "open" = the follow-up doesn't address this action, it's still needed
+- "ask" = unclear whether this is resolved, need user confirmation
+- Be conservative — only mark done if the email clearly covers it"""
+
+        try:
+            ai_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            eval_response = ai_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=300,
+                messages=[{"role": "user", "content": eval_prompt}],
+            )
+            eval_text = eval_response.content[0].text
+            import re
+            json_match = re.search(r"\[.*\]", eval_text, re.DOTALL)
+            if json_match:
+                evaluations = json_mod.loads(json_match.group())
+                for ev in evaluations:
+                    action_prefix = ev.get("id", "")
+                    status = ev.get("status", "open")
+                    reason = ev.get("reason", "")
+                    for a in open_actions:
+                        if a.id.startswith(action_prefix):
+                            if status == "done":
+                                a.status = "done"
+                                a.completed_at = datetime.now(timezone.utc)
+                                closed_actions.append({"id": a.id, "description": a.description, "reason": reason})
+                            elif status == "ask":
+                                ask_actions.append({"id": a.id, "description": a.description, "reason": reason})
+                await db.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Action evaluation after follow-up failed: {e}")
+
+    return {
+        "sent": True,
+        "to": msg.from_email,
+        "closed_actions": closed_actions,
+        "ask_actions": ask_actions,
+    }
 
 
 class ReviseDraftBody(BaseModel):

@@ -883,12 +883,23 @@ interface ActionComment {
   created_at: string;
 }
 
+interface RelatedJob {
+  id: string;
+  action_type: string;
+  description: string;
+  status: string;
+  comments: { author: string; text: string }[];
+}
+
 interface ActionDetail extends AgentAction {
   comments?: ActionComment[];
   notes?: string | null;
   from_email?: string;
   customer_name?: string;
   subject?: string;
+  email_body?: string;
+  our_response?: string;
+  related_jobs?: RelatedJob[];
 }
 
 function ActionDetailSheet({
@@ -1071,11 +1082,44 @@ function ActionDetailSheet({
         </div>
       </div>
 
-      {/* Source email ref */}
-      {detail.subject && (
-        <div className="bg-muted/50 rounded-md p-3 text-sm">
-          <p className="text-xs text-muted-foreground mb-1">From email</p>
-          <p className="font-medium">{detail.subject}</p>
+      {/* Context trail */}
+      {(detail.subject || detail.related_jobs) && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Context</p>
+
+          {detail.subject && (
+            <div className="bg-muted/50 rounded-md p-3 text-sm space-y-1">
+              <p className="text-xs text-muted-foreground">Email: {detail.from_email}</p>
+              <p className="font-medium">{detail.subject}</p>
+              {detail.email_body && (
+                <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4">{detail.email_body}</p>
+              )}
+            </div>
+          )}
+
+          {detail.our_response && (
+            <div className="bg-green-50 dark:bg-green-950/20 rounded-md p-3 text-sm">
+              <p className="text-xs text-muted-foreground mb-1">Our reply</p>
+              <p className="text-xs whitespace-pre-wrap line-clamp-3">{detail.our_response}</p>
+            </div>
+          )}
+
+          {detail.related_jobs?.map((job) => (
+            <div key={job.id} className="bg-muted/30 rounded-md p-2.5 text-sm">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <ActionStatusIcon status={job.status} />
+                <ActionTypeBadge type={job.action_type} />
+              </div>
+              <p className={`text-xs ${job.status === "done" ? "line-through text-muted-foreground" : ""}`}>{job.description}</p>
+              {job.comments.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {job.comments.map((c, i) => (
+                    <p key={i} className="text-[10px] text-muted-foreground">{c.author}: {c.text}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 

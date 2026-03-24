@@ -55,7 +55,7 @@ When classifying emails, respond with JSON:
   "actions": [
     {
       "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
-      "description": "short description of what needs to happen",
+      "description": "detailed description including specifics — addresses, part numbers, names, prices mentioned in the email",
       "due_days": 1
     }
   ]
@@ -86,7 +86,7 @@ CRITICAL TONE RULES — follow these exactly:
 - Always end with this exact signature (no variations):\\n\\nBest,\\nThe Sapphire Pools Team\\ncontact@sapphire-pools.com
 - "actions" array: extract follow-up work the team needs to do. ONE action per distinct task — do NOT split a single task into steps. For example, "inspect pool and report back" is ONE action, not two. Include due_days (business days). Leave empty [] if no action needed.
 - Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)
-- Keep action descriptions concise — what needs to happen, not how to do it"""
+- Action descriptions should be specific — include property address, client name, part numbers, and any details from the email. "Replace filter" is too vague. "Replace spa filter at 751 Central Park Dr for Ashley Overton (Coventry Park)" is good."""
 
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
@@ -1119,12 +1119,13 @@ Respond with JSON:
 {{
   "has_next": true/false,
   "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
-  "description": "what needs to happen next",
+  "description": "detailed description including ALL specifics from the conversation — part numbers, model names, prices, client approvals, addresses. Never be vague when details exist in the comments.",
   "due_days": 3,
   "reasoning": "why this is the logical next step"
 }}
 
 Rules:
+- CRITICAL: The description must include every relevant detail from the comments and conversation. If a filter model (SM7), part number, price ($500), or client name (Ashley) was mentioned, include it. "Replace filter" is BAD. "Order and install SM7 spa filter at Coventry Park (751 Central Park Dr) — approved by Ashley Overton" is GOOD.
 - Only recommend a next step if it's genuinely needed — don't create busywork
 - If all necessary work is covered by existing open actions, return has_next: false
 - If a follow-up email was already sent to the client about this issue, do NOT suggest calling or emailing them again about the same thing

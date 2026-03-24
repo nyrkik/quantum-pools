@@ -716,13 +716,39 @@ async def get_agent_action(
         raise HTTPException(status_code=404, detail="Action not found")
 
     d = _serialize_action(action, include_comments=True)
-    # Include parent message context
-    msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
-    msg = msg_result.scalar_one_or_none()
-    if msg:
-        d["from_email"] = msg.from_email
-        d["customer_name"] = msg.customer_name
-        d["subject"] = msg.subject
+    # Include parent message context + sibling actions for full history
+    if action.agent_message_id:
+        msg_result = await db.execute(select(AgentMessage).where(AgentMessage.id == action.agent_message_id))
+        msg = msg_result.scalar_one_or_none()
+        if msg:
+            d["from_email"] = msg.from_email
+            d["customer_name"] = msg.customer_name or action.customer_name
+            d["subject"] = msg.subject
+            d["email_body"] = (msg.body or "")[:500]
+            d["our_response"] = msg.final_response or msg.draft_response
+
+            # Get sibling actions (other jobs from the same email) for context
+            siblings_result = await db.execute(
+                select(AgentAction)
+                .options(selectinload(AgentAction.comments))
+                .where(
+                    AgentAction.agent_message_id == action.agent_message_id,
+                    AgentAction.id != action.id,
+                )
+                .order_by(AgentAction.created_at)
+            )
+            d["related_jobs"] = [
+                {
+                    "id": s.id,
+                    "action_type": s.action_type,
+                    "description": s.description,
+                    "status": s.status,
+                    "comments": [{"author": c.author, "text": c.text} for c in (s.comments or [])],
+                }
+                for s in siblings_result.scalars().all()
+            ]
+    else:
+        d["customer_name"] = action.customer_name
     return d
 
 

@@ -6,7 +6,6 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -102,31 +101,7 @@ interface LineItem {
   is_taxed: boolean;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: "secondary",
-  sent: "outline",
-  paid: "default",
-  overdue: "destructive",
-  void: "secondary",
-  written_off: "outline",
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const variant = STATUS_COLORS[status] || "secondary";
-  const colorClass =
-    status === "sent"
-      ? "border-blue-400 text-blue-600"
-      : status === "paid"
-        ? "bg-green-600"
-        : status === "written_off"
-          ? "border-yellow-500 text-yellow-600"
-          : "";
-  return (
-    <Badge variant={variant as "default"} className={colorClass}>
-      {status.replace("_", " ")}
-    </Badge>
-  );
-}
+import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
 
 const OPEN_STATUSES = "draft,sent,viewed,overdue";
 
@@ -833,7 +808,7 @@ export default function InvoicesPage() {
               invoices.map((inv, i) => (
                 <TableRow key={inv.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                   <TableCell>
-                    <StatusBadge status={inv.status} />
+                    <InvoiceStatusBadge status={inv.status} />
                   </TableCell>
                   <TableCell>{inv.issue_date}</TableCell>
                   <TableCell>

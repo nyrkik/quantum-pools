@@ -28,74 +28,14 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react";
+import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
+import type { AgentStats, AgentAction, AgentMessage } from "@/types/agent";
 
 interface Stats {
   customers: number;
   properties: number;
   todayVisits: number;
   monthlyRevenue: number;
-}
-
-interface AgentStats {
-  total: number;
-  pending: number;
-  sent: number;
-  auto_sent: number;
-  rejected: number;
-  ignored: number;
-  open_actions: number;
-  overdue_actions: number;
-  avg_response_seconds: number | null;
-  stale_pending: number;
-  recent_24h: number;
-}
-
-interface AgentMessage {
-  id: string;
-  from_email: string;
-  subject: string | null;
-  category: string | null;
-  status: string;
-  customer_name: string | null;
-  received_at: string | null;
-}
-
-interface AgentAction {
-  id: string;
-  action_type: string;
-  description: string;
-  assigned_to: string | null;
-  due_date: string | null;
-  status: string;
-  customer_name?: string;
-  from_email?: string;
-}
-
-function formatTime(iso: string | null) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function isOverdue(iso: string | null) {
-  if (!iso) return false;
-  return new Date(iso) < new Date();
-}
-
-function formatDueDate(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const diffDays = Math.ceil((d.getTime() - Date.now()) / 86400000);
-  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
-  if (diffDays === 0) return "Due today";
-  if (diffDays === 1) return "Tomorrow";
-  return `${diffDays}d`;
 }
 
 function StatusDot({ status }: { status: string }) {

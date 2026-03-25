@@ -1,4 +1,7 @@
-"""Profitability analysis service — cost breakdown, margins, difficulty scoring."""
+"""Profitability analysis service — cost breakdown, margins, overview aggregation.
+
+Delegates difficulty scoring to DifficultyService and pricing/whale curve to PricingService.
+"""
 
 import uuid
 from typing import Optional
@@ -22,54 +25,58 @@ from src.schemas.profitability import (
 )
 from src.core.exceptions import NotFoundError
 from src.models.chemical_cost_profile import ChemicalCostProfile
-
-
-# Difficulty score weights
-WEIGHTS = {
-    "pool_gallons": 0.10,
-    "pool_sqft": 0.05,
-    "water_features": 0.08,
-    "equipment_effectiveness": 0.07,
-    "pool_design": 0.05,
-    "shade_debris": 0.05,
-    "enclosure": 0.05,
-    "chemical_demand": 0.12,
-    "service_time": 0.18,
-    "distance": 0.10,
-    "access": 0.08,
-    "customer_demands": 0.07,
-}
-
-# Gallon ranges → score 1-5
-GALLON_RANGES = [(10000, 1), (20000, 2), (30000, 3), (40000, 4)]
-SQFT_RANGES = [(400, 1), (700, 2), (1000, 3), (1500, 4)]
-SERVICE_TIME_RANGES = [(20, 1), (30, 2), (45, 3), (60, 4)]
-
-
-def _range_score(value: Optional[float], ranges: list[tuple]) -> float:
-    if value is None:
-        return 1.0
-    for threshold, score in ranges:
-        if value <= threshold:
-            return float(score)
-    return 5.0
-
-
-def _shade_score(shade: Optional[str]) -> float:
-    return {"full_sun": 1.0, "partial_shade": 3.0, "full_shade": 5.0}.get(shade or "", 1.0)
-
-
-def _debris_score(debris: Optional[str]) -> float:
-    return {"none": 1.0, "low": 2.0, "moderate": 3.5, "heavy": 5.0}.get(debris or "", 1.0)
-
-
-def _enclosure_score(enclosure: Optional[str]) -> float:
-    return {"indoor": 1.0, "screened": 2.0, "open": 3.5}.get(enclosure or "", 3.5)
+from src.services.difficulty_service import DifficultyService
+from src.services.pricing_service import PricingService
 
 
 class ProfitabilityService:
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._difficulty_svc = DifficultyService(db)
+        self._pricing_svc = PricingService(db)
+
+    # --- Delegate difficulty methods ---
+
+    async def get_or_create_difficulty(self, org_id: str, property_id: str) -> PropertyDifficulty:
+        return await self._difficulty_svc.get_or_create_difficulty(org_id, property_id)
+
+    async def update_difficulty(self, org_id: str, property_id: str, **kwargs) -> PropertyDifficulty:
+        return await self._difficulty_svc.update_difficulty(org_id, property_id, **kwargs)
+
+    def compute_composite_score(
+        self, prop: Property, diff: Optional[PropertyDifficulty],
+        wfs: Optional[list[WaterFeature]] = None,
+    ) -> float:
+        return self._difficulty_svc.compute_composite_score(prop, diff, wfs=wfs)
+
+    def difficulty_to_multiplier(self, score: float) -> float:
+        return self._difficulty_svc.difficulty_to_multiplier(score)
+
+    def get_difficulty_response(
+        self, prop: Property, diff: PropertyDifficulty
+    ) -> PropertyDifficultyResponse:
+        return self._difficulty_svc.get_difficulty_response(prop, diff)
+
+    # --- Delegate pricing methods ---
+
+    async def get_whale_curve(self, org_id: str) -> list[WhaleCurvePoint]:
+        return await self._pricing_svc.get_whale_curve(org_id)
+
+    async def get_suggestions(self, org_id: str) -> list[PricingSuggestion]:
+        return await self._pricing_svc.get_suggestions(org_id)
+
+    async def suggest_rate(
+        self, org_id: str, gallons: int, water_type: str = "pool",
+        service_minutes: int = 30, difficulty_score: float = 2.5,
+        customer_type: str = "residential", tier_id: str | None = None,
+    ) -> dict:
+        return await self._pricing_svc.suggest_rate(
+            org_id=org_id, gallons=gallons, water_type=water_type,
+            service_minutes=service_minutes, difficulty_score=difficulty_score,
+            customer_type=customer_type, tier_id=tier_id,
+        )
+
+    # --- Settings ---
 
     async def get_or_create_settings(self, org_id: str) -> OrgCostSettings:
         result = await self.db.execute(
@@ -92,102 +99,7 @@ class ProfitabilityService:
         await self.db.refresh(settings)
         return settings
 
-    async def get_or_create_difficulty(self, org_id: str, property_id: str) -> PropertyDifficulty:
-        result = await self.db.execute(
-            select(PropertyDifficulty).where(
-                PropertyDifficulty.property_id == property_id,
-                PropertyDifficulty.organization_id == org_id,
-            )
-        )
-        diff = result.scalar_one_or_none()
-        if not diff:
-            diff = PropertyDifficulty(
-                id=str(uuid.uuid4()),
-                property_id=property_id,
-                organization_id=org_id,
-            )
-            self.db.add(diff)
-            await self.db.flush()
-            await self.db.refresh(diff)
-        return diff
-
-    async def update_difficulty(self, org_id: str, property_id: str, **kwargs) -> PropertyDifficulty:
-        diff = await self.get_or_create_difficulty(org_id, property_id)
-        for key, value in kwargs.items():
-            if value is not None:
-                setattr(diff, key, value)
-        await self.db.flush()
-        await self.db.refresh(diff)
-        return diff
-
-    def compute_composite_score(
-        self, prop: Property, diff: Optional[PropertyDifficulty],
-        wfs: Optional[list[WaterFeature]] = None,
-    ) -> float:
-        if diff and diff.override_composite is not None:
-            return diff.override_composite
-
-        scores = {}
-
-        # Aggregate from WFs if available, else fall back to property fields
-        if wfs:
-            total_gallons = sum(b.pool_gallons or 0 for b in wfs) or None
-            total_sqft = sum(b.pool_sqft or 0 for b in wfs) or None
-            total_service_minutes = sum(b.estimated_service_minutes or 0 for b in wfs) or None
-            has_spa = any(b.water_type == "spa" for b in wfs)
-            has_water_feature = any(b.water_type in ("water_feature", "fountain") for b in wfs)
-        else:
-            total_gallons = prop.pool_gallons
-            total_sqft = prop.pool_sqft
-            total_service_minutes = prop.estimated_service_minutes
-            has_spa = prop.has_spa
-            has_water_feature = prop.has_water_feature
-
-        # Measured factors
-        scores["pool_gallons"] = _range_score(total_gallons, GALLON_RANGES)
-        scores["pool_sqft"] = _range_score(total_sqft, SQFT_RANGES)
-        scores["service_time"] = _range_score(total_service_minutes, SERVICE_TIME_RANGES)
-
-        water_feature_score = 1.0
-        if has_spa:
-            water_feature_score += 1.5
-        if has_water_feature:
-            water_feature_score += 1.0
-        scores["water_features"] = min(water_feature_score, 5.0)
-
-        # WF-level scores — average across WFs (these live on the WF now)
-        if wfs:
-            avg = lambda attr, default: sum(getattr(b, attr, default) for b in wfs) / len(wfs)
-            scores["equipment_effectiveness"] = 6.0 - avg("equipment_effectiveness", 3.0)
-            scores["pool_design"] = 6.0 - avg("pool_design", 3.0)
-            scores["chemical_demand"] = avg("chemical_demand", 1.0)
-            scores["access"] = avg("access_difficulty", 1.0)
-            scores["shade_debris"] = (avg("shade_exposure", 1.0) + avg("tree_debris", 1.0)) / 2.0
-        else:
-            scores["equipment_effectiveness"] = 3.0
-            scores["pool_design"] = 3.0
-            scores["chemical_demand"] = 1.0
-            scores["access"] = 1.0
-            scores["shade_debris"] = 1.0
-
-        # Property-level scores — from PropertyDifficulty
-        if diff:
-            scores["enclosure"] = _enclosure_score(
-                diff.enclosure_type.value if diff.enclosure_type else None
-            )
-            scores["customer_demands"] = diff.customer_demands_score
-        else:
-            scores["enclosure"] = 3.5
-            scores["customer_demands"] = 1.0
-
-        # Distance — would need route data, default to 1.0
-        scores["distance"] = 1.0
-
-        composite = sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)
-        return round(min(max(composite, 1.0), 5.0), 2)
-
-    def difficulty_to_multiplier(self, score: float) -> float:
-        return round(0.8 + (score - 1.0) * 0.2, 3)
+    # --- Overview & Analysis ---
 
     async def get_overview(
         self,
@@ -350,6 +262,28 @@ class ProfitabilityService:
             wf_costs=[WfCost(**bc) for bc in wf_costs],
         )]
 
+    async def get_portfolio_medians(self, org_id: str) -> dict:
+        """Compute median rate/gal, cost, margin, difficulty across all active accounts."""
+        import statistics
+        overview = await self.get_overview(org_id)
+        accounts = overview.accounts
+        if not accounts:
+            return {"rate_per_gallon": None, "cost": 0, "margin_pct": 0, "difficulty": 0}
+
+        rpg = [a.rate_per_gallon for a in accounts if a.rate_per_gallon and a.rate_per_gallon > 0]
+        costs = [a.cost_breakdown.total_cost for a in accounts if a.cost_breakdown.total_cost > 0]
+        margins = [a.margin_pct for a in accounts]
+        diffs = [a.difficulty_score for a in accounts]
+
+        return {
+            "rate_per_gallon": statistics.median(rpg) if rpg else None,
+            "cost": statistics.median(costs) if costs else 0,
+            "margin_pct": statistics.median(margins) if margins else 0,
+            "difficulty": statistics.median(diffs) if diffs else 0,
+        }
+
+    # --- Rate Allocation ---
+
     @staticmethod
     def allocate_rate_to_wfs(total_rate: float, wfs: list[WaterFeature]) -> dict[str, dict]:
         """Allocate a property's total rate across its WFs.
@@ -412,77 +346,93 @@ class ProfitabilityService:
             result[b.id] = {"allocated_rate": round(total_rate * ratio, 2), "allocation_method": "type_weight", "weight": round(ratio, 4)}
         return result
 
-    async def get_portfolio_medians(self, org_id: str) -> dict:
-        """Compute median rate/gal, cost, margin, difficulty across all active accounts."""
-        import statistics
-        overview = await self.get_overview(org_id)
-        accounts = overview.accounts
-        if not accounts:
-            return {"rate_per_gallon": None, "cost": 0, "margin_pct": 0, "difficulty": 0}
+    async def get_rate_allocation_preview(self, customer_id: str, org_id: str) -> dict:
+        """Preview rate allocation for a customer's WFs without saving."""
+        customer = await self.db.execute(
+            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
+        )
+        customer = customer.scalar_one_or_none()
+        if not customer:
+            raise NotFoundError("Customer not found")
 
-        rpg = [a.rate_per_gallon for a in accounts if a.rate_per_gallon and a.rate_per_gallon > 0]
-        costs = [a.cost_breakdown.total_cost for a in accounts if a.cost_breakdown.total_cost > 0]
-        margins = [a.margin_pct for a in accounts]
-        diffs = [a.difficulty_score for a in accounts]
+        # Get all properties + WFs
+        props = await self.db.execute(
+            select(Property).where(Property.customer_id == customer_id, Property.is_active == True)
+        )
+        properties = props.scalars().all()
+        prop_ids = [p.id for p in properties]
+
+        bows_result = await self.db.execute(
+            select(WaterFeature).where(WaterFeature.property_id.in_(prop_ids), WaterFeature.is_active == True)
+        )
+        wfs = bows_result.scalars().all()
+
+        if not wfs:
+            return {"customer_id": customer_id, "total_rate": customer.monthly_rate, "allocations": [], "method": None}
+
+        allocation = self.allocate_rate_to_wfs(customer.monthly_rate, wfs)
+
+        allocations = []
+        method = None
+        for wf in wfs:
+            alloc = allocation.get(wf.id, {})
+            method = alloc.get("allocation_method", method)
+            allocations.append({
+                "wf_id": wf.id,
+                "bow_name": wf.name,
+                "water_type": wf.water_type,
+                "gallons": wf.pool_gallons,
+                "service_minutes": wf.estimated_service_minutes,
+                "current_rate": wf.monthly_rate,
+                "proposed_rate": alloc.get("allocated_rate", 0),
+                "weight": alloc.get("weight", 0),
+                "allocation_method": alloc.get("allocation_method"),
+            })
 
         return {
-            "rate_per_gallon": statistics.median(rpg) if rpg else None,
-            "cost": statistics.median(costs) if costs else 0,
-            "margin_pct": statistics.median(margins) if margins else 0,
-            "difficulty": statistics.median(diffs) if diffs else 0,
+            "customer_id": customer_id,
+            "customer_name": customer.display_name_col,
+            "total_rate": customer.monthly_rate,
+            "method": method,
+            "allocations": allocations,
         }
 
-    async def get_whale_curve(self, org_id: str) -> list[WhaleCurvePoint]:
-        overview = await self.get_overview(org_id)
-        # Sort by profit descending
-        sorted_accounts = sorted(overview.accounts, key=lambda a: a.cost_breakdown.profit, reverse=True)
+    async def apply_rate_allocation(self, customer_id: str, org_id: str, rates: dict[str, float]) -> dict:
+        """Apply per-WF rates. rates = {wf_id: rate}."""
+        from datetime import datetime, timezone
 
-        total_profit = sum(a.cost_breakdown.profit for a in sorted_accounts)
-        if total_profit == 0:
-            return []
+        customer = await self.db.execute(
+            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
+        )
+        customer = customer.scalar_one_or_none()
+        if not customer:
+            raise NotFoundError("Customer not found")
 
-        cumulative = 0.0
-        points = []
-        for i, account in enumerate(sorted_accounts):
-            cumulative += account.cost_breakdown.profit
-            points.append(WhaleCurvePoint(
-                rank=i + 1,
-                customer_name=account.customer_name,
-                customer_id=account.customer_id,
-                cumulative_profit_pct=round(cumulative / abs(total_profit) * 100, 1),
-                individual_profit=account.cost_breakdown.profit,
-            ))
-        return points
+        from src.services.rate_sync import sync_rates_for_property
 
-    async def get_suggestions(self, org_id: str) -> list[PricingSuggestion]:
-        overview = await self.get_overview(org_id)
-        suggestions = []
-        for account in overview.accounts:
-            if account.cost_breakdown.rate_gap > 0:
-                suggestions.append(PricingSuggestion(
-                    customer_id=account.customer_id,
-                    customer_name=account.customer_name,
-                    property_address=account.property_address,
-                    current_rate=account.monthly_rate,
-                    suggested_rate=account.cost_breakdown.suggested_rate,
-                    rate_gap=account.cost_breakdown.rate_gap,
-                    current_margin_pct=account.margin_pct,
-                    target_margin_pct=overview.target_margin_pct,
-                    difficulty_score=account.difficulty_score,
-                ))
-        # Sort by rate gap descending
-        suggestions.sort(key=lambda s: s.rate_gap, reverse=True)
-        return suggestions
+        updated = 0
+        affected_property_ids = set()
+        for wf_id, rate in rates.items():
+            result = await self.db.execute(
+                select(WaterFeature).where(WaterFeature.id == wf_id, WaterFeature.organization_id == org_id)
+            )
+            wf = result.scalar_one_or_none()
+            if wf:
+                wf.monthly_rate = round(rate, 2)
+                wf.rate_allocation_method = "manual"
+                wf.rate_allocated_at = datetime.now(timezone.utc)
+                affected_property_ids.add(wf.property_id)
+                updated += 1
 
-    def get_difficulty_response(
-        self, prop: Property, diff: PropertyDifficulty
-    ) -> PropertyDifficultyResponse:
-        score = self.compute_composite_score(prop, diff)
-        multiplier = self.difficulty_to_multiplier(score)
-        resp = PropertyDifficultyResponse.model_validate(diff)
-        resp.composite_score = score
-        resp.difficulty_multiplier = multiplier
-        return resp
+        await self.db.flush()
+
+        # Sync property + customer rates
+        for prop_id in affected_property_ids:
+            await sync_rates_for_property(self.db, prop_id)
+
+        return {"updated": updated, "customer_id": customer_id}
+
+    # --- Cost Computation ---
 
     def compute_wf_cost(
         self,
@@ -744,91 +694,7 @@ class ProfitabilityService:
 
         return breakdown, wf_costs
 
-    async def get_rate_allocation_preview(self, customer_id: str, org_id: str) -> dict:
-        """Preview rate allocation for a customer's WFs without saving."""
-        customer = await self.db.execute(
-            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
-        )
-        customer = customer.scalar_one_or_none()
-        if not customer:
-            raise NotFoundError("Customer not found")
-
-        # Get all properties + WFs
-        props = await self.db.execute(
-            select(Property).where(Property.customer_id == customer_id, Property.is_active == True)
-        )
-        properties = props.scalars().all()
-        prop_ids = [p.id for p in properties]
-
-        bows_result = await self.db.execute(
-            select(WaterFeature).where(WaterFeature.property_id.in_(prop_ids), WaterFeature.is_active == True)
-        )
-        wfs = bows_result.scalars().all()
-
-        if not wfs:
-            return {"customer_id": customer_id, "total_rate": customer.monthly_rate, "allocations": [], "method": None}
-
-        allocation = self.allocate_rate_to_wfs(customer.monthly_rate, wfs)
-
-        allocations = []
-        method = None
-        for wf in wfs:
-            alloc = allocation.get(wf.id, {})
-            method = alloc.get("allocation_method", method)
-            allocations.append({
-                "wf_id": wf.id,
-                "bow_name": wf.name,
-                "water_type": wf.water_type,
-                "gallons": wf.pool_gallons,
-                "service_minutes": wf.estimated_service_minutes,
-                "current_rate": wf.monthly_rate,
-                "proposed_rate": alloc.get("allocated_rate", 0),
-                "weight": alloc.get("weight", 0),
-                "allocation_method": alloc.get("allocation_method"),
-            })
-
-        return {
-            "customer_id": customer_id,
-            "customer_name": customer.display_name_col,
-            "total_rate": customer.monthly_rate,
-            "method": method,
-            "allocations": allocations,
-        }
-
-    async def apply_rate_allocation(self, customer_id: str, org_id: str, rates: dict[str, float]) -> dict:
-        """Apply per-WF rates. rates = {wf_id: rate}."""
-        from datetime import datetime, timezone
-
-        customer = await self.db.execute(
-            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
-        )
-        customer = customer.scalar_one_or_none()
-        if not customer:
-            raise NotFoundError("Customer not found")
-
-        from src.services.rate_sync import sync_rates_for_property
-
-        updated = 0
-        affected_property_ids = set()
-        for wf_id, rate in rates.items():
-            result = await self.db.execute(
-                select(WaterFeature).where(WaterFeature.id == wf_id, WaterFeature.organization_id == org_id)
-            )
-            wf = result.scalar_one_or_none()
-            if wf:
-                wf.monthly_rate = round(rate, 2)
-                wf.rate_allocation_method = "manual"
-                wf.rate_allocated_at = datetime.now(timezone.utc)
-                affected_property_ids.add(wf.property_id)
-                updated += 1
-
-        await self.db.flush()
-
-        # Sync property + customer rates
-        for prop_id in affected_property_ids:
-            await sync_rates_for_property(self.db, prop_id)
-
-        return {"updated": updated, "customer_id": customer_id}
+    # --- Profit Gaps ---
 
     async def get_profit_gaps(self, org_id: str) -> list[dict]:
         """Get all WFs sorted by margin, flagging those below target."""
@@ -904,138 +770,3 @@ class ProfitabilityService:
         gaps.sort(key=lambda g: g["margin_pct"])
 
         return gaps
-
-    @staticmethod
-    def _billing_options(monthly_rate: float, settings: OrgCostSettings) -> dict:
-        """Calculate semi-annual and annual pricing with discounts."""
-        def apply_discount(monthly: float, months: int, dtype: str, dval: float) -> dict:
-            total_no_discount = monthly * months
-            if dtype == "percent":
-                discount = total_no_discount * (dval / 100.0)
-            else:
-                discount = dval * months
-            total = total_no_discount - discount
-            effective_monthly = total / months
-            return {
-                "total": round(total, 2),
-                "discount": round(discount, 2),
-                "effective_monthly": round(effective_monthly, 2),
-                "savings_pct": round((discount / total_no_discount * 100) if total_no_discount > 0 else 0, 1),
-            }
-
-        return {
-            "monthly": round(monthly_rate, 2),
-            "semi_annual": apply_discount(monthly_rate, 6, settings.semi_annual_discount_type, settings.semi_annual_discount_value),
-            "annual": apply_discount(monthly_rate, 12, settings.annual_discount_type, settings.annual_discount_value),
-        }
-
-    async def suggest_rate(
-        self, org_id: str, gallons: int, water_type: str = "pool",
-        service_minutes: int = 30, difficulty_score: float = 2.5,
-        customer_type: str = "residential", tier_id: str | None = None,
-    ) -> dict:
-        """Suggest a rate for a WF.
-
-        Residential: tier base_rate × difficulty_multiplier × volume_factor
-        Commercial: cost-based calculation with target margin
-        """
-        settings = await self.get_or_create_settings(org_id)
-        multiplier = self.difficulty_to_multiplier(difficulty_score)
-
-        # Residential: tier-based pricing
-        if customer_type == "residential":
-            from src.models.service_tier import ServiceTier
-
-            tier = None
-            if tier_id:
-                result = await self.db.execute(
-                    select(ServiceTier).where(ServiceTier.id == tier_id, ServiceTier.organization_id == org_id)
-                )
-                tier = result.scalar_one_or_none()
-
-            # Fall back to default tier
-            if not tier:
-                result = await self.db.execute(
-                    select(ServiceTier).where(
-                        ServiceTier.organization_id == org_id,
-                        ServiceTier.is_default == True,
-                        ServiceTier.is_active == True,
-                    )
-                )
-                tier = result.scalar_one_or_none()
-
-            if tier:
-                # Volume factor: ratio vs typical 15k gallon pool
-                typical_gallons = 15000
-                volume_factor = max(0.7, min(1.5, (gallons / typical_gallons) ** 0.5)) if gallons > 0 else 1.0
-
-                # Residential: no multiplier, use dollar adjustments
-                # difficulty_score is not used for residential pricing — adjustments come from
-                # the res_* fields on PropertyDifficulty, applied after rate is set
-                suggested_rate = tier.base_rate * volume_factor
-
-                # Load all tiers for comparison
-                result = await self.db.execute(
-                    select(ServiceTier)
-                    .where(ServiceTier.organization_id == org_id, ServiceTier.is_active == True)
-                    .order_by(ServiceTier.sort_order)
-                )
-                all_tiers = result.scalars().all()
-                tier_options = []
-                for t in all_tiers:
-                    tier_rate = t.base_rate * volume_factor
-                    tier_options.append({
-                        "tier_id": t.id,
-                        "tier_name": t.name,
-                        "tier_slug": t.slug,
-                        "base_rate": t.base_rate,
-                        "suggested_rate": round(tier_rate, 2),
-                        "is_selected": t.id == tier.id,
-                    })
-
-                return {
-                    "suggested_rate": round(suggested_rate, 2),
-                    "method": "tier",
-                    "tier_id": tier.id,
-                    "tier_name": tier.name,
-                    "base_rate": tier.base_rate,
-                    "volume_factor": round(volume_factor, 2),
-                    "gallons": gallons,
-                    "water_type": water_type,
-                    "note": "Difficulty adjustments (tree debris, dog, etc.) are added per-visit after rate is set",
-                    "tier_options": tier_options,
-                    "billing_options": self._billing_options(suggested_rate, settings),
-                }
-
-        # Commercial: cost-based
-        from sqlalchemy import func
-        count_result = await self.db.execute(
-            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
-        )
-        total_accounts = count_result.scalar() or 1
-        visits = settings.visits_per_month
-
-        chemical_cost = (gallons / 10000.0) * settings.chemical_cost_per_gallon * multiplier * visits
-        labor_cost = (service_minutes / 60.0) * settings.burdened_labor_rate * visits * multiplier
-        travel_cost = ((settings.avg_drive_minutes / 60.0) * settings.burdened_labor_rate + settings.avg_drive_miles * settings.vehicle_cost_per_mile) * visits
-        overhead_cost = settings.commercial_overhead_per_account if customer_type == "commercial" else settings.residential_overhead_per_account
-
-        total_cost = chemical_cost + labor_cost + travel_cost + overhead_cost
-        target_margin = settings.target_margin_pct / 100.0
-        suggested_rate = total_cost / (1 - target_margin) if target_margin < 1 else total_cost * 2
-
-        return {
-            "suggested_rate": round(suggested_rate, 2),
-            "method": "cost",
-            "total_cost": round(total_cost, 2),
-            "chemical_cost": round(chemical_cost, 2),
-            "labor_cost": round(labor_cost, 2),
-            "travel_cost": round(travel_cost, 2),
-            "overhead_cost": round(overhead_cost, 2),
-            "target_margin_pct": settings.target_margin_pct,
-            "gallons": gallons,
-            "water_type": water_type,
-            "service_minutes": service_minutes,
-            "difficulty_score": round(difficulty_score, 2),
-            "billing_options": self._billing_options(suggested_rate, settings),
-        }

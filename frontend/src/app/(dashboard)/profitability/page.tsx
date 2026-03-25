@@ -49,12 +49,7 @@ import type {
   WhaleCurvePoint,
 } from "@/types/profitability";
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(value);
-}
+import { formatCurrency } from "@/lib/format";
 
 function marginColor(margin: number, target: number) {
   if (margin >= target) return "text-green-600";

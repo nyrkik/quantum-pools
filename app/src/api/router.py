@@ -22,7 +22,12 @@ from src.api.v1.service_tiers import router as service_tiers_router
 from src.api.v1.notifications import router as notifications_router
 from src.api.v1.branding import router as branding_router
 from src.api.v1.agent_ops import router as agent_ops_router
-from src.api.v1.admin import router as admin_router
+from src.api.v1.permissions import router as permissions_router
+from src.api.v1.admin_emd import router as admin_emd_router
+from src.api.v1.admin_threads import router as admin_threads_router
+from src.api.v1.admin_messages import router as admin_messages_router
+from src.api.v1.admin_actions import router as admin_actions_router
+from src.api.v1.admin_webhooks import router as admin_webhooks_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -46,4 +51,9 @@ api_router.include_router(service_tiers_router)
 api_router.include_router(notifications_router)
 api_router.include_router(branding_router)
 api_router.include_router(agent_ops_router)
-api_router.include_router(admin_router)
+api_router.include_router(permissions_router)
+api_router.include_router(admin_emd_router)
+api_router.include_router(admin_threads_router)
+api_router.include_router(admin_messages_router)
+api_router.include_router(admin_actions_router)
+api_router.include_router(admin_webhooks_router)

@@ -108,31 +108,7 @@ interface Payment {
   created_at: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: "secondary",
-  sent: "outline",
-  paid: "default",
-  overdue: "destructive",
-  void: "secondary",
-  written_off: "outline",
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const variant = STATUS_COLORS[status] || "secondary";
-  const colorClass =
-    status === "sent"
-      ? "border-blue-400 text-blue-600"
-      : status === "paid"
-        ? "bg-green-600"
-        : status === "written_off"
-          ? "border-yellow-500 text-yellow-600"
-          : "";
-  return (
-    <Badge variant={variant as "default"} className={colorClass}>
-      {status.replace("_", " ")}
-    </Badge>
-  );
-}
+import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
 
 export default function InvoiceDetailPage({
   params,
@@ -250,7 +226,7 @@ export default function InvoiceDetailPage({
               {invoice.subject && ` — ${invoice.subject}`}
             </p>
           </div>
-          <StatusBadge status={invoice.status} />
+          <InvoiceStatusBadge status={invoice.status} />
         </div>
         <div className="flex items-center gap-2">
           {canSend && (

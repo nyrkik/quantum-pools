@@ -40,12 +40,7 @@ import type {
   PropertyDifficultyUpdate,
 } from "@/types/profitability";
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(value);
-}
+import { formatCurrency } from "@/lib/format";
 
 interface WfCost {
   wf_id: string;

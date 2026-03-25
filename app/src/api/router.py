@@ -28,6 +28,7 @@ from src.api.v1.admin_threads import router as admin_threads_router
 from src.api.v1.admin_messages import router as admin_messages_router
 from src.api.v1.admin_actions import router as admin_actions_router
 from src.api.v1.admin_webhooks import router as admin_webhooks_router
+from src.api.v1.email import router as email_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -57,3 +58,4 @@ api_router.include_router(admin_threads_router)
 api_router.include_router(admin_messages_router)
 api_router.include_router(admin_actions_router)
 api_router.include_router(admin_webhooks_router)
+api_router.include_router(email_router)

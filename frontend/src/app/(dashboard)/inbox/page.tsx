@@ -37,7 +37,9 @@ import {
   MessageSquare,
   ChevronLeft,
   ChevronRight,
+  PenSquare,
 } from "lucide-react";
+import { useCompose } from "@/components/email/compose-provider";
 import { formatTime } from "@/lib/format";
 import type { Thread } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "@/components/inbox/inbox-badges";
@@ -65,6 +67,7 @@ const STATUS_FILTERS = ["clients", "all", "handled"] as const;
 
 export default function InboxPage() {
   const { user } = useAuth();
+  const { openCompose } = useCompose();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<ThreadStats | null>(null);
@@ -132,6 +135,14 @@ export default function InboxPage() {
       <div className="flex items-center gap-2">
         <Bot className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">Inbox</h1>
+        <Button
+          size="sm"
+          className="ml-auto gap-1.5"
+          onClick={() => openCompose()}
+        >
+          <PenSquare className="h-3.5 w-3.5" />
+          New Email
+        </Button>
       </div>
 
       {/* Stats tile */}

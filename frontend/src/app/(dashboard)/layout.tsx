@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { DevModeProvider, useDevMode } from "@/lib/dev-mode";
+import { ComposeProvider } from "@/components/email/compose-provider";
+import { ComposeEmail } from "@/components/email/compose-email";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Code2 } from "lucide-react";
 
@@ -55,7 +57,10 @@ export default function DashboardLayout({
   return (
     <AuthProvider>
       <DevModeProvider>
-        <AuthenticatedLayout>{children}</AuthenticatedLayout>
+        <ComposeProvider>
+          <AuthenticatedLayout>{children}</AuthenticatedLayout>
+          <ComposeEmail />
+        </ComposeProvider>
       </DevModeProvider>
     </AuthProvider>
   );

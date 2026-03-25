@@ -21,6 +21,7 @@ class ApiClient {
   private baseUrl: string;
   private refreshPromise: Promise<boolean> | null = null;
   private viewAsRole: string | null = null;
+  private orgId: string | null = null;
 
   constructor(baseUrl = "/api") {
     this.baseUrl = baseUrl;
@@ -28,6 +29,10 @@ class ApiClient {
 
   setViewAsRole(role: string | null) {
     this.viewAsRole = role;
+  }
+
+  setOrgId(orgId: string | null) {
+    this.orgId = orgId;
   }
 
   private async request<T>(
@@ -41,6 +46,9 @@ class ApiClient {
     };
     if (this.viewAsRole) {
       headers["X-View-As-Role"] = this.viewAsRole;
+    }
+    if (this.orgId) {
+      headers["X-Organization-Id"] = this.orgId;
     }
 
     const response = await fetch(url, {

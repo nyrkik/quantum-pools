@@ -145,21 +145,40 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             />
           </div>
           {dev.isActive && (
-            <Select
-              value={dev.viewAsRole ?? dev.realRole}
-              onValueChange={(v) => dev.setViewAs(v === dev.realRole ? null : v as Role)}
-            >
-              <SelectTrigger className="h-7 text-xs bg-white dark:bg-background">
-                <SelectValue placeholder="View as..." />
-              </SelectTrigger>
-              <SelectContent>
-                {ALL_ROLES.map((r) => (
-                  <SelectItem key={r} value={r} className="text-xs">
-                    {r === dev.realRole ? `${r} (you)` : r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <>
+              <Select
+                value={dev.viewAsRole ?? dev.realRole}
+                onValueChange={(v) => dev.setViewAs(v === dev.realRole ? null : v as Role)}
+              >
+                <SelectTrigger className="h-7 text-xs bg-white dark:bg-background">
+                  <SelectValue placeholder="View as..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALL_ROLES.map((r) => (
+                    <SelectItem key={r} value={r} className="text-xs">
+                      {r === dev.realRole ? `${r} (you)` : r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {dev.orgs.length > 1 && (
+                <Select
+                  value={dev.activeOrgId || dev.orgs[0]?.id || ""}
+                  onValueChange={(v) => dev.switchOrg(v === dev.orgs[0]?.id ? null : v)}
+                >
+                  <SelectTrigger className="h-7 text-xs bg-white dark:bg-background">
+                    <SelectValue placeholder="Org..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dev.orgs.map((o) => (
+                      <SelectItem key={o.id} value={o.id} className="text-xs">
+                        {o.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </>
           )}
         </div>
       )}

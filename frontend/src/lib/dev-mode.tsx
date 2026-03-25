@@ -12,6 +12,11 @@ import { useAuth } from "./auth-context";
 import { api } from "./api";
 import type { Role } from "./permissions";
 
+interface OrgOption {
+  id: string;
+  name: string;
+}
+
 interface DevModeState {
   /** User has is_developer flag in DB */
   isDeveloper: boolean;
@@ -27,16 +32,33 @@ interface DevModeState {
   setViewAs: (role: Role | null) => void;
   /** Effective role (viewAs if active, otherwise real) */
   effectiveRole: Role;
+  /** Available orgs for switching */
+  orgs: OrgOption[];
+  /** Currently active org ID (null = default) */
+  activeOrgId: string | null;
+  /** Switch org */
+  switchOrg: (orgId: string | null) => void;
 }
 
 const DevModeContext = createContext<DevModeState | undefined>(undefined);
 
 export function DevModeProvider({ children }: { children: ReactNode }) {
-  const { role, isDeveloper } = useAuth();
+  const { role, isDeveloper, refreshUser } = useAuth();
   const [isActive, setIsActive] = useState(false);
   const [viewAsRole, setViewAsRole] = useState<Role | null>(null);
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
 
   const realRole = (role || "readonly") as Role;
+
+  // Load available orgs for dev users
+  useEffect(() => {
+    if (isDeveloper) {
+      api.get<{ id: string; name: string }[]>("/v1/auth/my-orgs")
+        .then(setOrgs)
+        .catch(() => {});
+    }
+  }, [isDeveloper]);
 
   const toggle = useCallback(() => {
     setIsActive((prev) => {
@@ -53,6 +75,13 @@ export function DevModeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const effectiveRole = isActive && viewAsRole ? viewAsRole : realRole;
+
+  const switchOrg = useCallback((orgId: string | null) => {
+    setActiveOrgId(orgId);
+    api.setOrgId(orgId);
+    // Refresh user to get new org context
+    refreshUser();
+  }, [refreshUser]);
 
   // Sync view-as role to API client
   useEffect(() => {
@@ -73,6 +102,9 @@ export function DevModeProvider({ children }: { children: ReactNode }) {
         toggle,
         setViewAs,
         effectiveRole,
+        orgs,
+        activeOrgId,
+        switchOrg,
       }}
     >
       {children}

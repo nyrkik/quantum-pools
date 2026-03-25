@@ -195,6 +195,24 @@ async def get_me(
     )
 
 
+@router.get("/my-orgs")
+async def list_my_orgs(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all organizations the current user belongs to (for dev org switching)."""
+    from src.models.organization_user import OrganizationUser
+    result = await db.execute(
+        select(OrganizationUser)
+        .options(joinedload(OrganizationUser.organization))
+        .where(OrganizationUser.user_id == user.id, OrganizationUser.is_active == True)
+    )
+    return [
+        {"id": ou.organization_id, "name": ou.organization.name}
+        for ou in result.unique().scalars().all()
+    ]
+
+
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
     # Always return success to prevent email enumeration

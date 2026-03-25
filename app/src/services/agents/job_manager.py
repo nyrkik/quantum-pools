@@ -30,6 +30,10 @@ async def evaluate_next_action(action_id: str) -> dict | None:
         if not action:
             return None
 
+        # Standalone jobs (no email) can't be auto-evaluated
+        if not action.agent_message_id:
+            return None
+
         msg_result = await db.execute(
             select(AgentMessage).where(AgentMessage.id == action.agent_message_id)
         )

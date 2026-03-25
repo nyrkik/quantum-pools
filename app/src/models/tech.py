@@ -1,8 +1,8 @@
-"""Tech (technician) model."""
+"""Tech (technician) model — operational profile for field workers."""
 
 import uuid
-from datetime import datetime, timezone, time
-from sqlalchemy import String, Boolean, DateTime, Float, Integer, ForeignKey, JSON, Time
+from datetime import datetime, date, timezone, time
+from sqlalchemy import String, Boolean, Date, DateTime, Float, Integer, Text, ForeignKey, JSON, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -34,6 +34,30 @@ class Tech(Base):
     working_days: Mapped[dict | None] = mapped_column(JSON)
     max_stops_per_day: Mapped[int] = mapped_column(Integer, default=20)
     efficiency_factor: Mapped[float] = mapped_column(Float, default=1.0)
+
+    # Link to user account (optional — not all techs have app logins)
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), unique=True, index=True)
+
+    # Compensation
+    hourly_rate: Mapped[float | None] = mapped_column(Float)
+    overtime_rate: Mapped[float | None] = mapped_column(Float)
+
+    # Capabilities — JSON for flexibility, easy to query with PostgreSQL
+    skills: Mapped[dict | None] = mapped_column(JSON)           # ["equipment_repair", "weekly_service", "heater_repair"]
+    certifications: Mapped[dict | None] = mapped_column(JSON)   # [{"name": "CPO", "number": "12345", "expires": "2027-06-15"}]
+    service_types: Mapped[dict | None] = mapped_column(JSON)    # ["weekly_maintenance", "repair", "equipment_install"]
+
+    # Territory
+    territory_zone: Mapped[str | None] = mapped_column(String(50))  # "north", "east_sac", "folsom"
+
+    # Vehicle
+    vehicle_type: Mapped[str | None] = mapped_column(String(50))    # truck, van, suv
+    vehicle_plate: Mapped[str | None] = mapped_column(String(20))
+
+    # Admin
+    job_title: Mapped[str | None] = mapped_column(String(100))      # "Senior Technician", "Office Manager"
+    hire_date: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)                 # Freeform context for AI: "Best with commercial accounts"
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

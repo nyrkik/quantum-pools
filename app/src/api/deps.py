@@ -111,6 +111,7 @@ class OrgUserContext:
         self.organization_name = org_name
         self.role = org_user.role
         self._features: list[str] | None = None
+        self._permissions: dict[str, str] | None = None
 
     async def load_features(self, db: AsyncSession) -> list[str]:
         """Lazy-load active feature slugs for this org. Cached per request."""
@@ -125,6 +126,34 @@ class OrgUserContext:
         if self._features is None:
             raise RuntimeError("Features not loaded — call load_features() first")
         return slug in self._features
+
+    async def load_permissions(self, db: AsyncSession) -> dict[str, str]:
+        """Lazy-load resolved permissions {slug: scope}. Cached per request.
+
+        If dev mode view-as is active (ctx.role != org_user.role), resolve
+        from the simulated preset instead of the user's actual role.
+        """
+        if self._permissions is None:
+            from src.services.permission_service import PermissionService
+            service = PermissionService(db)
+            if self.role != self.org_user.role:
+                # Dev mode: resolve from simulated role preset
+                self._permissions = await service._get_preset_permissions(self.role.value)
+            else:
+                self._permissions = await service.resolve_permissions(self.org_user)
+        return self._permissions
+
+    def has_perm(self, slug: str) -> bool:
+        """Check if permissions have been loaded and contain slug."""
+        if self._permissions is None:
+            raise RuntimeError("Permissions not loaded — call load_permissions() first")
+        return slug in self._permissions
+
+    def get_scope(self, slug: str) -> str | None:
+        """Get scope for a permission, or None if not granted."""
+        if self._permissions is None:
+            raise RuntimeError("Permissions not loaded — call load_permissions() first")
+        return self._permissions.get(slug)
 
 
 async def get_current_org_user(
@@ -222,3 +251,20 @@ def require_feature(*feature_slugs: str, tier_slug: str | None = None):
         ctx._features = await service.get_org_active_feature_slugs(ctx.organization_id)
         return ctx
     return _check_feature
+
+
+def require_permissions(*slugs: str):
+    """Dependency factory: require all listed permissions."""
+    async def _check_permissions(
+        ctx: OrgUserContext = Depends(get_current_org_user),
+        db: AsyncSession = Depends(get_db),
+    ):
+        perms = await ctx.load_permissions(db)
+        for slug in slugs:
+            if slug not in perms:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={"error": "insufficient_permissions", "permission": slug},
+                )
+        return ctx
+    return _check_permissions

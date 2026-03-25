@@ -70,6 +70,8 @@ class OrgUserResponse(BaseModel):
     features: list[str] = []
     emd_tier: Optional[str] = None
     branding: Optional[OrgBrandingResponse] = None
+    role_version: int = 0
+    permissions: dict[str, str] = {}
 
 
 class MessageResponse(BaseModel):

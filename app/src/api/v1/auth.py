@@ -83,6 +83,20 @@ async def register(body: RegisterRequest, response: Response, db: AsyncSession =
     _, access_token, refresh_token = await auth_service.login(email=body.email, password=body.password)
     _set_auth_cookies(response, access_token, refresh_token)
 
+    # Resolve permissions for the new owner
+    from src.models.organization_user import OrganizationUser
+    ou_result = await db.execute(
+        select(OrganizationUser).where(
+            OrganizationUser.user_id == user.id,
+            OrganizationUser.organization_id == org.id,
+        )
+    )
+    org_user = ou_result.scalar_one_or_none()
+    permissions: dict[str, str] = {}
+    if org_user:
+        from src.services.permission_service import PermissionService
+        permissions = await PermissionService(db).resolve_permissions(org_user)
+
     return OrgUserResponse(
         user=UserResponse.model_validate(user),
         organization_id=org.id,
@@ -90,6 +104,7 @@ async def register(body: RegisterRequest, response: Response, db: AsyncSession =
         role="owner",
         is_developer=False,
         branding=_branding(org),
+        permissions=permissions,
     )
 
 
@@ -120,11 +135,15 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
 
     features: list[str] = []
     emd_tier = None
+    permissions: dict[str, str] = {}
     if org_user:
         from src.services.feature_service import FeatureService
         feature_service = FeatureService(db)
         features = await feature_service.get_org_active_feature_slugs(org_user.organization_id)
         emd_tier = await feature_service.get_org_emd_tier(org_user.organization_id)
+        from src.services.permission_service import PermissionService
+        perm_service = PermissionService(db)
+        permissions = await perm_service.resolve_permissions(org_user)
 
     return OrgUserResponse(
         user=UserResponse.model_validate(user),
@@ -135,6 +154,8 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
         features=features,
         emd_tier=emd_tier,
         branding=_branding(org_user.organization if org_user else None),
+        role_version=org_user.role_version if org_user else 0,
+        permissions=permissions,
     )
 
 
@@ -177,6 +198,7 @@ async def get_me(
     db: AsyncSession = Depends(get_db),
 ):
     features = await ctx.load_features(db)
+    permissions = await ctx.load_permissions(db)
     from src.services.feature_service import FeatureService
     feature_service = FeatureService(db)
     emd_tier = await feature_service.get_org_emd_tier(ctx.organization_id)
@@ -192,6 +214,8 @@ async def get_me(
         features=features,
         emd_tier=emd_tier,
         branding=_branding(org),
+        role_version=ctx.org_user.role_version or 0,
+        permissions=permissions,
     )
 
 

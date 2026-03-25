@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, Integer
+from sqlalchemy import String, Boolean, DateTime, Text, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -37,6 +37,11 @@ class Organization(Base):
     agent_timezone: Mapped[str | None] = mapped_column(String(50))
     agent_service_area: Mapped[str | None] = mapped_column(Text)
     agent_approval_phones: Mapped[str | None] = mapped_column(Text)  # JSON: [{"phone": "+1...", "name": "Brian"}]
+
+    # Billing contact — who manages subscription/payments (separate from permissions)
+    billing_contact_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

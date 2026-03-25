@@ -66,7 +66,7 @@ function getBackendUrl(path: string) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { user, organizationName, branding, logout } = useAuth();
+  const { user, organizationName, branding, logout, refreshUser, roleVersion } = useAuth();
   const perms = usePermissions();
   const dev = useDevMode();
   const [pendingCount, setPendingCount] = useState(0);
@@ -222,29 +222,40 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
 export function Sidebar() {
   const [open, setOpen] = useState(false);
-  const { organizationName, branding } = useAuth();
+  const { organizationName, branding, roleVersion, refreshUser } = useAuth();
   const perms = usePermissions();
   const mobileDisplayName = organizationName || "QuantumPools";
   const [mobilePending, setMobilePending] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [lastRoleVersion, setLastRoleVersion] = useState(roleVersion);
   const [notifs, setNotifs] = useState<{ id: string; type: string; title: string; body: string | null; link: string | null; is_read: boolean; created_at: string }[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
 
   useEffect(() => {
-    const fetch = () => {
+    const poll = () => {
       if (perms.canViewInbox) {
         api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
           .then((s) => setMobilePending(s.pending ?? 0))
           .catch(() => {});
       }
-      api.get<{ unread: number }>("/v1/notifications/count")
-        .then((r) => setUnreadNotifs(r.unread))
+      api.get<{ unread: number; role_version?: number }>("/v1/notifications/count")
+        .then((r) => {
+          setUnreadNotifs(r.unread);
+          if (r.role_version !== undefined) {
+            setLastRoleVersion((prev) => {
+              if (prev !== r.role_version!) {
+                refreshUser();
+              }
+              return r.role_version!;
+            });
+          }
+        })
         .catch(() => {});
     };
-    fetch();
-    const interval = setInterval(fetch, 30000);
+    poll();
+    const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
-  }, [perms.canViewInbox]);
+  }, [perms.canViewInbox, refreshUser]);
 
   const loadNotifs = async () => {
     try {

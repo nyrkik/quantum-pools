@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
 
 from src.core.database import get_db
@@ -13,6 +13,7 @@ from src.core.security import get_password_hash
 from src.api.deps import get_current_org_user, require_roles, OrgUserContext
 from src.models.organization_user import OrganizationUser, OrgRole
 from src.models.user import User
+from src.models.tech import Tech
 from src.schemas.team import (
     TeamMemberResponse,
     TeamMemberUpdate,
@@ -25,7 +26,16 @@ router = APIRouter(prefix="/team", tags=["team"])
 VALID_ROLES = {r.value for r in OrgRole}
 
 
-def _to_response(ou: OrganizationUser) -> TeamMemberResponse:
+async def _get_job_title(db: AsyncSession, org_id: str, user_id: str) -> str | None:
+    result = await db.execute(
+        select(Tech.job_title).where(
+            Tech.organization_id == org_id, Tech.user_id == user_id, Tech.is_active == True
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def _to_response(ou: OrganizationUser, job_title: str | None = None) -> TeamMemberResponse:
     return TeamMemberResponse(
         id=ou.id,
         user_id=ou.user_id,
@@ -38,6 +48,7 @@ def _to_response(ou: OrganizationUser) -> TeamMemberResponse:
         state=ou.user.state,
         zip_code=ou.user.zip_code,
         role=ou.role.value,
+        job_title=job_title,
         is_developer=ou.is_developer,
         is_active=ou.is_active,
         is_verified=ou.user.is_verified,
@@ -58,7 +69,16 @@ async def list_team(
         .order_by(OrganizationUser.created_at)
     )
     members = result.unique().scalars().all()
-    return [_to_response(m) for m in members]
+
+    # Fetch job titles from tech records linked via user_id
+    user_ids = [m.user_id for m in members]
+    tech_result = await db.execute(
+        select(Tech.user_id, Tech.job_title)
+        .where(Tech.organization_id == ctx.organization_id, Tech.user_id.in_(user_ids), Tech.is_active == True)
+    )
+    title_map = {row.user_id: row.job_title for row in tech_result.all()}
+
+    return [_to_response(m, job_title=title_map.get(m.user_id)) for m in members]
 
 
 @router.post("/invite", response_model=TeamMemberResponse, status_code=status.HTTP_201_CREATED)
@@ -69,8 +89,9 @@ async def invite_member(
 ):
     if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}")
-    if body.role == "owner" and ctx.role != OrgRole.owner:
-        raise HTTPException(status_code=403, detail="Only owner can assign owner role")
+    # Full Access can only be assigned by existing Full Access users
+    if body.role == "owner" and ctx.role not in (OrgRole.owner, OrgRole.admin):
+        raise HTTPException(status_code=403, detail="Only Full Access or Admin users can grant Full Access")
 
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == body.email))
@@ -186,20 +207,31 @@ async def update_member(
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    # Can't modify owner unless you are owner
+    # Full Access users can only be modified by other Full Access users
     if member.role == OrgRole.owner and ctx.role != OrgRole.owner:
-        raise HTTPException(status_code=403, detail="Only owner can modify owner accounts")
+        raise HTTPException(status_code=403, detail="Only Full Access users can modify other Full Access accounts")
 
-    # Can't demote yourself from owner (prevent lockout)
+    # Can't demote yourself if you're the ONLY Full Access user (prevent lockout)
     if member.user_id == ctx.user.id and member.role == OrgRole.owner and body.role and body.role != "owner":
-        raise HTTPException(status_code=400, detail="Cannot demote yourself from owner")
+        other_owners = await db.execute(
+            select(func.count(OrganizationUser.id)).where(
+                OrganizationUser.organization_id == ctx.organization_id,
+                OrganizationUser.role == OrgRole.owner,
+                OrganizationUser.is_active == True,
+                OrganizationUser.id != member.id,
+            )
+        )
+        if (other_owners.scalar() or 0) == 0:
+            raise HTTPException(status_code=400, detail="Cannot demote yourself — you are the only Full Access user. Grant Full Access to another member first.")
 
     if body.role is not None:
         if body.role not in VALID_ROLES:
             raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}")
-        if body.role == "owner" and ctx.role != OrgRole.owner:
-            raise HTTPException(status_code=403, detail="Only owner can assign owner role")
+        if body.role == "owner" and ctx.role not in (OrgRole.owner, OrgRole.admin):
+            raise HTTPException(status_code=403, detail="Only Full Access or Admin users can grant Full Access")
         member.role = OrgRole(body.role)
+        member.role_version = (member.role_version or 0) + 1
+        member.permission_version = (member.permission_version or 0) + 1
 
     if body.is_active is not None:
         if member.user_id == ctx.user.id:
@@ -224,14 +256,21 @@ async def update_member(
 
     await db.commit()
     await db.refresh(member)
-    return _to_response(member)
+
+    # Invalidate permission cache if role changed
+    if body.role is not None:
+        from src.services.permission_service import PermissionService
+        await PermissionService(db).invalidate_cache(member.id)
+
+    title = await _get_job_title(db, ctx.organization_id, member.user_id)
+    return _to_response(member, job_title=title)
 
 
 @router.put("/{member_id}/developer", response_model=TeamMemberResponse)
 async def toggle_developer(
     member_id: str,
     body: TeamDeveloperToggle,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -249,7 +288,8 @@ async def toggle_developer(
     member.is_developer = body.is_developer
     await db.commit()
     await db.refresh(member)
-    return _to_response(member)
+    title = await _get_job_title(db, ctx.organization_id, member.user_id)
+    return _to_response(member, job_title=title)
 
 
 @router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -268,11 +308,23 @@ async def remove_member(
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    if member.role == OrgRole.owner:
-        raise HTTPException(status_code=400, detail="Cannot remove owner")
-
     if member.user_id == ctx.user.id:
         raise HTTPException(status_code=400, detail="Cannot remove yourself")
+
+    # If removing a Full Access user, ensure at least one remains
+    if member.role == OrgRole.owner:
+        if ctx.role != OrgRole.owner:
+            raise HTTPException(status_code=403, detail="Only Full Access users can remove other Full Access accounts")
+        other_owners = await db.execute(
+            select(func.count(OrganizationUser.id)).where(
+                OrganizationUser.organization_id == ctx.organization_id,
+                OrganizationUser.role == OrgRole.owner,
+                OrganizationUser.is_active == True,
+                OrganizationUser.id != member.id,
+            )
+        )
+        if (other_owners.scalar() or 0) == 0:
+            raise HTTPException(status_code=400, detail="Cannot remove the last Full Access user")
 
     await db.delete(member)
     await db.commit()

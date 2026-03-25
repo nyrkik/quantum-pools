@@ -17,6 +17,7 @@ class TeamMemberResponse(BaseModel):
     state: Optional[str] = None
     zip_code: Optional[str] = None
     role: str
+    job_title: Optional[str] = None
     is_developer: bool
     is_active: bool
     is_verified: bool

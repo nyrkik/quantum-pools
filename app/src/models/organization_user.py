@@ -3,7 +3,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Enum, UniqueConstraint
+from sqlalchemy import String, Boolean, DateTime, Integer, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -14,6 +14,7 @@ class OrgRole(str, enum.Enum):
     manager = "manager"
     technician = "technician"
     readonly = "readonly"
+    custom = "custom"
 
 
 class OrganizationUser(Base):
@@ -34,7 +35,13 @@ class OrganizationUser(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_developer: Mapped[bool] = mapped_column(Boolean, default=False)
+    org_role_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("org_roles.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    role_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    permission_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     organization = relationship("Organization", back_populates="members")
     user = relationship("User", back_populates="org_memberships")
+    custom_role = relationship("OrgRole", lazy="noload")

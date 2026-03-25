@@ -23,7 +23,9 @@ async def get_unread_count(
             Notification.is_read == False,
         )
     )).scalar() or 0
-    return {"unread": count}
+    rv = ctx.org_user.role_version or 0
+    pv = ctx.org_user.permission_version or 0
+    return {"unread": count, "role_version": rv + pv}
 
 
 @router.get("")

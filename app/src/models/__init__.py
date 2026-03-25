@@ -48,6 +48,12 @@ from src.models.agent_action_task import AgentActionTask
 from src.services.agents.observability import AgentLog
 from src.services.agents.evals import AgentEvalCase, AgentEvalResult
 from src.models.notification import Notification
+from src.models.permission import Permission
+from src.models.permission_preset import PermissionPreset
+from src.models.preset_permission import PresetPermission
+from src.models.org_role import OrgRole
+from src.models.org_role_permission import OrgRolePermission
+from src.models.user_permission_override import UserPermissionOverride
 
 __all__ = [
     "Base",

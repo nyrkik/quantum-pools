@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { Loader2, Save, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { formatPhone, unformatPhone } from "@/lib/format";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -30,18 +31,6 @@ const US_STATES = [
   "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
   "VA","WA","WV","WI","WY",
 ];
-
-function formatPhone(value: string): string {
-  const digits = value.replace(/\D/g, "").slice(0, 10);
-  if (digits.length === 0) return "";
-  if (digits.length <= 3) return `(${digits}`;
-  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-}
-
-function unformatPhone(value: string): string {
-  return value.replace(/\D/g, "").slice(0, 10);
-}
 
 interface UserProfile {
   id: string;
@@ -56,11 +45,12 @@ interface UserProfile {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  owner: "Full Access",
   admin: "Admin",
-  manager: "Manager",
-  technician: "Technician",
-  readonly: "Read Only",
+  manager: "Standard",
+  technician: "Limited",
+  readonly: "View Only",
+  custom: "Custom",
 };
 
 export default function ProfilePage() {

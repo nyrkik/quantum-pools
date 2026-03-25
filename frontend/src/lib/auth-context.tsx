@@ -34,6 +34,8 @@ interface AuthState {
   features: string[];
   emdTier: string | null;
   branding: Branding;
+  roleVersion: number;
+  permissions: Record<string, string>;
   isLoading: boolean;
 }
 
@@ -65,6 +67,8 @@ interface OrgUserResponse {
     primary_color: string | null;
     tagline: string | null;
   } | null;
+  role_version?: number;
+  permissions?: Record<string, string>;
 }
 
 const DEFAULT_BRANDING: Branding = { logoUrl: null, primaryColor: null, tagline: null };
@@ -81,6 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     features: [],
     emdTier: null,
     branding: DEFAULT_BRANDING,
+    roleVersion: 0,
+    permissions: {},
     isLoading: true,
   });
 
@@ -98,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         primaryColor: data.branding.primary_color,
         tagline: data.branding.tagline,
       } : DEFAULT_BRANDING,
+      roleVersion: data.role_version ?? 0,
+      permissions: data.permissions ?? {},
       isLoading: false,
     });
   }, []);
@@ -107,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api.get<OrgUserResponse>("/v1/auth/me");
       setFromResponse(data);
     } catch {
-      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], emdTier: null, branding: DEFAULT_BRANDING, isLoading: false }));
+      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], emdTier: null, branding: DEFAULT_BRANDING, roleVersion: 0, permissions: {}, isLoading: false }));
     }
   }, [setFromResponse]);
 
@@ -139,6 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       features: [],
       emdTier: null,
       branding: DEFAULT_BRANDING,
+      roleVersion: 0,
+      permissions: {},
       isLoading: false,
     });
   };

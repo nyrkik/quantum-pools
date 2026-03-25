@@ -9,12 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Table,
   TableBody,
   TableCell,
@@ -54,7 +48,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Plus, Trash2, Code2, Mail, CheckCircle2, Clock, Loader2, Users, Pencil, Check, X } from "lucide-react";
+import { Plus, Trash2, Code2, Mail, CheckCircle2, Clock, Loader2, Users, Pencil, Check } from "lucide-react";
+import { formatPhone, unformatPhone, formatRelativeDate } from "@/lib/format";
 
 interface TeamMember {
   id: string;
@@ -68,6 +63,7 @@ interface TeamMember {
   state: string | null;
   zip_code: string | null;
   role: string;
+  job_title: string | null;
   is_developer: boolean;
   is_active: boolean;
   is_verified: boolean;
@@ -82,26 +78,24 @@ const US_STATES = [
   "VA","WA","WV","WI","WY",
 ];
 
-function formatPhone(value: string): string {
-  const digits = value.replace(/\D/g, "").slice(0, 10);
-  if (digits.length === 0) return "";
-  if (digits.length <= 3) return `(${digits}`;
-  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-}
-
-function unformatPhone(value: string): string {
-  return value.replace(/\D/g, "").slice(0, 10);
-}
-
 const ROLES = ["owner", "admin", "manager", "technician", "readonly"];
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  owner: "Full Access",
   admin: "Admin",
-  manager: "Manager",
-  technician: "Technician",
-  readonly: "Read Only",
+  manager: "Standard",
+  technician: "Limited",
+  readonly: "View Only",
+  custom: "Custom",
+};
+
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  owner: "Full access to all features and settings",
+  admin: "Manage customers, billing, team. No org settings.",
+  manager: "Manage daily operations. No billing or team access.",
+  technician: "Own routes, visits, and readings only.",
+  readonly: "View-only access across the platform.",
+  custom: "Custom permission set assigned by admin.",
 };
 
 const roleBadgeVariant = (role: string) => {
@@ -114,19 +108,7 @@ const roleBadgeVariant = (role: string) => {
   }
 };
 
-function formatDate(iso: string | null) {
-  if (!iso) return "Never";
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDays = Math.floor(diffHr / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
+const formatDate = formatRelativeDate;
 
 function MemberDetail({
   member,
@@ -142,6 +124,11 @@ function MemberDetail({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resending, setResending] = useState(false);
+  const [savingRole, setSavingRole] = useState(false);
+  const [togglingDev, setTogglingDev] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false);
+  const isFullAccess = isOwner || member.role === "admin"; // who can manage
+
   const [form, setForm] = useState({
     first_name: member.first_name,
     last_name: member.last_name,
@@ -150,8 +137,21 @@ function MemberDetail({
     city: member.city || "",
     state: member.state || "",
     zip_code: member.zip_code || "",
-    role: member.role,
   });
+
+  // Reset form when member changes (e.g., after save + reload)
+  useEffect(() => {
+    setForm({
+      first_name: member.first_name,
+      last_name: member.last_name,
+      phone: member.phone || "",
+      address: member.address || "",
+      city: member.city || "",
+      state: member.state || "",
+      zip_code: member.zip_code || "",
+    });
+    setEditing(false);
+  }, [member]);
 
   const isDirty = editing && (
     form.first_name !== member.first_name ||
@@ -160,8 +160,7 @@ function MemberDetail({
     form.address !== (member.address || "") ||
     form.city !== (member.city || "") ||
     form.state !== (member.state || "") ||
-    form.zip_code !== (member.zip_code || "") ||
-    form.role !== member.role
+    form.zip_code !== (member.zip_code || "")
   );
 
   const handleSave = async () => {
@@ -175,7 +174,6 @@ function MemberDetail({
         city: form.city || null,
         state: form.state || null,
         zip_code: form.zip_code || null,
-        role: form.role !== member.role ? form.role : undefined,
       });
       toast.success("Profile updated");
       setEditing(false);
@@ -196,13 +194,45 @@ function MemberDetail({
       city: member.city || "",
       state: member.state || "",
       zip_code: member.zip_code || "",
-      role: member.role,
     });
     setEditing(false);
   };
 
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, phone: formatPhone(e.target.value) });
+  const handleToggleDev = async (checked: boolean) => {
+    setTogglingDev(true);
+    try {
+      await api.put(`/v1/team/${member.id}/developer`, { is_developer: checked });
+      toast.success(checked ? "Developer mode enabled" : "Developer mode disabled");
+      onUpdate();
+    } catch {
+      toast.error("Failed to toggle developer mode");
+    } finally {
+      setTogglingDev(false);
+    }
+  };
+
+  const handleToggleActive = async (checked: boolean) => {
+    setTogglingActive(true);
+    try {
+      await api.put(`/v1/team/${member.id}`, { is_active: checked });
+      toast.success(checked ? "Member activated" : "Member deactivated");
+      onUpdate();
+    } catch {
+      toast.error("Failed to update status");
+    } finally {
+      setTogglingActive(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    try {
+      await api.delete(`/v1/team/${member.id}`);
+      toast.success("Member removed");
+      onClose();
+      onUpdate();
+    } catch {
+      toast.error("Failed to remove member");
+    }
   };
 
   const displayPhone = member.phone ? formatPhone(member.phone) : null;
@@ -218,10 +248,18 @@ function MemberDetail({
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-lg">{member.first_name} {member.last_name}</p>
+          {member.job_title && (
+            <p className="text-sm text-muted-foreground">{member.job_title}</p>
+          )}
           <div className="flex items-center gap-1.5 mt-1">
             <Badge variant={roleBadgeVariant(member.role)}>{ROLE_LABELS[member.role]}</Badge>
             {!member.is_active && (
               <Badge variant="destructive" className="text-[10px]">Deactivated</Badge>
+            )}
+            {member.is_developer && (
+              <Badge variant="outline" className="text-amber-600 border-amber-300 text-[10px] px-1 py-0">
+                <Code2 className="h-2.5 w-2.5 mr-0.5" />DEV
+              </Badge>
             )}
           </div>
         </div>
@@ -230,6 +268,43 @@ function MemberDetail({
             <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit
           </Button>
         )}
+      </div>
+
+      {/* Permission Level — always interactive, no edit mode needed */}
+      <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Permission Level</p>
+        <div className="flex flex-wrap gap-2">
+          {ROLES.map(r => (
+            <button
+              key={r}
+              type="button"
+              disabled={savingRole || r === member.role}
+              onClick={async () => {
+                if (r === member.role) return;
+                setSavingRole(true);
+                try {
+                  await api.put(`/v1/team/${member.id}`, { role: r });
+                  toast.success(`Permission updated to ${ROLE_LABELS[r]}`);
+                  onUpdate();
+                } catch (err: unknown) {
+                  toast.error((err as { message?: string })?.message || "Failed to update permission");
+                } finally {
+                  setSavingRole(false);
+                }
+              }}
+              className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+                member.role === r
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background text-muted-foreground border-input hover:bg-accent hover:text-foreground"
+              }`}
+            >
+              {ROLE_LABELS[r]}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {ROLE_DESCRIPTIONS[member.role] || ""}
+        </p>
       </div>
 
       {/* Personal Info */}
@@ -298,7 +373,7 @@ function MemberDetail({
           {editing ? (
             <Input
               value={form.phone}
-              onChange={handlePhoneChange}
+              onChange={(e) => setForm({ ...form, phone: formatPhone(e.target.value) })}
               className="h-8 text-sm"
               placeholder="(916) 555-1234"
               type="tel"
@@ -347,30 +422,8 @@ function MemberDetail({
         )}
       </div>
 
-      {/* Role & Access */}
+      {/* Account Settings */}
       <div className="space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Role & Access</p>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Role</Label>
-          {editing && member.role !== "owner" ? (
-            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
-              <SelectTrigger className="h-8 text-sm w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.filter(r => isOwner || r !== "owner").map(r => (
-                  <SelectItem key={r} value={r} className="text-sm">{ROLE_LABELS[r]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <p className="text-sm font-medium">{ROLE_LABELS[member.role]}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Account Info */}
-      <div className="space-y-3">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Account</p>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
           <div>
@@ -386,6 +439,33 @@ function MemberDetail({
             <p>{new Date(member.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
           </div>
         </div>
+
+        <div className="space-y-3 pt-2 border-t">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Active</p>
+              <p className="text-xs text-muted-foreground">Deactivated members cannot log in</p>
+            </div>
+            <Switch
+              checked={member.is_active}
+              onCheckedChange={handleToggleActive}
+              disabled={togglingActive}
+            />
+          </div>
+          {(isOwner || member.role === "admin") && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Developer Mode</p>
+                <p className="text-xs text-muted-foreground">Access dev tools and org switching</p>
+              </div>
+              <Switch
+                checked={member.is_developer}
+                onCheckedChange={handleToggleDev}
+                disabled={togglingDev}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Save / Cancel — only visible when dirty */}
@@ -396,6 +476,32 @@ function MemberDetail({
             Save Changes
           </Button>
           <Button variant="ghost" onClick={handleCancel}>Cancel</Button>
+        </div>
+      )}
+
+      {/* Remove member — bottom, behind confirmation */}
+      {!editing && (
+        <div className="pt-2 border-t">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="w-full text-muted-foreground hover:text-destructive">
+                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                Remove from organization
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove {member.first_name} {member.last_name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will remove them from the organization. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleRemove}>Remove</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
     </div>
@@ -409,7 +515,6 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteDraft, setInviteDraft] = useState({ first_name: "", last_name: "", email: "", phone: "", role: "technician" });
-  const [resending, setResending] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
 
   const load = useCallback(async () => {
@@ -417,14 +522,19 @@ export default function TeamPage() {
     try {
       const data = await api.get<TeamMember[]>("/v1/team");
       setMembers(data);
+      // If a member is selected, refresh their data
+      if (selectedMember) {
+        const updated = data.find(m => m.id === selectedMember.id);
+        if (updated) setSelectedMember(updated);
+      }
     } catch {
       toast.error("Failed to load team");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedMember]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, []);
 
   const handleInvite = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -446,64 +556,6 @@ export default function TeamPage() {
     }
   };
 
-  const handleResendInvite = async (memberId: string) => {
-    setResending(memberId);
-    try {
-      await api.post(`/v1/team/${memberId}/resend-invite`, {});
-      toast.success("Invite resent");
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || "Failed to resend";
-      toast.error(msg);
-    } finally {
-      setResending(null);
-    }
-  };
-
-  const handleRoleChange = async (memberId: string, role: string) => {
-    try {
-      await api.put(`/v1/team/${memberId}`, { role });
-      toast.success("Role updated");
-      load();
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || "Failed to update role";
-      toast.error(msg);
-    }
-  };
-
-  const handleToggleDeveloper = async (memberId: string, isDeveloper: boolean) => {
-    try {
-      await api.put(`/v1/team/${memberId}/developer`, { is_developer: isDeveloper });
-      toast.success(isDeveloper ? "Developer mode enabled" : "Developer mode disabled");
-      load();
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || "Failed to toggle developer";
-      toast.error(msg);
-    }
-  };
-
-  const handleToggleActive = async (memberId: string, isActive: boolean) => {
-    try {
-      await api.put(`/v1/team/${memberId}`, { is_active: isActive });
-      toast.success(isActive ? "Member activated" : "Member deactivated");
-      load();
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || "Failed to update";
-      toast.error(msg);
-    }
-  };
-
-  const handleRemove = async (memberId: string) => {
-    try {
-      await api.delete(`/v1/team/${memberId}`);
-      toast.success("Member removed");
-      load();
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || "Failed to remove";
-      toast.error(msg);
-    }
-  };
-
-  const verified = members.filter(m => m.is_verified).length;
   const pending = members.filter(m => !m.is_verified).length;
 
   return (
@@ -552,7 +604,7 @@ export default function TeamPage() {
                 <Input id="phone" type="tel" value={inviteDraft.phone} onChange={(e) => setInviteDraft({ ...inviteDraft, phone: formatPhone(e.target.value) })} placeholder="(916) 555-1234" />
               </div>
               <div className="space-y-2">
-                <Label>Role</Label>
+                <Label>Permission Level</Label>
                 <div className="flex flex-wrap gap-2">
                   {ROLES.filter(r => isOwner || r !== "owner").map(r => (
                     <button
@@ -569,6 +621,7 @@ export default function TeamPage() {
                     </button>
                   ))}
                 </div>
+                <p className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[inviteDraft.role]}</p>
               </div>
               <Button type="submit" className="w-full">Send Invite</Button>
             </form>
@@ -576,67 +629,58 @@ export default function TeamPage() {
         </Dialog>
       </div>
 
+      {/* Read-only table */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-100 dark:bg-slate-800">
               <TableHead className="text-xs font-medium uppercase tracking-wide">Name</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide hidden sm:table-cell">Email</TableHead>
-              <TableHead className="text-xs font-medium uppercase tracking-wide">Role</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide">Permission</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide text-center">Status</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide hidden md:table-cell">Last Login</TableHead>
-              {isOwner && <TableHead className="text-xs font-medium uppercase tracking-wide text-center">Dev</TableHead>}
-              <TableHead className="text-xs font-medium uppercase tracking-wide text-center">Active</TableHead>
-              <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={isOwner ? 8 : 7} className="text-center py-8">
+                <TableCell colSpan={5} className="text-center py-8">
                   <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : members.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isOwner ? 8 : 7} className="text-center py-8 text-muted-foreground">No team members</TableCell>
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No team members</TableCell>
               </TableRow>
             ) : (
               members.map((m, i) => (
-                <TableRow key={m.id} className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`} onClick={() => setSelectedMember(m)}>
+                <TableRow
+                  key={m.id}
+                  className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}
+                  onClick={() => setSelectedMember(m)}
+                >
                   <TableCell>
-                    <div>
+                    <div className="flex items-center gap-2">
                       <span className="font-medium">{m.first_name} {m.last_name}</span>
                       {m.is_developer && (
-                        <Badge variant="outline" className="ml-2 text-amber-600 border-amber-300 text-[10px] px-1 py-0">
+                        <Badge variant="outline" className="text-amber-600 border-amber-300 text-[10px] px-1 py-0">
                           <Code2 className="h-2.5 w-2.5 mr-0.5" />DEV
                         </Badge>
                       )}
                     </div>
+                    {m.job_title && (
+                      <p className="text-xs text-muted-foreground">{m.job_title}</p>
+                    )}
                     <p className="text-xs text-muted-foreground sm:hidden">{m.email}</p>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">{m.email}</TableCell>
                   <TableCell>
-                    {m.role === "owner" ? (
-                      <Badge variant={roleBadgeVariant(m.role)}>{ROLE_LABELS[m.role]}</Badge>
-                    ) : (
-                      <Select
-                        value={m.role}
-                        onValueChange={(v) => handleRoleChange(m.id, v)}
-                      >
-                        <SelectTrigger className="h-7 w-28 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ROLES.filter(r => isOwner || r !== "owner").map(r => (
-                            <SelectItem key={r} value={r} className="text-xs">{ROLE_LABELS[r]}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                    <Badge variant={roleBadgeVariant(m.role)}>{ROLE_LABELS[m.role] || m.role}</Badge>
                   </TableCell>
                   <TableCell className="text-center">
-                    {m.is_verified ? (
+                    {!m.is_active ? (
+                      <Badge variant="destructive" className="text-[10px]">Inactive</Badge>
+                    ) : m.is_verified ? (
                       <Badge variant="outline" className="border-green-400 text-green-600 text-[10px]">
                         <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Verified
                       </Badge>
@@ -648,49 +692,6 @@ export default function TeamPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
                     {formatDate(m.last_login)}
-                  </TableCell>
-                  {isOwner && (
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={m.is_developer}
-                        onCheckedChange={(v) => handleToggleDeveloper(m.id, v)}
-                        className="scale-75"
-                      />
-                    </TableCell>
-                  )}
-                  <TableCell className="text-center">
-                    {m.role === "owner" ? (
-                      <Badge variant="default" className="text-[10px]">Always</Badge>
-                    ) : (
-                      <Switch
-                        checked={m.is_active}
-                        onCheckedChange={(v) => handleToggleActive(m.id, v)}
-                        className="scale-75"
-                      />
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {m.role !== "owner" && (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Remove {m.first_name} {m.last_name}?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will remove them from the organization. This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleRemove(m.id)}>Remove</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    )}
                   </TableCell>
                 </TableRow>
               ))

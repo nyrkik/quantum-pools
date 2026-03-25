@@ -19,6 +19,7 @@ from src.models.agent_thread import AgentThread
 from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
+from src.models.agent_action_task import AgentActionTask
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -361,6 +362,9 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
         "property_address": a.property_address,
         "created_by": a.created_by,
         "invoice_id": a.invoice_id,
+        "parent_action_id": a.parent_action_id,
+        "task_count": a.task_count or 0,
+        "tasks_completed": a.tasks_completed or 0,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -1250,11 +1254,11 @@ async def get_agent_action(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single action with comments."""
+    """Get a single action with comments and tasks."""
     from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(AgentAction)
-        .options(selectinload(AgentAction.comments))
+        .options(selectinload(AgentAction.comments), selectinload(AgentAction.tasks))
         .where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id)
     )
     action = result.scalar_one_or_none()
@@ -1296,6 +1300,25 @@ async def get_agent_action(
             ]
     else:
         d["customer_name"] = action.customer_name
+
+    # Include tasks
+    d["tasks"] = [
+        {
+            "id": t.id,
+            "title": t.title,
+            "assigned_to": t.assigned_to,
+            "status": t.status,
+            "sort_order": t.sort_order,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+            "notes": t.notes,
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "completed_by": t.completed_by,
+            "created_by": t.created_by,
+            "created_at": t.created_at.isoformat(),
+        }
+        for t in (action.tasks or [])
+    ]
+
     return d
 
 
@@ -1944,6 +1967,197 @@ Rules:
         return {"draft": response.content[0].text.strip()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to revise: {str(e)}")
+
+
+# --- Job Tasks (Sub-tasks) ---
+
+class CreateTaskBody(BaseModel):
+    title: str
+    assigned_to: Optional[str] = None
+    due_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class UpdateTaskBody(BaseModel):
+    title: Optional[str] = None
+    assigned_to: Optional[str] = None
+    status: Optional[str] = None
+    due_date: Optional[str] = None
+    notes: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+async def _update_task_counts(db, action_id: str):
+    """Recalculate denormalized task counts on the job."""
+    total = (await db.execute(
+        select(func.count(AgentActionTask.id)).where(
+            AgentActionTask.action_id == action_id,
+            AgentActionTask.status != "cancelled",
+        )
+    )).scalar() or 0
+    done = (await db.execute(
+        select(func.count(AgentActionTask.id)).where(
+            AgentActionTask.action_id == action_id,
+            AgentActionTask.status == "done",
+        )
+    )).scalar() or 0
+    action = (await db.execute(select(AgentAction).where(AgentAction.id == action_id))).scalar_one_or_none()
+    if action:
+        action.task_count = total
+        action.tasks_completed = done
+
+
+@router.get("/agent-actions/{action_id}/tasks")
+async def list_tasks(
+    action_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List tasks for a job."""
+    result = await db.execute(
+        select(AgentActionTask).where(
+            AgentActionTask.action_id == action_id,
+            AgentActionTask.organization_id == ctx.organization_id,
+        ).order_by(AgentActionTask.sort_order, AgentActionTask.created_at)
+    )
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "assigned_to": t.assigned_to,
+            "status": t.status,
+            "sort_order": t.sort_order,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+            "notes": t.notes,
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "completed_by": t.completed_by,
+            "created_by": t.created_by,
+            "created_at": t.created_at.isoformat(),
+        }
+        for t in result.scalars().all()
+    ]
+
+
+@router.post("/agent-actions/{action_id}/tasks")
+async def create_task(
+    action_id: str,
+    body: CreateTaskBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a task to a job."""
+    from datetime import datetime, timezone
+
+    # Verify action exists and belongs to org
+    action = (await db.execute(
+        select(AgentAction).where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    due = None
+    if body.due_date:
+        due = datetime.fromisoformat(body.due_date)
+
+    # Get next sort order
+    max_sort = (await db.execute(
+        select(func.max(AgentActionTask.sort_order)).where(AgentActionTask.action_id == action_id)
+    )).scalar() or 0
+
+    task = AgentActionTask(
+        organization_id=ctx.organization_id,
+        action_id=action_id,
+        title=body.title,
+        assigned_to=body.assigned_to,
+        due_date=due,
+        notes=body.notes,
+        sort_order=max_sort + 1,
+        created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
+    )
+    db.add(task)
+    await _update_task_counts(db, action_id)
+    await db.commit()
+    await db.refresh(task)
+
+    return {
+        "id": task.id,
+        "title": task.title,
+        "assigned_to": task.assigned_to,
+        "status": task.status,
+        "sort_order": task.sort_order,
+        "created_at": task.created_at.isoformat(),
+    }
+
+
+@router.put("/agent-actions/{action_id}/tasks/{task_id}")
+async def update_task(
+    action_id: str,
+    task_id: str,
+    body: UpdateTaskBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a task."""
+    from datetime import datetime, timezone
+
+    task = (await db.execute(
+        select(AgentActionTask).where(
+            AgentActionTask.id == task_id,
+            AgentActionTask.action_id == action_id,
+            AgentActionTask.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if body.title is not None:
+        task.title = body.title
+    if body.assigned_to is not None:
+        task.assigned_to = body.assigned_to
+    if body.status is not None:
+        task.status = body.status
+        if body.status == "done":
+            task.completed_at = datetime.now(timezone.utc)
+            task.completed_by = f"{ctx.user.first_name} {ctx.user.last_name}"
+        elif body.status == "open":
+            task.completed_at = None
+            task.completed_by = None
+    if body.due_date is not None:
+        task.due_date = datetime.fromisoformat(body.due_date) if body.due_date else None
+    if body.notes is not None:
+        task.notes = body.notes
+    if body.sort_order is not None:
+        task.sort_order = body.sort_order
+
+    await _update_task_counts(db, action_id)
+    await db.commit()
+
+    return {"ok": True}
+
+
+@router.delete("/agent-actions/{action_id}/tasks/{task_id}")
+async def delete_task(
+    action_id: str,
+    task_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a task."""
+    task = (await db.execute(
+        select(AgentActionTask).where(
+            AgentActionTask.id == task_id,
+            AgentActionTask.action_id == action_id,
+            AgentActionTask.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    await db.delete(task)
+    await _update_task_counts(db, action_id)
+    await db.commit()
+
+    return {"ok": True}
 
 
 # --- Twilio SMS Webhook ---

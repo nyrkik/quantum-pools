@@ -44,6 +44,7 @@ from src.models.estimate_approval import EstimateApproval
 from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
+from src.models.agent_action_task import AgentActionTask
 from src.services.agents.observability import AgentLog
 from src.services.agents.evals import AgentEvalCase, AgentEvalResult
 from src.models.notification import Notification

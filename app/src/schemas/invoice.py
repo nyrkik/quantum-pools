@@ -31,6 +31,7 @@ class InvoiceLineItemResponse(BaseModel):
 
 class InvoiceCreate(BaseModel):
     customer_id: str
+    document_type: str = "invoice"  # estimate, invoice
     subject: Optional[str] = None
     issue_date: date
     due_date: date
@@ -55,6 +56,7 @@ class InvoiceResponse(BaseModel):
     id: str
     organization_id: str
     customer_id: str
+    document_type: str = "invoice"
     invoice_number: str
     subject: Optional[str] = None
     status: str

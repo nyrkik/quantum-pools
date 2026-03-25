@@ -360,6 +360,7 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
         "customer_name": a.customer_name,
         "property_address": a.property_address,
         "created_by": a.created_by,
+        "invoice_id": a.invoice_id,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -1142,6 +1143,7 @@ class UpdateActionBody(BaseModel):
     description: Optional[str] = None
     due_date: Optional[str] = None
     notes: Optional[str] = None
+    invoice_id: Optional[str] = None
 
 
 @router.put("/agent-actions/{action_id}")
@@ -1175,6 +1177,8 @@ async def update_agent_action(
         action.due_date = datetime.fromisoformat(body.due_date) if body.due_date else None
     if body.notes is not None:
         action.notes = body.notes.strip() or None
+    if body.invoice_id is not None:
+        action.invoice_id = body.invoice_id
 
     await db.commit()
 

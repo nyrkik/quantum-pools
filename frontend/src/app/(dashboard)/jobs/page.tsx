@@ -91,6 +91,7 @@ interface RelatedJob {
 interface ActionDetail extends AgentAction {
   comments?: ActionComment[];
   notes?: string | null;
+  invoice_id?: string | null;
   from_email?: string;
   customer_name?: string;
   subject?: string;
@@ -414,8 +415,9 @@ function ActionDetailSheet({
       const due = new Date(Date.now() + 30 * 86400000)
         .toISOString()
         .split("T")[0];
-      await api.post("/v1/invoices", {
+      const inv = await api.post<{ id: string }>("/v1/invoices", {
         customer_id: invoiceDraft.customer_id,
+        document_type: "estimate",
         subject: invoiceDraft.subject,
         issue_date: today,
         due_date: due,
@@ -428,7 +430,11 @@ function ActionDetailSheet({
           sort_order: i,
         })),
       });
-      toast.success("Invoice created");
+      // Link estimate to the job
+      if (inv.id) {
+        await api.put(`/v1/admin/agent-actions/${actionId}`, { invoice_id: inv.id } as Record<string, string>).catch(() => {});
+      }
+      toast.success("Estimate created");
       setInvoiceDraft(null);
       onUpdate();
     } catch (err: unknown) {
@@ -738,19 +744,30 @@ function ActionDetailSheet({
             )}
             Draft Follow-up
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDraftInvoice}
-            disabled={draftingInvoice}
-          >
-            {draftingInvoice ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-            ) : (
+          {detail.invoice_id ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`/invoices/${detail.invoice_id}`, "_self")}
+            >
               <DollarSign className="h-3.5 w-3.5 mr-1.5" />
-            )}
-            Create Invoice
-          </Button>
+              View Estimate
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDraftInvoice}
+              disabled={draftingInvoice}
+            >
+              {draftingInvoice ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+              ) : (
+                <DollarSign className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Create Estimate
+            </Button>
+          )}
         </div>
       )}
 
@@ -913,7 +930,7 @@ function ActionDetailSheet({
               ) : (
                 <DollarSign className="h-4 w-4 mr-2" />
               )}
-              Create Invoice
+              Create Estimate
             </Button>
             <Button
               variant="ghost"

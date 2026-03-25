@@ -30,7 +30,8 @@ class Invoice(Base):
         String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    # Invoice details
+    # Document type and details
+    document_type: Mapped[str] = mapped_column(String(20), default="invoice")  # estimate, invoice
     invoice_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     subject: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default=InvoiceStatus.draft.value, index=True)

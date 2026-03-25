@@ -59,6 +59,7 @@ async def create_invoice(
         ctx.organization_id,
         customer_id=body.customer_id,
         line_items_data=line_items_data,
+        document_type=body.document_type,
         subject=body.subject,
         issue_date=body.issue_date,
         due_date=body.due_date,
@@ -157,4 +158,22 @@ async def write_off_invoice(
 ):
     svc = InvoiceService(db)
     invoice = await svc.write_off(ctx.organization_id, invoice_id)
+    return _invoice_to_response(invoice)
+
+
+@router.post("/{invoice_id}/convert-to-invoice", response_model=InvoiceResponse)
+async def convert_to_invoice(
+    invoice_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Convert an estimate to an invoice."""
+    svc = InvoiceService(db)
+    invoice = await svc.get(ctx.organization_id, invoice_id)
+    if invoice.document_type != "estimate":
+        from src.core.exceptions import ValidationError
+        raise ValidationError("Only estimates can be converted to invoices")
+    invoice.document_type = "invoice"
+    await db.commit()
+    await db.refresh(invoice)
     return _invoice_to_response(invoice)

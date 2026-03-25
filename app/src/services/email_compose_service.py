@@ -65,18 +65,45 @@ class EmailComposeService:
         subject: str,
         body: str,
         customer_id: str | None = None,
+        sender_name: str | None = None,
+        sender_user_id: str | None = None,
     ) -> dict:
         """Send email, create AgentMessage + AgentThread records."""
         org = await self._get_org(org_id)
-        signature = org.agent_signature if org else None
+        org_name = org.name if org else "QuantumPools"
 
-        # Append signature
+        # Build signature: sender name + org signature
+        sig_parts = []
+        if sender_name:
+            # Look up job title from tech record
+            if sender_user_id:
+                from src.models.tech import Tech
+                tech = (await self.db.execute(
+                    select(Tech).where(Tech.user_id == sender_user_id, Tech.organization_id == org_id, Tech.is_active == True)
+                )).scalar_one_or_none()
+                if tech and tech.job_title:
+                    sig_parts.append(f"{sender_name}\n{tech.job_title}")
+                else:
+                    sig_parts.append(sender_name)
+            else:
+                sig_parts.append(sender_name)
+            sig_parts.append(org_name)
+        if org and org.agent_signature:
+            sig_parts.append(org.agent_signature)
+
         full_body = body
-        if signature:
-            full_body = f"{body}\n\n--\n{signature}"
+        if sig_parts:
+            full_body = f"{body}\n\n--\n" + "\n".join(sig_parts)
 
+        # Send with sender's name as from_name
         email_svc = EmailService(self.db)
-        msg = EmailMessage(to=to, subject=subject, text_body=full_body)
+        from_name = f"{sender_name} at {org_name}" if sender_name else org_name
+        msg = EmailMessage(
+            to=to,
+            subject=subject,
+            text_body=full_body,
+            from_name=from_name,
+        )
         result = await email_svc.send_email(org_id, msg)
 
         if not result.success:

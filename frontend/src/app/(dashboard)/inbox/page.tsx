@@ -38,6 +38,7 @@ import {
   ChevronLeft,
   ChevronRight,
   PenSquare,
+  User,
 } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
 import { formatTime } from "@/lib/format";
@@ -62,6 +63,7 @@ interface PaginatedThreads {
 const PAGE_SIZE = 25;
 
 const STATUS_FILTERS = ["clients", "all", "handled"] as const;
+type AssignFilter = "all" | "mine";
 
 // --- Main Page ---
 
@@ -73,6 +75,7 @@ export default function InboxPage() {
   const [stats, setStats] = useState<ThreadStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<typeof STATUS_FILTERS[number]>("clients");
+  const [assignFilter, setAssignFilter] = useState<AssignFilter>("all");
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
@@ -93,6 +96,7 @@ export default function InboxPage() {
       params.set("exclude_spam", "false");
     }
     if (search) params.set("search", search);
+    if (assignFilter === "mine" && user?.id) params.set("assigned_to", user.id);
 
     api.get<PaginatedThreads>(`/v1/admin/agent-threads?${params}`)
       .then((data) => {
@@ -101,7 +105,7 @@ export default function InboxPage() {
       })
       .catch(() => toast.error("Failed to load threads"))
       .finally(() => setLoading(false));
-  }, [filter, search, page]);
+  }, [filter, search, page, assignFilter, user?.id]);
 
   const loadStats = useCallback(() => {
     api.get<ThreadStats>("/v1/admin/agent-threads/stats")
@@ -238,6 +242,15 @@ export default function InboxPage() {
             {f}
           </Button>
         ))}
+        <div className="h-5 w-px bg-border mx-1" />
+        <Button
+          variant={assignFilter === "mine" ? "default" : "outline"}
+          size="sm"
+          onClick={() => { setAssignFilter(assignFilter === "mine" ? "all" : "mine"); setPage(0); }}
+        >
+          <User className="h-3.5 w-3.5 mr-1" />
+          Mine
+        </Button>
         <div className="flex items-center gap-1 ml-auto">
           <Input
             placeholder="Search..."
@@ -291,9 +304,16 @@ export default function InboxPage() {
                     {formatTime(t.last_message_at)}
                   </TableCell>
                   <TableCell className="truncate max-w-[180px]">
-                    <span className={t.has_pending ? "font-medium" : ""}>
-                      {t.customer_name || t.contact_email.split("@")[0]}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={t.has_pending ? "font-medium" : ""}>
+                        {t.customer_name || t.contact_email.split("@")[0]}
+                      </span>
+                      {t.assigned_to_name && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 flex-shrink-0">
+                          {t.assigned_to_user_id === user?.id ? "Mine" : t.assigned_to_name}
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="truncate max-w-[250px] text-sm">
                     <span className={t.has_pending ? "" : "text-muted-foreground"}>

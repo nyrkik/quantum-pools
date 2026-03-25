@@ -91,6 +91,9 @@ export interface Thread {
   last_snippet: string | null;
   has_pending: boolean;
   has_open_actions: boolean;
+  assigned_to_user_id: string | null;
+  assigned_to_name: string | null;
+  assigned_at: string | null;
 }
 
 export interface TimelineMessage {
@@ -119,6 +122,9 @@ export interface ThreadDetail {
   category: string | null;
   message_count: number;
   has_pending: boolean;
+  assigned_to_user_id: string | null;
+  assigned_to_name: string | null;
+  assigned_at: string | null;
   timeline: TimelineMessage[];
   actions: unknown[];
 }

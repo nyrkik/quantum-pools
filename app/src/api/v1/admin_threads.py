@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.api.deps import OrgUserContext, require_roles, OrgRole
-from src.schemas.agent_thread import ApproveBody, ReviseDraftBody
+from src.schemas.agent_thread import ApproveBody, ReviseDraftBody, AssignThreadBody
 from src.services.agent_thread_service import AgentThreadService
 
 router = APIRouter(prefix="/admin", tags=["admin-threads"])
@@ -31,6 +31,7 @@ async def list_threads(
     search: Optional[str] = Query(None),
     exclude_spam: bool = Query(True),
     exclude_ignored: bool = Query(False),
+    assigned_to: Optional[str] = Query(None),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -44,6 +45,7 @@ async def list_threads(
         exclude_ignored=exclude_ignored,
         limit=limit,
         offset=offset,
+        assigned_to=assigned_to,
     )
 
 
@@ -105,6 +107,27 @@ async def dismiss_thread(
         thread_id=thread_id,
         user_name=f"{ctx.user.first_name} {ctx.user.last_name}",
     )
+
+
+@router.post("/agent-threads/{thread_id}/assign")
+async def assign_thread(
+    thread_id: str,
+    body: AssignThreadBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign or unassign a thread to a team member."""
+    service = AgentThreadService(db)
+    result = await service.assign_thread(
+        org_id=ctx.organization_id,
+        thread_id=thread_id,
+        user_id=body.user_id,
+        user_name=body.user_name,
+    )
+    if "error" in result:
+        code = {"not_found": 404}[result["error"]]
+        raise HTTPException(status_code=code, detail=result["detail"])
+    return result
 
 
 @router.post("/agent-threads/{thread_id}/send-followup")

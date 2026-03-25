@@ -30,6 +30,11 @@ class AgentThread(Base):
     has_pending: Mapped[bool] = mapped_column(Boolean, default=True)
     has_open_actions: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Thread assignment
+    assigned_to_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    assigned_to_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

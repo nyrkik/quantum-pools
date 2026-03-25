@@ -40,6 +40,8 @@ async def compose_email(
         subject=req.subject,
         body=req.body,
         customer_id=req.customer_id,
+        sender_name=f"{ctx.user.first_name} {ctx.user.last_name}",
+        sender_user_id=ctx.user.id,
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail={"error": "send_failed", "message": result.get("error", "Failed to send email")})

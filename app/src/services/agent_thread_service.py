@@ -15,6 +15,7 @@ from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_message import AgentMessage
 from src.models.agent_thread import AgentThread
 from src.models.customer import Customer
+from src.models.notification import Notification
 from src.models.property import Property
 from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
 
@@ -96,6 +97,7 @@ class AgentThreadService:
         exclude_ignored: bool,
         limit: int,
         offset: int,
+        assigned_to: str | None = None,
     ) -> dict:
         """List conversation threads with filtering."""
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
@@ -109,6 +111,8 @@ class AgentThreadService:
             base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
         if exclude_ignored:
             base = base.where(AgentThread.status != "ignored")
+        if assigned_to:
+            base = base.where(AgentThread.assigned_to_user_id == assigned_to)
         if search:
             q = f"%{search}%"
             base = base.where(
@@ -141,6 +145,9 @@ class AgentThreadService:
                     "last_snippet": t.last_snippet,
                     "has_pending": t.has_pending,
                     "has_open_actions": t.has_open_actions,
+                    "assigned_to_user_id": t.assigned_to_user_id,
+                    "assigned_to_name": t.assigned_to_name,
+                    "assigned_at": t.assigned_at.isoformat() if t.assigned_at else None,
                 }
                 for t in threads
             ],
@@ -257,6 +264,9 @@ class AgentThreadService:
             "message_count": thread.message_count,
             "has_pending": thread.has_pending,
             "has_open_actions": thread.has_open_actions,
+            "assigned_to_user_id": thread.assigned_to_user_id,
+            "assigned_to_name": thread.assigned_to_name,
+            "assigned_at": thread.assigned_at.isoformat() if thread.assigned_at else None,
             "timeline": timeline,
             "actions": actions,
         }
@@ -333,6 +343,43 @@ class AgentThreadService:
         await self.db.commit()
         await update_thread_status(thread_id)
         return {"dismissed": True}
+
+    async def assign_thread(self, org_id: str, thread_id: str, user_id: str | None, user_name: str | None) -> dict:
+        """Assign/unassign a thread to a team member. Creates notification on assign."""
+        result = await self.db.execute(
+            select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
+        )
+        thread = result.scalar_one_or_none()
+        if not thread:
+            return {"error": "not_found", "detail": "Thread not found"}
+
+        now = datetime.now(timezone.utc)
+        if user_id:
+            thread.assigned_to_user_id = user_id
+            thread.assigned_to_name = user_name
+            thread.assigned_at = now
+
+            # Create notification for the assignee
+            notif = Notification(
+                organization_id=org_id,
+                user_id=user_id,
+                type="thread_assigned",
+                title=f"Thread assigned to you",
+                body=f"{thread.customer_name or thread.contact_email}: {thread.subject or 'No subject'}",
+                link="/inbox",
+            )
+            self.db.add(notif)
+        else:
+            thread.assigned_to_user_id = None
+            thread.assigned_to_name = None
+            thread.assigned_at = None
+
+        await self.db.commit()
+        return {
+            "assigned_to_user_id": thread.assigned_to_user_id,
+            "assigned_to_name": thread.assigned_to_name,
+            "assigned_at": thread.assigned_at.isoformat() if thread.assigned_at else None,
+        }
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""

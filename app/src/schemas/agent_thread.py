@@ -11,3 +11,8 @@ class ApproveBody(BaseModel):
 class ReviseDraftBody(BaseModel):
     draft: str
     instruction: str
+
+
+class AssignThreadBody(BaseModel):
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None

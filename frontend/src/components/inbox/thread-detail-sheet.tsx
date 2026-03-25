@@ -19,11 +19,20 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Loader2,
   Send,
   Pencil,
   AlertTriangle,
+  User,
 } from "lucide-react";
+import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { formatTime } from "@/lib/format";
 import type { ThreadDetail } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "./inbox-badges";
@@ -60,6 +69,8 @@ export function ThreadDetailSheet({
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [followUpRevise, setFollowUpRevise] = useState("");
   const [followUpRevising, setFollowUpRevising] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const teamMembers = useTeamMembersFull();
 
   const timelineEndRef = useRef<HTMLDivElement>(null);
 
@@ -200,6 +211,34 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleAssign = async (userId: string) => {
+    setAssigning(true);
+    try {
+      const member = userId === "__unassign__" ? null : teamMembers.find((m) => m.user_id === userId);
+      const result = await api.post<{ assigned_to_user_id: string | null; assigned_to_name: string | null; assigned_at: string | null }>(
+        `/v1/admin/agent-threads/${threadId}/assign`,
+        {
+          user_id: member ? member.user_id : null,
+          user_name: member ? `${member.first_name} ${member.last_name}` : null,
+        },
+      );
+      if (thread) {
+        setThread({
+          ...thread,
+          assigned_to_user_id: result.assigned_to_user_id,
+          assigned_to_name: result.assigned_to_name,
+          assigned_at: result.assigned_at,
+        });
+      }
+      toast.success(member ? `Assigned to ${member.first_name}` : "Unassigned");
+      onAction();
+    } catch {
+      toast.error("Failed to assign");
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -223,6 +262,28 @@ export function ThreadDetailSheet({
               <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />Stale
             </Badge>
           )}
+        </div>
+        {/* Assignment */}
+        <div className="flex items-center gap-2">
+          <User className="h-3.5 w-3.5 text-muted-foreground" />
+          <Select
+            value={thread.assigned_to_user_id || "__unassign__"}
+            onValueChange={handleAssign}
+            disabled={assigning}
+          >
+            <SelectTrigger className="h-7 text-xs w-40">
+              <SelectValue placeholder="Unassigned" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__unassign__">Unassigned</SelectItem>
+              {teamMembers.map((m) => (
+                <SelectItem key={m.user_id} value={m.user_id}>
+                  {m.first_name} {m.last_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {assigning && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </div>
         <p className="text-sm font-medium">
           {thread.customer_name || thread.contact_email}

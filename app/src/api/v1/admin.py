@@ -1166,6 +1166,7 @@ async def update_agent_action(
             action.completed_at = datetime.now(timezone.utc)
         elif body.status in ("open", "in_progress"):
             action.completed_at = None
+    old_assignee = action.assigned_to
     if body.assigned_to is not None:
         action.assigned_to = body.assigned_to
     if body.description is not None:
@@ -1176,6 +1177,33 @@ async def update_agent_action(
         action.notes = body.notes.strip() or None
 
     await db.commit()
+
+    # Notify new assignee on reassignment
+    if body.assigned_to and body.assigned_to != old_assignee:
+        from src.models.notification import Notification
+        from src.models.organization_user import OrganizationUser
+        from src.models.user import User
+
+        target_ou = await db.execute(
+            select(OrganizationUser)
+            .join(User, OrganizationUser.user_id == User.id)
+            .where(
+                OrganizationUser.organization_id == ctx.organization_id,
+                User.first_name == body.assigned_to.split()[0],
+                User.id != ctx.user.id,
+            )
+        )
+        target = target_ou.scalar_one_or_none()
+        if target:
+            db.add(Notification(
+                organization_id=ctx.organization_id,
+                user_id=target.user_id,
+                type="job_assigned",
+                title=f"Job assigned to you: {action.description[:50]}",
+                body=f"Assigned by {ctx.user.first_name}",
+                link=f"/jobs?action={action.id}",
+            ))
+            await db.commit()
 
     # If just marked done, evaluate if a follow-up action is needed
     suggestion = None

@@ -1396,23 +1396,30 @@ async def add_action_comment(
 
             if customer_context:
                 # Ask Claude if the comment asks for info we have
-                info_prompt = f"""A team member commented on a job. Does their comment ask for information that's available?
+                info_prompt = f"""A team member commented on a job. Determine the comment's intent and respond appropriately.
 
 Job: {action.description}
 Comment: {body.text.strip()}
 
 Available data:{customer_context}
 
-IMPORTANT: The job may be for a different address than the customer record (e.g., a property manager's personal home vs their managed property). If the job has its own address, use that — not the customer's commercial property address.
+First: Is this comment ASKING A QUESTION or REQUESTING information?
+- "need address" = asking
+- "what's the gate code?" = asking
+- "pump capacitor is blown, needs replacement" = NOT asking, this is a status update/diagnosis
+- "will visit thursday" = NOT asking, this is a plan
+- "replaced the filter" = NOT asking, this is a completion report
 
-If the comment asks for info we have (address, phone, gate code, service day, equipment, etc.), respond with JSON:
-{{"has_answer": true, "answer": "the relevant info, formatted naturally"}}
+ONLY if the comment is asking for information we have, respond with:
+{{"type": "answer", "answer": "the relevant info, formatted naturally"}}
 
-If the comment doesn't ask for info, or the info isn't available, or the job address differs from customer records and we don't have the right address:
-{{"has_answer": false, "needs_info": "what info is missing (e.g., 'residential address for this client')"}}
+ONLY if the comment is asking for info we DON'T have, respond with:
+{{"type": "escalate", "needs_info": "what info is missing"}}
 
-Only answer with data that directly addresses what was asked. Don't volunteer unrelated info.
-If info is missing and the comment is asking for it, set needs_info to describe what's needed."""
+If the comment is NOT asking a question (it's a status update, diagnosis, plan, or completion):
+{{"type": "none"}}
+
+IMPORTANT: Most comments are status updates, NOT questions. Default to "none" unless there's a clear question."""
 
                 ai_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
                 info_response = ai_client.messages.create(
@@ -1423,7 +1430,9 @@ If info is missing and the comment is asking for it, set needs_info to describe 
                 info_match = re_mod.search(r"\{.*\}", info_response.content[0].text, re_mod.DOTALL)
                 if info_match:
                     info_data = json_mod.loads(info_match.group())
-                    if info_data.get("has_answer") and info_data.get("answer"):
+                    comment_type = info_data.get("type", "none")
+
+                    if comment_type == "answer" and info_data.get("answer"):
                         # Post an auto-comment with the info
                         auto_reply = AgentActionComment(
                             organization_id=ctx.organization_id,
@@ -1435,7 +1444,7 @@ If info is missing and the comment is asking for it, set needs_info to describe 
                         await db.commit()
                         await db.refresh(auto_reply)
                         auto_comment = {"author": "DeepBlue", "text": info_data["answer"]}
-                    elif info_data.get("needs_info"):
+                    elif comment_type == "escalate" and info_data.get("needs_info"):
                         # Escalate: notify job creator or assignee that info is missing
                         from src.models.notification import Notification
                         from src.models.organization_user import OrganizationUser

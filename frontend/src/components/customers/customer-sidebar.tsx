@@ -79,10 +79,10 @@ export function CustomerSidebar({
               <Badge variant="outline" className="text-xs">{customer.company_name}</Badge>
             )}
             <Badge
-              variant={customer.status === "active" ? "default" : customer.status === "pending" ? "outline" : "secondary"}
-              className={customer.status === "pending" ? "border-amber-400 text-amber-600" : customer.status === "one_time" ? "border-blue-400 text-blue-600" : ""}
+              variant={customer.status === "active" ? "default" : customer.status === "service_call" ? "outline" : customer.status === "lead" || customer.status === "pending" ? "outline" : "secondary"}
+              className={customer.status === "service_call" ? "border-blue-400 text-blue-600" : customer.status === "lead" || customer.status === "pending" ? "border-amber-400 text-amber-600" : customer.status === "one_time" ? "border-blue-400 text-blue-600" : ""}
             >
-              {customer.status === "one_time" ? "One-time" : (customer.status ?? "active").charAt(0).toUpperCase() + (customer.status ?? "active").slice(1)}
+              {customer.status === "service_call" ? "Service Call" : customer.status === "one_time" ? "One-time" : (customer.status ?? "active").charAt(0).toUpperCase() + (customer.status ?? "active").slice(1)}
             </Badge>
           </div>
 

@@ -68,7 +68,7 @@ export default function DashboardPage() {
     (async () => {
       try {
         const promises: Promise<unknown>[] = [
-          api.get<{ total: number }>("/v1/customers?limit=1"),
+          api.get<{ total: number }>("/v1/customers?status=active&limit=1"),
           api.get<{ total: number }>("/v1/properties?limit=1"),
           api.get<{ total: number }>(
             `/v1/visits?scheduled_date=${new Date().toISOString().split("T")[0]}&limit=1`

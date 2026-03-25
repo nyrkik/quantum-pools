@@ -172,7 +172,7 @@ class PricingService:
         # Commercial: cost-based
         from sqlalchemy import func
         count_result = await self.db.execute(
-            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
+            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.status == "active")
         )
         total_accounts = count_result.scalar() or 1
         visits = settings.visits_per_month

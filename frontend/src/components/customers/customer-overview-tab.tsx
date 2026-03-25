@@ -426,9 +426,10 @@ function DetailsEditMode({
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="service_call">Service Call</SelectItem>
+                  <SelectItem value="lead">Lead</SelectItem>
                   <SelectItem value="inactive">Inactive</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="one_time">One-time</SelectItem>
                 </SelectContent>
               </Select>
             </div>

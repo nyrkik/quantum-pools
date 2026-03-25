@@ -113,8 +113,8 @@ class ProfitabilityService:
         """Portfolio profitability overview — aggregated from per-WF costs."""
         settings = await self.get_or_create_settings(org_id)
 
-        # Get all active customers
-        query = select(Customer).where(Customer.organization_id == org_id, Customer.is_active == True)
+        # Get only recurring active customers (exclude service_call, lead, inactive)
+        query = select(Customer).where(Customer.organization_id == org_id, Customer.status == "active")
         result = await self.db.execute(query)
         customers = list(result.scalars().all())
 
@@ -703,11 +703,11 @@ class ProfitabilityService:
         # Count total active accounts
         from sqlalchemy import func
         count_result = await self.db.execute(
-            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.is_active == True)
+            select(func.count(Customer.id)).where(Customer.organization_id == org_id, Customer.status == "active")
         )
         total_accounts = count_result.scalar() or 1
 
-        # Load all active WFs with their property + customer
+        # Load all active WFs with their property + customer (recurring active only)
         result = await self.db.execute(
             select(WaterFeature, Property, Customer)
             .join(Property, WaterFeature.property_id == Property.id)
@@ -715,7 +715,7 @@ class ProfitabilityService:
             .where(
                 WaterFeature.organization_id == org_id,
                 WaterFeature.is_active == True,
-                Customer.is_active == True,
+                Customer.status == "active",
             )
         )
         rows = result.all()

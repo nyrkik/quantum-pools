@@ -180,9 +180,9 @@ function ClientTable({
                   </TableCell>
                 )}
                 <TableCell>
-                  <Badge variant={c.status === "active" ? "default" : c.status === "pending" ? "outline" : "secondary"}
-                    className={c.status === "pending" ? "border-amber-400 text-amber-600" : c.status === "one_time" ? "border-blue-400 text-blue-600" : ""}>
-                    {c.status === "one_time" ? "One-time" : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
+                  <Badge variant={c.status === "active" ? "default" : c.status === "service_call" ? "outline" : c.status === "lead" || c.status === "pending" ? "outline" : "secondary"}
+                    className={c.status === "service_call" ? "border-blue-400 text-blue-600" : c.status === "lead" || c.status === "pending" ? "border-amber-400 text-amber-600" : c.status === "one_time" ? "border-blue-400 text-blue-600" : ""}>
+                    {c.status === "service_call" ? "Service Call" : c.status === "one_time" ? "One-time" : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
                   </Badge>
                 </TableCell>
               </TableRow>
@@ -497,9 +497,9 @@ export default function CustomersPage() {
         <div className="flex items-center gap-1.5">
           {[
             { value: "active", label: "Active" },
+            { value: "service_call", label: "Service Call" },
+            { value: "lead", label: "Lead" },
             { value: "inactive", label: "Inactive" },
-            { value: "pending", label: "Pending" },
-            { value: "one_time", label: "One-time" },
           ].map((s) => (
             <Button
               key={s.value}

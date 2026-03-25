@@ -12,7 +12,9 @@ class CustomerStatus(str, enum.Enum):
     active = "active"
     inactive = "inactive"
     pending = "pending"
-    one_time = "one_time"
+    one_time = "one_time"  # legacy — use service_call
+    service_call = "service_call"
+    lead = "lead"
 
 
 class CustomerType(str, enum.Enum):

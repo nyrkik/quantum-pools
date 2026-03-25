@@ -74,8 +74,9 @@ class CustomerService:
             if value is not None:
                 setattr(customer, key, value)
         # Keep is_active in sync with status
+        # service_call customers are active (they're serviced, just not recurring)
         if "status" in kwargs and kwargs["status"] is not None:
-            customer.is_active = kwargs["status"] == "active"
+            customer.is_active = kwargs["status"] in ("active", "service_call")
         await self.db.flush()
         await self.db.refresh(customer)
         return customer

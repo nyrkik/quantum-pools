@@ -78,11 +78,13 @@ async def optimize(
     tech_result = await db.execute(tech_query)
     techs = list(tech_result.scalars().all())
 
-    # Load properties with customers
+    # Load properties with customers (only recurring active customers, not service_call/lead)
     prop_query = (
         select(Property)
+        .join(Customer, Property.customer_id == Customer.id)
         .options(joinedload(Property.customer))
         .where(Property.organization_id == ctx.organization_id, Property.is_active == True)
+        .where(Customer.status == "active")
         .where(Property.lat.isnot(None), Property.lng.isnot(None))
     )
     if body.service_day and body.mode != "cross_day":

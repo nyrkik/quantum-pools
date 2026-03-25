@@ -88,6 +88,17 @@ def create_app() -> FastAPI:
     upload_path.mkdir(parents=True, exist_ok=True)
     app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
+    # Global exception handlers
+    from src.core.exceptions import NotFoundError, ValidationError as BizValidationError
+
+    @app.exception_handler(NotFoundError)
+    async def not_found_handler(request: Request, exc: NotFoundError):
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(BizValidationError)
+    async def validation_handler(request: Request, exc: BizValidationError):
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
     # Routes
     app.include_router(api_router)
 

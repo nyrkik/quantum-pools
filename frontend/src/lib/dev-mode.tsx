@@ -63,12 +63,19 @@ export function DevModeProvider({ children }: { children: ReactNode }) {
   const toggle = useCallback(() => {
     setIsActive((prev) => {
       if (prev) {
-        // Turning off — reset view-as
+        // Turning off — reset view-as and org, reload to clear stale data
         setViewAsRole(null);
+        if (activeOrgId) {
+          setActiveOrgId(null);
+          api.setOrgId(null);
+          api.setViewAsRole(null);
+          window.location.reload();
+          return false;
+        }
       }
       return !prev;
     });
-  }, []);
+  }, [activeOrgId]);
 
   const setViewAs = useCallback((r: Role | null) => {
     setViewAsRole(r);
@@ -79,9 +86,9 @@ export function DevModeProvider({ children }: { children: ReactNode }) {
   const switchOrg = useCallback((orgId: string | null) => {
     setActiveOrgId(orgId);
     api.setOrgId(orgId);
-    // Refresh user to get new org context
-    refreshUser();
-  }, [refreshUser]);
+    // Full page reload to reset all data contexts — org switch is a complete context change
+    window.location.reload();
+  }, []);
 
   // Sync view-as role to API client
   useEffect(() => {

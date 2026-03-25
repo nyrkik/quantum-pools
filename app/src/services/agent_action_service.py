@@ -395,7 +395,8 @@ class AgentActionService:
                 d["from_email"] = msg.from_email
                 d["customer_name"] = msg.customer_name or action.customer_name
                 d["subject"] = msg.subject
-                d["email_body"] = (msg.body or "")[:500]
+                from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
+                d["email_body"] = strip_email_signature(strip_quoted_reply(msg.body))[:500] if msg.body else ""
                 d["our_response"] = msg.final_response or msg.draft_response
 
                 siblings_result = await self.db.execute(

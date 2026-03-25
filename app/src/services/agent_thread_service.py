@@ -263,7 +263,8 @@ class AgentThreadService:
 
     async def approve_thread(self, org_id: str, thread_id: str, response_text: str | None, user_name: str) -> dict:
         """Approve the latest pending message in a thread — send email and update status."""
-        from src.services.customer_agent import send_email_response, update_thread_status, save_discovered_contact
+        from src.services.customer_agent import update_thread_status, save_discovered_contact
+        from src.services.email_service import EmailService
 
         result = await self.db.execute(
             select(AgentMessage)
@@ -279,8 +280,9 @@ class AgentThreadService:
         if not final_text:
             return {"error": "no_text", "detail": "No response text provided"}
 
-        success = await send_email_response(msg.from_email, msg.subject or "", final_text)
-        if not success:
+        email_svc = EmailService(self.db)
+        send_result = await email_svc.send_agent_reply(org_id, msg.from_email, msg.subject or "", final_text)
+        if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send email"}
 
         now = datetime.now(timezone.utc)
@@ -334,7 +336,8 @@ class AgentThreadService:
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""
-        from src.services.customer_agent import send_email_response, update_thread_status
+        from src.services.customer_agent import update_thread_status
+        from src.services.email_service import EmailService
 
         thread = (await self.db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id))).scalar_one_or_none()
         if not thread:
@@ -343,8 +346,9 @@ class AgentThreadService:
         if not text:
             return {"error": "no_text", "detail": "No response text"}
 
-        success = await send_email_response(thread.contact_email, thread.subject or "", text)
-        if not success:
+        email_svc = EmailService(self.db)
+        send_result = await email_svc.send_agent_reply(org_id, thread.contact_email, thread.subject or "", text)
+        if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send"}
 
         now = datetime.now(timezone.utc)

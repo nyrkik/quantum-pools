@@ -238,7 +238,7 @@ async def approve_agent_message(
 ):
     """Approve and send an agent message from the dashboard."""
     from datetime import datetime, timezone
-    from src.services.customer_agent import send_email_response
+    from src.services.email_service import EmailService
 
     result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
@@ -251,8 +251,9 @@ async def approve_agent_message(
     if not response_text:
         raise HTTPException(status_code=400, detail="No response text provided")
 
-    success = await send_email_response(msg.from_email, msg.subject or "", response_text)
-    if not success:
+    email_svc = EmailService(db)
+    send_result = await email_svc.send_agent_reply(ctx.organization_id, msg.from_email, msg.subject or "", response_text)
+    if not send_result.success:
         raise HTTPException(status_code=500, detail="Failed to send email")
 
     now = datetime.now(timezone.utc)
@@ -430,7 +431,7 @@ async def send_followup(
 ):
     """Send a follow-up email."""
     from datetime import datetime, timezone
-    from src.services.customer_agent import send_email_response
+    from src.services.email_service import EmailService
 
     result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
     msg = result.scalar_one_or_none()
@@ -441,8 +442,9 @@ async def send_followup(
     if not response_text:
         raise HTTPException(status_code=400, detail="No response text provided")
 
-    success = await send_email_response(msg.from_email, msg.subject or "", response_text)
-    if not success:
+    email_svc = EmailService(db)
+    send_result = await email_svc.send_agent_reply(ctx.organization_id, msg.from_email, msg.subject or "", response_text)
+    if not send_result.success:
         raise HTTPException(status_code=500, detail="Failed to send email")
 
     # Log as a note on the message

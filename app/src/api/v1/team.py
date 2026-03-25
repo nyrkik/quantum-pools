@@ -332,62 +332,18 @@ async def remove_member(
 
 async def _send_invite_email(user: User, organization_id: str, db: AsyncSession):
     """Send account setup email to invited user."""
-    import aiosmtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
     import os
+    from src.services.email_service import EmailService
 
-    from src.models.organization import Organization
-    result = await db.execute(select(Organization).where(Organization.id == organization_id))
-    org = result.scalar_one_or_none()
-    org_name = org.name if org else "QuantumPools"
-    org_email = (org.email if org and org.email else os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"))
-
-    # Build setup URL — frontend handles the token
     base_url = os.environ.get("FRONTEND_URL", "http://100.121.52.15:7060")
     setup_url = f"{base_url}/setup-account?token={user.verification_token}&email={user.email}"
 
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"{org_name} <{org_email}>"
-    msg["To"] = user.email
-    msg["Subject"] = f"You've been invited to {org_name}"
-
-    text = f"""Hi {user.first_name},
-
-You've been invited to join {org_name} on QuantumPools.
-
-Click the link below to set up your password and access your account:
-
-{setup_url}
-
-This link will expire in 7 days. If you have questions, reply to this email.
-
-— {org_name}"""
-
-    html = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 500px; margin: 0 auto; padding: 32px 0;">
-<h2 style="color: #1a1a2e; margin-bottom: 8px;">Welcome to {org_name}</h2>
-<p style="color: #4a5568; line-height: 1.6;">Hi {user.first_name},</p>
-<p style="color: #4a5568; line-height: 1.6;">You've been invited to join <strong>{org_name}</strong> on QuantumPools.</p>
-<p style="margin: 24px 0;">
-  <a href="{setup_url}" style="background: #1a1a2e; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Set Up Your Account</a>
-</p>
-<p style="color: #718096; font-size: 0.875rem;">This link expires in 7 days. If the button doesn't work, copy this URL:<br>
-<span style="color: #4a5568; word-break: break-all;">{setup_url}</span></p>
-</div>"""
-
-    msg.attach(MIMEText(text, "plain"))
-    msg.attach(MIMEText(html, "html"))
-
-    smtp_host = os.environ.get("AGENT_SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.environ.get("AGENT_SMTP_PORT", "587"))
-    smtp_user = os.environ.get("AGENT_GMAIL_USER", "")
-    smtp_pass = os.environ.get("AGENT_GMAIL_PASSWORD", "")
-
-    await aiosmtplib.send(
-        msg,
-        hostname=smtp_host,
-        port=smtp_port,
-        username=smtp_user,
-        password=smtp_pass,
-        start_tls=True,
+    email_service = EmailService(db)
+    result = await email_service.send_team_invite(
+        org_id=organization_id,
+        to=user.email,
+        user_name=user.first_name,
+        setup_url=setup_url,
     )
+    if not result.success:
+        raise RuntimeError(result.error or "Email send failed")

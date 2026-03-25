@@ -2,19 +2,12 @@
 
 import os
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
-import aiosmtplib
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
 
 # Config from env
-GMAIL_USER = os.environ.get("AGENT_GMAIL_USER", "")
-GMAIL_PASSWORD = os.environ.get("AGENT_GMAIL_PASSWORD", "")
-SMTP_HOST = os.environ.get("AGENT_SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("AGENT_SMTP_PORT", "587"))
 FROM_EMAIL = os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com")
 FROM_NAME = os.environ.get("AGENT_FROM_NAME", "Sapphire Pools")
 TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
@@ -53,24 +46,27 @@ async def send_approval_request(agent_msg_id: str, summary: str, draft: str, fro
 
 
 async def send_email_response(to: str, subject: str, body: str):
-    """Send email reply via SMTP."""
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"{FROM_NAME} <{FROM_EMAIL}>"
-    msg["To"] = to
-    msg["Subject"] = f"Re: {subject}" if not subject.startswith("Re:") else subject
-    msg.attach(MIMEText(body, "plain"))
+    """Send email reply via EmailService (SMTP provider)."""
+    from src.services.email_service import EmailMessage, SmtpProvider
+
+    re_subject = f"Re: {subject}" if subject and not subject.startswith("Re:") else subject
+    msg = EmailMessage(
+        to=to,
+        subject=re_subject,
+        text_body=body,
+        from_email=FROM_EMAIL,
+        from_name=FROM_NAME,
+    )
 
     try:
-        await aiosmtplib.send(
-            msg,
-            hostname=SMTP_HOST,
-            port=SMTP_PORT,
-            username=GMAIL_USER,
-            password=GMAIL_PASSWORD,
-            start_tls=True,
-        )
-        logger.info(f"Email sent to {to}: {subject}")
-        return True
+        provider = SmtpProvider()
+        result = await provider.send(msg)
+        if result.success:
+            logger.info(f"Email sent to {to}: {subject}")
+            return True
+        else:
+            logger.error(f"Failed to send email to {to}: {result.error}")
+            return False
     except Exception as e:
         logger.error(f"Failed to send email to {to}: {e}")
         return False

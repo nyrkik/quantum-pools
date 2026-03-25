@@ -161,6 +161,129 @@ async def write_off_invoice(
     return _invoice_to_response(invoice)
 
 
+@router.post("/{invoice_id}/approve")
+async def approve_estimate(
+    invoice_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve an estimate — admin on behalf of client. Creates frozen snapshot."""
+    import json
+    from datetime import datetime, timezone
+    from pydantic import BaseModel
+    from src.models.estimate_approval import EstimateApproval
+
+    class ApproveBody(BaseModel):
+        notes: Optional[str] = None
+        client_name: Optional[str] = None
+
+    # Parse body manually since we defined inline
+    from fastapi import Request
+    body_raw = {}
+    try:
+        import starlette
+    except:
+        pass
+
+    svc = InvoiceService(db)
+    invoice = await svc.get(ctx.organization_id, invoice_id)
+
+    if invoice.document_type != "estimate":
+        from src.core.exceptions import ValidationError
+        raise ValidationError("Only estimates can be approved")
+
+    if invoice.approved_at:
+        from src.core.exceptions import ValidationError
+        raise ValidationError("Estimate is already approved")
+
+    # Build frozen snapshot
+    snapshot = {
+        "estimate_number": invoice.invoice_number,
+        "customer_name": invoice.customer.display_name if invoice.customer else "",
+        "subject": invoice.subject,
+        "line_items": [
+            {
+                "description": li.description,
+                "quantity": li.quantity,
+                "unit_price": li.unit_price,
+                "amount": li.amount,
+            }
+            for li in (invoice.line_items or [])
+        ],
+        "subtotal": invoice.subtotal,
+        "discount": invoice.discount,
+        "tax_rate": invoice.tax_rate,
+        "tax_amount": invoice.tax_amount,
+        "total": invoice.total,
+        "notes": invoice.notes,
+        "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
+        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+    }
+
+    now = datetime.now(timezone.utc)
+    approver_name = f"{ctx.user.first_name} {ctx.user.last_name}"
+
+    approval = EstimateApproval(
+        organization_id=ctx.organization_id,
+        invoice_id=invoice_id,
+        approved_by_type="admin_on_behalf",
+        approved_by_name=approver_name,
+        approved_by_user_id=ctx.user.id,
+        approval_method="admin_dashboard",
+        snapshot_json=json.dumps(snapshot),
+        approved_at=now,
+    )
+    db.add(approval)
+    await db.flush()
+
+    invoice.approved_at = now
+    invoice.approved_by = approver_name
+    invoice.approval_id = approval.id
+
+    await db.commit()
+
+    return {
+        "approved": True,
+        "approval_id": approval.id,
+        "approved_by": approver_name,
+        "approved_at": now.isoformat(),
+        "approval_token": approval.approval_token,
+    }
+
+
+@router.get("/{invoice_id}/approval")
+async def get_approval(
+    invoice_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get approval record for an estimate."""
+    import json
+    from sqlalchemy import select
+    from src.models.estimate_approval import EstimateApproval
+
+    result = await db.execute(
+        select(EstimateApproval).where(
+            EstimateApproval.invoice_id == invoice_id,
+            EstimateApproval.organization_id == ctx.organization_id,
+        )
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        return {"approved": False}
+
+    return {
+        "approved": True,
+        "id": approval.id,
+        "approved_by_type": approval.approved_by_type,
+        "approved_by_name": approval.approved_by_name,
+        "approval_method": approval.approval_method,
+        "notes": approval.notes,
+        "approved_at": approval.approved_at.isoformat(),
+        "snapshot": json.loads(approval.snapshot_json),
+    }
+
+
 @router.post("/{invoice_id}/convert-to-invoice", response_model=InvoiceResponse)
 async def convert_to_invoice(
     invoice_id: str,

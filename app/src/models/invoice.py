@@ -68,6 +68,11 @@ class Invoice(Base):
         String(64), unique=True, default=lambda: secrets.token_urlsafe(32)
     )
 
+    # Approval
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str | None] = mapped_column(String(200))
+    approval_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("estimate_approvals.id"))
+
     # Tracking
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

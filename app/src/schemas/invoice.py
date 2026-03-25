@@ -74,6 +74,8 @@ class InvoiceResponse(BaseModel):
     notes: Optional[str] = None
     pss_invoice_id: Optional[str] = None
     payment_token: str
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
     sent_at: Optional[datetime] = None
     viewed_at: Optional[datetime] = None
     created_at: datetime

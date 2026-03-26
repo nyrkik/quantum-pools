@@ -79,6 +79,36 @@ async def update_water_feature(
     if changes:
         await queue_parts_discovery(db, changes)
 
+    # Normalize changed equipment fields into equipment_items
+    if changes:
+        import asyncio
+        from src.services.parts.equipment_normalizer import EquipmentNormalizer
+
+        _FIELD_TO_TYPE = {
+            "pump_type": "pump",
+            "filter_type": "filter",
+            "heater_type": "heater",
+            "chlorinator_type": "chlorinator",
+            "automation_system": "automation",
+        }
+
+        async def _normalize_equipment():
+            try:
+                normalizer = EquipmentNormalizer(db)
+                for field, eq_type in _FIELD_TO_TYPE.items():
+                    raw = getattr(wf, field, None)
+                    if raw and raw.strip():
+                        normalized = await normalizer.normalize(raw.strip(), eq_type)
+                        await normalizer.upsert_equipment_item(
+                            ctx.organization_id, wf.id, eq_type, raw.strip(), normalized
+                        )
+                await db.commit()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Equipment normalization failed: {e}")
+
+        asyncio.create_task(_normalize_equipment())
+
     return WaterFeatureResponse.model_validate(wf)
 
 

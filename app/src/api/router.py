@@ -36,6 +36,7 @@ from src.api.v1.service_checklist import router as service_checklist_router
 from src.api.v1.vendors import router as vendors_router
 from src.api.v1.part_purchases import router as part_purchases_router
 from src.api.v1.parts import router as parts_router
+from src.api.v1.equipment import router as equipment_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -73,3 +74,4 @@ api_router.include_router(service_checklist_router)
 api_router.include_router(vendors_router)
 api_router.include_router(part_purchases_router)
 api_router.include_router(parts_router)
+api_router.include_router(equipment_router)

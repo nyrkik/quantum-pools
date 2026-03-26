@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EquipmentInput } from "@/components/equipment/equipment-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -425,27 +426,27 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Pump</Label>
-                  <Input value={form.pump_type ?? ""} onChange={(e) => set("pump_type", e.target.value)} className="h-8 text-sm bg-background" />
+                  <EquipmentInput value={form.pump_type ?? ""} onChange={(v) => set("pump_type", v)} equipmentType="pump" className="h-8 text-sm bg-background" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Filter</Label>
-                  <Input value={form.filter_type ?? ""} onChange={(e) => set("filter_type", e.target.value)} className="h-8 text-sm bg-background" />
+                  <EquipmentInput value={form.filter_type ?? ""} onChange={(v) => set("filter_type", v)} equipmentType="filter" className="h-8 text-sm bg-background" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Heater</Label>
-                  <Input value={form.heater_type ?? ""} onChange={(e) => set("heater_type", e.target.value)} className="h-8 text-sm bg-background" />
+                  <EquipmentInput value={form.heater_type ?? ""} onChange={(v) => set("heater_type", v)} equipmentType="heater" className="h-8 text-sm bg-background" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Chlorinator</Label>
-                  <Input value={form.chlorinator_type ?? ""} onChange={(e) => set("chlorinator_type", e.target.value)} className="h-8 text-sm bg-background" />
+                  <EquipmentInput value={form.chlorinator_type ?? ""} onChange={(v) => set("chlorinator_type", v)} equipmentType="chlorinator" className="h-8 text-sm bg-background" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Automation</Label>
-                  <Input value={form.automation_system ?? ""} onChange={(e) => set("automation_system", e.target.value)} className="h-8 text-sm bg-background" />
+                  <EquipmentInput value={form.automation_system ?? ""} onChange={(v) => set("automation_system", v)} equipmentType="automation" className="h-8 text-sm bg-background" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Equipment Year</Label>

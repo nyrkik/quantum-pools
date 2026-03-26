@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, date, timezone
-from sqlalchemy import String, Boolean, DateTime, Date, Integer, Text, ForeignKey
+from sqlalchemy import String, Boolean, DateTime, Date, Integer, Float, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -22,6 +22,11 @@ class EquipmentItem(Base):
     brand: Mapped[str | None] = mapped_column(String(100))
     model: Mapped[str | None] = mapped_column(String(200))
     serial_number: Mapped[str | None] = mapped_column(String(100))
+    part_number: Mapped[str | None] = mapped_column(String(100))
+    normalized_name: Mapped[str | None] = mapped_column(String(200), index=True)
+    horsepower: Mapped[float | None] = mapped_column(Float)
+    flow_rate_gpm: Mapped[int | None] = mapped_column(Integer)
+    voltage: Mapped[int | None] = mapped_column(Integer)
     catalog_part_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("parts_catalog.id", ondelete="SET NULL")
     )

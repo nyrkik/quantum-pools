@@ -26,6 +26,11 @@ class OrgCostSettings(Base):
     avg_drive_miles: Mapped[float] = mapped_column(Float, default=2.0)
     visits_per_month: Mapped[float] = mapped_column(Float, default=4.0)
 
+    # Charge thresholds
+    auto_approve_threshold: Mapped[float] = mapped_column(Float, default=75.0)
+    separate_invoice_threshold: Mapped[float] = mapped_column(Float, default=200.0)
+    require_photo_threshold: Mapped[float] = mapped_column(Float, default=50.0)
+
     # Billing frequency discounts
     semi_annual_discount_type: Mapped[str] = mapped_column(String(10), default="percent")
     semi_annual_discount_value: Mapped[float] = mapped_column(Float, default=5.0)

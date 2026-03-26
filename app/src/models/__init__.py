@@ -47,6 +47,8 @@ from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_action_task import AgentActionTask
 from src.services.agents.observability import AgentLog
 from src.services.agents.evals import AgentEvalCase, AgentEvalResult
+from src.models.charge_template import ChargeTemplate
+from src.models.visit_charge import VisitCharge
 from src.models.notification import Notification
 from src.models.permission import Permission
 from src.models.permission_preset import PermissionPreset
@@ -95,5 +97,7 @@ __all__ = [
     "FeatureTier",
     "OrgSubscription",
     "EMDLookup",
+    "ChargeTemplate",
+    "VisitCharge",
     "ServiceTier",
 ]

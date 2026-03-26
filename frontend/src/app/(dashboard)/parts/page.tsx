@@ -58,31 +58,17 @@ interface CategoryInfo {
 }
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  Pumps: Cog,
-  Filters: Filter,
-  Heaters: Flame,
-  Chemicals: Beaker,
-  "Salt Systems": Droplets,
-  Automation: Cpu,
-  Cleaners: Wrench,
-  Motors: Zap,
-  Valves: Settings2,
-  Lighting: Zap,
-  "O-Rings": CircleDot,
-  Baskets: Box,
-  Gauges: Settings2,
-  Tools: Wrench,
-  Accessories: Package,
+  "Equipment": Cog,
+  "Filters": Filter,
+  "Chemicals": Beaker,
+  "Parts & Repair": Wrench,
+  "Tools & Supplies": Settings2,
 };
 
+const CATEGORY_ORDER = ["Equipment", "Filters", "Chemicals", "Parts & Repair", "Tools & Supplies"];
+
 function getCategoryIcon(category: string) {
-  // Try exact match first, then partial
-  if (CATEGORY_ICONS[category]) return CATEGORY_ICONS[category];
-  const lower = category.toLowerCase();
-  for (const [key, Icon] of Object.entries(CATEGORY_ICONS)) {
-    if (lower.includes(key.toLowerCase())) return Icon;
-  }
-  return Package;
+  return CATEGORY_ICONS[category] || Package;
 }
 
 export default function PartsPage() {
@@ -113,7 +99,12 @@ export default function PartsPage() {
       });
       // Actually, the search endpoint doesn't return count separately. Let's use a different approach.
       // Just load all parts per category count from search with limit=200
-      setCategories(cats.map(c => ({ name: c, count: 0 })));
+      const sorted = [...cats].sort((a, b) => {
+        const ai = CATEGORY_ORDER.indexOf(a);
+        const bi = CATEGORY_ORDER.indexOf(b);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+      setCategories(sorted.map(c => ({ name: c, count: 0 })));
       setVendors(vends);
       setStats(st);
 

@@ -475,205 +475,30 @@ class AgentActionService:
         await self.db.commit()
         await self.db.refresh(comment)
 
-        # Auto-answer: check if the comment asks for info we have in the database
-        auto_comment = None
-        if action.status in ("open", "in_progress"):
-            auto_comment = await self._try_auto_answer(org_id, action, action_id, text, user_id)
+        # Run comment through the agent pipeline
+        from src.services.agents.comment_pipeline import CommentPipeline
 
-        # Evaluate if the comment resolves the action
-        resolved = False
-        updated_desc = None
-        if action.status in ("open", "in_progress"):
-            resolved, updated_desc = await self._evaluate_resolution(
-                org_id, action, action_id, text, user_first_name
-            )
+        pipeline = CommentPipeline(self.db)
+        pipeline_result = await pipeline.process_comment(
+            org_id=org_id,
+            action=action,
+            comment_text=text,
+            user_id=user_id,
+            user_name=user_first_name,
+            build_customer_context_fn=self._build_customer_context,
+            find_org_user_fn=self._find_org_user,
+        )
 
         return {
             "id": comment.id,
             "author": comment.author,
             "text": comment.text,
             "created_at": comment.created_at.isoformat(),
-            "action_resolved": resolved,
-            "action_updated": updated_desc is not None,
-            "new_description": updated_desc,
-            "auto_comment": auto_comment,
+            "action_resolved": pipeline_result.get("action_resolved", False),
+            "action_updated": pipeline_result.get("updated_description") is not None,
+            "new_description": pipeline_result.get("updated_description"),
+            "auto_comment": pipeline_result.get("auto_comment"),
         }
-
-    async def _try_auto_answer(
-        self,
-        org_id: str,
-        action: AgentAction,
-        action_id: str,
-        comment_text: str,
-        user_id: str,
-    ) -> dict | None:
-        """Ask Claude if the comment asks for info we have, and auto-reply if so."""
-        try:
-            _, customer_context = await self._build_customer_context(org_id, action)
-
-            if not customer_context:
-                return None
-
-            info_prompt = f"""A team member commented on a job. Determine the comment's intent and respond appropriately.
-
-Job: {action.description}
-Comment: {comment_text.strip()}
-
-Available data:{customer_context}
-
-First: Is this comment ASKING A QUESTION or REQUESTING information?
-- "need address" = asking
-- "what's the gate code?" = asking
-- "pump capacitor is blown, needs replacement" = NOT asking, this is a status update/diagnosis
-- "will visit thursday" = NOT asking, this is a plan
-- "replaced the filter" = NOT asking, this is a completion report
-
-ONLY if the comment is asking for information we have, respond with:
-{{"type": "answer", "answer": "the relevant info, formatted naturally"}}
-
-ONLY if the comment is asking for info we DON'T have, respond with:
-{{"type": "escalate", "needs_info": "what info is missing"}}
-
-If the comment is NOT asking a question (it's a status update, diagnosis, plan, or completion):
-{{"type": "none"}}
-
-IMPORTANT: Most comments are status updates, NOT questions. Default to "none" unless there's a clear question."""
-
-            ai_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-            info_response = ai_client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=200,
-                messages=[{"role": "user", "content": info_prompt}],
-            )
-            info_match = re.search(r"\{.*\}", info_response.content[0].text, re.DOTALL)
-            if not info_match:
-                return None
-
-            info_data = json.loads(info_match.group())
-            comment_type = info_data.get("type", "none")
-
-            if comment_type == "answer" and info_data.get("answer"):
-                auto_reply = AgentActionComment(
-                    organization_id=org_id,
-                    action_id=action_id,
-                    author="DeepBlue",
-                    text=info_data["answer"],
-                )
-                self.db.add(auto_reply)
-                await self.db.commit()
-                await self.db.refresh(auto_reply)
-                return {"author": "DeepBlue", "text": info_data["answer"]}
-
-            elif comment_type == "escalate" and info_data.get("needs_info"):
-                missing_info = info_data["needs_info"]
-                gap_comment = AgentActionComment(
-                    organization_id=org_id,
-                    action_id=action_id,
-                    author="DeepBlue",
-                    text=f"I don't have this info on file: {missing_info}. Can someone provide it?",
-                )
-                self.db.add(gap_comment)
-                auto_comment_dict = {"author": "DeepBlue", "text": gap_comment.text}
-
-                # Notify the creator or assignee
-                notify_target = action.created_by or action.assigned_to
-                if notify_target and notify_target != "DeepBlue":
-                    target = await self._find_org_user(
-                        org_id, notify_target.split()[0], exclude_user_id=user_id
-                    )
-                    if target:
-                        self.db.add(Notification(
-                            organization_id=org_id,
-                            user_id=target.user_id,
-                            type="info_needed",
-                            title=f"Info needed: {action.description[:50]}",
-                            body=f"Missing: {missing_info}",
-                            link=f"/jobs?action={action_id}",
-                        ))
-                await self.db.commit()
-                return auto_comment_dict
-
-        except Exception as e:
-            logger.error(f"Auto-answer failed: {e}")
-
-        return None
-
-    async def _evaluate_resolution(
-        self,
-        org_id: str,
-        action: AgentAction,
-        action_id: str,
-        comment_text: str,
-        user_first_name: str,
-    ) -> tuple[bool, str | None]:
-        """Evaluate if a comment resolves the action. Returns (resolved, updated_description)."""
-        resolved = False
-        updated_desc = None
-
-        try:
-            action_result = await self.db.execute(
-                select(AgentAction)
-                .options(selectinload(AgentAction.comments))
-                .where(AgentAction.id == action_id, AgentAction.organization_id == org_id)
-            )
-            action_full = action_result.scalar_one()
-
-            comments_text = "\n".join(
-                f"- {c.author}: {c.text}" for c in action_full.comments
-            )
-
-            eval_prompt = f"""An action item for a pool service company just received a new comment. Does this comment resolve/answer the action?
-
-Action: [{action_full.action_type}] {action_full.description}
-Assigned to: {action_full.assigned_to or 'unassigned'}
-
-Comments:
-{comments_text}
-
-Latest comment by {user_first_name}: {comment_text.strip()}
-
-Respond with JSON:
-{{
-  "resolved": true/false,
-  "update_description": "new description if the comment changes the scope of the action, or null if no change",
-  "update_type": "new action_type if changed, or null",
-  "reason": "brief explanation"
-}}
-
-Rules:
-- "resolved" = true if the comment provides the answer, completes the task, or makes it clear no further work is needed
-- Examples: someone provides the requested info, confirms work is done, answers the question
-- If the comment is just a status update or partial info that doesn't fully resolve it, return resolved: false
-- If the comment changes the scope (e.g., "skip inspection, just replace" or "already done, just need to invoice"), update the description to reflect the new scope
-- update_description: set ONLY if the comment changes what needs to be done. Keep it concise.
-- update_type: set ONLY if the action type should change (e.g., site_visit → equipment)"""
-
-            client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=200,
-                messages=[{"role": "user", "content": eval_prompt}],
-            )
-            json_match = re.search(r"\{.*\}", response.content[0].text, re.DOTALL)
-            if json_match:
-                result_data = json.loads(json_match.group())
-
-                if result_data.get("update_description"):
-                    action.description = result_data["update_description"]
-                    updated_desc = action.description
-                if result_data.get("update_type"):
-                    action.action_type = result_data["update_type"]
-
-                if result_data.get("resolved"):
-                    action.status = "done"
-                    action.completed_at = datetime.now(timezone.utc)
-                    resolved = True
-
-                await self.db.commit()
-        except Exception as e:
-            logger.error(f"Comment resolution eval failed: {e}")
-
-        return resolved, updated_desc
 
     async def draft_invoice(self, org_id: str, action_id: str) -> dict | None:
         """AI-generated invoice draft from action context."""

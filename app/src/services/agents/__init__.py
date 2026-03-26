@@ -10,6 +10,11 @@ from .communicator import send_email_response, send_sms, send_approval_request, 
 from .customer_matcher import match_customer
 from .classifier import classify_and_draft, get_correction_history, build_context_prompt, SYSTEM_PROMPT
 from .mail_agent import poll_inbox, mark_processed, decode_email_header, extract_text_body, QP_LABEL
+from .comment_pipeline import CommentPipeline
+from .comment_classifier import classify_comment
+from .deepblue_responder import DeepBlueResponder
+from .command_executor import CommandExecutor
+from .resolution_evaluator import ResolutionEvaluator
 
 __all__ = [
     "process_incoming_email",
@@ -33,4 +38,9 @@ __all__ = [
     "decode_email_header",
     "extract_text_body",
     "QP_LABEL",
+    "CommentPipeline",
+    "classify_comment",
+    "DeepBlueResponder",
+    "CommandExecutor",
+    "ResolutionEvaluator",
 ]

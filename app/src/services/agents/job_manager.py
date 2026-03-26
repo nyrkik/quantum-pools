@@ -1,4 +1,5 @@
 """Job lifecycle: creation, evaluation, next steps."""
+from src.core.ai_models import get_model
 
 import os
 import re
@@ -120,7 +121,7 @@ Rules:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=await get_model("fast"),
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
         )

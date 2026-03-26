@@ -11,6 +11,7 @@ Usage:
     # Returns: { passed: 8, failed: 2, total: 10, details: [...] }
 """
 
+from src.core.ai_models import get_model
 import uuid
 import json
 import logging
@@ -203,7 +204,7 @@ Rules:
     try:
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=await get_model("fast"),
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )

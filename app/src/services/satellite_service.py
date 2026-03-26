@@ -22,6 +22,7 @@ from src.core.exceptions import NotFoundError
 from src.models.satellite_analysis import SatelliteAnalysis
 from src.models.property import Property
 from src.models.water_feature import WaterFeature
+from src.core.ai_models import get_model
 
 logger = logging.getLogger(__name__)
 
@@ -446,7 +447,7 @@ class SatelliteService:
         content.append({"type": "text", "text": text})
 
         message = await self.client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=await get_model("fast"),
             max_tokens=1024,
             messages=[{"role": "user", "content": content}],
         )

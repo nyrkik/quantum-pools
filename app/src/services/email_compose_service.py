@@ -24,6 +24,7 @@ from src.models.property import Property
 from src.models.visit import Visit
 from src.models.water_feature import WaterFeature
 from src.services.email_service import EmailMessage, EmailService
+from src.core.ai_models import get_model
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,7 @@ class EmailComposeService:
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             response = client.messages.create(
-                model="claude-haiku-4-20250414",
+                model=await get_model("fast"),
                 max_tokens=1024,
                 system=system_prompt,
                 messages=[{"role": "user", "content": task}],

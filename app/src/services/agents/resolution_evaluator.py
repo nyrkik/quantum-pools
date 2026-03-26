@@ -18,11 +18,12 @@ from sqlalchemy.orm import selectinload
 from src.models.agent_action import AgentAction
 
 from .observability import AgentTimer, log_agent_call
+from src.core.ai_models import get_model
 
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = "claude-haiku-4-5-20251001"
+
 
 EVAL_PROMPT = """A pool service job just received a new comment. Does this resolve the job?
 
@@ -104,7 +105,7 @@ class ResolutionEvaluator:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             with AgentTimer() as timer:
                 response = client.messages.create(
-                    model=MODEL,
+                    model=await get_model("fast"),
                     max_tokens=200,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -119,7 +120,7 @@ class ResolutionEvaluator:
                 input_summary=f"Job: {action.description[:60]} | Comment: {comment_text[:60]}",
                 output_summary=text[:200],
                 success=True,
-                model=MODEL,
+                model=await get_model("fast"),
                 input_tokens=getattr(usage, "input_tokens", None),
                 output_tokens=getattr(usage, "output_tokens", None),
                 duration_ms=timer.duration_ms,
@@ -151,7 +152,7 @@ class ResolutionEvaluator:
                 input_summary=f"Job: {action.description[:60]}",
                 success=False,
                 error=str(e),
-                model=MODEL,
+                model=await get_model("fast"),
             )
 
         return {"resolved": resolved, "updated_description": updated_desc}

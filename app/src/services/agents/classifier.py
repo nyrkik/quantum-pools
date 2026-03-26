@@ -1,4 +1,5 @@
 """Email classification and draft response via Claude."""
+from src.core.ai_models import get_model
 
 import os
 import re
@@ -255,7 +256,7 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
     from .observability import AgentTimer, log_agent_call
     with AgentTimer() as timer:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=await get_model("fast"),
             max_tokens=500,
             system=full_system,
             messages=[{"role": "user", "content": user_msg}],
@@ -300,7 +301,7 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
                 input_summary=f"{from_email}: {subject}",
                 output_summary=f"category={result.get('category')}, needs_approval={result.get('needs_approval')}",
                 success=True,
-                model="claude-haiku-4-5-20251001",
+                model=await get_model("fast"),
                 input_tokens=getattr(usage, 'input_tokens', None),
                 output_tokens=getattr(usage, 'output_tokens', None),
                 duration_ms=timer.duration_ms,

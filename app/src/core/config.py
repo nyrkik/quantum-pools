@@ -62,6 +62,9 @@ class Settings(BaseSettings):
 
     # AI Services
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
+    ai_model_fast: str = Field(default="claude-haiku-4-5-20251001", env="AI_MODEL_FAST")
+    ai_model_standard: str = Field(default="claude-sonnet-4-6", env="AI_MODEL_STANDARD")
+    ai_model_advanced: str = Field(default="claude-opus-4-6", env="AI_MODEL_ADVANCED")
 
     # Geocoding
     google_maps_api_key: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")

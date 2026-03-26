@@ -1,5 +1,6 @@
 """Service layer for agent thread (conversation) business logic."""
 
+from src.core.ai_models import get_model
 import json
 import logging
 import os
@@ -463,7 +464,7 @@ Rules:
 
                 ai_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
                 eval_response = ai_client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model=await get_model("fast"),
                     max_tokens=300,
                     messages=[{"role": "user", "content": eval_prompt}],
                 )
@@ -508,7 +509,7 @@ Rules:
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=await get_model("fast"),
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -564,7 +565,7 @@ Return ONLY the email body text."""
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=await get_model("fast"),
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}],
             )

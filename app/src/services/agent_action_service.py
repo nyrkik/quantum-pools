@@ -1,5 +1,6 @@
 """Service layer for agent action (job) business logic."""
 
+from src.core.ai_models import get_model
 import json
 import logging
 import os
@@ -598,7 +599,7 @@ Rules:
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=await get_model("fast"),
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}],
             )

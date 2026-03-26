@@ -1,5 +1,6 @@
 """Main flow that ties agents together."""
 
+from src.core.ai_models import get_model
 import os
 import re
 import logging
@@ -357,7 +358,7 @@ async def handle_sms_reply(from_number: str, body: str):
 
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             redraft = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=await get_model("fast"),
                 max_tokens=300,
                 system=redraft_system,
                 messages=[

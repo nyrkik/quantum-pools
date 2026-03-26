@@ -1,7 +1,8 @@
-"""Agent operations API — observability, evals, drift detection."""
+"""Agent operations API — observability, evals, drift detection, model evaluation."""
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -82,3 +83,54 @@ async def get_logs(
         }
         for l in result.scalars().all()
     ]
+
+
+@router.get("/ai-models")
+async def get_ai_models(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+):
+    """Get current AI model configuration."""
+    from src.core.ai_models import get_all_models
+    return await get_all_models()
+
+
+@router.put("/ai-models/{tier}")
+async def update_ai_model(
+    tier: str,
+    body: dict,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+):
+    """Update AI model for a tier (fast/standard/advanced). Takes effect immediately."""
+    if tier not in ("fast", "standard", "advanced"):
+        from fastapi import HTTPException
+        raise HTTPException(400, detail=f"Invalid tier: {tier}. Must be fast, standard, or advanced.")
+    model_id = body.get("model_id")
+    if not model_id:
+        from fastapi import HTTPException
+        raise HTTPException(400, detail="model_id required")
+    from src.core.ai_models import set_model
+    await set_model(tier, model_id)
+    return {"tier": tier, "model_id": model_id, "status": "updated"}
+
+
+class ModelEvalRequest(BaseModel):
+    tier: str
+    candidate: str
+    auto_promote: bool = True
+
+
+@router.post("/ai-models/evaluate")
+async def evaluate_model(
+    body: ModelEvalRequest,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Evaluate a candidate AI model against test cases. Auto-promotes if threshold met."""
+    if body.tier not in ("fast", "standard", "advanced"):
+        raise HTTPException(400, detail=f"Invalid tier: {body.tier}. Must be fast, standard, or advanced.")
+    if not body.candidate:
+        raise HTTPException(400, detail="candidate model ID required")
+
+    from src.services.model_eval_service import ModelEvalService
+    svc = ModelEvalService(db)
+    return await svc.evaluate_candidate(body.tier, body.candidate, body.auto_promote)

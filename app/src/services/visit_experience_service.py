@@ -303,14 +303,18 @@ class VisitExperienceService:
         """Create chemical reading for this visit + water feature."""
         visit = await self._get_visit(org_id, visit_id)
 
-        # Resolve property_id from visit
+        # Map frontend field names to model field names
+        field_map = {"cya": "cyanuric_acid", "fc": "free_chlorine", "tc": "total_chlorine",
+                     "alk": "alkalinity", "ch": "calcium_hardness", "temp": "water_temp"}
+        mapped = {field_map.get(k, k): v for k, v in readings.items() if v is not None}
+
         reading = ChemicalReading(
             id=str(uuid.uuid4()),
             organization_id=org_id,
             property_id=visit.property_id,
             visit_id=visit.id,
             water_feature_id=water_feature_id,
-            **readings,
+            **mapped,
         )
 
         # Auto-recommendations via ChemicalService

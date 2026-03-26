@@ -99,6 +99,7 @@ class AgentThreadService:
         limit: int,
         offset: int,
         assigned_to: str | None = None,
+        current_user_id: str | None = None,
     ) -> dict:
         """List conversation threads with filtering."""
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
@@ -129,6 +130,17 @@ class AgentThreadService:
             ).offset(offset).limit(limit)
         )
         threads = result.scalars().all()
+
+        # Look up read status for current user
+        read_map: dict[str, datetime] = {}
+        if current_user_id and threads:
+            from sqlalchemy import text
+            read_result = await self.db.execute(
+                text("SELECT thread_id, last_read_at FROM thread_reads WHERE user_id = :uid AND thread_id = ANY(:tids)"),
+                {"uid": current_user_id, "tids": [t.id for t in threads]},
+            )
+            read_map = {row[0]: row[1] for row in read_result.all()}
+
         return {
             "items": [
                 {
@@ -149,6 +161,10 @@ class AgentThreadService:
                     "assigned_to_user_id": t.assigned_to_user_id,
                     "assigned_to_name": t.assigned_to_name,
                     "assigned_at": t.assigned_at.isoformat() if t.assigned_at else None,
+                    "is_unread": (
+                        t.last_message_at > read_map[t.id] if t.id in read_map and t.last_message_at
+                        else t.last_message_at is not None  # Never read = unread
+                    ),
                 }
                 for t in threads
             ],
@@ -381,6 +397,19 @@ class AgentThreadService:
             "assigned_to_name": thread.assigned_to_name,
             "assigned_at": thread.assigned_at.isoformat() if thread.assigned_at else None,
         }
+
+    async def mark_thread_read(self, thread_id: str, user_id: str) -> None:
+        """Mark a thread as read by the current user."""
+        from sqlalchemy import text
+        await self.db.execute(
+            text("""
+                INSERT INTO thread_reads (user_id, thread_id, last_read_at)
+                VALUES (:uid, :tid, now())
+                ON CONFLICT (user_id, thread_id) DO UPDATE SET last_read_at = now()
+            """),
+            {"uid": user_id, "tid": thread_id},
+        )
+        await self.db.commit()
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""

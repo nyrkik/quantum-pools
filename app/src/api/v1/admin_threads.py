@@ -46,6 +46,7 @@ async def list_threads(
         limit=limit,
         offset=offset,
         assigned_to=assigned_to,
+        current_user_id=ctx.user.id,
     )
 
 
@@ -65,11 +66,13 @@ async def get_thread(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get thread with full conversation timeline."""
+    """Get thread with full conversation timeline. Marks as read for current user."""
     service = AgentThreadService(db)
     result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id)
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
+    # Mark as read when viewing
+    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id)
     return result
 
 

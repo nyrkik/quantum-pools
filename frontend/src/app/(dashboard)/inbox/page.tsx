@@ -297,15 +297,18 @@ export default function InboxPage() {
                   key={t.id}
                   className={`cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-950 ${
                     i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""
-                  } ${t.has_pending ? "border-l-4 border-l-amber-400 font-medium" : ""}`}
+                  } ${t.has_pending ? "border-l-4 border-l-amber-400" : ""} ${t.is_unread ? "font-medium" : ""}`}
                   onClick={() => setSelectedThreadId(t.id)}
                 >
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    {formatTime(t.last_message_at)}
+                    <div className="flex items-center gap-1.5">
+                      {t.is_unread && <span className="h-2 w-2 rounded-full bg-blue-500 flex-shrink-0" />}
+                      {formatTime(t.last_message_at)}
+                    </div>
                   </TableCell>
                   <TableCell className="truncate max-w-[180px]">
                     <div className="flex items-center gap-1.5">
-                      <span className={t.has_pending ? "font-medium" : ""}>
+                      <span className={t.is_unread ? "font-semibold" : t.has_pending ? "font-medium" : ""}>
                         {t.customer_name || t.contact_email.split("@")[0]}
                       </span>
                       {t.assigned_to_name && (
@@ -316,7 +319,7 @@ export default function InboxPage() {
                     </div>
                   </TableCell>
                   <TableCell className="truncate max-w-[250px] text-sm">
-                    <span className={t.has_pending ? "" : "text-muted-foreground"}>
+                    <span className={t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}>
                       {t.subject || t.last_snippet || "No subject"}
                     </span>
                   </TableCell>

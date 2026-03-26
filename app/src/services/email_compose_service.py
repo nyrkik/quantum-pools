@@ -130,15 +130,31 @@ class EmailComposeService:
         from_email = (org.agent_from_email if org and org.agent_from_email
                       else os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"))
 
-        # Find or create thread
-        thread = await self._get_or_create_thread(
-            org_id=org_id,
-            contact_email=to,
-            subject=subject,
-            customer_id=customer_id,
-            customer_name=customer_name,
-            property_address=property_address,
-        )
+        # Use existing thread if sending from a job that has one
+        thread = None
+        if job_id:
+            from src.models.agent_action import AgentAction
+            action_result = await self.db.execute(
+                select(AgentAction).where(AgentAction.id == job_id, AgentAction.organization_id == org_id)
+            )
+            action = action_result.scalar_one_or_none()
+            if action and action.thread_id:
+                from src.models.agent_thread import AgentThread
+                thread_result = await self.db.execute(
+                    select(AgentThread).where(AgentThread.id == action.thread_id)
+                )
+                thread = thread_result.scalar_one_or_none()
+
+        # Fall back to find-or-create by subject + email
+        if not thread:
+            thread = await self._get_or_create_thread(
+                org_id=org_id,
+                contact_email=to,
+                subject=subject,
+                customer_id=customer_id,
+                customer_name=customer_name,
+                property_address=property_address,
+            )
 
         # Create message record
         now = datetime.now(timezone.utc)
@@ -168,9 +184,19 @@ class EmailComposeService:
         thread.status = "handled"
         thread.has_pending = False
 
-        # If linked to a job, post confirmation comment
+        # If linked to a job, mark draft as sent + post confirmation
         if job_id:
             from src.models.agent_action import AgentActionComment
+            # Replace draft email comments with the actual sent version
+            draft_comments = await self.db.execute(
+                select(AgentActionComment).where(
+                    AgentActionComment.action_id == job_id,
+                    AgentActionComment.text.startswith("[DRAFT_EMAIL]"),
+                )
+            )
+            for dc in draft_comments.scalars().all():
+                dc.text = f"[SENT_EMAIL]\nTo: {to}\nSubject: {subject}\n---\n{body}"
+
             confirm_comment = AgentActionComment(
                 id=str(uuid.uuid4()),
                 organization_id=org_id,

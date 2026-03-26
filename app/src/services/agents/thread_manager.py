@@ -46,7 +46,7 @@ async def get_or_create_thread(
 
     async with get_db_context() as db:
         result = await db.execute(
-            select(AgentThread).where(AgentThread.thread_key == thread_key)
+            select(AgentThread).where(AgentThread.thread_key == thread_key).limit(1)
         )
         thread = result.scalar_one_or_none()
 

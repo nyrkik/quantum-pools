@@ -95,6 +95,7 @@ export interface Thread {
   assigned_to_user_id: string | null;
   assigned_to_name: string | null;
   assigned_at: string | null;
+  is_unread: boolean;
 }
 
 export interface TimelineMessage {

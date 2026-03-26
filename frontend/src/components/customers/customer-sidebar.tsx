@@ -161,18 +161,10 @@ export function CustomerSidebar({
       {/* Nav tiles — desktop: vertical stack, mobile: horizontal scroll */}
       <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0">
         {[
-          ...(isTech
-            ? [
-                { key: "service" as const, icon: ClipboardCheck, label: "Service" },
-                { key: "wfs" as const, icon: Droplets, label: "Water Features" },
-                { key: "details" as const, icon: History, label: "History" },
-              ]
-            : [
-                { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
-                { key: "wfs" as const, icon: Droplets, label: "Water Features" },
-                ...(perms.canViewInvoices ? [{ key: "invoices" as const, icon: Receipt, label: "Invoices" }] : []),
-              ]
-          ),
+          { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
+          { key: "service" as const, icon: ClipboardCheck, label: "Service" },
+          { key: "wfs" as const, icon: Droplets, label: "Water Features" },
+          ...(perms.canViewInvoices ? [{ key: "invoices" as const, icon: Receipt, label: "Invoices" }] : []),
         ].map((nav) => (
           <button
             key={nav.key}

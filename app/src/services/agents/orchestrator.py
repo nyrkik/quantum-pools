@@ -229,9 +229,9 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                     AgentAction.customer_name == result.get("customer_name")
                 )
             org_open = (await db.execute(org_open_query)).all()
-            for desc, atype in org_open:
-                if desc not in all_open_descriptions:
-                    all_open_descriptions.append(desc)
+            for open_desc, atype in org_open:
+                if open_desc not in all_open_descriptions:
+                    all_open_descriptions.append(open_desc)
 
         actions = result.get("actions", [])
         for action in actions:

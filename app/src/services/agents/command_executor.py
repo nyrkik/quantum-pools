@@ -87,14 +87,22 @@ class CommandExecutor:
         from src.services.email_compose_service import EmailComposeService
         svc = EmailComposeService(self.db)
 
-        # Find customer email
+        # Find customer email and thread subject
         to_email = ""
+        thread_subject = ""
         if action.agent_message_id:
             orig_msg = (await self.db.execute(
                 select(AgentMessage).where(AgentMessage.id == action.agent_message_id)
             )).scalar_one_or_none()
             if orig_msg:
                 to_email = orig_msg.from_email or ""
+        if action.thread_id:
+            from src.models.agent_thread import AgentThread
+            thread = (await self.db.execute(
+                select(AgentThread).where(AgentThread.id == action.thread_id)
+            )).scalar_one_or_none()
+            if thread:
+                thread_subject = thread.subject or ""
         if not to_email and c.get("customer_id"):
             cust = (await self.db.execute(
                 select(Customer).where(Customer.id == c["customer_id"])
@@ -141,8 +149,12 @@ class CommandExecutor:
         draft = await svc.generate_draft(org_id=c["org_id"], instruction=instruction, customer_id=c["customer_id"])
         if draft.get("error"):
             return await self._post(f"Could not generate email draft: {draft['error']}")
-        subject = draft.get("subject", "")
         body = draft.get("body", "")
+        # Use thread subject as reply, not AI-generated subject
+        if thread_subject:
+            subject = f"Re: {thread_subject}" if not thread_subject.startswith("Re:") else thread_subject
+        else:
+            subject = draft.get("subject", "")
         # Post as structured draft comment (frontend detects [DRAFT_EMAIL] prefix)
         text = f"[DRAFT_EMAIL]\nTo: {to_email}\nSubject: {subject}\n---\n{body}"
         await log_agent_call(organization_id=c["org_id"], agent_name="command_executor",

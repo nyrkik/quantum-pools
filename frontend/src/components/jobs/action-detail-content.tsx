@@ -25,7 +25,12 @@ import {
   Trash2,
   DollarSign,
   Play,
-  Eye,
+  ChevronDown,
+  ChevronUp,
+  Mail,
+  MessageSquare,
+  ListChecks,
+  ClipboardList,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCompose } from "@/components/email/compose-provider";
@@ -34,7 +39,81 @@ import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges"
 import { TasksSection } from "@/components/jobs/tasks-section";
 import type { ActionDetail } from "@/types/agent";
 
-function ExpandableCard({ label, title, children, variant }: { label?: string; title?: string; children?: string | null; variant?: "green" }) {
+// --- Utility components ---
+
+function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
+  detail: ActionDetail; actionId: string; onUpdate: () => void; loadDetail: () => void;
+}) {
+  const statusColors: Record<string, string> = {
+    open: "bg-blue-500",
+    in_progress: "bg-amber-500",
+    done: "bg-green-500",
+    cancelled: "bg-slate-400",
+  };
+
+  const handleStatusChange = async (status: string) => {
+    try {
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { status });
+      toast.success(status === "done" ? "Job marked done" : `Status: ${status}`);
+      loadDetail();
+      onUpdate();
+    } catch { toast.error("Failed to update status"); }
+  };
+
+  return (
+    <div className={`${statusColors[detail.status] || "bg-slate-400"} rounded-lg p-3 text-white`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ActionStatusIcon status={detail.status} />
+          <span className="text-sm font-semibold capitalize">{detail.status.replace("_", " ")}</span>
+          <ActionTypeBadge type={detail.action_type} />
+          {detail.due_date && isOverdue(detail.due_date) && detail.status !== "done" && (
+            <Badge variant="destructive" className="text-[10px] px-1.5 bg-red-700">Overdue</Badge>
+          )}
+        </div>
+        {(detail.status === "open" || detail.status === "in_progress") && (
+          <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => handleStatusChange("done")}>
+            <CheckCircle2 className="h-3 w-3 mr-1" /> Done
+          </Button>
+        )}
+      </div>
+      <p className="text-sm mt-2 text-white/90">{detail.description}</p>
+      <div className="flex items-center gap-4 text-xs text-white/70 mt-1">
+        {detail.customer_name && <span>{detail.customer_name}</span>}
+        {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
+        {detail.due_date && <span>{formatDueDate(detail.due_date)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function CollapsibleSection({ title, icon: Icon, children, defaultOpen = true, count }: {
+  title: string; icon: React.ElementType; children: React.ReactNode; defaultOpen?: boolean; count?: number;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium uppercase tracking-wide">{title}</span>
+          {count !== undefined && (
+            <span className="text-[10px] text-muted-foreground">({count})</span>
+          )}
+        </div>
+        {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+      </button>
+      {open && <div className="p-3">{children}</div>}
+    </div>
+  );
+}
+
+function ExpandableCard({ label, title, children, variant }: {
+  label?: string; title?: string; children?: string | null; variant?: "green";
+}) {
   const [expanded, setExpanded] = useState(false);
   if (!children) return null;
   const bg = variant === "green" ? "bg-green-50 dark:bg-green-950/20" : "bg-muted/50";
@@ -42,13 +121,13 @@ function ExpandableCard({ label, title, children, variant }: { label?: string; t
     <div className={`${bg} rounded-md p-3 text-sm space-y-1 cursor-pointer`} onClick={() => setExpanded(!expanded)}>
       {label && <p className="text-xs text-muted-foreground">{label}</p>}
       {title && <p className="font-medium">{title}</p>}
-      <p className={`text-xs text-muted-foreground whitespace-pre-wrap ${expanded ? "" : "line-clamp-4"}`}>
-        {children}
-      </p>
+      <p className={`text-xs text-muted-foreground whitespace-pre-wrap ${expanded ? "" : "line-clamp-4"}`}>{children}</p>
       <p className="text-[10px] text-muted-foreground/50">{expanded ? "Click to collapse" : "Click to expand"}</p>
     </div>
   );
 }
+
+// --- Main component ---
 
 interface ActionDetailContentProps {
   actionId: string;
@@ -56,141 +135,37 @@ interface ActionDetailContentProps {
   onUpdate: () => void;
 }
 
-export function ActionDetailContent({
-  actionId,
-  onClose,
-  onUpdate,
-}: ActionDetailContentProps) {
+export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetailContentProps) {
   const router = useRouter();
   const compose = useCompose();
   const [detail, setDetail] = useState<ActionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
-  const [followUp, setFollowUp] = useState<{
-    draft: string;
-    to: string;
-    subject: string;
-  } | null>(null);
+  const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
   const [followUpText, setFollowUpText] = useState("");
   const [draftingFollowUp, setDraftingFollowUp] = useState(false);
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [reviseInstruction, setReviseInstruction] = useState("");
   const [revising, setRevising] = useState(false);
   const [visitPropertyId, setVisitPropertyId] = useState<string | null>(null);
-  const [visitId, setVisitId] = useState<string | null>(null);
 
-  const handleDraftFollowUp = async () => {
-    if (!detail) return;
-    setDraftingFollowUp(true);
-    try {
-      const result = await api.post<{
-        draft: string;
-        to: string;
-        subject: string;
-      }>(
-        `/v1/admin/agent-messages/${detail.agent_message_id}/draft-followup`,
-        {}
-      );
-      setFollowUp(result);
-      setFollowUpText(result.draft);
-    } catch {
-      toast.error("Failed to draft follow-up");
-    } finally {
-      setDraftingFollowUp(false);
-    }
-  };
-
-  const handleSendFollowUp = async () => {
-    if (!detail || !followUpText.trim()) return;
-    setSendingFollowUp(true);
-    try {
-      const result = await api.post<{
-        sent: boolean;
-        closed_actions: { description: string }[];
-        ask_actions: {
-          id: string;
-          description: string;
-          reason: string;
-        }[];
-      }>(
-        `/v1/admin/agent-messages/${detail.agent_message_id}/send-followup`,
-        { response_text: followUpText }
-      );
-      if (result.closed_actions?.length) {
-        toast.success(
-          `Follow-up sent. Completed: ${result.closed_actions
-            .map((a) => a.description.slice(0, 40))
-            .join(", ")}`
-        );
-      } else {
-        toast.success("Follow-up sent");
-      }
-      if (result.ask_actions?.length) {
-        for (const a of result.ask_actions) {
-          toast(
-            `Does this close "${a.description.slice(0, 50)}"? ${a.reason}`,
-            { duration: 10000 }
-          );
-        }
-      }
-      setFollowUp(null);
-      setFollowUpText("");
-      setReviseInstruction("");
-      loadDetail();
-      onUpdate();
-    } catch {
-      toast.error("Failed to send");
-    } finally {
-      setSendingFollowUp(false);
-    }
-  };
-
-  const handleRevise = async () => {
-    if (!detail || !reviseInstruction.trim() || !followUpText) return;
-    setRevising(true);
-    try {
-      const result = await api.post<{ draft: string }>(
-        `/v1/admin/agent-messages/${detail.agent_message_id}/revise-draft`,
-        {
-          draft: followUpText,
-          instruction: reviseInstruction,
-        }
-      );
-      setFollowUpText(result.draft);
-      setReviseInstruction("");
-    } catch {
-      toast.error("Failed to revise");
-    } finally {
-      setRevising(false);
-    }
-  };
+  // --- Handlers ---
 
   const loadDetail = useCallback(() => {
     setLoading(true);
-    api
-      .get<ActionDetail>(`/v1/admin/agent-actions/${actionId}`)
-      .then((d) => {
-        setDetail(d);
-      })
+    api.get<ActionDetail>(`/v1/admin/agent-actions/${actionId}`)
+      .then(setDetail)
       .catch(() => toast.error("Failed to load action"))
       .finally(() => setLoading(false));
   }, [actionId]);
 
-  useEffect(() => {
-    loadDetail();
-  }, [loadDetail]);
+  useEffect(() => { loadDetail(); }, [loadDetail]);
 
-  // For site_visit jobs, resolve the customer's first property
   useEffect(() => {
     if (!detail?.matched_customer_id || detail.action_type !== "site_visit") return;
-    api
-      .get<{ items: { id: string }[] }>(`/v1/properties?customer_id=${detail.matched_customer_id}&limit=1`)
-      .then((res) => {
-        if (res.items?.length > 0) {
-          setVisitPropertyId(res.items[0].id);
-        }
-      })
+    api.get<{ items: { id: string }[] }>(`/v1/properties?customer_id=${detail.matched_customer_id}&limit=1`)
+      .then((res) => { if (res.items?.length > 0) setVisitPropertyId(res.items[0].id); })
       .catch(() => {});
   }, [detail?.matched_customer_id, detail?.action_type]);
 
@@ -199,170 +174,208 @@ export function ActionDetailContent({
     setPosting(true);
     try {
       const result = await api.post<{
-        action_resolved?: boolean;
-        action_updated?: boolean;
-        new_description?: string;
-        auto_comment?: { author: string; text: string };
+        action_resolved?: boolean; action_updated?: boolean;
+        new_description?: string; auto_comment?: { author: string; text: string };
       }>(`/v1/admin/agent-actions/${actionId}/comments`, { text: comment });
       setComment("");
-      if (result.auto_comment) {
-        toast.success(`DeepBlue: ${result.auto_comment.text.slice(0, 80)}`);
-      }
-      if (result.action_resolved) {
-        toast.success("Job marked complete — your comment resolved it");
-      } else if (result.action_updated && result.new_description) {
-        toast.success(
-          `Job updated: ${result.new_description.slice(0, 60)}`
-        );
-      }
-      loadDetail();
-      onUpdate();
-    } catch {
-      toast.error("Failed to add comment");
-    } finally {
-      setPosting(false);
-    }
+      if (result.auto_comment) toast.success(`DeepBlue: ${result.auto_comment.text.slice(0, 80)}`);
+      if (result.action_resolved) toast.success("Job marked complete — your comment resolved it");
+      else if (result.action_updated && result.new_description) toast.success(`Job updated: ${result.new_description.slice(0, 60)}`);
+      loadDetail(); onUpdate();
+    } catch { toast.error("Failed to add comment"); }
+    finally { setPosting(false); }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  const handleDraftFollowUp = async () => {
+    if (!detail) return;
+    setDraftingFollowUp(true);
+    try {
+      const result = await api.post<{ draft: string; to: string; subject: string }>(
+        `/v1/admin/agent-messages/${detail.agent_message_id}/draft-followup`, {}
+      );
+      setFollowUp(result); setFollowUpText(result.draft);
+    } catch { toast.error("Failed to draft follow-up"); }
+    finally { setDraftingFollowUp(false); }
+  };
+
+  const handleSendFollowUp = async () => {
+    if (!detail || !followUpText.trim()) return;
+    setSendingFollowUp(true);
+    try {
+      const result = await api.post<{
+        sent: boolean; closed_actions: { description: string }[];
+        ask_actions: { id: string; description: string; reason: string }[];
+      }>(`/v1/admin/agent-messages/${detail.agent_message_id}/send-followup`, { response_text: followUpText });
+      if (result.closed_actions?.length) toast.success(`Follow-up sent. Completed: ${result.closed_actions.map(a => a.description.slice(0, 40)).join(", ")}`);
+      else toast.success("Follow-up sent");
+      setFollowUp(null); setFollowUpText(""); setReviseInstruction("");
+      loadDetail(); onUpdate();
+    } catch { toast.error("Failed to send"); }
+    finally { setSendingFollowUp(false); }
+  };
+
+  const handleRevise = async () => {
+    if (!detail || !reviseInstruction.trim() || !followUpText) return;
+    setRevising(true);
+    try {
+      const result = await api.post<{ draft: string }>(
+        `/v1/admin/agent-messages/${detail.agent_message_id}/revise-draft`,
+        { draft: followUpText, instruction: reviseInstruction }
+      );
+      setFollowUpText(result.draft); setReviseInstruction("");
+    } catch { toast.error("Failed to revise"); }
+    finally { setRevising(false); }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!detail) return null;
 
+  const isActive = detail.status === "open" || detail.status === "in_progress";
+
   return (
-    <div className="space-y-5 pt-2">
-      {/* Header */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <ActionStatusIcon status={detail.status} />
-          <ActionTypeBadge type={detail.action_type} />
-          {detail.due_date &&
-            isOverdue(detail.due_date) &&
-            detail.status !== "done" && (
-              <Badge
-                variant="destructive"
-                className="text-[10px] px-1.5"
-              >
-                Overdue
-              </Badge>
-            )}
-        </div>
-        <p className="text-sm font-medium">{detail.description}</p>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span>{detail.customer_name || detail.from_email}</span>
-          {detail.assigned_to && (
-            <span>Assigned: {detail.assigned_to}</span>
+    <div className="space-y-3 pt-2">
+      {/* 1. Status Bar — always on top */}
+      <StatusBar detail={detail} actionId={actionId} onUpdate={onUpdate} loadDetail={loadDetail} />
+
+      {/* 2. Action Buttons — grouped by purpose */}
+      {isActive && !followUp && (
+        <div className="grid grid-cols-1 gap-2">
+          {/* Field actions */}
+          {detail.action_type === "site_visit" && visitPropertyId && (
+            <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/visits/new?property=${visitPropertyId}&job=${actionId}`)}>
+              <Play className="h-3.5 w-3.5 mr-2 text-green-600" /> Start Visit
+            </Button>
           )}
-          {detail.due_date && <span>{formatDueDate(detail.due_date)}</span>}
-        </div>
-      </div>
-
-      {/* Context trail */}
-      {(detail.subject || detail.related_jobs) && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Context
-          </p>
-
-          {detail.subject && (
-            <ExpandableCard label={`Email: ${detail.from_email}`} title={detail.subject}>
-              {detail.email_body}
-            </ExpandableCard>
+          {/* Communication */}
+          {detail.agent_message_id && (
+            <Button variant="outline" size="sm" className="justify-start" onClick={handleDraftFollowUp} disabled={draftingFollowUp}>
+              {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" /> : <Mail className="h-3.5 w-3.5 mr-2 text-blue-600" />}
+              Draft Follow-up Email
+            </Button>
           )}
-
-          {detail.our_response && (
-            <ExpandableCard label="Our reply" variant="green">
-              {detail.our_response}
-            </ExpandableCard>
+          {/* Billing */}
+          {detail.invoice_id ? (
+            <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/${detail.invoice_id}`)}>
+              <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> View Estimate
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}>
+              <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> Create Estimate
+            </Button>
           )}
-
-          {detail.related_jobs?.map((job) => (
-            <div
-              key={job.id}
-              className="bg-muted/30 rounded-md p-2.5 text-sm"
-            >
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <ActionStatusIcon status={job.status} />
-                <ActionTypeBadge type={job.action_type} />
-              </div>
-              <p
-                className={`text-xs ${
-                  job.status === "done"
-                    ? "line-through text-muted-foreground"
-                    : ""
-                }`}
-              >
-                {job.description}
-              </p>
-              {job.comments.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {job.comments.map((c, i) => (
-                    <p
-                      key={i}
-                      className="text-[10px] text-muted-foreground"
-                    >
-                      {c.author}: {c.text}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
         </div>
       )}
 
-      {/* Tasks */}
-      <TasksSection actionId={actionId} tasks={detail.tasks || []} onUpdate={() => { loadDetail(); onUpdate(); }} />
+      {/* Follow-up draft editor (replaces action buttons when active) */}
+      {followUp && (
+        <div className="border rounded-lg p-3 space-y-3 bg-blue-50/50 dark:bg-blue-950/10">
+          <div>
+            <p className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-1">Follow-up Draft</p>
+            <p className="text-xs text-muted-foreground mb-2">To: {followUp.to} — Re: {followUp.subject}</p>
+            <Textarea value={followUpText} onChange={(e) => setFollowUpText(e.target.value)} rows={6} className="text-sm" />
+          </div>
+          <div className="flex gap-2 items-end">
+            <Input value={reviseInstruction} onChange={(e) => setReviseInstruction(e.target.value)}
+              placeholder="Tell AI how to change it..." className="text-sm h-8 flex-1"
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRevise(); } }} />
+            <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
+              {revising && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Revise
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
+              {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />} Send
+            </Button>
+            <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setReviseInstruction(""); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
 
-      {/* Comments / Activity */}
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-          Activity
-        </p>
+      {/* 3. Tasks — distinct checklist card */}
+      {(detail.tasks?.length ?? 0) > 0 && (
+        <CollapsibleSection
+          title="Tasks"
+          icon={ListChecks}
+          count={detail.tasks?.length}
+          defaultOpen={true}
+        >
+          <TasksSection actionId={actionId} tasks={detail.tasks || []} onUpdate={() => { loadDetail(); onUpdate(); }} />
+        </CollapsibleSection>
+      )}
+
+      {/* 4. Context — email thread + related jobs (collapsed by default) */}
+      {(detail.subject || detail.related_jobs?.length) && (
+        <CollapsibleSection title="Context" icon={ClipboardList} defaultOpen={false} count={detail.related_jobs?.length}>
+          <div className="space-y-2">
+            {detail.subject && (
+              <ExpandableCard label={`Email: ${detail.from_email}`} title={detail.subject}>
+                {detail.email_body}
+              </ExpandableCard>
+            )}
+            {detail.our_response && (
+              <ExpandableCard label="Our reply" variant="green">{detail.our_response}</ExpandableCard>
+            )}
+            {detail.related_jobs?.map((job) => (
+              <div key={job.id} className="bg-muted/30 rounded-md p-2.5 text-sm">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <ActionStatusIcon status={job.status} />
+                  <ActionTypeBadge type={job.action_type} />
+                </div>
+                <p className={`text-xs ${job.status === "done" ? "line-through text-muted-foreground" : ""}`}>{job.description}</p>
+                {job.comments.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {job.comments.map((c, i) => (
+                      <p key={i} className="text-[10px] text-muted-foreground">{c.author}: {c.text}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </CollapsibleSection>
+      )}
+
+      {/* 5. Activity — visually distinct from tasks */}
+      <CollapsibleSection title="Activity" icon={MessageSquare} count={detail.comments?.length} defaultOpen={true}>
         {detail.comments && detail.comments.length > 0 ? (
           <div className="space-y-2 mb-3">
             {detail.comments.map((c) => {
               const isDraft = c.text.startsWith("[DRAFT_EMAIL]");
-              if (isDraft) {
-                const lines = c.text.replace("[DRAFT_EMAIL]\n", "").split("\n---\n");
+              const isSent = c.text.startsWith("[SENT_EMAIL]");
+              if (isDraft || isSent) {
+                const lines = c.text.replace(/\[(DRAFT|SENT)_EMAIL\]\n/, "").split("\n---\n");
                 const header = lines[0] || "";
                 const body = lines[1] || "";
-                const toMatch = header.match(/To: (.+)/);
-                const subjectMatch = header.match(/Subject: (.+)/);
-                const to = toMatch?.[1] || "";
-                const subject = subjectMatch?.[1] || "";
+                const to = header.match(/To: (.+)/)?.[1] || "";
+                const subject = header.match(/Subject: (.+)/)?.[1] || "";
                 return (
-                  <div key={c.id} className="bg-blue-50 dark:bg-blue-950/20 rounded-md p-3 border border-blue-200 dark:border-blue-800">
+                  <div key={c.id} className={`rounded-md p-3 border ${isSent ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" : "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800"}`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-blue-700 dark:text-blue-400">Draft Email</span>
+                      <span className={`text-xs font-medium ${isSent ? "text-green-700 dark:text-green-400" : "text-blue-700 dark:text-blue-400"}`}>
+                        {isSent ? "✓ Email Sent" : "Draft Email"}
+                      </span>
                       <span className="text-[10px] text-muted-foreground">{formatTime(c.created_at)}</span>
                     </div>
                     <p className="text-xs text-muted-foreground mb-1">To: {to}</p>
                     <p className="text-xs font-medium mb-1">Subject: {subject}</p>
                     <p className="text-sm whitespace-pre-wrap line-clamp-6">{body}</p>
-                    <Button
-                      size="sm"
-                      variant="default"
-                      className="mt-2"
-                      onClick={() => compose.openCompose({ to, subject, body, jobId: actionId, originalDraft: body, originalSubject: subject, onSent: () => { loadDetail(); onUpdate(); } })}
-                    >
-                      <Send className="h-3.5 w-3.5 mr-1.5" />
-                      Edit & Send
-                    </Button>
+                    {!isSent && (
+                      <Button size="sm" variant="default" className="mt-2"
+                        onClick={() => compose.openCompose({ to, subject, body, jobId: actionId, originalDraft: body, originalSubject: subject, onSent: () => { loadDetail(); onUpdate(); } })}>
+                        <Send className="h-3.5 w-3.5 mr-1.5" /> Edit & Send
+                      </Button>
+                    )}
                   </div>
                 );
               }
+              const isBot = c.author === "DeepBlue";
               return (
-                <div key={c.id} className="bg-muted/50 rounded-md p-2.5">
+                <div key={c.id} className={`rounded-md p-2.5 ${isBot ? "bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800" : "bg-muted/50"}`}>
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-xs font-medium">{c.author}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {formatTime(c.created_at)}
+                    <span className={`text-xs font-medium ${isBot ? "text-violet-700 dark:text-violet-400" : ""}`}>
+                      {isBot ? "🤖 DeepBlue" : c.author}
                     </span>
+                    <span className="text-[10px] text-muted-foreground">{formatTime(c.created_at)}</span>
                   </div>
                   <p className="text-sm">{c.text}</p>
                 </div>
@@ -370,212 +383,40 @@ export function ActionDetailContent({
             })}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground mb-3">
-            No comments yet
-          </p>
+          <p className="text-xs text-muted-foreground mb-3">No comments yet</p>
         )}
         <div className="flex gap-2 items-end">
-          <Textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Add a comment..."
-            className="text-sm min-h-[2.5rem] resize-none flex-1"
-            rows={2}
-          />
-          <Button
-            size="sm"
-            className="h-9 flex-shrink-0"
-            onClick={handleAddComment}
-            disabled={posting || !comment.trim()}
-          >
-            {posting ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              "Post"
-            )}
+          <Textarea value={comment} onChange={(e) => setComment(e.target.value)}
+            placeholder="Add a comment or give AI a command..." className="text-sm min-h-[2.5rem] resize-none flex-1" rows={2} />
+          <Button size="sm" className="h-9 flex-shrink-0" onClick={handleAddComment} disabled={posting || !comment.trim()}>
+            {posting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Post"}
           </Button>
         </div>
-      </div>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Try: "draft email to client", "assign to Shane", "mark as done"
+        </p>
+      </CollapsibleSection>
 
-      {/* Actions row */}
-      {!followUp && (
-        <div className="pt-2 border-t flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDraftFollowUp}
-            disabled={draftingFollowUp}
-          >
-            {draftingFollowUp ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-            ) : (
-              <Send className="h-3.5 w-3.5 mr-1.5" />
-            )}
-            Draft Follow-up
-          </Button>
-          {detail.action_type === "site_visit" && visitPropertyId && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(`/visits/new?property=${visitPropertyId}&job=${actionId}`)}
-            >
-              <Play className="h-3.5 w-3.5 mr-1.5" />
-              Start Visit
-            </Button>
-          )}
-          {detail.invoice_id ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(`/invoices/${detail.invoice_id}`)}
-            >
-              <DollarSign className="h-3.5 w-3.5 mr-1.5" />
-              View Estimate
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}
-            >
-              <DollarSign className="h-3.5 w-3.5 mr-1.5" />
-              Create Estimate
-            </Button>
-          )}
-        </div>
-      )}
-
-      {followUp && (
-        <div className="pt-2 border-t space-y-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">
-              Follow-up Draft
-            </p>
-            <p className="text-xs text-muted-foreground mb-2">
-              To: {followUp.to} — Re: {followUp.subject}
-            </p>
-            <Textarea
-              value={followUpText}
-              onChange={(e) => setFollowUpText(e.target.value)}
-              rows={6}
-              className="text-sm"
-            />
-          </div>
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
-              <Input
-                value={reviseInstruction}
-                onChange={(e) => setReviseInstruction(e.target.value)}
-                placeholder="Tell AI how to change it..."
-                className="text-sm h-8"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleRevise();
-                  }
-                }}
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={handleRevise}
-              disabled={revising || !reviseInstruction.trim()}
-            >
-              {revising ? (
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-              ) : null}
-              Revise
-            </Button>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={handleSendFollowUp}
-              disabled={sendingFollowUp || !followUpText.trim()}
-            >
-              {sendingFollowUp ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Send className="h-4 w-4 mr-2" />
-              )}
-              Send
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setFollowUp(null);
-                setFollowUpText("");
-                setReviseInstruction("");
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Actions */}
-      {(detail.status === "open" || detail.status === "in_progress") && (
-        <div className="pt-3 border-t">
-          <Button
-            className="w-full bg-green-600 hover:bg-green-700"
-            onClick={async () => {
-              try {
-                await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "done" });
-                toast.success("Job marked done");
-                loadDetail();
-                onUpdate();
-              } catch { toast.error("Failed"); }
-            }}
-          >
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            Mark Done
-          </Button>
-        </div>
-      )}
-
-      {/* Delete */}
+      {/* 6. Danger zone — bottom, subtle */}
       {detail.status !== "cancelled" && (
-        <div className="pt-2 flex justify-end">
+        <div className="flex justify-end pt-1">
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-3 w-3 mr-1" />
-                Delete Job
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive">
+                <Trash2 className="h-3 w-3 mr-1" /> Cancel Job
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete this job?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently remove the action and all its
-                  comments. This cannot be undone.
-                </AlertDialogDescription>
+                <AlertDialogTitle>Cancel this job?</AlertDialogTitle>
+                <AlertDialogDescription>This will cancel the job. Comments and history will be preserved.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={async () => {
-                    try {
-                      await api.put(
-                        `/v1/admin/agent-actions/${actionId}`,
-                        { status: "cancelled" }
-                      );
-                      toast.success("Action deleted");
-                      onClose();
-                      onUpdate();
-                    } catch {
-                      toast.error("Failed");
-                    }
-                  }}
-                >
-                  Delete
-                </AlertDialogAction>
+                <AlertDialogCancel>Keep Job</AlertDialogCancel>
+                <AlertDialogAction onClick={async () => {
+                  try { await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" }); toast.success("Job cancelled"); onClose(); onUpdate(); }
+                  catch { toast.error("Failed"); }
+                }}>Cancel Job</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

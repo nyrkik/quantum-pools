@@ -26,6 +26,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useCompose } from "@/components/email/compose-provider";
 import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { TasksSection } from "@/components/jobs/tasks-section";
@@ -59,6 +60,7 @@ export function ActionDetailContent({
   onUpdate,
 }: ActionDetailContentProps) {
   const router = useRouter();
+  const compose = useCompose();
   const [detail, setDetail] = useState<ActionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
@@ -306,17 +308,49 @@ export function ActionDetailContent({
         </p>
         {detail.comments && detail.comments.length > 0 ? (
           <div className="space-y-2 mb-3">
-            {detail.comments.map((c) => (
-              <div key={c.id} className="bg-muted/50 rounded-md p-2.5">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-xs font-medium">{c.author}</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {formatTime(c.created_at)}
-                  </span>
+            {detail.comments.map((c) => {
+              const isDraft = c.text.startsWith("[DRAFT_EMAIL]");
+              if (isDraft) {
+                const lines = c.text.replace("[DRAFT_EMAIL]\n", "").split("\n---\n");
+                const header = lines[0] || "";
+                const body = lines[1] || "";
+                const toMatch = header.match(/To: (.+)/);
+                const subjectMatch = header.match(/Subject: (.+)/);
+                const to = toMatch?.[1] || "";
+                const subject = subjectMatch?.[1] || "";
+                return (
+                  <div key={c.id} className="bg-blue-50 dark:bg-blue-950/20 rounded-md p-3 border border-blue-200 dark:border-blue-800">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-blue-700 dark:text-blue-400">Draft Email</span>
+                      <span className="text-[10px] text-muted-foreground">{formatTime(c.created_at)}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-1">To: {to}</p>
+                    <p className="text-xs font-medium mb-1">Subject: {subject}</p>
+                    <p className="text-sm whitespace-pre-wrap line-clamp-6">{body}</p>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="mt-2"
+                      onClick={() => compose.openCompose({ to, subject, body, jobId: actionId, originalDraft: body, originalSubject: subject, onSent: () => { loadDetail(); onUpdate(); } })}
+                    >
+                      <Send className="h-3.5 w-3.5 mr-1.5" />
+                      Edit & Send
+                    </Button>
+                  </div>
+                );
+              }
+              return (
+                <div key={c.id} className="bg-muted/50 rounded-md p-2.5">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-xs font-medium">{c.author}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatTime(c.created_at)}
+                    </span>
+                  </div>
+                  <p className="text-sm">{c.text}</p>
                 </div>
-                <p className="text-sm">{c.text}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground mb-3">

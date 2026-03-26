@@ -202,8 +202,22 @@ export function ComposeEmail() {
         subject: subject.trim(),
         body: body.trim(),
         customer_id: customerId,
+        job_id: options.jobId || undefined,
       });
+
+      // Log AI draft correction if the user edited the draft
+      if (options.originalDraft && (body.trim() !== options.originalDraft || subject.trim() !== (options.originalSubject || ""))) {
+        api.post("/v1/email/draft-correction", {
+          original_subject: options.originalSubject || "",
+          original_body: options.originalDraft,
+          edited_subject: subject.trim(),
+          edited_body: body.trim(),
+          job_id: options.jobId,
+        }).catch(() => {}); // Fire and forget
+      }
+
       toast.success("Email sent");
+      if (options.onSent) options.onSent();
       closeCompose();
     } catch (e: unknown) {
       const msg = (e as { message?: string })?.message || "Failed to send email";
@@ -218,7 +232,7 @@ export function ComposeEmail() {
   // Minimized bar
   if (isMinimized) {
     return (
-      <div className="fixed bottom-0 right-4 z-40 w-72 sm:w-80">
+      <div className="fixed bottom-0 right-4 z-[60] w-72 sm:w-80">
         <button
           type="button"
           onClick={toggleMinimize}
@@ -241,7 +255,7 @@ export function ComposeEmail() {
 
   // Full compose window
   return (
-    <div className="fixed bottom-0 right-4 z-40 flex w-[calc(100vw-2rem)] flex-col rounded-t-lg border bg-background shadow-2xl sm:w-[480px] sm:right-6 max-h-[85vh]">
+    <div className="fixed bottom-0 right-4 z-[60] flex w-[calc(100vw-2rem)] flex-col rounded-t-lg border bg-background shadow-2xl sm:w-[480px] sm:right-6 max-h-[85vh]">
       {/* Header */}
       <div className="flex items-center justify-between rounded-t-lg bg-primary px-4 py-2.5 text-primary-foreground">
         <span className="text-sm font-medium">New Email</span>

@@ -4,6 +4,7 @@ Handles outbound email composition with thread tracking, and AI-assisted
 draft generation using customer context.
 """
 
+import json
 import logging
 import os
 import re
@@ -67,6 +68,7 @@ class EmailComposeService:
         body: str,
         customer_id: str | None = None,
         sender_name: str | None = None,
+        job_id: str | None = None,
         sender_user_id: str | None = None,
     ) -> dict:
         """Send email, create AgentMessage + AgentThread records."""
@@ -166,6 +168,18 @@ class EmailComposeService:
         thread.status = "handled"
         thread.has_pending = False
 
+        # If linked to a job, post confirmation comment
+        if job_id:
+            from src.models.agent_action import AgentActionComment
+            confirm_comment = AgentActionComment(
+                id=str(uuid.uuid4()),
+                organization_id=org_id,
+                action_id=job_id,
+                author=sender_name or "System",
+                text=f"Email sent to {to}: {subject}",
+            )
+            self.db.add(confirm_comment)
+
         await self.db.commit()
 
         return {
@@ -256,9 +270,10 @@ class EmailComposeService:
             f"Do NOT include a signature — it will be appended automatically.\n"
             f"Do NOT include greeting headers like 'Subject:' in the body.\n\n"
             f"CONTEXT:\n{context_block}\n\n"
-            f"Respond in this exact JSON format:\n"
-            f'{{"subject": "...", "body": "..."}}\n'
-            f"The body should be plain text (no HTML). Use natural line breaks."
+            f"You MUST respond with ONLY a JSON object, no other text. Format:\n"
+            f'{{"subject": "the email subject", "body": "the email body text"}}\n'
+            f"The body should be plain text (no HTML). Use natural line breaks.\n"
+            f"Do NOT wrap in markdown code blocks. Do NOT add any text before or after the JSON."
         )
 
         try:
@@ -271,22 +286,31 @@ class EmailComposeService:
             )
             text = response.content[0].text.strip()
 
-            # Parse JSON from response
-            import json
-            # Handle markdown code blocks
+            # Parse JSON from response — try multiple extraction strategies
+            # Strip markdown code blocks
             if text.startswith("```"):
                 text = re.sub(r"^```(?:json)?\s*", "", text)
                 text = re.sub(r"\s*```$", "", text)
 
-            parsed = json.loads(text)
-            return {
-                "subject": parsed.get("subject", ""),
-                "body": parsed.get("body", ""),
-            }
-        except json.JSONDecodeError:
-            # Try to extract subject and body from non-JSON response
-            logger.warning("AI returned non-JSON response for draft")
-            return {"subject": "", "body": text if text else "", "error": "AI returned unexpected format"}
+            # Try direct parse first
+            try:
+                parsed = json.loads(text)
+                return {"subject": parsed.get("subject", ""), "body": parsed.get("body", "")}
+            except json.JSONDecodeError:
+                pass
+
+            # Try extracting JSON object from mixed text
+            json_match = re.search(r"\{[^{}]*\"subject\"[^{}]*\"body\"[^{}]*\}", text, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                    return {"subject": parsed.get("subject", ""), "body": parsed.get("body", "")}
+                except json.JSONDecodeError:
+                    pass
+
+            # Last resort: use the raw text as the body
+            logger.warning("AI returned non-JSON response for draft, using raw text")
+            return {"subject": "Follow-up", "body": text if text else "", "error": "AI returned unexpected format"}
         except Exception as e:
             logger.error(f"AI draft generation failed: {e}")
             return {"subject": "", "body": "", "error": str(e)}

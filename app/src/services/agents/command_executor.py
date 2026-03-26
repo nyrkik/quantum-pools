@@ -9,11 +9,13 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_action_task import AgentActionTask
+from src.models.agent_message import AgentMessage
+from src.models.customer import Customer
 from src.models.notification import Notification
 from src.models.user import User
 from src.models.organization_user import OrganizationUser
@@ -81,14 +83,68 @@ class CommandExecutor:
 
     async def _draft_email(self) -> dict | None:
         c = self._ctx
+        action = c["action"]
         from src.services.email_compose_service import EmailComposeService
         svc = EmailComposeService(self.db)
-        instruction = (f"Job: {c['action'].description}\nRequest: {c['details'] or 'Draft email to customer'}\n"
-                       f"Context: {(c['customer_context'] or '')[:500]}")
+
+        # Find customer email
+        to_email = ""
+        if action.agent_message_id:
+            orig_msg = (await self.db.execute(
+                select(AgentMessage).where(AgentMessage.id == action.agent_message_id)
+            )).scalar_one_or_none()
+            if orig_msg:
+                to_email = orig_msg.from_email or ""
+        if not to_email and c.get("customer_id"):
+            cust = (await self.db.execute(
+                select(Customer).where(Customer.id == c["customer_id"])
+            )).scalar_one_or_none()
+            if cust:
+                to_email = cust.email or ""
+
+        # Build rich context: thread conversation + job details + customer info
+        thread_context = ""
+        if action.agent_message_id:
+            # select, desc imported at module level
+            # Get the thread messages for conversation context
+            if action.thread_id:
+                msgs = await self.db.execute(
+                    select(AgentMessage)
+                    .where(AgentMessage.thread_id == action.thread_id)
+                    .order_by(desc(AgentMessage.received_at))
+                    .limit(5)
+                )
+                for m in msgs.scalars().all():
+                    direction = "Customer" if m.direction == "inbound" else "Us"
+                    body_preview = (m.body or "")[:300]
+                    thread_context += f"\n[{direction}] {m.subject or ''}: {body_preview}\n"
+
+        # Get all comments on this job for context
+        comments_context = ""
+        comments = await self.db.execute(
+            select(AgentActionComment)
+            .where(AgentActionComment.action_id == action.id)
+            .order_by(AgentActionComment.created_at)
+        )
+        for cm in comments.scalars().all():
+            comments_context += f"\n{cm.author}: {cm.text}"
+
+        instruction = (
+            f"Job: {action.description}\n"
+            f"Request: {c['details'] or 'Draft email to customer about this job'}\n"
+            f"\nEmail thread (DO NOT repeat information already communicated):{thread_context or ' (no prior emails)'}\n"
+            f"\nJob comments (latest status/plans):{comments_context or ' (none)'}\n"
+            f"\nCustomer info: {(c['customer_context'] or '')[:500]}\n"
+            f"\nIMPORTANT: Be concise. Only cover what's NEW since the last email. "
+            f"Don't re-explain things already discussed. 3-5 sentences max."
+        )
         draft = await svc.generate_draft(org_id=c["org_id"], instruction=instruction, customer_id=c["customer_id"])
         if draft.get("error"):
             return await self._post(f"Could not generate email draft: {draft['error']}")
-        text = f"Draft email:\nSubject: {draft.get('subject', '')}\n\n{draft.get('body', '')}\n\nReply \"send\" to send, or edit and repost."
+        subject = draft.get("subject", "")
+        body = draft.get("body", "")
+        # Post as structured draft comment (frontend detects [DRAFT_EMAIL] prefix)
+        text = f"[DRAFT_EMAIL]\nTo: {to_email}\nSubject: {subject}\n---\n{body}"
         await log_agent_call(organization_id=c["org_id"], agent_name="command_executor",
                              action="execute_draft_email", input_summary=f"Job: {c['action'].description[:80]}",
                              output_summary=f"Draft generated, {len(text)} chars", success=True)

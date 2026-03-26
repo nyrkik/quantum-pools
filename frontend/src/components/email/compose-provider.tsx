@@ -8,6 +8,11 @@ export interface ComposeOptions {
   customerName?: string;
   subject?: string;
   body?: string;
+  jobId?: string;
+  onSent?: () => void;
+  /** Original AI draft body — if user edits, diff is logged as correction */
+  originalDraft?: string;
+  originalSubject?: string;
 }
 
 interface ComposeContextValue {

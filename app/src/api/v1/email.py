@@ -17,6 +17,7 @@ class ComposeRequest(BaseModel):
     subject: str
     body: str
     customer_id: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 class DraftRequest(BaseModel):
@@ -42,6 +43,7 @@ async def compose_email(
         customer_id=req.customer_id,
         sender_name=f"{ctx.user.first_name} {ctx.user.last_name}",
         sender_user_id=ctx.user.id,
+        job_id=req.job_id,
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail={"error": "send_failed", "message": result.get("error", "Failed to send email")})
@@ -78,3 +80,48 @@ async def get_customer_context(
     if not result:
         raise HTTPException(status_code=404, detail={"error": "not_found", "message": "Customer not found"})
     return result
+
+
+class DraftCorrectionRequest(BaseModel):
+    original_subject: str
+    original_body: str
+    edited_subject: str
+    edited_body: str
+    job_id: Optional[str] = None
+
+
+@router.post("/draft-correction")
+async def log_draft_correction(
+    req: DraftCorrectionRequest,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Log when a user edits an AI-drafted email before sending. Used to improve future drafts."""
+    from src.services.agents.observability import log_agent_call
+    await log_agent_call(
+        organization_id=ctx.organization_id,
+        agent_name="email_drafter",
+        action="draft_corrected",
+        input_summary=f"Original: {req.original_subject[:80]}",
+        output_summary=f"Edited: {req.edited_subject[:80]}",
+        success=True,
+        extra_data={
+            "original_subject": req.original_subject,
+            "original_body": req.original_body[:1000],
+            "edited_subject": req.edited_subject,
+            "edited_body": req.edited_body[:1000],
+            "job_id": req.job_id,
+            "corrected_by": f"{ctx.user.first_name} {ctx.user.last_name}",
+        },
+    )
+    # Also store as eval case for future model testing
+    from src.services.agents.evals import create_eval_from_correction
+    await create_eval_from_correction(
+        agent_name="email_drafter",
+        org_id=ctx.organization_id,
+        input_text=f"Subject: {req.original_subject}\n\n{req.original_body}",
+        original_output=req.original_body,
+        corrected_output=req.edited_body,
+        corrected_by=f"{ctx.user.first_name} {ctx.user.last_name}",
+    )
+    return {"logged": True}

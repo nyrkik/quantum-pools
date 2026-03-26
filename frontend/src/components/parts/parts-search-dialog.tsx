@@ -66,6 +66,7 @@ interface PartsSearchDialogProps {
   jobId?: string;
   propertyId?: string;
   waterFeatureId?: string;
+  initialQuery?: string;
 }
 
 export function PartsSearchDialog({
@@ -76,6 +77,7 @@ export function PartsSearchDialog({
   jobId,
   propertyId,
   waterFeatureId,
+  initialQuery,
 }: PartsSearchDialogProps) {
   const [query, setQuery] = useState("");
   const [catalogResults, setCatalogResults] = useState<CatalogPart[]>([]);
@@ -91,6 +93,13 @@ export function PartsSearchDialog({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const webDebounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Set initial query when dialog opens
+  useEffect(() => {
+    if (open && initialQuery) {
+      setQuery(initialQuery);
+    }
+  }, [open, initialQuery]);
 
   // Load categories, brands, and vendors on open
   useEffect(() => {

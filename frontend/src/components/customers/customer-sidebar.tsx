@@ -12,6 +12,7 @@ import {
   Droplets,
   Receipt,
   History,
+  Package,
 } from "lucide-react";
 import type { Permissions } from "@/lib/permissions";
 import type { Customer, Property, Invoice } from "./customer-types";
@@ -31,7 +32,7 @@ function SiteDetails({ property, className }: { property: Property; className?: 
   );
 }
 
-const validTabs = ["overview", "service", "details", "wfs", "invoices"] as const;
+const validTabs = ["overview", "service", "details", "wfs", "parts", "invoices"] as const;
 export type ViewTab = typeof validTabs[number];
 
 interface CustomerSidebarProps {
@@ -164,6 +165,7 @@ export function CustomerSidebar({
           { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
           { key: "service" as const, icon: ClipboardCheck, label: "Service" },
           { key: "wfs" as const, icon: Droplets, label: "Water Features" },
+          { key: "parts" as const, icon: Package, label: "Parts" },
           ...(perms.canViewInvoices ? [{ key: "invoices" as const, icon: Receipt, label: "Invoices" }] : []),
         ].map((nav) => (
           <button

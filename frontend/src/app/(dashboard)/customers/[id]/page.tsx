@@ -24,6 +24,7 @@ import { CustomerServiceTab } from "@/components/customers/customer-service-tab"
 import { CustomerOverviewTab } from "@/components/customers/customer-overview-tab";
 import { CustomerWfsTab } from "@/components/customers/customer-wfs-tab";
 import { CustomerInvoicesTab } from "@/components/customers/customer-invoices-tab";
+import { CustomerPartsTab } from "@/components/customers/customer-parts-tab";
 
 export default function CustomerDetailPage({
   params,
@@ -42,7 +43,7 @@ export default function CustomerDetailPage({
   const isTech = perms.role === "technician";
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const validTabs = ["overview", "service", "details", "wfs", "invoices"] as const;
+  const validTabs = ["overview", "service", "details", "wfs", "parts", "invoices"] as const;
   const resolvedTab = tabParam === "details" && !isTech ? "overview" : tabParam;
   const initialTab = validTabs.includes(resolvedTab as typeof validTabs[number]) ? (resolvedTab as typeof validTabs[number]) : isTech ? "service" : "overview";
   const [viewTab, setViewTab] = useState<ViewTab>(initialTab);
@@ -382,6 +383,10 @@ export default function CustomerDetailPage({
               onRateSplitEditChange={(wfId, value) => setRateSplitEdits(prev => ({ ...prev, [wfId]: value }))}
               onLoad={load}
             />
+          )}
+
+          {viewTab === "parts" && (
+            <CustomerPartsTab customer={customer} properties={properties} />
           )}
 
           {viewTab === "invoices" && perms.canViewInvoices && (

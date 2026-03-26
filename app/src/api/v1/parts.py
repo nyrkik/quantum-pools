@@ -92,6 +92,45 @@ async def catalog_stats(
     return await svc.get_stats()
 
 
+@router.post("/discover")
+async def discover_parts_for_org(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger equipment parts discovery for the current org (admin+).
+
+    Scans all equipment models across water features and equipment items,
+    discovers replacement parts for any models not yet in the catalog.
+    """
+    from src.services.parts.equipment_parts_agent import EquipmentPartsAgent
+
+    agent = EquipmentPartsAgent(db)
+    result = await agent.discover_parts_for_org(ctx.organization_id)
+    return result
+
+
+@router.post("/discover-model")
+async def discover_parts_for_model(
+    body: dict,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Discover parts for a specific equipment model.
+
+    Body: {"model": "Pentair CCP420", "type": "filter"}
+    """
+    from src.services.parts.equipment_parts_agent import EquipmentPartsAgent
+
+    model = (body.get("model") or "").strip()
+    eq_type = (body.get("type") or "equipment").strip()
+    if len(model) < 5:
+        raise HTTPException(status_code=400, detail="Model name too short (min 5 chars)")
+
+    agent = EquipmentPartsAgent(db)
+    parts = await agent.discover_parts_for_model(model, eq_type)
+    return {"model": model, "type": eq_type, "parts_discovered": len(parts), "parts": parts}
+
+
 @router.get("/{part_id}")
 async def get_part(
     part_id: str,

@@ -53,7 +53,32 @@ async def update_water_feature(
     db: AsyncSession = Depends(get_db),
 ):
     svc = WaterFeatureService(db)
+
+    # Capture old equipment values before update
+    from src.services.parts.equipment_change_detector import detect_equipment_changes, queue_parts_discovery
+    old_wf = await svc.get(ctx.organization_id, wf_id)
+    old_equip = {
+        "pump_type": old_wf.pump_type,
+        "filter_type": old_wf.filter_type,
+        "heater_type": old_wf.heater_type,
+        "chlorinator_type": old_wf.chlorinator_type,
+        "automation_system": old_wf.automation_system,
+    }
+
     wf = await svc.update(ctx.organization_id, wf_id, **body.model_dump(exclude_unset=True))
+
+    # Check for equipment changes and queue background discovery
+    new_equip = {
+        "pump_type": wf.pump_type,
+        "filter_type": wf.filter_type,
+        "heater_type": wf.heater_type,
+        "chlorinator_type": wf.chlorinator_type,
+        "automation_system": wf.automation_system,
+    }
+    changes = detect_equipment_changes(old_equip, new_equip)
+    if changes:
+        await queue_parts_discovery(db, changes)
+
     return WaterFeatureResponse.model_validate(wf)
 
 

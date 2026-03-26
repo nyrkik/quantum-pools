@@ -21,6 +21,7 @@ import {
   Loader2,
   Package,
   X,
+  RefreshCw,
 } from "lucide-react";
 import { LogPurchaseForm } from "@/components/parts/log-purchase-form";
 
@@ -68,6 +69,7 @@ export default function PartsPage() {
   const [recentPurchases, setRecentPurchases] = useState<RecentPurchase[]>([]);
   const [purchasePart, setPurchasePart] = useState<CatalogPart | null>(null);
   const [stats, setStats] = useState<{ total: number; by_vendor: Record<string, number> } | null>(null);
+  const [discovering, setDiscovering] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -128,6 +130,37 @@ export default function PartsPage() {
     setQuery("");
   };
 
+  const handleDiscover = async () => {
+    setDiscovering(true);
+    try {
+      const result = await api.post<{
+        models_scanned: number;
+        new_models_found: number;
+        parts_discovered: number;
+        errors: number;
+      }>("/v1/parts/discover");
+      if (result.new_models_found === 0) {
+        toast.info("Catalog is up to date — no new equipment models found");
+      } else {
+        toast.success(
+          `Catalog updated: ${result.parts_discovered} parts discovered from ${result.new_models_found} new equipment model${result.new_models_found !== 1 ? "s" : ""}`
+        );
+      }
+      if (result.errors > 0) {
+        toast.warning(`${result.errors} model${result.errors !== 1 ? "s" : ""} failed during discovery`);
+      }
+      // Refresh stats and search
+      api.get<{ total: number; by_vendor: Record<string, number> }>("/v1/parts/stats")
+        .then(setStats)
+        .catch(() => {});
+      doSearch(query, selectedCategory, selectedBrand);
+    } catch {
+      toast.error("Catalog discovery failed");
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
   const hasFilters = selectedCategory || selectedBrand;
 
   return (
@@ -142,6 +175,20 @@ export default function PartsPage() {
             </p>
           )}
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleDiscover}
+          disabled={discovering}
+          className="h-8 text-xs"
+        >
+          {discovering ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+          )}
+          {discovering ? "Discovering..." : "Update Catalog"}
+        </Button>
       </div>
 
       {/* Search bar */}

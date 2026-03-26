@@ -8,20 +8,25 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Search,
   ExternalLink,
   ShoppingCart,
   Loader2,
   Package,
-  X,
   RefreshCw,
+  ChevronRight,
+  ChevronDown,
+  Filter,
+  Cog,
+  Flame,
+  Droplets,
+  Cpu,
+  Wrench,
+  Beaker,
+  CircleDot,
+  Zap,
+  Settings2,
+  Box,
 } from "lucide-react";
 import { LogPurchaseForm } from "@/components/parts/log-purchase-form";
 
@@ -37,6 +42,7 @@ interface CatalogPart {
   image_url: string | null;
   product_url: string | null;
   is_chemical: boolean;
+  estimated_price?: number | null;
 }
 
 interface Vendor {
@@ -46,114 +52,144 @@ interface Vendor {
   search_url_template: string | null;
 }
 
-interface RecentPurchase {
-  id: string;
-  description: string;
-  sku: string | null;
-  vendor_name: string;
-  unit_cost: number;
-  quantity: number;
-  total_cost: number;
-  purchased_at: string;
+interface CategoryInfo {
+  name: string;
+  count: number;
+}
+
+const CATEGORY_ICONS: Record<string, React.ElementType> = {
+  Pumps: Cog,
+  Filters: Filter,
+  Heaters: Flame,
+  Chemicals: Beaker,
+  "Salt Systems": Droplets,
+  Automation: Cpu,
+  Cleaners: Wrench,
+  Motors: Zap,
+  Valves: Settings2,
+  Lighting: Zap,
+  "O-Rings": CircleDot,
+  Baskets: Box,
+  Gauges: Settings2,
+  Tools: Wrench,
+  Accessories: Package,
+};
+
+function getCategoryIcon(category: string) {
+  // Try exact match first, then partial
+  if (CATEGORY_ICONS[category]) return CATEGORY_ICONS[category];
+  const lower = category.toLowerCase();
+  for (const [key, Icon] of Object.entries(CATEGORY_ICONS)) {
+    if (lower.includes(key.toLowerCase())) return Icon;
+  }
+  return Package;
 }
 
 export default function PartsPage() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<CatalogPart[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [brands, setBrands] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
-  const [selectedBrand, setSelectedBrand] = useState<string>("");
+  const [searchResults, setSearchResults] = useState<CatalogPart[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [recentPurchases, setRecentPurchases] = useState<RecentPurchase[]>([]);
-  const [purchasePart, setPurchasePart] = useState<CatalogPart | null>(null);
   const [stats, setStats] = useState<{ total: number; by_vendor: Record<string, number> } | null>(null);
   const [discovering, setDiscovering] = useState(false);
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [categoryParts, setCategoryParts] = useState<Record<string, CatalogPart[]>>({});
+  const [loadingCategory, setLoadingCategory] = useState<string | null>(null);
+  const [purchasePart, setPurchasePart] = useState<CatalogPart | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Load initial data
   useEffect(() => {
     Promise.all([
       api.get<string[]>("/v1/parts/categories"),
-      api.get<string[]>("/v1/parts/brands"),
       api.get<Vendor[]>("/v1/vendors"),
-      api.get<RecentPurchase[]>("/v1/part-purchases?limit=10"),
       api.get<{ total: number; by_vendor: Record<string, number> }>("/v1/parts/stats"),
-    ]).then(([cats, brds, vends, purchases, st]) => {
-      setCategories(cats);
-      setBrands(brds);
+    ]).then(([cats, vends, st]) => {
+      // Get counts per category
+      const catPromises = cats.map(async (c) => {
+        const parts = await api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(c)}&limit=0`).catch(() => []);
+        return { name: c, count: parts.length };
+      });
+      // Actually, the search endpoint doesn't return count separately. Let's use a different approach.
+      // Just load all parts per category count from search with limit=200
+      setCategories(cats.map(c => ({ name: c, count: 0 })));
       setVendors(vends);
-      setRecentPurchases(purchases);
       setStats(st);
+
+      // Get actual counts
+      cats.forEach(c => {
+        api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(c)}&limit=200`)
+          .then(parts => {
+            setCategories(prev => prev.map(cat => cat.name === c ? { ...cat, count: parts.length } : cat));
+          })
+          .catch(() => {});
+      });
     }).catch(() => {});
   }, []);
 
-  const doSearch = useCallback(async (q: string, cat: string, brand: string) => {
-    setLoading(true);
+  // Search
+  const doSearch = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
     try {
-      const params = new URLSearchParams();
-      params.set("q", q);
-      params.set("limit", "40");
-      if (cat) params.set("category", cat);
-      if (brand) params.set("brand", brand);
-      const data = await api.get<CatalogPart[]>(`/v1/parts/search?${params}`);
-      setResults(data);
+      const data = await api.get<CatalogPart[]>(`/v1/parts/search?q=${encodeURIComponent(q)}&limit=40`);
+      setSearchResults(data);
     } catch {
       toast.error("Search failed");
     } finally {
-      setLoading(false);
+      setSearching(false);
     }
   }, []);
 
-  // Debounced search
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      doSearch(query, selectedCategory, selectedBrand);
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [query, selectedCategory, selectedBrand, doSearch]);
+    debounceRef.current = setTimeout(() => doSearch(query), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, doSearch]);
 
-  const getScpSearchUrl = (q: string): string | null => {
-    const scp = vendors.find((v) => v.provider_type === "scp");
-    if (!scp?.search_url_template) return null;
-    return scp.search_url_template.replace("{query}", encodeURIComponent(q));
+  // Expand/collapse category
+  const toggleCategory = async (category: string) => {
+    if (expandedCategory === category) {
+      setExpandedCategory(null);
+      return;
+    }
+    setExpandedCategory(category);
+    if (!categoryParts[category]) {
+      setLoadingCategory(category);
+      try {
+        const parts = await api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(category)}&limit=200`);
+        setCategoryParts(prev => ({ ...prev, [category]: parts }));
+      } catch {
+        toast.error("Failed to load parts");
+      } finally {
+        setLoadingCategory(null);
+      }
+    }
   };
 
-  const clearFilters = () => {
-    setSelectedCategory("");
-    setSelectedBrand("");
-    setQuery("");
+  const getSearchUrl = (q: string): string | null => {
+    const scp = vendors.find(v => v.provider_type === "scp");
+    if (!scp?.search_url_template) return null;
+    return scp.search_url_template.replace("{query}", encodeURIComponent(q));
   };
 
   const handleDiscover = async () => {
     setDiscovering(true);
     try {
       const result = await api.post<{
-        models_scanned: number;
-        new_models_found: number;
-        parts_discovered: number;
-        errors: number;
+        models_scanned: number; new_models_found: number; parts_discovered: number; errors: number;
       }>("/v1/parts/discover");
       if (result.new_models_found === 0) {
-        toast.info("Catalog is up to date — no new equipment models found");
+        toast.info("Catalog is up to date");
       } else {
-        toast.success(
-          `Catalog updated: ${result.parts_discovered} parts discovered from ${result.new_models_found} new equipment model${result.new_models_found !== 1 ? "s" : ""}`
-        );
+        toast.success(`${result.parts_discovered} parts discovered from ${result.new_models_found} new models`);
       }
-      if (result.errors > 0) {
-        toast.warning(`${result.errors} model${result.errors !== 1 ? "s" : ""} failed during discovery`);
-      }
-      // Refresh stats and search
-      api.get<{ total: number; by_vendor: Record<string, number> }>("/v1/parts/stats")
-        .then(setStats)
-        .catch(() => {});
-      doSearch(query, selectedCategory, selectedBrand);
+      // Refresh
+      window.location.reload();
     } catch {
       toast.error("Catalog discovery failed");
     } finally {
@@ -161,233 +197,180 @@ export default function PartsPage() {
     }
   };
 
-  const hasFilters = selectedCategory || selectedBrand;
+  const isSearching = query.trim().length > 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Parts Catalog</h1>
           {stats && (
-            <p className="text-sm text-muted-foreground">
-              {stats.total} parts from {Object.keys(stats.by_vendor).length} vendor{Object.keys(stats.by_vendor).length !== 1 ? "s" : ""}
-            </p>
+            <p className="text-sm text-muted-foreground">{stats.total} parts</p>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDiscover}
-          disabled={discovering}
-          className="h-8 text-xs"
-        >
-          {discovering ? (
-            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-          )}
+        <Button variant="outline" size="sm" onClick={handleDiscover} disabled={discovering} className="h-8 text-xs">
+          {discovering ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
           {discovering ? "Discovering..." : "Update Catalog"}
         </Button>
       </div>
 
       {/* Search bar */}
-      <div className="space-y-2">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search parts by name, SKU, brand, or description..."
-            className="pl-9 h-10 text-sm"
-          />
-        </div>
-
-        {/* Filter pills */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Select
-            value={selectedCategory}
-            onValueChange={(v) => setSelectedCategory(v === "all" ? "" : v)}
-          >
-            <SelectTrigger className="h-7 text-xs w-auto min-w-[120px]">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={selectedBrand}
-            onValueChange={(v) => setSelectedBrand(v === "all" ? "" : v)}
-          >
-            <SelectTrigger className="h-7 text-xs w-auto min-w-[120px]">
-              <SelectValue placeholder="Brand" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Brands</SelectItem>
-              {brands.map((b) => (
-                <SelectItem key={b} value={b}>{b}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {hasFilters && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearFilters}>
-              <X className="h-3 w-3 mr-1" /> Clear
-            </Button>
-          )}
-        </div>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search parts by name, SKU, or brand..."
+          className="pl-9 h-10 text-sm"
+        />
       </div>
 
-      {/* Log purchase form (inline when a part is selected) */}
+      {/* Log purchase form (inline) */}
       {purchasePart && (
         <Card className="border-l-4 border-primary shadow-sm">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-medium">Log Purchase: {purchasePart.name}</p>
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setPurchasePart(null)}>
-                Cancel
-              </Button>
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setPurchasePart(null)}>Cancel</Button>
             </div>
             <LogPurchaseForm
-              onPurchaseLogged={() => {
-                setPurchasePart(null);
-                api.get<RecentPurchase[]>("/v1/part-purchases?limit=10")
-                  .then(setRecentPurchases)
-                  .catch(() => {});
-              }}
+              onPurchaseLogged={() => { setPurchasePart(null); }}
               onCancel={() => setPurchasePart(null)}
             />
           </CardContent>
         </Card>
       )}
 
-      {/* Results */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      ) : results.length === 0 && query ? (
-        <div className="text-center py-12 space-y-3">
-          <Package className="h-10 w-10 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">No parts found for &quot;{query}&quot;</p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const url = getScpSearchUrl(query);
-              if (url) window.open(url, "_blank");
-            }}
-            disabled={!getScpSearchUrl(query)}
-          >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Search on SCP / Pool360
-          </Button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {results.map((part) => (
-            <Card key={part.id} className="shadow-sm hover:shadow-md transition-shadow">
-              <CardContent className="p-3">
-                <div className="flex items-start gap-3">
-                  <div className="flex-shrink-0 h-12 w-12 rounded bg-muted flex items-center justify-center overflow-hidden">
-                    {part.image_url ? (
-                      <img src={part.image_url} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <Package className="h-5 w-5 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-tight truncate">{part.name}</p>
-                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
-                        {part.sku}
-                      </span>
-                      {part.brand && (
-                        <span className="text-[10px] text-muted-foreground">{part.brand}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Category badges */}
-                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                  {part.category && (
-                    <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{part.category}</Badge>
-                  )}
-                  {part.subcategory && (
-                    <Badge variant="outline" className="text-[10px] h-4 px-1.5">{part.subcategory}</Badge>
-                  )}
-                  {part.is_chemical && (
-                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-400 text-amber-600">Chemical</Badge>
-                  )}
-                </div>
-
-                {part.description && (
-                  <p className="text-[11px] text-muted-foreground mt-1.5 line-clamp-2">{part.description}</p>
-                )}
-
-                {/* Actions */}
-                <div className="flex items-center gap-1.5 mt-2.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs flex-1"
-                    onClick={() => setPurchasePart(part)}
-                  >
-                    <ShoppingCart className="h-3 w-3 mr-1" />
-                    Log Purchase
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => {
-                      const url = part.product_url || getScpSearchUrl(part.name);
-                      if (url) window.open(url, "_blank");
-                    }}
-                  >
-                    <ExternalLink className="h-3 w-3 mr-1" />
-                    SCP
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+      {/* Search results (when searching) */}
+      {isSearching && (
+        <div>
+          {searching ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className="text-center py-8 space-y-3">
+              <Package className="h-8 w-8 text-muted-foreground mx-auto" />
+              <p className="text-sm text-muted-foreground">No parts found for &quot;{query}&quot;</p>
+              <Button variant="outline" size="sm" onClick={() => { const url = getSearchUrl(query); if (url) window.open(url, "_blank"); }}>
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Search on SCP
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground mb-2">{searchResults.length} results</p>
+              {searchResults.map((part) => (
+                <PartRow key={part.id} part={part} onLogPurchase={() => setPurchasePart(part)} getSearchUrl={getSearchUrl} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Recent Purchases */}
-      {recentPurchases.length > 0 && (
-        <div className="space-y-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Recent Purchases</h2>
-          <Card className="shadow-sm">
-            <CardContent className="p-0">
-              <div className="divide-y">
-                {recentPurchases.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium truncate">{p.description}</span>
-                        {p.sku && (
-                          <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded">{p.sku}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>{p.vendor_name}</span>
-                        <span>{p.quantity} x ${p.unit_cost.toFixed(2)}</span>
-                        <span>{p.purchased_at}</span>
-                      </div>
-                    </div>
-                    <span className="text-sm font-medium">${p.total_cost.toFixed(2)}</span>
+      {/* Category browse (default view) */}
+      {!isSearching && (
+        <div className="space-y-1">
+          {categories.map((cat) => {
+            const Icon = getCategoryIcon(cat.name);
+            const isExpanded = expandedCategory === cat.name;
+            const isLoading = loadingCategory === cat.name;
+            const parts = categoryParts[cat.name] || [];
+
+            return (
+              <div key={cat.name} className="border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => toggleCategory(cat.name)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">{cat.name}</span>
+                    {cat.count > 0 && (
+                      <Badge variant="secondary" className="text-[10px] h-5 px-2">{cat.count}</Badge>
+                    )}
                   </div>
-                ))}
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : isExpanded ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t bg-muted/20">
+                    {parts.length === 0 && !isLoading ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">No parts in this category</p>
+                    ) : (
+                      <div className="divide-y">
+                        {parts.map((part) => (
+                          <PartRow key={part.id} part={part} onLogPurchase={() => setPurchasePart(part)} getSearchUrl={getSearchUrl} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </CardContent>
-          </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PartRow({ part, onLogPurchase, getSearchUrl }: {
+  part: CatalogPart;
+  onLogPurchase: () => void;
+  getSearchUrl: (q: string) => string | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="px-4 py-2.5 hover:bg-muted/30 transition-colors">
+      <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <div className="flex-shrink-0 h-8 w-8 rounded bg-muted flex items-center justify-center overflow-hidden">
+          {part.image_url ? (
+            <img src={part.image_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <Package className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">{part.name}</p>
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span className="font-mono bg-muted px-1 rounded">{part.sku}</span>
+            {part.brand && <span>{part.brand}</span>}
+            {part.subcategory && <span>· {part.subcategory}</span>}
+          </div>
+        </div>
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform flex-shrink-0 ${expanded ? "rotate-180" : ""}`} />
+      </div>
+
+      {expanded && (
+        <div className="ml-11 mt-2 space-y-2 pb-1">
+          {part.description && (
+            <p className="text-xs text-muted-foreground">{part.description}</p>
+          )}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); onLogPurchase(); }}>
+              <ShoppingCart className="h-3 w-3 mr-1" /> Log Purchase
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                const url = part.product_url || getSearchUrl(part.name);
+                if (url) window.open(url, "_blank");
+              }}
+            >
+              <ExternalLink className="h-3 w-3 mr-1" /> Buy Online
+            </Button>
+          </div>
         </div>
       )}
     </div>

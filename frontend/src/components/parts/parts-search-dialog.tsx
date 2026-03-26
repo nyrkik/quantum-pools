@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, ExternalLink, ShoppingCart, Loader2, Package } from "lucide-react";
+import { Search, ExternalLink, ShoppingCart, Loader2, Package, Globe } from "lucide-react";
 
 interface CatalogPart {
   id: string;
@@ -34,6 +34,21 @@ interface CatalogPart {
   image_url: string | null;
   product_url: string | null;
   is_chemical: boolean;
+}
+
+interface WebResult {
+  product_name: string;
+  price: number | null;
+  vendor_name: string;
+  vendor_url: string;
+  availability: string;
+  relevance_score: number;
+}
+
+interface WebSearchResponse {
+  catalog_results: CatalogPart[];
+  web_results: WebResult[];
+  cached: boolean;
 }
 
 interface Vendor {
@@ -63,14 +78,18 @@ export function PartsSearchDialog({
   waterFeatureId,
 }: PartsSearchDialogProps) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<CatalogPart[]>([]);
+  const [catalogResults, setCatalogResults] = useState<CatalogPart[]>([]);
+  const [webResults, setWebResults] = useState<WebResult[]>([]);
+  const [webCached, setWebCached] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [webSearching, setWebSearching] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [selectedBrand, setSelectedBrand] = useState<string>("");
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const webDebounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Load categories, brands, and vendors on open
@@ -86,14 +105,15 @@ export function PartsSearchDialog({
       setVendors(vends);
     }).catch(() => {});
 
-    // Initial search (show all)
-    doSearch("", "", "");
+    // Initial catalog search (show all)
+    doCatalogSearch("", "", "");
 
     // Focus input
     setTimeout(() => inputRef.current?.focus(), 100);
   }, [open]);
 
-  const doSearch = useCallback(async (q: string, cat: string, brand: string) => {
+  // Catalog search (fast, local)
+  const doCatalogSearch = useCallback(async (q: string, cat: string, brand: string) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -102,7 +122,7 @@ export function PartsSearchDialog({
       if (cat) params.set("category", cat);
       if (brand) params.set("brand", brand);
       const data = await api.get<CatalogPart[]>(`/v1/parts/search?${params}`);
-      setResults(data);
+      setCatalogResults(data);
     } catch {
       toast.error("Search failed");
     } finally {
@@ -110,17 +130,52 @@ export function PartsSearchDialog({
     }
   }, []);
 
-  // Debounced search on query change
+  // Web search (slower, AI-powered)
+  const doWebSearch = useCallback(async (q: string) => {
+    if (!q.trim() || q.trim().length < 3) {
+      setWebResults([]);
+      setWebCached(false);
+      return;
+    }
+    setWebSearching(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("q", q);
+      params.set("limit", "10");
+      const data = await api.get<WebSearchResponse>(`/v1/parts/web-search?${params}`);
+      setWebResults(data.web_results);
+      setWebCached(data.cached);
+    } catch {
+      // Silently fail — web search is supplemental
+      setWebResults([]);
+    } finally {
+      setWebSearching(false);
+    }
+  }, []);
+
+  // Debounced catalog search (300ms)
   useEffect(() => {
     if (!open) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      doSearch(query, selectedCategory, selectedBrand);
+      doCatalogSearch(query, selectedCategory, selectedBrand);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, selectedCategory, selectedBrand, open, doSearch]);
+  }, [query, selectedCategory, selectedBrand, open, doCatalogSearch]);
+
+  // Debounced web search (800ms — slower to avoid hammering)
+  useEffect(() => {
+    if (!open) return;
+    if (webDebounceRef.current) clearTimeout(webDebounceRef.current);
+    webDebounceRef.current = setTimeout(() => {
+      doWebSearch(query);
+    }, 800);
+    return () => {
+      if (webDebounceRef.current) clearTimeout(webDebounceRef.current);
+    };
+  }, [query, open, doWebSearch]);
 
   const getScpSearchUrl = (q: string): string | null => {
     const scp = vendors.find((v) => v.provider_type === "scp");
@@ -132,7 +187,9 @@ export function PartsSearchDialog({
     setQuery("");
     setSelectedCategory("");
     setSelectedBrand("");
-    setResults([]);
+    setCatalogResults([]);
+    setWebResults([]);
+    setWebCached(false);
   };
 
   const handleClose = () => {
@@ -140,13 +197,20 @@ export function PartsSearchDialog({
     onClose();
   };
 
+  const formatPrice = (price: number | null) => {
+    if (price === null) return null;
+    return `$${price.toFixed(2)}`;
+  };
+
+  const hasResults = catalogResults.length > 0 || webResults.length > 0;
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-0">
           <DialogTitle className="text-base flex items-center gap-2">
             <Package className="h-4 w-4" />
-            Search Parts Catalog
+            Search Parts
           </DialogTitle>
         </DialogHeader>
 
@@ -192,11 +256,11 @@ export function PartsSearchDialog({
 
         {/* Results */}
         <ScrollArea className="flex-1 min-h-0 px-4 pb-4">
-          {loading ? (
+          {loading && catalogResults.length === 0 ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : results.length === 0 ? (
+          ) : !hasResults && !webSearching ? (
             <div className="text-center py-8 space-y-3">
               <p className="text-sm text-muted-foreground">
                 {query ? "No parts found" : "Enter a search term to find parts"}
@@ -217,95 +281,179 @@ export function PartsSearchDialog({
               )}
             </div>
           ) : (
-            <div className="space-y-1.5 pt-2">
-              {results.map((part) => (
-                <div
-                  key={part.id}
-                  className="flex items-start gap-3 rounded-md border p-2.5 hover:bg-accent/50 transition-colors"
-                >
-                  {/* Image or placeholder */}
-                  <div className="flex-shrink-0 h-12 w-12 rounded bg-muted flex items-center justify-center overflow-hidden">
-                    {part.image_url ? (
-                      <img src={part.image_url} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <Package className="h-5 w-5 text-muted-foreground" />
-                    )}
+            <div className="space-y-4 pt-2">
+              {/* Catalog Results */}
+              {catalogResults.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      From Catalog
+                    </h3>
+                    <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                      {catalogResults.length}
+                    </Badge>
                   </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{part.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
-                        {part.sku}
-                      </span>
-                      {part.brand && (
-                        <span className="text-xs text-muted-foreground">{part.brand}</span>
-                      )}
-                      {part.category && (
-                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                          {part.category}
-                        </Badge>
-                      )}
-                      {part.is_chemical && (
-                        <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-400 text-amber-600">
-                          Chemical
-                        </Badge>
-                      )}
-                    </div>
-                    {part.description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
-                        {part.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex flex-col gap-1 flex-shrink-0">
-                    {onSelectPart && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          onSelectPart(part);
-                          handleClose();
-                        }}
+                  <div className="space-y-1.5">
+                    {catalogResults.map((part) => (
+                      <div
+                        key={part.id}
+                        className="flex items-start gap-3 rounded-md border p-2.5 hover:bg-accent/50 transition-colors"
                       >
-                        Select
-                      </Button>
-                    )}
-                    {onLogPurchase && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          onLogPurchase(part);
-                          handleClose();
-                        }}
-                      >
-                        <ShoppingCart className="h-3 w-3 mr-1" />
-                        Log
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs text-muted-foreground"
-                      onClick={() => {
-                        const url = part.product_url || getScpSearchUrl(part.name);
-                        if (url) window.open(url, "_blank");
-                      }}
-                    >
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      SCP
-                    </Button>
+                        <div className="flex-shrink-0 h-12 w-12 rounded bg-muted flex items-center justify-center overflow-hidden">
+                          {part.image_url ? (
+                            <img src={part.image_url} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <Package className="h-5 w-5 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium truncate block">{part.name}</span>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
+                              {part.sku}
+                            </span>
+                            {part.brand && (
+                              <span className="text-xs text-muted-foreground">{part.brand}</span>
+                            )}
+                            {part.category && (
+                              <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                                {part.category}
+                              </Badge>
+                            )}
+                            {part.is_chemical && (
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-400 text-amber-600">
+                                Chemical
+                              </Badge>
+                            )}
+                          </div>
+                          {part.description && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
+                              {part.description}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-1 flex-shrink-0">
+                          {onSelectPart && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                onSelectPart(part);
+                                handleClose();
+                              }}
+                            >
+                              Select
+                            </Button>
+                          )}
+                          {onLogPurchase && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                onLogPurchase(part);
+                                handleClose();
+                              }}
+                            >
+                              <ShoppingCart className="h-3 w-3 mr-1" />
+                              Log
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground"
+                            onClick={() => {
+                              const url = part.product_url || getScpSearchUrl(part.name);
+                              if (url) window.open(url, "_blank");
+                            }}
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            SCP
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
+              )}
+
+              {/* Web Results */}
+              {(webResults.length > 0 || webSearching) && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Found Online
+                    </h3>
+                    {webSearching && (
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    )}
+                    {!webSearching && webResults.length > 0 && (
+                      <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                        {webResults.length}
+                      </Badge>
+                    )}
+                    {webCached && !webSearching && (
+                      <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-muted-foreground">
+                        Cached
+                      </Badge>
+                    )}
+                  </div>
+                  {webSearching && webResults.length === 0 ? (
+                    <div className="flex items-center justify-center py-4 gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Searching the web...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {webResults.map((result, idx) => (
+                        <div
+                          key={`web-${idx}`}
+                          className="flex items-start gap-3 rounded-md border p-2.5 hover:bg-accent/50 transition-colors"
+                        >
+                          <div className="flex-shrink-0 h-12 w-12 rounded bg-blue-50 dark:bg-blue-950 flex items-center justify-center">
+                            <Globe className="h-5 w-5 text-blue-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm font-medium truncate block">{result.product_name}</span>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              {result.price !== null && (
+                                <span className="text-xs font-semibold text-green-600">
+                                  {formatPrice(result.price)}
+                                </span>
+                              )}
+                              <span className="text-xs text-muted-foreground">{result.vendor_name}</span>
+                              {result.availability === "in_stock" && (
+                                <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                                  In Stock
+                                </Badge>
+                              )}
+                              {result.availability === "out_of_stock" && (
+                                <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300">
+                                  Out of Stock
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1 flex-shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => window.open(result.vendor_url, "_blank")}
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Buy
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Fallback search on SCP */}
               {query && (

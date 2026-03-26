@@ -31,6 +31,35 @@ async def search_parts(
     return await svc.search(q, vendor_provider=vendor, category=category, brand=brand, limit=limit)
 
 
+@router.get("/web-search")
+async def web_search_parts(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=20),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search local catalog + web for pool parts. Returns both result sets."""
+    from src.services.parts.web_search_agent import PartsWebSearchAgent
+
+    # Local catalog search
+    svc = PartsSearchService(db)
+    catalog_results = await svc.search(q, limit=limit)
+
+    # Web search (graceful failure)
+    agent = PartsWebSearchAgent()
+    try:
+        web_data = await agent.search(q, max_results=limit)
+    except Exception:
+        logger.warning(f"Web search failed for '{q}', returning catalog only")
+        web_data = {"web_results": [], "cached": False}
+
+    return {
+        "catalog_results": catalog_results,
+        "web_results": web_data["web_results"],
+        "cached": web_data.get("cached", False),
+    }
+
+
 @router.get("/categories")
 async def list_categories(
     vendor: Optional[str] = None,

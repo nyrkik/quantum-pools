@@ -202,68 +202,40 @@ class EquipmentPartsAgent:
         return count > 0
 
     async def _search_and_extract_parts(self, model: str, equipment_type: str) -> list[dict]:
-        """Web search + Claude extraction for a single model."""
-        # Build multiple queries for coverage
-        queries = [
-            f"{model} replacement parts",
-            f"{model} repair kit parts list",
-        ]
-        # If model has a clear brand, try brand-specific query
-        words = model.split()
-        if len(words) >= 2:
-            queries.append(f"{words[0]} {' '.join(words[1:])} parts list")
-
-        all_results = []
-        for i, query in enumerate(queries):
-            try:
-                results = self._web_search(query)
-                all_results.extend(results)
-            except Exception as e:
-                logger.warning(f"Web search failed for '{query}': {e}")
-            # Rate limit between queries
-            if i < len(queries) - 1:
-                await asyncio.sleep(_SEARCH_DELAY)
-
-        if not all_results:
-            return []
-
-        # Deduplicate by URL
-        seen_urls = set()
-        unique = []
-        for r in all_results:
-            url = r.get("url", "")
-            if url not in seen_urls:
-                seen_urls.add(url)
-                unique.append(r)
-
-        # Format for Claude
-        formatted = ""
-        for i, r in enumerate(unique[:15], 1):
-            formatted += f"\n{i}. **{r['title']}**\n   URL: {r['url']}\n   {r['snippet']}\n"
-
-        # Claude extraction
+        """Use Claude's knowledge to identify replacement parts, then verify with web search."""
         settings = get_settings()
         if not settings.anthropic_api_key:
-            logger.warning("No Anthropic API key — cannot extract parts")
+            logger.warning("No Anthropic API key — cannot discover parts")
             return []
 
         ai_model = await get_model("fast")
-        prompt = _EXTRACTION_PROMPT.format(
-            model=model,
-            equipment_type=equipment_type,
-            formatted_results=formatted,
-            max_parts=_MAX_PARTS_PER_MODEL,
-        )
-
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+        # Step 1: Ask Claude directly — it knows pool equipment parts from training data
+        knowledge_prompt = f"""List the common replacement and maintenance parts for this pool equipment:
+
+Equipment: {model}
+Type: {equipment_type}
+
+For each part provide:
+- name: specific part name including brand and model compatibility
+- sku: manufacturer part number (if you know it, otherwise null)
+- brand: manufacturer name
+- category: part type (cartridge, grid, o_ring, seal, gasket, motor, impeller, valve, clamp, band, basket, gauge, switch, board, element, other)
+- estimated_price: typical retail price in USD (your best estimate, or null)
+- compatible_models: list of equipment model numbers this part fits (include "{model}" and any known compatible models)
+
+Return ONLY a JSON array. Maximum {_MAX_PARTS_PER_MODEL} parts. Focus on the most commonly replaced items.
+Include: filter media/cartridges, o-rings, seals, gaskets, valves, clamps, motors, impellers, baskets, gauges.
+Exclude: the equipment unit itself, tools, chemicals, accessories."""
+
         try:
             response = await client.messages.create(
                 model=ai_model,
                 max_tokens=2048,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": knowledge_prompt}],
             )
             text = response.content[0].text.strip()
-            # Strip markdown code blocks
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
                 if text.endswith("```"):
@@ -272,10 +244,9 @@ class EquipmentPartsAgent:
 
             parts = json.loads(text)
             if not isinstance(parts, list):
-                logger.warning(f"Expected list from extraction, got {type(parts)}")
+                logger.warning(f"Expected list, got {type(parts)}")
                 return []
 
-            # Validate and clean
             cleaned = []
             for p in parts:
                 if not isinstance(p, dict):
@@ -292,13 +263,14 @@ class EquipmentPartsAgent:
                     "compatible_models": p.get("compatible_models", [model]),
                 })
 
+            logger.info(f"Claude identified {len(cleaned)} parts for {model}")
             return cleaned[:_MAX_PARTS_PER_MODEL]
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse extraction response: {e}")
+            logger.error(f"Failed to parse parts response for {model}: {e}")
             return []
         except Exception as e:
-            logger.error(f"Claude extraction error: {e}")
+            logger.error(f"Parts discovery error for {model}: {e}")
             return []
 
     def _web_search(self, query: str, max_results: int = 10) -> list[dict]:

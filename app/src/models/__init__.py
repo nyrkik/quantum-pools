@@ -49,6 +49,9 @@ from src.services.agents.observability import AgentLog
 from src.services.agents.evals import AgentEvalCase, AgentEvalResult
 from src.models.charge_template import ChargeTemplate
 from src.models.visit_charge import VisitCharge
+from src.models.visit_photo import VisitPhoto
+from src.models.service_checklist_item import ServiceChecklistItem
+from src.models.visit_checklist_entry import VisitChecklistEntry
 from src.models.notification import Notification
 from src.models.permission import Permission
 from src.models.permission_preset import PermissionPreset
@@ -99,5 +102,8 @@ __all__ = [
     "EMDLookup",
     "ChargeTemplate",
     "VisitCharge",
+    "VisitPhoto",
+    "ServiceChecklistItem",
+    "VisitChecklistEntry",
     "ServiceTier",
 ]

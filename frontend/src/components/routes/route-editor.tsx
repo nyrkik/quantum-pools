@@ -17,7 +17,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Play, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
 import type { OptimizationRoute, OptimizationStop } from "@/types/route";
 
 interface RouteEditorProps {
@@ -69,6 +70,16 @@ function SortableStop({
           <p>{stop.estimated_drive_time_from_previous}m drive</p>
         )}
       </div>
+      {stop.route_stop_id && (
+        <Link
+          href={`/visits/new?property=${stop.property_id}&route_stop=${stop.route_stop_id}`}
+          className="flex-shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 transition-colors"
+          title="Start visit"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Play className="h-4 w-4" />
+        </Link>
+      )}
     </div>
   );
 }

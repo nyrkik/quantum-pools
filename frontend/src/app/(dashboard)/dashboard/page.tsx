@@ -27,6 +27,7 @@ import {
   Bot,
   ArrowRight,
   Loader2,
+  Play,
 } from "lucide-react";
 import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
 import type { AgentStats, AgentAction, AgentMessage } from "@/types/agent";
@@ -62,6 +63,11 @@ export default function DashboardPage() {
   const [pendingMessages, setPendingMessages] = useState<AgentMessage[]>([]);
   const [openActions, setOpenActions] = useState<AgentAction[]>([]);
   const [recentMessages, setRecentMessages] = useState<AgentMessage[]>([]);
+  const [activeVisit, setActiveVisit] = useState<{
+    visit: { id: string; started_at: string };
+    customer: { name: string };
+    property: { address: string };
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -73,6 +79,7 @@ export default function DashboardPage() {
           api.get<{ total: number }>(
             `/v1/visits?scheduled_date=${new Date().toISOString().split("T")[0]}&limit=1`
           ),
+          api.get("/v1/visits/active").catch(() => null),
         ];
 
         if (perms.canViewInbox) {
@@ -85,7 +92,12 @@ export default function DashboardPage() {
         }
 
         const results = await Promise.all(promises);
-        const [customers, properties, visits] = results as [{ total: number }, { total: number }, { total: number }];
+        const [customers, properties, visits, activeVisitData] = results as [
+          { total: number },
+          { total: number },
+          { total: number },
+          { visit: { id: string; started_at: string }; customer: { name: string }; property: { address: string } } | null,
+        ];
 
         setStats({
           customers: customers.total,
@@ -94,11 +106,15 @@ export default function DashboardPage() {
           monthlyRevenue: 0,
         });
 
-        if (perms.canViewInbox && results.length > 3) {
-          setAgentStats(results[3] as AgentStats);
-          setPendingMessages((results[4] as { items: AgentMessage[] }).items || []);
-          setOpenActions(results[5] as AgentAction[]);
-          setRecentMessages((results[6] as { items: AgentMessage[] }).items || []);
+        if (activeVisitData?.visit) {
+          setActiveVisit(activeVisitData);
+        }
+
+        if (perms.canViewInbox && results.length > 4) {
+          setAgentStats(results[4] as AgentStats);
+          setPendingMessages((results[5] as { items: AgentMessage[] }).items || []);
+          setOpenActions(results[6] as AgentAction[]);
+          setRecentMessages((results[7] as { items: AgentMessage[] }).items || []);
         }
       } catch {
         // Stats will stay at defaults
@@ -140,6 +156,28 @@ export default function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {/* Active Visit */}
+      {activeVisit && (
+        <Link href={`/visits/${activeVisit.visit.id}`}>
+          <Card className="shadow-sm border-l-4 border-green-500 cursor-pointer transition-shadow hover:shadow-md">
+            <CardContent className="flex items-center gap-4 py-4">
+              <div className="rounded-full bg-green-100 dark:bg-green-950 p-2">
+                <Play className="h-5 w-5 text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">Visit In Progress</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {activeVisit.customer.name} — {activeVisit.property.address}
+                </p>
+              </div>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700 flex-shrink-0">
+                Resume
+              </Button>
+            </CardContent>
+          </Card>
+        </Link>
+      )}
 
       {/* Inbox + Actions row */}
       {perms.canViewInbox && agentStats && (

@@ -36,6 +36,7 @@ export interface OptimizationStop {
   estimated_service_duration: number;
   estimated_drive_time_from_previous: number;
   estimated_distance_from_previous: number;
+  route_stop_id?: string;
 }
 
 export interface OptimizationRoute {

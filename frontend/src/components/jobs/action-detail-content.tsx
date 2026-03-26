@@ -24,6 +24,8 @@ import {
   CheckCircle2,
   Trash2,
   DollarSign,
+  Play,
+  Eye,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCompose } from "@/components/email/compose-provider";
@@ -75,6 +77,8 @@ export function ActionDetailContent({
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [reviseInstruction, setReviseInstruction] = useState("");
   const [revising, setRevising] = useState(false);
+  const [visitPropertyId, setVisitPropertyId] = useState<string | null>(null);
+  const [visitId, setVisitId] = useState<string | null>(null);
 
   const handleDraftFollowUp = async () => {
     if (!detail) return;
@@ -176,6 +180,19 @@ export function ActionDetailContent({
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  // For site_visit jobs, resolve the customer's first property
+  useEffect(() => {
+    if (!detail?.matched_customer_id || detail.action_type !== "site_visit") return;
+    api
+      .get<{ items: { id: string }[] }>(`/v1/properties?customer_id=${detail.matched_customer_id}&limit=1`)
+      .then((res) => {
+        if (res.items?.length > 0) {
+          setVisitPropertyId(res.items[0].id);
+        }
+      })
+      .catch(() => {});
+  }, [detail?.matched_customer_id, detail?.action_type]);
 
   const handleAddComment = async () => {
     if (!comment.trim()) return;
@@ -396,6 +413,16 @@ export function ActionDetailContent({
             )}
             Draft Follow-up
           </Button>
+          {detail.action_type === "site_visit" && visitPropertyId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/visits/new?property=${visitPropertyId}&job=${actionId}`)}
+            >
+              <Play className="h-3.5 w-3.5 mr-1.5" />
+              Start Visit
+            </Button>
+          )}
           {detail.invoice_id ? (
             <Button
               variant="outline"

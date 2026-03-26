@@ -1,9 +1,10 @@
-"""Visit endpoints."""
+"""Visit endpoints — CRUD + visit experience lifecycle."""
 
 from typing import Optional
 from datetime import date
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from src.core.database import get_db
 from src.api.deps import get_current_org_user, OrgUserContext
@@ -13,10 +14,57 @@ from src.schemas.visit import (
     ServiceCreate, ServiceUpdate, ServiceResponse,
 )
 from src.services.visit_service import VisitService
+from src.services.visit_experience_service import VisitExperienceService, ALLOWED_PHOTO_TYPES, MAX_PHOTO_SIZE
 from src.services.chemical_service import ChemicalService
+from src.core.exceptions import NotFoundError
 
 router = APIRouter(tags=["visits"])
 
+
+# --- Pydantic bodies for new endpoints ---
+
+class VisitStartRequest(BaseModel):
+    property_id: str
+    route_stop_id: Optional[str] = None
+    tech_id: Optional[str] = None  # admin override; defaults to logged-in user's tech
+
+
+class ChecklistUpdateRequest(BaseModel):
+    entries: list[dict]  # [{id, completed, notes}]
+
+
+class VisitReadingCreate(BaseModel):
+    water_feature_id: Optional[str] = None
+    ph: Optional[float] = None
+    free_chlorine: Optional[float] = None
+    total_chlorine: Optional[float] = None
+    combined_chlorine: Optional[float] = None
+    alkalinity: Optional[float] = None
+    calcium_hardness: Optional[float] = None
+    cyanuric_acid: Optional[float] = None
+    tds: Optional[float] = None
+    phosphates: Optional[float] = None
+    salt: Optional[float] = None
+    water_temp: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class VisitCompleteBody(BaseModel):
+    notes: Optional[str] = None
+
+
+class VisitChargeCreate(BaseModel):
+    property_id: str
+    customer_id: str
+    template_id: Optional[str] = None
+    description: str
+    amount: float
+    category: str = "other"
+    is_taxable: bool = True
+    notes: Optional[str] = None
+
+
+# --- Helpers ---
 
 def _visit_to_response(visit_data: dict) -> VisitResponse:
     visit = visit_data["visit"]
@@ -27,7 +75,75 @@ def _visit_to_response(visit_data: dict) -> VisitResponse:
     return resp
 
 
-# --- Visits ---
+# ======================================================================
+# Visit Experience endpoints (new)
+# ======================================================================
+
+@router.post("/visits/start")
+async def start_visit(
+    body: VisitStartRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start a new in-progress visit. Creates visit + checklist entries."""
+    svc = VisitExperienceService(db)
+    try:
+        # If tech_id override provided (admin), look up that tech's user_id
+        tech_user_id = ctx.user.id
+        if body.tech_id:
+            from sqlalchemy import select
+            from src.models.tech import Tech
+            result = await db.execute(
+                select(Tech).where(
+                    Tech.id == body.tech_id,
+                    Tech.organization_id == ctx.organization_id,
+                )
+            )
+            tech = result.scalar_one_or_none()
+            if not tech:
+                raise HTTPException(status_code=404, detail="Tech not found")
+            if tech.user_id:
+                tech_user_id = tech.user_id
+
+        return await svc.start_visit(
+            ctx.organization_id,
+            body.property_id,
+            tech_user_id,
+            route_stop_id=body.route_stop_id,
+        )
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/visits/active")
+async def get_active_visit(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get in-progress visit for the current tech."""
+    svc = VisitExperienceService(db)
+    try:
+        result = await svc.get_active_visit(ctx.organization_id, ctx.user.id)
+    except NotFoundError:
+        return None
+    return result
+
+
+@router.get("/visits/history/{property_id}")
+async def visit_history(
+    property_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get visit history for a property."""
+    svc = VisitExperienceService(db)
+    return await svc.get_property_history(ctx.organization_id, property_id, limit=limit)
+
+
+# ======================================================================
+# Existing CRUD endpoints (preserved)
+# ======================================================================
 
 @router.get("/visits", response_model=dict)
 async def list_visits(
@@ -94,18 +210,160 @@ async def update_visit(
 
 
 @router.post("/visits/{visit_id}/complete", response_model=VisitResponse)
-async def complete_visit(
+async def complete_visit_legacy(
     visit_id: str,
     body: VisitCompleteRequest,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Legacy complete endpoint — kept for backward compat."""
     svc = VisitService(db)
     visit = await svc.complete(ctx.organization_id, visit_id, **body.model_dump(exclude_unset=True))
     return VisitResponse.model_validate(visit)
 
 
-# --- Chemical Readings ---
+# ======================================================================
+# Visit Experience — context, checklist, readings, photos, complete
+# ======================================================================
+
+@router.get("/visits/{visit_id}/context")
+async def get_visit_context(
+    visit_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full visit context — single-call fetch for the visit page."""
+    svc = VisitExperienceService(db)
+    try:
+        return await svc.get_context(ctx.organization_id, visit_id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.put("/visits/{visit_id}/checklist")
+async def update_checklist(
+    visit_id: str,
+    body: ChecklistUpdateRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk update checklist entries."""
+    svc = VisitExperienceService(db)
+    try:
+        return await svc.update_checklist(ctx.organization_id, visit_id, body.entries)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/visits/{visit_id}/readings")
+async def create_visit_reading(
+    visit_id: str,
+    body: VisitReadingCreate,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a chemical reading for this visit."""
+    svc = VisitExperienceService(db)
+    reading_fields = body.model_dump(exclude={"water_feature_id"}, exclude_unset=True)
+    try:
+        return await svc.add_reading(
+            ctx.organization_id, visit_id, body.water_feature_id, reading_fields,
+        )
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/visits/{visit_id}/photos")
+async def upload_visit_photo(
+    visit_id: str,
+    file: UploadFile = File(...),
+    category: Optional[str] = Form(None),
+    water_feature_id: Optional[str] = Form(None),
+    caption: Optional[str] = Form(None),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a photo for this visit."""
+    if not file.content_type or file.content_type not in ALLOWED_PHOTO_TYPES:
+        raise HTTPException(status_code=400, detail="File must be JPEG, PNG, or WebP")
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_PHOTO_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    svc = VisitExperienceService(db)
+    try:
+        return await svc.upload_photo(
+            ctx.organization_id, visit_id, file_bytes,
+            file.filename or "photo.jpg",
+            category=category,
+            water_feature_id=water_feature_id,
+            caption=caption,
+        )
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/visits/{visit_id}/photos/{photo_id}", status_code=204)
+async def delete_visit_photo(
+    visit_id: str,
+    photo_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a visit photo."""
+    svc = VisitExperienceService(db)
+    try:
+        await svc.delete_photo(ctx.organization_id, visit_id, photo_id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/visits/{visit_id}/charges")
+async def create_visit_charge(
+    visit_id: str,
+    body: VisitChargeCreate,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a charge linked to this visit. Delegates to ChargeService."""
+    # Verify visit exists
+    svc = VisitExperienceService(db)
+    try:
+        await svc._get_visit(ctx.organization_id, visit_id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    from src.services.charge_service import ChargeService
+    charge_svc = ChargeService(db)
+    return await charge_svc.create_charge(
+        ctx.organization_id,
+        ctx.user.id,
+        visit_id=visit_id,
+        **body.model_dump(),
+    )
+
+
+@router.post("/visits/{visit_id}/finish")
+async def finish_visit(
+    visit_id: str,
+    body: VisitCompleteBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enhanced complete — calculates duration, marks route stop."""
+    svc = VisitExperienceService(db)
+    try:
+        return await svc.complete_visit(ctx.organization_id, visit_id, notes=body.notes)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ======================================================================
+# Chemical Readings (existing)
+# ======================================================================
 
 @router.get("/readings/property/{property_id}", response_model=list[ChemicalReadingResponse])
 async def list_readings(
@@ -141,7 +399,9 @@ async def get_recommendations(
     return reading.recommendations or {"issues": [], "actions": []}
 
 
-# --- Service Catalog ---
+# ======================================================================
+# Service Catalog (existing)
+# ======================================================================
 
 @router.get("/services", response_model=list[ServiceResponse])
 async def list_services(

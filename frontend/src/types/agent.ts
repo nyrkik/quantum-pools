@@ -49,6 +49,7 @@ export interface ActionDetail extends AgentAction {
   comments?: ActionComment[];
   notes?: string | null;
   invoice_id?: string | null;
+  matched_customer_id?: string | null;
   task_count?: number;
   tasks_completed?: number;
   tasks?: JobTask[];

@@ -1,9 +1,34 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Droplets } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Droplets, Play, Camera, FileText, Beaker, CheckSquare, Clock, Loader2 } from "lucide-react";
 import type { Customer, Property } from "./customer-types";
+
+interface VisitHistoryItem {
+  id: string;
+  scheduled_date: string | null;
+  status: string;
+  duration_minutes: number | null;
+  tech_name: string | null;
+  notes: string | null;
+  photo_count: number;
+  reading_count: number;
+  checklist_total: number;
+  checklist_completed: number;
+}
 
 interface CustomerServiceTabProps {
   customer: Customer;
@@ -11,10 +36,64 @@ interface CustomerServiceTabProps {
 }
 
 export function CustomerServiceTab({ customer, properties }: CustomerServiceTabProps) {
+  const router = useRouter();
   const allWfs = properties.flatMap(p => p.water_features || []);
+
+  // Visit history
+  const [history, setHistory] = useState<VisitHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>(
+    properties.length === 1 ? properties[0].id : ""
+  );
+
+  useEffect(() => {
+    if (!selectedPropertyId) return;
+    setHistoryLoading(true);
+    api
+      .get<VisitHistoryItem[]>(`/v1/visits/history/${selectedPropertyId}?limit=5`)
+      .then(setHistory)
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+  }, [selectedPropertyId]);
+
+  const handleLogVisit = () => {
+    if (properties.length === 1) {
+      router.push(`/visits/new?property=${properties[0].id}`);
+    } else if (selectedPropertyId) {
+      router.push(`/visits/new?property=${selectedPropertyId}`);
+    }
+  };
 
   return (
     <div className="space-y-4">
+      {/* Log Visit */}
+      <Card className="shadow-sm">
+        <CardContent className="pt-4 space-y-3">
+          {properties.length > 1 && (
+            <Select value={selectedPropertyId} onValueChange={setSelectedPropertyId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select property..." />
+              </SelectTrigger>
+              <SelectContent>
+                {properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Button
+            className="w-full h-11"
+            onClick={handleLogVisit}
+            disabled={!selectedPropertyId && properties.length > 1}
+          >
+            <Play className="h-4 w-4 mr-2" />
+            Log Visit
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Service schedule */}
       <Card className="shadow-sm">
         <CardHeader className="pb-2">
@@ -38,7 +117,7 @@ export function CustomerServiceTab({ customer, properties }: CustomerServiceTabP
         </CardContent>
       </Card>
 
-      {/* Pool info for each WF — what the tech needs to know */}
+      {/* Pool info for each WF */}
       {allWfs.map((wf) => (
         <Card key={wf.id} className="shadow-sm">
           <CardHeader className="pb-2">
@@ -73,34 +152,76 @@ export function CustomerServiceTab({ customer, properties }: CustomerServiceTabP
         </Card>
       )}
 
-      {/* Chemical reading entry — placeholder */}
+      {/* Visit History */}
       <Card className="shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Chemical Reading</CardTitle>
+          <CardTitle className="text-sm">Recent Visits</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-            Chemical reading entry coming soon
-          </div>
+          {!selectedPropertyId && properties.length > 1 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              Select a property to see visit history
+            </p>
+          ) : historyLoading ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : history.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No visits recorded yet
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {history.map((v) => (
+                <Link
+                  key={v.id}
+                  href={`/visits/${v.id}`}
+                  className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {v.scheduled_date
+                          ? new Date(v.scheduled_date + "T00:00:00").toLocaleDateString()
+                          : "No date"}
+                      </span>
+                      <Badge
+                        variant={v.status === "completed" ? "default" : "outline"}
+                        className="text-[10px] px-1.5"
+                      >
+                        {v.status}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                      {v.tech_name && <span>{v.tech_name}</span>}
+                      {v.duration_minutes != null && (
+                        <span className="flex items-center gap-0.5">
+                          <Clock className="h-3 w-3" />{v.duration_minutes}m
+                        </span>
+                      )}
+                      {v.checklist_total > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          <CheckSquare className="h-3 w-3" />{v.checklist_completed}/{v.checklist_total}
+                        </span>
+                      )}
+                      {v.reading_count > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          <Beaker className="h-3 w-3" />{v.reading_count}
+                        </span>
+                      )}
+                      {v.photo_count > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          <Camera className="h-3 w-3" />{v.photo_count}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* Service checklist — placeholder */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Service Checklist</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-            Service checklist coming soon
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Complete visit — placeholder */}
-      <Button className="w-full h-12 text-base" disabled>
-        Complete Visit
-      </Button>
     </div>
   );
 }

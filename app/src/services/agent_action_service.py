@@ -395,6 +395,7 @@ class AgentActionService:
             if msg:
                 d["from_email"] = msg.from_email
                 d["customer_name"] = msg.customer_name or action.customer_name
+                d["matched_customer_id"] = msg.matched_customer_id
                 d["subject"] = msg.subject
                 from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
                 d["email_body"] = strip_email_signature(strip_quoted_reply(msg.body))[:500] if msg.body else ""

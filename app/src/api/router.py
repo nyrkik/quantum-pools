@@ -32,6 +32,7 @@ from src.api.v1.charge_templates import router as charge_templates_router
 from src.api.v1.visit_charges import router as visit_charges_router
 from src.api.v1.charge_settings import router as charge_settings_router
 from src.api.v1.email import router as email_router
+from src.api.v1.service_checklist import router as service_checklist_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -65,3 +66,4 @@ api_router.include_router(charge_templates_router)
 api_router.include_router(visit_charges_router)
 api_router.include_router(charge_settings_router)
 api_router.include_router(email_router)
+api_router.include_router(service_checklist_router)

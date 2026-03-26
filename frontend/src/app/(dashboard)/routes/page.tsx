@@ -62,6 +62,7 @@ export default function RoutesPage() {
             estimated_service_duration: s.estimated_service_duration,
             estimated_drive_time_from_previous: s.estimated_drive_time_from_previous,
             estimated_distance_from_previous: s.estimated_distance_from_previous,
+            route_stop_id: s.id,
           })),
           total_stops: r.total_stops,
           total_distance_miles: r.total_distance_miles,

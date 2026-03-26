@@ -37,6 +37,13 @@ class Visit(Base):
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
     service_performed: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
+    route_stop_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("route_stops.id", ondelete="SET NULL"), index=True
+    )
+    customer_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("customers.id", ondelete="SET NULL"), index=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     photos: Mapped[dict | None] = mapped_column(JSON)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -50,3 +57,5 @@ class Visit(Base):
     tech = relationship("Tech", back_populates="visits", lazy="noload")
     visit_services = relationship("VisitService", back_populates="visit", lazy="noload")
     chemical_readings = relationship("ChemicalReading", back_populates="visit", lazy="noload")
+    photos_rel = relationship("VisitPhoto", back_populates="visit", lazy="noload")
+    checklist_entries = relationship("VisitChecklistEntry", back_populates="visit", lazy="noload")

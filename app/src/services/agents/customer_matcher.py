@@ -36,7 +36,7 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
             select(Customer).where(
                 func.lower(Customer.email) == from_email.lower(),
                 Customer.is_active == True,
-            )
+            ).limit(1)
         )
         customer = result.scalar_one_or_none()
         if customer:

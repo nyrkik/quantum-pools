@@ -377,7 +377,7 @@ export default function InboxPage() {
       )}
 
       {/* Thread detail sheet */}
-      <Sheet open={!!selectedThreadId} onOpenChange={(open) => { if (!open) setSelectedThreadId(null); }}>
+      <Sheet open={!!selectedThreadId} onOpenChange={(open) => { if (!open) { setSelectedThreadId(null); loadThreads(); } }}>
         <SheetContent className="w-full sm:max-w-lg flex flex-col h-full px-4 sm:px-6">
           <SheetHeader className="flex-shrink-0">
             <SheetTitle className="text-base">Conversation</SheetTitle>

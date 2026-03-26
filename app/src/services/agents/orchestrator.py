@@ -454,5 +454,5 @@ async def run_poll_cycle():
                 await process_incoming_email(uid, msg, organization_id=org_id)
                 mark_processed(uid)
             except Exception as e:
-                logger.error(f"Error processing email {uid}: {e}")
+                logger.error(f"Error processing email {uid}: {e}", exc_info=True)
     return len(messages)

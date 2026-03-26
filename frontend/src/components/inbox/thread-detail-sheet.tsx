@@ -197,11 +197,25 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleArchive = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/archive`, {});
+      toast.success("Thread archived");
+      onAction();
+      onClose();
+    } catch {
+      toast.error("Failed to archive");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleDelete = async () => {
     setSending(true);
     try {
       await api.delete(`/v1/admin/agent-threads/${threadId}`);
-      toast.success("Thread deleted");
+      toast.success("Thread permanently deleted");
       onAction();
       onClose();
     } catch {
@@ -441,29 +455,49 @@ export function ThreadDetailSheet({
           </div>
         )}
 
-        {/* Dismiss + Delete */}
-        <div className="flex justify-between pt-2 border-t">
-          {thread.has_pending && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={sending}>
-                  Dismiss
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Dismiss this thread?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    No reply will be sent for the pending message.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDismiss}>Dismiss</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
+        {/* Actions: Dismiss, Archive, Delete */}
+        <div className="flex justify-between items-center pt-2 border-t">
+          <div className="flex gap-2">
+            {thread.has_pending && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={sending}>
+                    Dismiss
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Dismiss this thread?</AlertDialogTitle>
+                    <AlertDialogDescription>No reply will be sent for the pending message.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDismiss}>Dismiss</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={handleArchive} disabled={sending}>
+              Archive
+            </Button>
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive" disabled={sending}>
+                Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Permanently delete this thread?</AlertDialogTitle>
+                <AlertDialogDescription>This will remove the conversation and all messages. This cannot be undone.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </div>

@@ -112,6 +112,28 @@ async def dismiss_thread(
     )
 
 
+@router.post("/agent-threads/{thread_id}/archive")
+async def archive_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Archive a thread — hidden from inbox, preserved for records."""
+    service = AgentThreadService(db)
+    return await service.archive_thread(org_id=ctx.organization_id, thread_id=thread_id)
+
+
+@router.delete("/agent-threads/{thread_id}")
+async def delete_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete a thread and all messages. Owner only."""
+    service = AgentThreadService(db)
+    return await service.delete_thread(org_id=ctx.organization_id, thread_id=thread_id)
+
+
 @router.post("/agent-threads/{thread_id}/assign")
 async def assign_thread(
     thread_id: str,

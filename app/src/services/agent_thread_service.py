@@ -109,6 +109,11 @@ class AgentThreadService:
             base = base.where(AgentThread.status == "handled")
         elif status == "ignored":
             base = base.where(AgentThread.status == "ignored")
+        elif status == "archived":
+            base = base.where(AgentThread.status == "archived")
+        else:
+            # Default: exclude archived
+            base = base.where(AgentThread.status != "archived")
         if exclude_spam:
             base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
         if exclude_ignored:
@@ -360,6 +365,60 @@ class AgentThreadService:
         await self.db.commit()
         await update_thread_status(thread_id)
         return {"dismissed": True}
+
+    async def archive_thread(self, org_id: str, thread_id: str) -> dict:
+        """Archive a thread — hidden from inbox but preserved for records."""
+        result = await self.db.execute(
+            select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
+        )
+        thread = result.scalar_one_or_none()
+        if not thread:
+            raise Exception("Thread not found")
+        thread.status = "archived"
+        thread.has_pending = False
+        await self.db.commit()
+        return {"archived": True}
+
+    async def delete_thread(self, org_id: str, thread_id: str) -> dict:
+        """Permanently delete a thread and all its messages."""
+        from sqlalchemy import delete, update, text
+
+        # Get message IDs in this thread
+        msg_result = await self.db.execute(
+            select(AgentMessage.id).where(
+                AgentMessage.thread_id == thread_id,
+                AgentMessage.organization_id == org_id,
+            )
+        )
+        msg_ids = [r[0] for r in msg_result.all()]
+
+        if msg_ids:
+            # Unlink actions referencing these messages
+            await self.db.execute(
+                update(AgentAction)
+                .where(AgentAction.agent_message_id.in_(msg_ids))
+                .values(agent_message_id=None, thread_id=None)
+            )
+            # Delete action comments referencing these actions' messages
+            # Delete the messages
+            await self.db.execute(
+                delete(AgentMessage).where(AgentMessage.id.in_(msg_ids))
+            )
+
+        # Unlink any actions referencing this thread directly
+        await self.db.execute(
+            update(AgentAction)
+            .where(AgentAction.thread_id == thread_id)
+            .values(thread_id=None)
+        )
+        # Delete thread reads
+        await self.db.execute(text("DELETE FROM thread_reads WHERE thread_id = :tid"), {"tid": thread_id})
+        # Delete thread
+        await self.db.execute(
+            delete(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
+        )
+        await self.db.commit()
+        return {"deleted": True}
 
     async def assign_thread(self, org_id: str, thread_id: str, user_id: str | None, user_name: str | None) -> dict:
         """Assign/unassign a thread to a team member. Creates notification on assign."""

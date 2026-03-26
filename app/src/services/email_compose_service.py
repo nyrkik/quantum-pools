@@ -75,21 +75,11 @@ class EmailComposeService:
         org = await self._get_org(org_id)
         org_name = org.name if org else "QuantumPools"
 
-        # Build signature: sender name + org signature
+        # Build signature: first name only + org name
         sig_parts = []
         if sender_name:
-            # Look up job title from tech record
-            if sender_user_id:
-                from src.models.tech import Tech
-                tech = (await self.db.execute(
-                    select(Tech).where(Tech.user_id == sender_user_id, Tech.organization_id == org_id, Tech.is_active == True)
-                )).scalar_one_or_none()
-                if tech and tech.job_title:
-                    sig_parts.append(f"{sender_name}\n{tech.job_title}")
-                else:
-                    sig_parts.append(sender_name)
-            else:
-                sig_parts.append(sender_name)
+            first_name = sender_name.split()[0] if sender_name else ""
+            sig_parts.append(first_name)
             sig_parts.append(org_name)
         if org and org.agent_signature:
             sig_parts.append(org.agent_signature)
@@ -183,6 +173,8 @@ class EmailComposeService:
         thread.last_snippet = body[:200]
         thread.status = "handled"
         thread.has_pending = False
+        if not thread.category:
+            thread.category = "outbound"
 
         # If linked to a job, mark draft as sent + post confirmation
         if job_id:
@@ -289,11 +281,20 @@ class EmailComposeService:
                 f"Generate both a subject line and body."
             )
 
+        # Get sender name for the sign-off
+        sender_first = ""
+        if context_parts:
+            # Check if we have sender info passed via instruction
+            pass
+        # Try to get from the current user context (passed through org tone rules)
+        org = await self._get_org(org_id)
+
         system_prompt = (
             f"You are an email assistant for {org_name}, a professional pool service company.\n"
             f"Write professional but friendly emails. Be concise and specific.\n"
             f"Use details from the customer context when relevant.\n"
-            f"Do NOT include a signature — it will be appended automatically.\n"
+            f"Do NOT include a signature block — it will be appended automatically.\n"
+            f"End the body with a brief closing like 'Best,' or 'Thanks,' on its own line. Do NOT add a name after the closing — the signature system handles that.\n"
             f"Do NOT include greeting headers like 'Subject:' in the body.\n\n"
             f"CONTEXT:\n{context_block}\n\n"
             f"You MUST respond with ONLY a JSON object, no other text. Format:\n"

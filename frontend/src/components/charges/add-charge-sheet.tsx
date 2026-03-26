@@ -22,7 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Camera, Loader2, X, Receipt } from "lucide-react";
+import { Plus, Camera, Loader2, X, Receipt, Search } from "lucide-react";
+import { PartsSearchDialog } from "@/components/parts/parts-search-dialog";
 
 interface ChargeTemplate {
   id: string;
@@ -71,6 +72,7 @@ export function AddChargeSheet({
   const [notes, setNotes] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [partsDialogOpen, setPartsDialogOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -247,6 +249,17 @@ export function AddChargeSheet({
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Describe the charge"
               />
+              {category === "material" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setPartsDialogOpen(true)}
+                >
+                  <Search className="h-3 w-3 mr-1" />
+                  Search Parts
+                </Button>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -348,6 +361,15 @@ export function AddChargeSheet({
           </div>
         )}
       </SheetContent>
+
+      <PartsSearchDialog
+        open={partsDialogOpen}
+        onClose={() => setPartsDialogOpen(false)}
+        onSelectPart={(part) => {
+          setDescription(part.name);
+          setPartsDialogOpen(false);
+        }}
+      />
     </Sheet>
   );
 }

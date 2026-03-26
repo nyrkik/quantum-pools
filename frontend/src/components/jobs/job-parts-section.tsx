@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { LogPurchaseForm } from "@/components/parts/log-purchase-form";
+import { PartsSearchDialog } from "@/components/parts/parts-search-dialog";
 
 interface PartPurchase {
   id: string;
@@ -40,6 +41,7 @@ export function JobPartsSection({ jobId, propertyId }: JobPartsSectionProps) {
   const [parts, setParts] = useState<PartPurchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -132,10 +134,26 @@ export function JobPartsSection({ jobId, propertyId }: JobPartsSectionProps) {
           onCancel={() => setShowAdd(false)}
         />
       ) : (
-        <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={() => setShowAdd(true)}>
-          <Plus className="h-3 w-3 mr-1" /> Add Part
-        </Button>
+        <div className="flex gap-1.5">
+          <Button variant="outline" size="sm" className="flex-1 h-7 text-xs" onClick={() => setShowAdd(true)}>
+            <Plus className="h-3 w-3 mr-1" /> Add Part
+          </Button>
+          <Button variant="outline" size="sm" className="flex-1 h-7 text-xs" onClick={() => setCatalogOpen(true)}>
+            <Search className="h-3 w-3 mr-1" /> Search Catalog
+          </Button>
+        </div>
       )}
+
+      <PartsSearchDialog
+        open={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        jobId={jobId}
+        propertyId={propertyId || undefined}
+        onLogPurchase={() => {
+          setCatalogOpen(false);
+          setShowAdd(true);
+        }}
+      />
     </div>
   );
 }

@@ -35,6 +35,7 @@ from src.api.v1.email import router as email_router
 from src.api.v1.service_checklist import router as service_checklist_router
 from src.api.v1.vendors import router as vendors_router
 from src.api.v1.part_purchases import router as part_purchases_router
+from src.api.v1.parts import router as parts_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -71,3 +72,4 @@ api_router.include_router(email_router)
 api_router.include_router(service_checklist_router)
 api_router.include_router(vendors_router)
 api_router.include_router(part_purchases_router)
+api_router.include_router(parts_router)

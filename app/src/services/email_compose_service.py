@@ -198,6 +198,18 @@ class EmailComposeService:
             )
             self.db.add(confirm_comment)
 
+        # Mark thread as read for sender (so outbound doesn't show as unread)
+        if sender_user_id:
+            from sqlalchemy import text as sql_text
+            await self.db.execute(
+                sql_text("""
+                    INSERT INTO thread_reads (user_id, thread_id, last_read_at)
+                    VALUES (:uid, :tid, now())
+                    ON CONFLICT (user_id, thread_id) DO UPDATE SET last_read_at = now()
+                """),
+                {"uid": sender_user_id, "tid": thread.id},
+            )
+
         await self.db.commit()
 
         return {

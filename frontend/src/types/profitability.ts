@@ -15,6 +15,7 @@ export interface OrgCostSettings {
   semi_annual_discount_value: number;
   annual_discount_type: string;
   annual_discount_value: number;
+  default_parts_markup_pct: number;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +35,7 @@ export interface OrgCostSettingsUpdate {
   semi_annual_discount_value?: number;
   annual_discount_type?: string;
   annual_discount_value?: number;
+  default_parts_markup_pct?: number;
 }
 
 export interface PropertyDifficulty {

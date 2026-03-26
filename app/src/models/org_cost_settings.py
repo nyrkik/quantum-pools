@@ -31,6 +31,9 @@ class OrgCostSettings(Base):
     separate_invoice_threshold: Mapped[float] = mapped_column(Float, default=200.0)
     require_photo_threshold: Mapped[float] = mapped_column(Float, default=50.0)
 
+    # Parts markup
+    default_parts_markup_pct: Mapped[float] = mapped_column(Float, default=25.0)
+
     # Billing frequency discounts
     semi_annual_discount_type: Mapped[str] = mapped_column(String(10), default="percent")
     semi_annual_discount_value: Mapped[float] = mapped_column(Float, default=5.0)

@@ -362,7 +362,26 @@ export default function InboxPage() {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="px-2">{page + 1} / {totalPages}</span>
+            {Array.from({ length: totalPages }, (_, i) => {
+              // Show first, last, and pages around current
+              if (i === 0 || i === totalPages - 1 || Math.abs(i - page) <= 1) {
+                return (
+                  <Button
+                    key={i}
+                    variant={i === page ? "default" : "ghost"}
+                    size="icon"
+                    className="h-8 w-8 text-xs"
+                    onClick={() => setPage(i)}
+                  >
+                    {i + 1}
+                  </Button>
+                );
+              }
+              // Show ellipsis between gaps
+              if (i === 1 && page > 2) return <span key={i} className="px-1">…</span>;
+              if (i === totalPages - 2 && page < totalPages - 3) return <span key={i} className="px-1">…</span>;
+              return null;
+            })}
             <Button
               variant="ghost"
               size="icon"

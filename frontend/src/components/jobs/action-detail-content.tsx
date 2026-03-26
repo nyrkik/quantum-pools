@@ -31,6 +31,7 @@ import {
   MessageSquare,
   ListChecks,
   ClipboardList,
+  Package,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCompose } from "@/components/email/compose-provider";
@@ -38,6 +39,7 @@ import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { TasksSection } from "@/components/jobs/tasks-section";
 import type { ActionDetail } from "@/types/agent";
+import { JobPartsSection } from "@/components/jobs/job-parts-section";
 
 // --- Utility components ---
 
@@ -303,7 +305,12 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
         </CollapsibleSection>
       )}
 
-      {/* 4. Context — email thread + related jobs (collapsed by default) */}
+      {/* 4. Parts — purchased parts for this job */}
+      <CollapsibleSection title="Parts" icon={Package} defaultOpen={false}>
+        <JobPartsSection jobId={actionId} />
+      </CollapsibleSection>
+
+      {/* 5. Context — email thread + related jobs (collapsed by default) */}
       {(detail.subject || detail.related_jobs?.length) && (
         <CollapsibleSection title="Context" icon={ClipboardList} defaultOpen={false} count={detail.related_jobs?.length}>
           <div className="space-y-2">

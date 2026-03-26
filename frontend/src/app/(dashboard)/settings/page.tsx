@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { OrgCostSettings, OrgCostSettingsUpdate } from "@/types/profitability";
+import { VendorsSection } from "@/components/settings/vendors-section";
 
 // --- Types ---
 
@@ -97,7 +98,7 @@ function getDefaultPrice(defaults: RegionalDefault[], row: ChemicalRow): number 
   return match?.sanitizer_price_per_unit ?? null;
 }
 
-type SettingsTab = "general" | "costs" | "tiers" | "chemicals" | "charges";
+type SettingsTab = "general" | "costs" | "tiers" | "chemicals" | "charges" | "vendors";
 
 function BrandingSection() {
   const { refreshUser } = useAuth();
@@ -296,6 +297,7 @@ export default function SettingsPage() {
           visits_per_month: data.visits_per_month,
           semi_annual_discount_value: data.semi_annual_discount_value,
           annual_discount_value: data.annual_discount_value,
+          default_parts_markup_pct: data.default_parts_markup_pct,
         });
       })
       .catch(() => toast.error("Failed to load cost settings"))
@@ -386,6 +388,7 @@ export default function SettingsPage() {
     { key: "tiers", label: "Service Tiers" },
     { key: "chemicals", label: "Chemical Prices" },
     { key: "charges", label: "Charges" },
+    { key: "vendors", label: "Vendors" },
   ];
 
   const costFields: { key: keyof OrgCostSettingsUpdate; label: string; prefix: string; suffix: string; description: string; step?: string }[] = [
@@ -401,6 +404,7 @@ export default function SettingsPage() {
     { key: "visits_per_month", label: "Visits per Month", prefix: "", suffix: "visits", description: "Standard weekly = 4" },
     { key: "semi_annual_discount_value", label: "Semi-Annual Discount", prefix: "", suffix: "%", description: "Discount for semi-annual billing" },
     { key: "annual_discount_value", label: "Annual Discount", prefix: "", suffix: "%", description: "Discount for annual billing" },
+    { key: "default_parts_markup_pct", label: "Default Parts Markup", prefix: "", suffix: "%", description: "Default markup on parts for customer pricing (typical 25-50%)" },
   ];
 
   return (
@@ -656,6 +660,9 @@ export default function SettingsPage() {
 
       {/* Charges */}
       {tab === "charges" && <ChargeSettingsTab editMode={editMode} />}
+
+      {/* Vendors */}
+      {tab === "vendors" && <VendorsSection editMode={editMode} />}
     </div>
   );
 }

@@ -59,6 +59,11 @@ from src.models.preset_permission import PresetPermission
 from src.models.org_role import OrgRole
 from src.models.org_role_permission import OrgRolePermission
 from src.models.user_permission_override import UserPermissionOverride
+from src.models.vendor import Vendor
+from src.models.parts_catalog import PartsCatalog
+from src.models.part_purchase import PartPurchase
+from src.models.equipment_item import EquipmentItem
+from src.models.equipment_event import EquipmentEvent
 
 __all__ = [
     "Base",
@@ -106,4 +111,9 @@ __all__ = [
     "ServiceChecklistItem",
     "VisitChecklistEntry",
     "ServiceTier",
+    "Vendor",
+    "PartsCatalog",
+    "PartPurchase",
+    "EquipmentItem",
+    "EquipmentEvent",
 ]

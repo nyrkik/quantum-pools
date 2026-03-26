@@ -342,7 +342,7 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
                 self.db.add(part)
                 count += 1
 
-        await self.db.flush()
+        await self.db.commit()
         return count
 
     # --- Redis caching ---

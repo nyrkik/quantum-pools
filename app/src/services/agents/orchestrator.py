@@ -52,17 +52,8 @@ AUTO_SENDER_DOMAINS = {
 # Internal team addresses — skip (handled by sent folder tracking)
 INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]
 
-# Thank-you / confirmation / FYI patterns — auto-handle without AI
-GRATITUDE_PATTERNS = [
-    "thank you", "thanks", "thx", "ty", "appreciate it",
-    "sounds good", "perfect", "great", "awesome", "wonderful",
-    "no problem", "will do", "got it", "understood",
-    "ok", "okay", "confirmed", "works for me",
-    "we are expecting", "we will", "i will", "we'll",
-    "just wanted to let you know", "fyi", "for your information",
-    "just an update", "update:", "no rush",
-    "yes that", "yes we", "yes i", "yep", "yea", "yeah",
-]
+
+# Gratitude patterns removed — AI triage handles all edge cases now
 
 
 def _is_own_email(from_email: str) -> bool:
@@ -190,19 +181,13 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 thread_context += "\nDo NOT create duplicate action items. Only add new actions if this email introduces genuinely new work."
                 existing_action_descriptions = await _get_thread_open_actions(thread.id)
 
-    # --- Quick check for simple thank-you / confirmation messages ---
-    body_stripped = (body or "").strip().lower()
-    # Remove quoted content and signatures for the check
-    first_line = body_stripped.split("\n")[0].strip() if body_stripped else ""
-    # If the entire meaningful content is just a thank-you/confirmation
-    is_gratitude = (
-        len(first_line) < 100
-        and any(p in first_line for p in GRATITUDE_PATTERNS)
-        and not any(q in first_line for q in ["?", "when", "how", "what", "why", "can you", "please", "need"])
-    )
+    # --- AI triage: does this email need a response? ---
+    from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
+    clean_body = strip_email_signature(strip_quoted_reply(body)) if body else ""
 
-    if is_gratitude:
-        logger.info(f"Auto-handling gratitude message: {first_line[:50]}")
+    needs_response = await _ai_triage(clean_body, subject, from_email)
+    if not needs_response:
+        logger.info(f"AI triage: no response needed — {subject[:50]}")
         async with get_db_context() as db:
             agent_msg = AgentMessage(
                 organization_id=organization_id,
@@ -212,8 +197,8 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 to_email=to_header,
                 subject=subject,
                 body=body,
-                status="ignored",
-                category="thank_you",
+                status="handled",
+                category="no_response",
                 thread_id=thread.id if thread else None,
                 matched_customer_id=thread.matched_customer_id if thread else None,
                 customer_name=thread.customer_name if thread else None,
@@ -227,8 +212,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                     thread_obj.message_count = (thread_obj.message_count or 0) + 1
                     thread_obj.last_message_at = datetime.now(timezone.utc)
                     thread_obj.last_direction = "inbound"
-                    thread_obj.last_snippet = first_line[:200]
-                    # Don't flip to pending — it's just a thank you
+                    thread_obj.last_snippet = (clean_body or "")[:200]
             await db.commit()
         return
 
@@ -516,6 +500,62 @@ async def _get_default_org_id() -> str:
         result = await db.execute(select(Organization).order_by(Organization.created_at).limit(1))
         org = result.scalar_one_or_none()
         return org.id if org else ""
+
+
+async def _ai_triage(body: str, subject: str, from_email: str) -> bool:
+    """Quick AI check: does this email need a response from us?
+
+    Returns True if we should respond, False if it's informational/gratitude/FYI.
+    Uses Haiku for speed — ~200ms per call.
+    """
+    if not body.strip():
+        return False
+
+    try:
+        import anthropic
+        from src.core.ai_models import get_model
+        from src.core.config import get_settings
+        settings = get_settings()
+        if not settings.anthropic_api_key:
+            return True  # Default to needing response if no AI
+
+        model = await get_model("fast")
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+        prompt = f"""You are triaging incoming emails for a pool service company.
+
+From: {from_email}
+Subject: {subject}
+Body: {body[:500]}
+
+Does this email require a response from us? Answer ONLY "yes" or "no".
+
+Answer "no" if it's:
+- A thank you, acknowledgment, or confirmation ("thanks", "got it", "sounds good")
+- A status update that's just informational ("we expect to finish by May")
+- An automated notification (order shipped, payment received)
+- A marketing email or newsletter
+- A forwarded message that's just FYI
+- A one-word or very short affirmative ("ok", "yes", "perfect")
+
+Answer "yes" if it's:
+- Asking a question
+- Requesting service, a quote, or scheduling
+- Reporting a problem or complaint
+- Asking for information we need to provide
+- Requesting a callback or meeting"""
+
+        response = await client.messages.create(
+            model=model,
+            max_tokens=5,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.content[0].text.strip().lower()
+        return answer.startswith("yes")
+
+    except Exception as e:
+        logger.warning(f"AI triage failed: {e}")
+        return True  # Default to needing response on error
 
 
 async def _process_sent_emails(org_id: str) -> int:

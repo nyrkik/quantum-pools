@@ -188,10 +188,8 @@ export default function CatalogPage() {
     }
   };
 
-  const getSearchUrl = (q: string): string | null => {
-    const scp = vendors.find(v => v.provider_type === "scp");
-    if (!scp?.search_url_template) return null;
-    return scp.search_url_template.replace("{query}", encodeURIComponent(q));
+  const getSearchUrl = (q: string): string => {
+    return `https://www.google.com/search?q=${encodeURIComponent(q + " pool supply buy")}`;
   };
 
   const handleDiscover = async () => {

@@ -81,7 +81,7 @@ CRITICAL TONE RULES — follow these exactly:
 - Don't over-promise urgency. "We'll look into this" or "we'll follow up" is fine — avoid "prioritizing", "right away", "ASAP" unless truly critical.
 - Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines, then the signature. Use \\n for line breaks in the JSON string.
 - Always end with this exact signature (no variations):\\n\\nBest,\\nThe """ + from_name + """ Team\\n""" + from_email + """
-- "actions" array: extract follow-up work the team needs to do. ONE action per distinct task — do NOT split a single task into steps. For example, "inspect pool and report back" is ONE action, not two. Include due_days (business days). Leave empty [] if no action needed.
+- "actions" array: extract follow-up work the team needs to do. MAXIMUM 2 actions per email. ONE action per distinct task — do NOT split a single task into steps or create separate actions for related follow-ups. For example, "inspect pool and report back" is ONE action, not two. "Get termination details and clarify timeline" is ONE action, not five. When in doubt, combine into fewer actions. Include due_days (business days). Leave empty [] if no action needed.
 - Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)
 - Action descriptions should be specific — include property address, client name, part numbers, and any details from the email. "Replace filter" is too vague. "Replace spa filter at 751 Central Park Dr for Ashley Overton (Coventry Park)" is good."""
 

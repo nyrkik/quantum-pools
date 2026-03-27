@@ -314,7 +314,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 if open_desc not in all_open_descriptions:
                     all_open_descriptions.append(open_desc)
 
-        actions = result.get("actions", [])
+        actions = result.get("actions", [])[:3]  # Hard cap: max 3 actions per email
         for action in actions:
             if not action.get("description"):
                 continue

@@ -70,6 +70,51 @@ def poll_inbox():
     return messages
 
 
+def fetch_sent_emails() -> list[tuple[str, email.message.Message]]:
+    """Fetch recent sent emails that haven't been tracked yet.
+
+    Checks [Gmail]/Sent Mail for outbound messages from org addresses.
+    These are replies sent via Gmail/alias, not through the app.
+    """
+    messages = []
+    try:
+        client = IMAPClient(IMAP_HOST, ssl=True)
+        client.login(GMAIL_USER, GMAIL_PASSWORD)
+        _ensure_label(client)
+
+        client.select_folder("[Gmail]/Sent Mail")
+        uids = client.gmail_search(f"-label:{QP_LABEL} newer_than:2d")
+        if not uids:
+            client.logout()
+            return []
+
+        uids = uids[-10:]
+        raw_messages = client.fetch(uids, ["RFC822"])
+
+        for uid, data in raw_messages.items():
+            raw = data[b"RFC822"]
+            msg = email.message_from_bytes(raw)
+            messages.append((str(uid), msg))
+
+        client.logout()
+    except Exception as e:
+        logger.error(f"IMAP sent folder error: {e}")
+
+    return messages
+
+
+def mark_sent_processed(uid: str):
+    """Add the QP-Processed label to a sent message."""
+    try:
+        client = IMAPClient(IMAP_HOST, ssl=True)
+        client.login(GMAIL_USER, GMAIL_PASSWORD)
+        client.select_folder("[Gmail]/Sent Mail")
+        client.add_gmail_labels([int(uid)], [QP_LABEL])
+        client.logout()
+    except Exception as e:
+        logger.error(f"Failed to label sent message {uid}: {e}")
+
+
 def mark_processed(uid: str):
     """Add the QP-Processed label to a message after processing."""
     try:

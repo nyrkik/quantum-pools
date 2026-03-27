@@ -439,6 +439,119 @@ async def _get_default_org_id() -> str:
         return org.id if org else ""
 
 
+async def _process_sent_emails(org_id: str) -> int:
+    """Track outbound emails sent via Gmail (not through the app).
+
+    When someone replies from Gmail or an alias, the sent email
+    appears in [Gmail]/Sent Mail. We match it to an existing thread
+    and record it as an outbound message, marking the thread as handled.
+    """
+    from .mail_agent import fetch_sent_emails, mark_sent_processed, extract_text_body
+    from .thread_manager import get_or_create_thread
+    from src.models.agent_message import AgentMessage
+    from src.core.database import get_db_context
+    import uuid as uuid_mod
+    from email.utils import parsedate_to_datetime
+
+    sent = fetch_sent_emails()
+    if not sent:
+        return 0
+
+    count = 0
+    for uid, msg in sent:
+        try:
+            from_email = msg.get("From", "")
+            to_email = msg.get("To", "")
+            subject = msg.get("Subject", "")
+
+            # Only track emails FROM org addresses
+            if not any(addr in from_email.lower() for addr in ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]):
+                mark_sent_processed(uid)
+                continue
+
+            # Skip emails sent to org addresses (internal)
+            if not to_email or all(addr in to_email.lower() for addr in ["sapphire-pools.com", "quantumpoolspro.com"]):
+                mark_sent_processed(uid)
+                continue
+
+            # Extract recipient email
+            import re
+            to_match = re.search(r'[\w.+-]+@[\w.-]+', to_email)
+            if not to_match:
+                mark_sent_processed(uid)
+                continue
+            recipient = to_match.group().lower()
+
+            # Extract sender name
+            from_match = re.match(r'"?([^"<]+)"?\s*<', from_email)
+            sender_name = from_match.group(1).strip() if from_match else "Team"
+
+            body = extract_text_body(msg)
+            date_header = msg.get("Date")
+            sent_at = parsedate_to_datetime(date_header) if date_header else datetime.now(timezone.utc)
+
+            # Find or create thread
+            thread = await get_or_create_thread(
+                contact_email=recipient,
+                subject=subject,
+                organization_id=org_id,
+            )
+
+            # Check if we already recorded this (by checking for outbound message at same time)
+            async with get_db_context() as db:
+                existing = await db.execute(
+                    select(AgentMessage).where(
+                        AgentMessage.thread_id == thread.id,
+                        AgentMessage.direction == "outbound",
+                        AgentMessage.from_email.ilike(f"%{sender_name.split()[0]}%") if sender_name != "Team" else AgentMessage.id.isnot(None),
+                        AgentMessage.subject == subject,
+                    ).limit(1)
+                )
+                if existing.scalar_one_or_none():
+                    mark_sent_processed(uid)
+                    continue
+
+                # Record the outbound message
+                outbound = AgentMessage(
+                    id=str(uuid_mod.uuid4()),
+                    organization_id=org_id,
+                    direction="outbound",
+                    from_email=from_email,
+                    to_email=to_email,
+                    subject=subject,
+                    body=body,
+                    status="sent",
+                    sent_at=sent_at,
+                    received_at=sent_at,
+                    thread_id=thread.id,
+                )
+                db.add(outbound)
+
+                # Update thread — mark as handled since we replied
+                thread_obj = (await db.execute(
+                    select(AgentThread).where(AgentThread.id == thread.id)
+                )).scalar_one_or_none()
+                if thread_obj:
+                    thread_obj.message_count = (thread_obj.message_count or 0) + 1
+                    thread_obj.last_message_at = sent_at
+                    thread_obj.last_direction = "outbound"
+                    thread_obj.last_snippet = (body or "")[:200]
+                    thread_obj.status = "handled"
+                    thread_obj.has_pending = False
+
+                await db.commit()
+
+            mark_sent_processed(uid)
+            logger.info(f"Tracked sent email from {sender_name} to {recipient}: {subject[:50]}")
+            count += 1
+
+        except Exception as e:
+            logger.error(f"Error tracking sent email {uid}: {e}", exc_info=True)
+            mark_sent_processed(uid)  # Don't retry
+
+    return count
+
+
 async def run_poll_cycle():
     """Single poll cycle — check for new emails and process them."""
     org_id = await _get_default_org_id()
@@ -455,4 +568,13 @@ async def run_poll_cycle():
                 mark_processed(uid)
             except Exception as e:
                 logger.error(f"Error processing email {uid}: {e}", exc_info=True)
+
+    # Also track outbound emails sent via Gmail
+    try:
+        sent_count = await _process_sent_emails(org_id)
+        if sent_count:
+            logger.info(f"Tracked {sent_count} sent emails")
+    except Exception as e:
+        logger.error(f"Error tracking sent emails: {e}", exc_info=True)
+
     return len(messages)

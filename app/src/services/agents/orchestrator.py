@@ -52,12 +52,16 @@ AUTO_SENDER_DOMAINS = {
 # Internal team addresses — skip (handled by sent folder tracking)
 INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]
 
-# Thank-you / confirmation patterns — auto-handle without AI
+# Thank-you / confirmation / FYI patterns — auto-handle without AI
 GRATITUDE_PATTERNS = [
     "thank you", "thanks", "thx", "ty", "appreciate it",
     "sounds good", "perfect", "great", "awesome", "wonderful",
     "no problem", "will do", "got it", "understood",
     "ok", "okay", "confirmed", "works for me",
+    "we are expecting", "we will", "i will", "we'll",
+    "just wanted to let you know", "fyi", "for your information",
+    "just an update", "update:", "no rush",
+    "yes that", "yes we", "yes i", "yep", "yea", "yeah",
 ]
 
 

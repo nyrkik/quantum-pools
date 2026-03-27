@@ -100,6 +100,7 @@ export default function CatalogPage() {
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [categoryParts, setCategoryParts] = useState<Record<string, CatalogPart[]>>({});
   const [loadingCategory, setLoadingCategory] = useState<string | null>(null);
+  const [activeSubcategory, setActiveSubcategory] = useState<string | null>(null);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -174,8 +175,9 @@ export default function CatalogPage() {
   }, [query, doSearch, activeType]);
 
   const toggleCategory = async (category: string) => {
-    if (expandedCategory === category) { setExpandedCategory(null); return; }
+    if (expandedCategory === category) { setExpandedCategory(null); setActiveSubcategory(null); return; }
     setExpandedCategory(category);
+    setActiveSubcategory(null);
     if (!categoryParts[category]) {
       setLoadingCategory(category);
       try {
@@ -333,15 +335,47 @@ export default function CatalogPage() {
                     : isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                 </button>
-                {isExpanded && (
-                  <div className="border-t bg-muted/20">
-                    {parts.length === 0 && !isLoading
-                      ? <p className="text-xs text-muted-foreground text-center py-4">No items</p>
-                      : <div className="divide-y">{parts.map(part => (
-                          <PartRow key={part.id} part={part}  getSearchUrl={getSearchUrl} />
-                        ))}</div>}
-                  </div>
-                )}
+                {isExpanded && (() => {
+                  // Get unique subcategories for filter pills
+                  const subcats = [...new Set(parts.map(p => p.subcategory).filter(Boolean))] as string[];
+                  const filtered = activeSubcategory
+                    ? parts.filter(p => p.subcategory === activeSubcategory)
+                    : parts;
+                  return (
+                    <div className="border-t bg-muted/20">
+                      {parts.length === 0 && !isLoading
+                        ? <p className="text-xs text-muted-foreground text-center py-4">No items</p>
+                        : <>
+                            {subcats.length > 1 && (
+                              <div className="flex gap-1.5 px-4 py-2 overflow-x-auto border-b">
+                                <button
+                                  onClick={() => setActiveSubcategory(null)}
+                                  className={`px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
+                                    !activeSubcategory ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  All ({parts.length})
+                                </button>
+                                {subcats.sort().map(sub => (
+                                  <button
+                                    key={sub}
+                                    onClick={() => setActiveSubcategory(activeSubcategory === sub ? null : sub)}
+                                    className={`px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
+                                      activeSubcategory === sub ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    {sub} ({parts.filter(p => p.subcategory === sub).length})
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <div className="divide-y">{filtered.map(part => (
+                              <PartRow key={part.id} part={part} getSearchUrl={getSearchUrl} />
+                            ))}</div>
+                          </>}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

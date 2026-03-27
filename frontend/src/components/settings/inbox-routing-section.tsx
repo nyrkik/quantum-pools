@@ -385,19 +385,17 @@ export function InboxRoutingSection({ editMode }: { editMode: boolean }) {
               Rules match by priority (lower = first).
             </CardDescription>
           </div>
-          {editMode && (
-            <Button size="sm" variant="outline" onClick={() => {
-              setNewRule((prev) => ({
-                ...prev,
-                action: activeTab === "block" ? "block" : "route",
-                match_field: activeTab === "block" ? "from" : "to",
-              }));
-              setAdding(true);
-            }}>
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Add Rule
-            </Button>
-          )}
+          <Button size="sm" variant="outline" onClick={() => {
+            setNewRule((prev) => ({
+              ...prev,
+              action: activeTab === "block" ? "block" : "route",
+              match_field: activeTab === "block" ? "from" : "to",
+            }));
+            setAdding(true);
+          }}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Rule
+          </Button>
         </div>
       </CardHeader>
       <CardContent>

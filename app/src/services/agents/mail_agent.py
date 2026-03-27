@@ -229,8 +229,15 @@ def strip_email_signature(text: str) -> str:
 def _clean_html(html: str) -> str:
     """Convert HTML to clean plain text."""
     from html import unescape
+    # Remove style blocks (CSS) and script blocks entirely
+    text = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.IGNORECASE | re.DOTALL)
+    # Remove HTML comments
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    # Remove head block
+    text = re.sub(r"<head[^>]*>.*?</head>", "", text, flags=re.IGNORECASE | re.DOTALL)
     # Replace block elements with newlines
-    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</?(p|div|tr|li|h[1-6])[^>]*>", "\n", text, flags=re.IGNORECASE)
     # Strip remaining tags
     text = re.sub(r"<[^>]+>", " ", text)

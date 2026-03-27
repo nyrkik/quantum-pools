@@ -130,9 +130,49 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
       <div className="flex items-center gap-4 text-xs text-white/70 mt-1">
         {detail.customer_name && <span>{detail.customer_name}</span>}
         {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
-        {detail.due_date && <span>{formatDueDate(detail.due_date)}</span>}
+        <DueDateEditor actionId={actionId} currentDate={detail.due_date} onUpdate={() => { loadDetail(); onUpdate(); }} />
       </div>
     </div>
+  );
+}
+
+function DueDateEditor({ actionId, currentDate, onUpdate }: { actionId: string; currentDate: string | null; onUpdate: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleChange = async (newDate: string) => {
+    setSaving(true);
+    try {
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { due_date: newDate || null });
+      toast.success("Due date updated");
+      setEditing(false);
+      onUpdate();
+    } catch { toast.error("Failed to update"); }
+    finally { setSaving(false); }
+  };
+
+  if (editing) {
+    return (
+      <input
+        type="date"
+        defaultValue={currentDate ? currentDate.split("T")[0] : ""}
+        className="bg-white/20 text-white text-xs rounded px-1.5 py-0.5 border border-white/30"
+        autoFocus
+        disabled={saving}
+        onChange={(e) => handleChange(e.target.value)}
+        onBlur={() => setEditing(false)}
+      />
+    );
+  }
+
+  return (
+    <button
+      className="hover:text-white/90 hover:underline cursor-pointer"
+      onClick={() => setEditing(true)}
+      title="Click to change due date"
+    >
+      {currentDate ? formatDueDate(currentDate) : "Set due date"}
+    </button>
   );
 }
 

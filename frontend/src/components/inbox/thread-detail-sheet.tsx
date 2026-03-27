@@ -366,8 +366,8 @@ export function ThreadDetailSheet({
         <div ref={timelineEndRef} />
       </div>
 
-      {/* Bottom action area */}
-      <div className="flex-shrink-0 border-t pt-4 space-y-3">
+      {/* Bottom action area — scrollable on mobile when draft is long */}
+      <div className="flex-shrink-0 border-t pt-4 space-y-3 max-h-[50vh] overflow-y-auto">
         {/* Draft area for pending messages */}
         {pendingMessage && pendingMessage.draft_response && (
           <div className="space-y-2">
@@ -387,7 +387,7 @@ export function ThreadDetailSheet({
                 className="text-sm"
               />
             ) : (
-              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm whitespace-pre-wrap max-h-40 overflow-y-auto">
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm whitespace-pre-wrap max-h-24 sm:max-h-40 overflow-y-auto">
                 {pendingMessage.draft_response}
               </div>
             )}

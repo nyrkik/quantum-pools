@@ -344,6 +344,8 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
 
             due_days = action.get("due_days", 3)
             due_date = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
+            action_confidence = action.get("confidence", "high")
+            is_suggested = action_confidence in ("medium", "low")
             db.add(AgentAction(
                 organization_id=organization_id,
                 agent_message_id=agent_msg.id,
@@ -352,6 +354,8 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 description=action["description"],
                 due_date=due_date,
                 status="open",
+                is_suggested=is_suggested,
+                suggestion_confidence=action_confidence if is_suggested else None,
                 created_by="DeepBlue",
             ))
 

@@ -32,6 +32,7 @@ import {
   ListChecks,
   ClipboardList,
   Package,
+  Lightbulb,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCompose } from "@/components/email/compose-provider";
@@ -46,6 +47,8 @@ import { JobPartsSection } from "@/components/jobs/job-parts-section";
 function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
   detail: ActionDetail; actionId: string; onUpdate: () => void; loadDetail: () => void;
 }) {
+  const isSuggested = detail.is_suggested === true;
+
   const statusColors: Record<string, string> = {
     open: "bg-blue-500",
     in_progress: "bg-amber-500",
@@ -61,6 +64,50 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
       onUpdate();
     } catch { toast.error("Failed to update status"); }
   };
+
+  if (isSuggested) {
+    return (
+      <div className="border-2 border-dashed border-amber-400 rounded-lg p-3 bg-amber-50/50 dark:bg-amber-950/20">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-amber-500" />
+            <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">Suggested Job</span>
+            <ActionTypeBadge type={detail.action_type} />
+            {detail.suggestion_confidence && (
+              <Badge variant="outline" className="text-[10px] px-1.5 border-amber-400 text-amber-600">
+                {detail.suggestion_confidence} confidence
+              </Badge>
+            )}
+          </div>
+        </div>
+        <p className="text-sm mt-2">{detail.description}</p>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+          {detail.customer_name && <span>{detail.customer_name}</span>}
+          {detail.due_date && <span>{formatDueDate(detail.due_date)}</span>}
+        </div>
+        <div className="flex gap-2 mt-3">
+          <Button size="sm" className="h-7 text-xs" onClick={async () => {
+            try {
+              await api.post(`/v1/admin/agent-actions/${actionId}/approve-suggestion`, {});
+              toast.success("Suggestion approved — now an open job");
+              loadDetail(); onUpdate();
+            } catch { toast.error("Failed"); }
+          }}>
+            <CheckCircle2 className="h-3 w-3 mr-1" /> Approve
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => {
+            try {
+              await api.post(`/v1/admin/agent-actions/${actionId}/dismiss-suggestion`, {});
+              toast.success("Suggestion dismissed");
+              loadDetail(); onUpdate();
+            } catch { toast.error("Failed"); }
+          }}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`${statusColors[detail.status] || "bg-slate-400"} rounded-lg p-3 text-white`}>

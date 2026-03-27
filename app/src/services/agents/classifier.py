@@ -44,6 +44,7 @@ When classifying emails, respond with JSON:
 {
   "category": "schedule|complaint|billing|gate_code|service_request|general|spam|auto_reply|no_response",
   "urgency": "low|medium|high",
+  "confidence": "high|medium|low",
   "customer_name": "extracted name or null",
   "summary": "one line summary",
   "needs_approval": true/false,
@@ -53,12 +54,18 @@ When classifying emails, respond with JSON:
     {
       "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
       "description": "detailed description including specifics — addresses, part numbers, names, prices mentioned in the email",
-      "due_days": 1
+      "due_days": 1,
+      "confidence": "high|medium|low"
     }
   ]
 }
 
 Guidelines:
+- "confidence": how confident you are in your classification and response:
+  - "high": clear intent, straightforward email, you're sure about the category and response. Examples: simple question with obvious answer, thank you, scheduling request with clear details.
+  - "medium": reasonable interpretation but could be wrong, or email has some ambiguity. Examples: multi-topic email, unclear if they want a quote or just info, property reference but unsure which one.
+  - "low": unclear intent, complex situation, multiple possible interpretations. Examples: forwarded chain with unclear context, legal/financial implications, complaint that could escalate.
+- Each action also gets its own confidence: "high" = clearly needed, "medium" = probably needed but check, "low" = might not be needed
 - category "auto_reply" means no-reply addresses, bounce notifications, marketing — ignore these
 - category "spam" — junk, ignore
 - category "no_response" — ONLY for truly empty acknowledgments with zero actionable content: "thank you", "thanks", "got it", "ok", "sounds good", "perfect", thumbs up, single-word replies. If the email contains ANY instructions, approvals, questions, requests, decisions, or new information — even brief ones — it is NOT no_response. When in doubt, classify as "general" with needs_approval=true. A short reply like "go ahead" or "you can replace it" IS actionable and needs a response.

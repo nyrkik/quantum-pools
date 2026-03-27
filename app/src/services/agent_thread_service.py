@@ -46,6 +46,8 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
         "tasks_completed": a.tasks_completed or 0,
         "completed_at": a.completed_at.isoformat() if a.completed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
+        "is_suggested": a.is_suggested if hasattr(a, "is_suggested") else False,
+        "suggestion_confidence": a.suggestion_confidence if hasattr(a, "suggestion_confidence") else None,
     }
     if include_comments and hasattr(a, "comments") and a.comments:
         d["comments"] = [
@@ -220,7 +222,11 @@ class AgentThreadService:
         )).scalar() or 0
 
         open_actions = (await self.db.execute(
-            select(func.count(AgentAction.id)).where(AgentAction.organization_id == org_id, AgentAction.status.in_(("open", "in_progress")))
+            select(func.count(AgentAction.id)).where(
+                AgentAction.organization_id == org_id,
+                AgentAction.status.in_(("open", "in_progress")),
+                AgentAction.is_suggested == False,
+            )
         )).scalar() or 0
 
         return {

@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import Boolean, String, Integer, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -24,6 +24,8 @@ class AgentAction(Base):
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     parent_action_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_actions.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, suggested, cancelled
+    is_suggested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    suggestion_confidence: Mapped[str | None] = mapped_column(String(10))  # high, medium, low
     created_by: Mapped[str | None] = mapped_column(String(100))  # user name or "DeepBlue"
     notes: Mapped[str | None] = mapped_column(Text)
     task_count: Mapped[int | None] = mapped_column(Integer, default=0)

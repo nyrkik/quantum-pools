@@ -154,15 +154,17 @@ async def get_agent_stats(
         select(func.count(AgentMessage.id)).where(org_filter, AgentMessage.received_at >= since_24h)
     )).scalar() or 0
 
-    # Action item counts
+    # Action item counts (exclude suggestions — they're not yet approved)
     action_org = AgentAction.organization_id == ctx.organization_id
+    not_suggested = AgentAction.is_suggested == False
     open_actions = (await db.execute(
-        select(func.count(AgentAction.id)).where(action_org, AgentAction.status.in_(("open", "in_progress")))
+        select(func.count(AgentAction.id)).where(action_org, AgentAction.status.in_(("open", "in_progress")), not_suggested)
     )).scalar() or 0
     overdue_actions = (await db.execute(
         select(func.count(AgentAction.id)).where(
             action_org,
             AgentAction.status.in_(("open", "in_progress")),
+            not_suggested,
             AgentAction.due_date < datetime.now(timezone.utc),
         )
     )).scalar() or 0

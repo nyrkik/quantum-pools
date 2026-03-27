@@ -17,6 +17,8 @@ export interface AgentAction {
   from_email?: string;
   customer_name?: string;
   subject?: string;
+  is_suggested?: boolean;
+  suggestion_confidence?: string | null;
 }
 
 export interface ActionComment {

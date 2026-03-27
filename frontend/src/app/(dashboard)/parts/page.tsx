@@ -28,6 +28,8 @@ import {
   Clock,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
+import { usePermissions } from "@/lib/permissions";
+import { VendorSettingsSheet } from "@/components/parts/vendor-settings-sheet";
 
 // --- Types ---
 
@@ -89,6 +91,8 @@ function getCategoryIcon(cat: string) {
 // --- Main Page ---
 
 export default function CatalogPage() {
+  const perms = usePermissions();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeType, setActiveType] = useState<CatalogType>("parts");
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<CatalogPart[]>([]);
@@ -229,12 +233,19 @@ export default function CatalogPage() {
           <h1 className="text-xl font-semibold">Catalog</h1>
           {stats && <p className="text-sm text-muted-foreground">{stats.total} items</p>}
         </div>
-        {activeType === "parts" && (
-          <Button variant="outline" size="sm" onClick={handleDiscover} disabled={discovering} className="h-8 text-xs">
-            {discovering ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
-            {discovering ? "Discovering..." : "Update Catalog"}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {(perms.role === "owner" || perms.role === "admin") && (
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          )}
+          {activeType === "parts" && (
+            <Button variant="outline" size="sm" onClick={handleDiscover} disabled={discovering} className="h-8 text-xs">
+              {discovering ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+              {discovering ? "Discovering..." : "Update Catalog"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Type toggle */}
@@ -439,6 +450,8 @@ export default function CatalogPage() {
           })}
         </div>
       )}
+
+      <VendorSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

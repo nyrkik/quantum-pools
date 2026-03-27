@@ -27,6 +27,7 @@ import {
   DollarSign,
   AlertTriangle,
   Settings,
+  Settings2,
   Calculator,
   Building2,
   Home,
@@ -50,6 +51,8 @@ import type {
 } from "@/types/profitability";
 
 import { formatCurrency } from "@/lib/format";
+import { usePermissions } from "@/lib/permissions";
+import { CostSettingsSheet } from "@/components/profitability/cost-settings-sheet";
 
 function marginColor(margin: number, target: number) {
   if (margin >= target) return "text-green-600";
@@ -66,6 +69,8 @@ function marginBadge(margin: number, target: number) {
 }
 
 export default function ProfitabilityPage() {
+  const perms = usePermissions();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [overview, setOverview] = useState<ProfitabilityOverview | null>(null);
   const [whaleCurve, setWhaleCurve] = useState<WhaleCurvePoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,7 +155,12 @@ export default function ProfitabilityPage() {
             {filteredAccounts.length} of {overview.total_accounts} accounts
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {perms.can("profitability.edit_settings") && (
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          )}
           <div className="flex gap-1">
             {([
               { value: "commercial", label: "Commercial", icon: Building2 },
@@ -508,6 +518,8 @@ export default function ProfitabilityPage() {
           })()}
         </CardContent>
       </Card>
+
+      <CostSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

@@ -25,7 +25,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Receipt, Loader2, ImageIcon } from "lucide-react";
+import { Receipt, Loader2, ImageIcon, Settings2 } from "lucide-react";
+import { ChargeSettingsSheet } from "@/components/charges/charge-settings-sheet";
 
 interface Charge {
   id: string;
@@ -51,6 +52,7 @@ const STATUS_BADGES: Record<string, { variant: "default" | "secondary" | "outlin
 
 export default function ChargesPage() {
   const perms = usePermissions();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
@@ -91,8 +93,11 @@ export default function ChargesPage() {
             </Badge>
           )}
         </div>
-        {/* The AddChargeSheet needs a property/customer — it's mainly used from visit pages.
-            On this page we show a disabled hint. */}
+        {(perms.can("invoices.edit") || perms.role === "owner" || perms.role === "admin") && (
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
+            <Settings2 className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* Pending approval */}
@@ -209,6 +214,8 @@ export default function ChargesPage() {
           )}
         </CardContent>
       </Card>
+
+      <ChargeSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

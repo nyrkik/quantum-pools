@@ -40,12 +40,15 @@ import {
   PenSquare,
   User,
   Lock,
+  Settings2,
 } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
+import { usePermissions } from "@/lib/permissions";
 import { formatTime } from "@/lib/format";
 import type { Thread } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "@/components/inbox/inbox-badges";
 import { ThreadDetailSheet } from "@/components/inbox/thread-detail-sheet";
+import { InboxSettingsSheet } from "@/components/inbox/inbox-settings-sheet";
 
 // --- Types ---
 
@@ -71,6 +74,8 @@ type AssignFilter = "all" | "mine";
 export default function InboxPage() {
   const { user } = useAuth();
   const { openCompose } = useCompose();
+  const perms = usePermissions();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<ThreadStats | null>(null);
@@ -140,14 +145,21 @@ export default function InboxPage() {
       <div className="flex items-center gap-2">
         <Bot className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">Inbox</h1>
-        <Button
-          size="sm"
-          className="ml-auto gap-1.5"
-          onClick={() => openCompose()}
-        >
-          <PenSquare className="h-3.5 w-3.5" />
-          New Email
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {perms.can("inbox.manage") && (
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => openCompose()}
+          >
+            <PenSquare className="h-3.5 w-3.5" />
+            New Email
+          </Button>
+        </div>
       </div>
 
       {/* Stats tile */}
@@ -418,6 +430,8 @@ export default function InboxPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      <InboxSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

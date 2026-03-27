@@ -65,16 +65,17 @@ interface Vendor {
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
   "Pumps & Motors": Cog, "Filters & Media": Filter, "Heaters": Flame,
-  "Cleaners & Sweeps": Wrench, "Plumbing & Fittings": Settings2,
-  "Automation & Electrical": Cpu, "Seals & O-Rings": CircleDot,
-  "Sanitizers": Droplets, "pH & Alkalinity": Beaker, "Specialty": Beaker,
-  "Testing": Beaker, "Chemicals": Beaker,
+  "Water Treatment": Droplets, "Cleaners & Sweeps": Wrench,
+  "Plumbing & Fittings": Settings2, "Automation & Electrical": Cpu,
+  "Seals & O-Rings": CircleDot, "Safety & Compliance": Box,
+  "Chemicals": Beaker,
   "time": Clock, "chemical": Beaker, "material": Package, "other": Box,
 };
 
 const PARTS_ORDER = [
-  "Pumps & Motors", "Filters & Media", "Heaters", "Cleaners & Sweeps",
-  "Plumbing & Fittings", "Automation & Electrical", "Seals & O-Rings",
+  "Pumps & Motors", "Filters & Media", "Heaters", "Water Treatment",
+  "Cleaners & Sweeps", "Plumbing & Fittings", "Automation & Electrical",
+  "Seals & O-Rings", "Safety & Compliance",
 ];
 
 const SERVICE_CATEGORY_LABELS: Record<string, string> = {

@@ -303,13 +303,17 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
         pumps = {"pump", "pumps", "motor", "motors", "impeller", "capacitor", "diffuser", "booster"}
         filters = {"filter", "filters", "cartridge", "grid", "element", "de grid", "media", "lateral", "manifold", "standpipe"}
         heaters = {"heater", "heaters", "heat pump", "heat exchanger", "ignitor", "igniter", "thermistor", "burner", "header"}
+        water_treatment = {"salt", "salt system", "salt systems", "chlorinator", "feeder", "cell", "erosion",
+                          "ozone", "uv", "orp", "stenner", "rola", "chemical feed", "sanitizer"}
         cleaners = {"cleaner", "cleaners", "sweep", "polaris", "kreepy", "diaphragm", "robotic"}
-        automation = {"automation", "control", "salt", "salt system", "salt systems", "lighting", "light", "led", "timer", "relay", "transformer", "board", "sensor", "cell"}
+        automation = {"automation", "control", "lighting", "light", "led", "timer", "relay", "transformer", "board", "sensor"}
+        safety = {"drain cover", "svrs", "vgb", "safety", "alarm", "barrier", "entrapment", "rope", "float", "sign"}
         seals = {"o_ring", "o-ring", "seal", "gasket", "lube"}
         plumbing = {"valve", "valves", "union", "fitting", "pvc", "basket", "plug", "drain", "skimmer", "return", "coupling", "elbow"}
         chemicals = {"chemical", "chemicals", "testing", "test", "reagent"}
         tools = {"tool", "tools", "supplies", "accessories"}
         for words, cat in [
+            (safety, "Safety & Compliance"), (water_treatment, "Water Treatment"),
             (pumps, "Pumps & Motors"), (filters, "Filters & Media"), (heaters, "Heaters"),
             (cleaners, "Cleaners & Sweeps"), (automation, "Automation & Electrical"),
             (seals, "Seals & O-Rings"), (plumbing, "Plumbing & Fittings"),

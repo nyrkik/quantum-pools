@@ -294,6 +294,28 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
             raise
         return results
 
+    @staticmethod
+    def _normalize_category(raw: str | None) -> str:
+        """Map any category string to one of 5 standard groups."""
+        if not raw:
+            return "Parts & Repair"
+        lower = raw.lower().strip()
+        equipment = {"pump", "pumps", "motor", "motors", "heater", "heaters", "automation",
+                     "salt", "salt systems", "salt system", "lighting", "cleaner", "cleaners",
+                     "board", "switch", "impeller"}
+        filters = {"filter", "filters", "cartridge", "grid", "element", "de grid", "media"}
+        chemicals = {"chemical", "chemicals", "testing", "test"}
+        tools = {"tool", "tools", "supplies", "accessories"}
+        if lower in equipment or any(lower.startswith(e) for e in equipment):
+            return "Equipment"
+        if lower in filters or any(lower.startswith(f) for f in filters):
+            return "Filters"
+        if lower in chemicals or any(lower.startswith(c) for c in chemicals):
+            return "Chemicals"
+        if lower in tools or any(lower.startswith(t) for t in tools):
+            return "Tools & Supplies"
+        return "Parts & Repair"
+
     async def _upsert_parts(self, parts: list[dict], source_model: str) -> int:
         """Upsert parts into catalog. Update compatible_with to include source_model."""
         count = 0
@@ -335,7 +357,7 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
                     sku=sku,
                     name=p["name"],
                     brand=p.get("brand"),
-                    category=p.get("category"),
+                    category=self._normalize_category(p.get("category")),
                     compatible_with=compat,
                     last_scraped_at=datetime.now(timezone.utc),
                 )

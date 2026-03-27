@@ -188,25 +188,25 @@ export default function CatalogPage() {
     }
   };
 
-  const [webSearching, setWebSearching] = useState<string | null>(null);
-  const [webResults, setWebResults] = useState<{ product_name: string; price: number | null; vendor_name: string; vendor_url: string; availability: string }[]>([]);
-  const [webSearchQuery, setWebSearchQuery] = useState("");
+  const [webSearchState, setWebSearchState] = useState<{
+    loading: boolean;
+    query: string;
+    results: { product_name: string; price: number | null; vendor_name: string; vendor_url: string; availability: string }[];
+    visible: boolean;
+  }>({ loading: false, query: "", results: [], visible: false });
 
-  const handleWebSearch = async (q: string) => {
-    setWebSearching(q);
-    setWebSearchQuery(q);
-    setWebResults([]);
+  const handleWebSearch = useCallback(async (q: string) => {
+    setWebSearchState({ loading: true, query: q, results: [], visible: true });
     try {
       const data = await api.get<{
         web_results: { product_name: string; price: number | null; vendor_name: string; vendor_url: string; availability: string }[];
       }>(`/v1/parts/web-search?q=${encodeURIComponent(q)}&limit=8`);
-      setWebResults(data.web_results || []);
+      setWebSearchState(prev => ({ ...prev, loading: false, results: data.web_results || [] }));
     } catch {
       toast.error("Web search failed");
-    } finally {
-      setWebSearching(null);
+      setWebSearchState(prev => ({ ...prev, loading: false }));
     }
-  };
+  }, []);
 
   const handleDiscover = async () => {
     setDiscovering(true);
@@ -262,26 +262,26 @@ export default function CatalogPage() {
       )}
 
       {/* Web search results panel */}
-      {(webSearching || webResults.length > 0) && (
+      {webSearchState.visible && (
         <Card className="shadow-sm border-blue-200 dark:border-blue-800">
           <CardContent className="p-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-medium text-blue-700 dark:text-blue-400">
-                {webSearching ? `Searching for "${webSearching}"...` : `Online results for "${webSearchQuery}"`}
+                {webSearchState.loading ? `Searching for "${webSearchState.query}"...` : `Online results for "${webSearchState.query}"`}
               </p>
-              {!webSearching && (
-                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setWebResults([]); setWebSearchQuery(""); }}>
+              {!webSearchState.loading && (
+                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setWebSearchState(prev => ({ ...prev, visible: false }))}>
                   Close
                 </Button>
               )}
             </div>
-            {webSearching ? (
+            {webSearchState.loading ? (
               <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-blue-500" /></div>
-            ) : webResults.length === 0 ? (
+            ) : webSearchState.results.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-2">No results found online</p>
             ) : (
               <div className="divide-y">
-                {webResults.map((r, i) => (
+                {webSearchState.results.map((r, i) => (
                   <div key={i} className="flex items-center justify-between py-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{r.product_name}</p>

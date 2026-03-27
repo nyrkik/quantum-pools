@@ -270,6 +270,14 @@ export function ComposeEmail() {
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto p-3 gap-2.5">
+        {/* From field (shown when replying from a specific address) */}
+        {options.fromAddress && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-medium w-8">From</span>
+            <span className="bg-muted px-2 py-0.5 rounded">{options.fromAddress}</span>
+          </div>
+        )}
+
         {/* To field with customer search */}
         <div ref={searchRef} className="relative">
           <div className="flex items-center gap-2">

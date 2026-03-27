@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import type { OrgCostSettings, OrgCostSettingsUpdate } from "@/types/profitability";
 import { VendorsSection } from "@/components/settings/vendors-section";
+import { InboxRoutingSection } from "@/components/settings/inbox-routing-section";
 
 // --- Types ---
 
@@ -98,7 +99,7 @@ function getDefaultPrice(defaults: RegionalDefault[], row: ChemicalRow): number 
   return match?.sanitizer_price_per_unit ?? null;
 }
 
-type SettingsTab = "general" | "costs" | "tiers" | "chemicals" | "charges" | "vendors";
+type SettingsTab = "general" | "costs" | "tiers" | "chemicals" | "charges" | "vendors" | "routing";
 
 function BrandingSection() {
   const { refreshUser } = useAuth();
@@ -389,6 +390,7 @@ export default function SettingsPage() {
     { key: "chemicals", label: "Chemical Prices" },
     { key: "charges", label: "Charges" },
     { key: "vendors", label: "Vendors" },
+    { key: "routing", label: "Inbox Routing" },
   ];
 
   const costFields: { key: keyof OrgCostSettingsUpdate; label: string; prefix: string; suffix: string; description: string; step?: string }[] = [
@@ -663,6 +665,9 @@ export default function SettingsPage() {
 
       {/* Vendors */}
       {tab === "vendors" && <VendorsSection editMode={editMode} />}
+
+      {/* Inbox Routing */}
+      {tab === "routing" && <InboxRoutingSection editMode={editMode} />}
     </div>
   );
 }

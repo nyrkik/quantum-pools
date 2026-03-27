@@ -39,6 +39,7 @@ import {
   ChevronRight,
   PenSquare,
   User,
+  Lock,
 } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
 import { formatTime } from "@/lib/format";
@@ -311,6 +312,11 @@ export default function InboxPage() {
                       <span className={t.is_unread ? "font-semibold" : t.has_pending ? "font-medium" : ""}>
                         {t.customer_name || t.contact_email.split("@")[0]}
                       </span>
+                      {t.visibility_permission && (
+                        <span title={`Restricted: ${t.visibility_permission}`}>
+                          <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        </span>
+                      )}
                       {t.assigned_to_name && (
                         <Badge variant="secondary" className="text-[10px] px-1.5 flex-shrink-0">
                           {t.assigned_to_user_id === user?.id ? "Mine" : t.assigned_to_name}

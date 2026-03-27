@@ -38,8 +38,15 @@ async def get_or_create_thread(
     customer_id: str | None = None, customer_name: str | None = None,
     property_address: str | None = None, category: str | None = None,
     urgency: str | None = None,
+    visibility_permission: str | None = None,
+    delivered_to: str | None = None,
+    routing_rule_id: str | None = None,
 ) -> "AgentThread":
-    """Find existing thread or create new one."""
+    """Find existing thread or create new one.
+
+    Routing fields (visibility_permission, delivered_to, routing_rule_id) are only
+    set on NEW threads — existing threads keep their original visibility.
+    """
     from src.models.agent_thread import AgentThread
 
     thread_key = _make_thread_key(contact_email, subject)
@@ -63,6 +70,9 @@ async def get_or_create_thread(
                 urgency=urgency,
                 category=category,
                 message_count=0,
+                visibility_permission=visibility_permission,
+                delivered_to=delivered_to,
+                routing_rule_id=routing_rule_id,
             )
             db.add(thread)
             await db.commit()
@@ -75,6 +85,9 @@ async def get_or_create_thread(
                 thread.customer_name = customer_name
             if property_address and not thread.property_address:
                 thread.property_address = property_address
+            # Set delivered_to if not yet set (first message had it)
+            if delivered_to and not thread.delivered_to:
+                thread.delivered_to = delivered_to
             await db.commit()
 
         return thread

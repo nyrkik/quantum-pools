@@ -100,6 +100,7 @@ class AgentThreadService:
         offset: int,
         assigned_to: str | None = None,
         current_user_id: str | None = None,
+        user_permission_slugs: set[str] | None = None,
     ) -> dict:
         """List conversation threads with filtering."""
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
@@ -120,6 +121,15 @@ class AgentThreadService:
             base = base.where(AgentThread.status != "ignored")
         if assigned_to:
             base = base.where(AgentThread.assigned_to_user_id == assigned_to)
+        # Visibility filtering: only show threads the user has permission to see
+        if user_permission_slugs is not None:
+            from sqlalchemy import or_
+            base = base.where(
+                or_(
+                    AgentThread.visibility_permission.is_(None),
+                    AgentThread.visibility_permission.in_(user_permission_slugs),
+                )
+            )
         if search:
             q = f"%{search}%"
             base = base.where(
@@ -170,28 +180,43 @@ class AgentThreadService:
                         t.last_message_at > read_map[t.id] if t.id in read_map and t.last_message_at
                         else t.last_message_at is not None  # Never read = unread
                     ),
+                    "visibility_permission": t.visibility_permission,
+                    "delivered_to": t.delivered_to,
                 }
                 for t in threads
             ],
             "total": total,
         }
 
-    async def get_thread_stats(self, org_id: str) -> dict:
-        """Thread-level stats."""
+    async def get_thread_stats(self, org_id: str, user_permission_slugs: set[str] | None = None) -> dict:
+        """Thread-level stats. If user_permission_slugs provided, counts only visible threads."""
+        from sqlalchemy import or_
         thread_org = AgentThread.organization_id == org_id
-        total = (await self.db.execute(select(func.count(AgentThread.id)).where(thread_org))).scalar() or 0
+
+        def _vis_filter(q):
+            """Apply visibility filter if permissions are scoped."""
+            if user_permission_slugs is not None:
+                return q.where(or_(
+                    AgentThread.visibility_permission.is_(None),
+                    AgentThread.visibility_permission.in_(user_permission_slugs),
+                ))
+            return q
+
+        total = (await self.db.execute(
+            _vis_filter(select(func.count(AgentThread.id)).where(thread_org))
+        )).scalar() or 0
         pending = (await self.db.execute(
-            select(func.count(AgentThread.id)).where(thread_org, AgentThread.has_pending == True)
+            _vis_filter(select(func.count(AgentThread.id)).where(thread_org, AgentThread.has_pending == True))
         )).scalar() or 0
 
         # Stale: pending threads where last_message_at > 30 min ago
         stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
         stale = (await self.db.execute(
-            select(func.count(AgentThread.id)).where(
+            _vis_filter(select(func.count(AgentThread.id)).where(
                 thread_org,
                 AgentThread.has_pending == True,
                 AgentThread.last_message_at < stale_cutoff,
-            )
+            ))
         )).scalar() or 0
 
         open_actions = (await self.db.execute(
@@ -205,12 +230,20 @@ class AgentThreadService:
             "open_actions": open_actions,
         }
 
-    async def get_thread_detail(self, org_id: str, thread_id: str) -> dict | None:
-        """Get thread with full conversation timeline."""
+    async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None) -> dict | None:
+        """Get thread with full conversation timeline.
+
+        Returns None if thread doesn't exist or user lacks required visibility permission.
+        """
         result = await self.db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id))
         thread = result.scalar_one_or_none()
         if not thread:
             return None
+
+        # Visibility check
+        if user_permission_slugs is not None and thread.visibility_permission:
+            if thread.visibility_permission not in user_permission_slugs:
+                return None
 
         # Get all messages in thread
         msgs_result = await self.db.execute(
@@ -289,6 +322,9 @@ class AgentThreadService:
             "assigned_to_user_id": thread.assigned_to_user_id,
             "assigned_to_name": thread.assigned_to_name,
             "assigned_at": thread.assigned_at.isoformat() if thread.assigned_at else None,
+            "visibility_permission": thread.visibility_permission,
+            "delivered_to": thread.delivered_to,
+            "routing_rule_id": thread.routing_rule_id,
             "timeline": timeline,
             "actions": actions,
         }
@@ -312,8 +348,12 @@ class AgentThreadService:
         if not final_text:
             return {"error": "no_text", "detail": "No response text provided"}
 
+        # Determine FROM address: use thread's delivered_to if available
+        thread_obj = (await self.db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
+        from_addr = (thread_obj.delivered_to if thread_obj and thread_obj.delivered_to else None)
+
         email_svc = EmailService(self.db)
-        send_result = await email_svc.send_agent_reply(org_id, msg.from_email, msg.subject or "", final_text)
+        send_result = await email_svc.send_agent_reply(org_id, msg.from_email, msg.subject or "", final_text, from_address=from_addr)
         if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send email"}
 
@@ -328,7 +368,7 @@ class AgentThreadService:
         outbound = AgentMessage(
             organization_id=org_id,
             direction="outbound",
-            from_email=AGENT_FROM_EMAIL,
+            from_email=from_addr or AGENT_FROM_EMAIL,
             to_email=msg.from_email,
             subject=f"Re: {msg.subject}" if msg.subject and not msg.subject.startswith("Re:") else msg.subject,
             body=final_text,
@@ -421,7 +461,10 @@ class AgentThreadService:
         return {"deleted": True}
 
     async def assign_thread(self, org_id: str, thread_id: str, user_id: str | None, user_name: str | None) -> dict:
-        """Assign/unassign a thread to a team member. Creates notification on assign."""
+        """Assign/unassign a thread to a team member. Creates notification on assign.
+
+        Rejects assignment if thread requires a visibility permission the target user lacks.
+        """
         result = await self.db.execute(
             select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
         )
@@ -431,6 +474,23 @@ class AgentThreadService:
 
         now = datetime.now(timezone.utc)
         if user_id:
+            # Check target user has visibility permission for this thread
+            if thread.visibility_permission:
+                from src.models.organization_user import OrganizationUser
+                from src.services.permission_service import PermissionService
+                target_ou = (await self.db.execute(
+                    select(OrganizationUser).where(
+                        OrganizationUser.user_id == user_id,
+                        OrganizationUser.organization_id == org_id,
+                        OrganizationUser.is_active == True,
+                    )
+                )).scalar_one_or_none()
+                if target_ou:
+                    perm_svc = PermissionService(self.db)
+                    target_perms = await perm_svc.resolve_permissions(target_ou)
+                    if thread.visibility_permission not in target_perms:
+                        return {"error": "forbidden", "detail": f"User lacks required permission: {thread.visibility_permission}"}
+
             thread.assigned_to_user_id = user_id
             thread.assigned_to_name = user_name
             thread.assigned_at = now
@@ -482,8 +542,9 @@ class AgentThreadService:
         if not text:
             return {"error": "no_text", "detail": "No response text"}
 
+        from_addr = thread.delivered_to if thread.delivered_to else None
         email_svc = EmailService(self.db)
-        send_result = await email_svc.send_agent_reply(org_id, thread.contact_email, thread.subject or "", text)
+        send_result = await email_svc.send_agent_reply(org_id, thread.contact_email, thread.subject or "", text, from_address=from_addr)
         if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send"}
 
@@ -491,7 +552,7 @@ class AgentThreadService:
         outbound = AgentMessage(
             organization_id=org_id,
             direction="outbound",
-            from_email=AGENT_FROM_EMAIL,
+            from_email=from_addr or AGENT_FROM_EMAIL,
             to_email=thread.contact_email,
             subject=f"Re: {thread.subject}" if thread.subject and not thread.subject.startswith("Re:") else thread.subject,
             body=text,
@@ -660,3 +721,19 @@ Return ONLY the email body text."""
             return {"draft": response.content[0].text.strip(), "to": thread.contact_email, "subject": thread.subject}
         except Exception as e:
             return {"error": "ai_failed", "detail": f"Failed: {str(e)}"}
+
+    async def update_visibility(self, org_id: str, thread_id: str, visibility_permission: str | None) -> dict:
+        """Admin override: change a thread's visibility permission."""
+        result = await self.db.execute(
+            select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
+        )
+        thread = result.scalar_one_or_none()
+        if not thread:
+            return {"error": "not_found", "detail": "Thread not found"}
+
+        thread.visibility_permission = visibility_permission
+        await self.db.commit()
+        return {
+            "thread_id": thread.id,
+            "visibility_permission": thread.visibility_permission,
+        }

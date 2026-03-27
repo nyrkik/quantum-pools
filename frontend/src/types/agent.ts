@@ -96,6 +96,8 @@ export interface Thread {
   assigned_to_name: string | null;
   assigned_at: string | null;
   is_unread: boolean;
+  visibility_permission: string | null;
+  delivered_to: string | null;
 }
 
 export interface TimelineMessage {
@@ -127,6 +129,9 @@ export interface ThreadDetail {
   assigned_to_user_id: string | null;
   assigned_to_name: string | null;
   assigned_at: string | null;
+  visibility_permission: string | null;
+  delivered_to: string | null;
+  routing_rule_id: string | null;
   timeline: TimelineMessage[];
   actions: unknown[];
 }

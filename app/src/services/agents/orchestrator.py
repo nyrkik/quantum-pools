@@ -125,6 +125,10 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
 
     to_header = decode_email_header(msg.get("To", ""))
 
+    # --- Extract Delivered-To for routing ---
+    from src.services.inbox_routing_service import extract_delivered_to
+    delivered_to_addr = extract_delivered_to(msg)
+
     # --- Reply loop prevention ---
     if _is_own_email(from_email):
         logger.info(f"Skipping own email: {from_email}: {subject}")
@@ -153,10 +157,24 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             logger.info(f"Already processed: {uid}")
             return
 
-    # --- Thread: get or create ---
-    # We don't have customer match yet, so create thread with just email/subject
-    # Customer info will be added after classification
-    thread = await get_or_create_thread(from_email, subject, organization_id=organization_id)
+    # --- Thread: get or create (with routing rule matching) ---
+    # Match routing rules to set visibility on new threads
+    routing_kwargs: dict = {}
+    if delivered_to_addr and organization_id:
+        from src.services.inbox_routing_service import match_routing_rule
+        async with get_db_context() as db:
+            rule = await match_routing_rule(db, organization_id, delivered_to_addr)
+        if rule:
+            routing_kwargs["visibility_permission"] = rule.required_permission
+            routing_kwargs["delivered_to"] = delivered_to_addr
+            routing_kwargs["routing_rule_id"] = rule.id
+            if rule.category:
+                routing_kwargs["category"] = rule.category
+            logger.info(f"Routing rule matched: {rule.address_pattern} -> perm={rule.required_permission}")
+        else:
+            routing_kwargs["delivered_to"] = delivered_to_addr
+
+    thread = await get_or_create_thread(from_email, subject, organization_id=organization_id, **routing_kwargs)
     thread_context = ""
     existing_action_descriptions = []
 
@@ -199,6 +217,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 body=body,
                 status="handled",
                 category="no_response",
+                delivered_to=delivered_to_addr,
                 thread_id=thread.id if thread else None,
                 matched_customer_id=thread.matched_customer_id if thread else None,
                 customer_name=thread.customer_name if thread else None,
@@ -237,6 +256,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 customer_name=result.get("customer_name"),
                 received_at=email_date,
                 thread_id=thread.id,
+                delivered_to=delivered_to_addr,
             )
             db.add(agent_msg)
             await db.commit()
@@ -274,6 +294,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             property_address=result.get("_property_address"),
             notes=result.get("internal_note"),
             thread_id=thread.id,
+            delivered_to=delivered_to_addr,
         )
         db.add(agent_msg)
         await db.flush()

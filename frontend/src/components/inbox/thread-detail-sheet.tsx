@@ -309,6 +309,23 @@ export function ThreadDetailSheet({
         <p className="text-xs text-muted-foreground">
           {thread.message_count} message{thread.message_count !== 1 ? "s" : ""}
         </p>
+        {/* Visibility + delivered_to info */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {thread.delivered_to && (
+            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+              via {thread.delivered_to}
+            </span>
+          )}
+          {thread.visibility_permission ? (
+            <span className="text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950/30 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
+              Restricted: {thread.visibility_permission}
+            </span>
+          ) : (
+            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+              Visible to everyone
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Conversation timeline */}

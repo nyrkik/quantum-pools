@@ -88,6 +88,22 @@ class EmailComposeService:
         if sig_parts:
             full_body = f"{body}\n\n--\n" + "\n".join(sig_parts)
 
+        # Determine FROM address: use thread's delivered_to if replying in a thread
+        from_address_override = None
+        if job_id:
+            from src.models.agent_action import AgentAction
+            action_result = await self.db.execute(
+                select(AgentAction).where(AgentAction.id == job_id, AgentAction.organization_id == org_id)
+            )
+            action = action_result.scalar_one_or_none()
+            if action and action.thread_id:
+                thread_result = await self.db.execute(
+                    select(AgentThread.delivered_to).where(AgentThread.id == action.thread_id)
+                )
+                row = thread_result.first()
+                if row and row[0]:
+                    from_address_override = row[0]
+
         # Send with sender's name as from_name
         email_svc = EmailService(self.db)
         from_name = f"{sender_name} at {org_name}" if sender_name else org_name
@@ -96,6 +112,7 @@ class EmailComposeService:
             subject=subject,
             text_body=full_body,
             from_name=from_name,
+            from_email=from_address_override,
         )
         result = await email_svc.send_email(org_id, msg)
 

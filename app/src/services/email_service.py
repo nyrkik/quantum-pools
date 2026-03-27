@@ -233,11 +233,16 @@ class EmailService:
         return await self.send_email(org_id, msg)
 
     async def send_agent_reply(
-        self, org_id: str, to: str, subject: str, body_text: str
+        self, org_id: str, to: str, subject: str, body_text: str,
+        from_address: str | None = None,
     ) -> EmailResult:
-        """Send an agent email reply (plain text, Re: prefix handled by caller)."""
+        """Send an agent email reply (plain text, Re: prefix handled by caller).
+
+        If from_address is provided, it overrides the org's default sender address.
+        This is used when replying from the same address that originally received the email.
+        """
         re_subject = f"Re: {subject}" if subject and not subject.startswith("Re:") else subject
-        msg = EmailMessage(to=to, subject=re_subject, text_body=body_text)
+        msg = EmailMessage(to=to, subject=re_subject, text_body=body_text, from_email=from_address)
         return await self.send_email(org_id, msg)
 
 

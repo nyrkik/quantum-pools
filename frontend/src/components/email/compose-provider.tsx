@@ -13,6 +13,8 @@ export interface ComposeOptions {
   /** Original AI draft body — if user edits, diff is logged as correction */
   originalDraft?: string;
   originalSubject?: string;
+  /** FROM address override (e.g., thread.delivered_to). Shown as info, passed to backend. */
+  fromAddress?: string;
 }
 
 interface ComposeContextValue {

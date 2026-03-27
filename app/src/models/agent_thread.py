@@ -30,6 +30,11 @@ class AgentThread(Base):
     has_pending: Mapped[bool] = mapped_column(Boolean, default=True)
     has_open_actions: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Inbox routing / visibility
+    visibility_permission: Mapped[str | None] = mapped_column(String(80), nullable=True)  # permission slug required to view (null = everyone)
+    delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
+    routing_rule_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("inbox_routing_rules.id"), nullable=True)
+
     # Thread assignment
     assigned_to_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     assigned_to_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -41,6 +41,7 @@ from src.models.org_subscription import OrgSubscription
 from src.models.emd_lookup import EMDLookup
 from src.models.scraper_run import ScraperRun
 from src.models.estimate_approval import EstimateApproval
+from src.models.inbox_routing_rule import InboxRoutingRule
 from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
@@ -116,4 +117,5 @@ __all__ = [
     "PartPurchase",
     "EquipmentItem",
     "EquipmentEvent",
+    "InboxRoutingRule",
 ]

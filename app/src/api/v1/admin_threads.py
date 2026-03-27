@@ -1,7 +1,11 @@
-"""Admin thread endpoints — thin router delegating to AgentThreadService."""
+"""Admin thread endpoints — thin router delegating to AgentThreadService.
+
+Access: owner, admin, manager (visibility filtering replaces hard role gating).
+"""
 
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -12,10 +16,16 @@ from src.services.agent_thread_service import AgentThreadService
 router = APIRouter(prefix="/admin", tags=["admin-threads"])
 
 
+async def _get_user_perm_slugs(ctx: OrgUserContext, db: AsyncSession) -> set[str]:
+    """Load user's permission slugs for visibility filtering."""
+    perms = await ctx.load_permissions(db)
+    return set(perms.keys())
+
+
 @router.get("/client-search")
 async def search_clients(
     q: str = Query(..., min_length=2),
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Search customers + properties for autocomplete."""
@@ -32,10 +42,11 @@ async def list_threads(
     exclude_spam: bool = Query(True),
     exclude_ignored: bool = Query(False),
     assigned_to: Optional[str] = Query(None),
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
-    """List conversation threads."""
+    """List conversation threads (visibility-filtered by user permissions)."""
+    perm_slugs = await _get_user_perm_slugs(ctx, db)
     service = AgentThreadService(db)
     return await service.list_threads(
         org_id=ctx.organization_id,
@@ -47,28 +58,31 @@ async def list_threads(
         offset=offset,
         assigned_to=assigned_to,
         current_user_id=ctx.user.id,
+        user_permission_slugs=perm_slugs,
     )
 
 
 @router.get("/agent-threads/stats")
 async def get_thread_stats(
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Thread-level stats."""
+    """Thread-level stats (visibility-filtered)."""
+    perm_slugs = await _get_user_perm_slugs(ctx, db)
     service = AgentThreadService(db)
-    return await service.get_thread_stats(org_id=ctx.organization_id)
+    return await service.get_thread_stats(org_id=ctx.organization_id, user_permission_slugs=perm_slugs)
 
 
 @router.get("/agent-threads/{thread_id}")
 async def get_thread(
     thread_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Get thread with full conversation timeline. Marks as read for current user."""
+    perm_slugs = await _get_user_perm_slugs(ctx, db)
     service = AgentThreadService(db)
-    result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id)
+    result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_permission_slugs=perm_slugs)
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
     # Mark as read when viewing
@@ -80,7 +94,7 @@ async def get_thread(
 async def approve_thread(
     thread_id: str,
     body: ApproveBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Approve the latest pending message in a thread."""
@@ -100,7 +114,7 @@ async def approve_thread(
 @router.post("/agent-threads/{thread_id}/dismiss")
 async def dismiss_thread(
     thread_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Dismiss all pending messages in a thread."""
@@ -115,7 +129,7 @@ async def dismiss_thread(
 @router.post("/agent-threads/{thread_id}/archive")
 async def archive_thread(
     thread_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Archive a thread — hidden from inbox, preserved for records."""
@@ -138,7 +152,7 @@ async def delete_thread(
 async def assign_thread(
     thread_id: str,
     body: AssignThreadBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Assign or unassign a thread to a team member."""
@@ -150,7 +164,7 @@ async def assign_thread(
         user_name=body.user_name,
     )
     if "error" in result:
-        code = {"not_found": 404}[result["error"]]
+        code = {"not_found": 404, "forbidden": 403}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
     return result
 
@@ -159,7 +173,7 @@ async def assign_thread(
 async def send_thread_followup(
     thread_id: str,
     body: ApproveBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Send a follow-up in a thread."""
@@ -180,7 +194,7 @@ async def send_thread_followup(
 async def revise_thread_draft(
     thread_id: str,
     body: ReviseDraftBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Revise the draft on the latest pending message in a thread."""
@@ -200,7 +214,7 @@ async def revise_thread_draft(
 @router.post("/agent-threads/{thread_id}/draft-followup")
 async def draft_thread_followup(
     thread_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
     """Draft a follow-up for a thread using full conversation context."""
@@ -212,4 +226,29 @@ async def draft_thread_followup(
     if "error" in result:
         code = {"not_found": 404, "ai_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
+    return result
+
+
+# ── Thread visibility override ─────────────────────────────────────
+
+class VisibilityBody(BaseModel):
+    visibility_permission: Optional[str] = None
+
+
+@router.patch("/agent-threads/{thread_id}/visibility")
+async def update_thread_visibility(
+    thread_id: str,
+    body: VisibilityBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin override: change thread visibility permission."""
+    service = AgentThreadService(db)
+    result = await service.update_visibility(
+        org_id=ctx.organization_id,
+        thread_id=thread_id,
+        visibility_permission=body.visibility_permission,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["detail"])
     return result

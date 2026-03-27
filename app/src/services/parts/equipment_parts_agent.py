@@ -331,38 +331,38 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
         lower = name.lower()
         if category == "Pumps & Motors":
             if "motor" in lower and "pump" not in lower: return "Motors"
-            if "pump" in lower and not any(w in lower for w in ["seal", "basket", "lid", "gasket", "impeller", "diffuser", "capacitor"]): return "Complete Pumps"
-            return "Pump Parts"
+            if "pump" in lower and not any(w in lower for w in ["seal", "basket", "lid", "gasket", "impeller", "diffuser", "capacitor"]): return "Pumps"
+            return "Parts"
         if category == "Filters & Media":
             if "cartridge" in lower: return "Cartridges"
             if "grid" in lower or "de " in lower: return "DE Grids"
             if "sand" in lower: return "Sand Media"
-            return "Filter Parts"
+            return "Parts"
         if category == "Heaters":
             if "heat pump" in lower: return "Heat Pumps"
-            if "heater" in lower and not any(w in lower for w in ["ignit", "thermist", "exchang"]): return "Gas Heaters"
-            return "Heater Parts"
+            if "heater" in lower and not any(w in lower for w in ["ignit", "thermist", "exchang"]): return "Gas"
+            return "Parts"
         if category == "Water Treatment":
-            if "cell" in lower or "sensor" in lower: return "Cells & Sensors"
-            if "feeder" in lower or "stenner" in lower or "rola" in lower: return "Chemical Feeders"
-            return "Salt Systems"
+            if "cell" in lower or "sensor" in lower: return "Cells"
+            if "feeder" in lower or "stenner" in lower or "rola" in lower: return "Feeders"
+            return "Salt"
         if category == "Cleaners & Sweeps":
             if "polaris" in lower or "pressure" in lower: return "Pressure Side"
             if "robot" in lower: return "Robotic"
             return "Suction Side"
         if category == "Plumbing & Fittings":
             if "valve" in lower or "actuator" in lower: return "Valves"
-            if "basket" in lower or "skimmer" in lower: return "Skimmers & Baskets"
-            if "drain" in lower or "return" in lower: return "Returns & Drains"
-            if "gauge" in lower: return "Gauges & Accessories"
+            if "basket" in lower or "skimmer" in lower: return "Baskets"
+            if "drain" in lower or "return" in lower: return "Drains"
+            if "gauge" in lower: return "Gauges"
             return "Fittings"
         if category == "Automation & Electrical":
             if "light" in lower or "led" in lower: return "Lighting"
             return "Controls"
         if category == "Seals & O-Rings":
             if "gasket" in lower: return "Gaskets"
-            if "shaft" in lower or "mechanical" in lower: return "Shaft Seals"
-            if "kit" in lower: return "Seal Kits"
+            if "shaft" in lower or "mechanical" in lower: return "Shaft"
+            if "kit" in lower: return "Kits"
             return "O-Rings"
         if category == "Safety & Compliance":
             return "Drain Covers & SVRS"

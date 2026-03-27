@@ -51,7 +51,7 @@ const navItems = [
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/charges", label: "Charges", icon: Receipt, check: "canViewInvoices" as keyof Permissions, badge: "charges" as const },
-  { href: "/parts", label: "Parts", icon: Package, check: null },
+  { href: "/parts", label: "Catalog", icon: Package, check: null },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
   { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
   { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },

@@ -39,6 +39,27 @@ BUSINESS_HOUR_END = 20   # 8 PM
 # Reply loop detection patterns
 LOOP_PATTERNS = ["noreply@", "no-reply@", "mailer-daemon@", "postmaster@"]
 
+# Automated senders — skip without wasting AI tokens
+AUTO_SENDER_DOMAINS = {
+    "scppool.com", "pool360.com",  # SCP order notifications
+    "americanexpress.com", "welcome.americanexpress.com",
+    "entrata.com", "emailrelay.com",  # Property mgmt portals
+    "getskimmer.com",  # Competitor marketing
+    "mailchimp.com", "sendgrid.net", "constantcontact.com",
+    "notifications@", "alerts@", "updates@",
+}
+
+# Internal team addresses — skip (handled by sent folder tracking)
+INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]
+
+# Thank-you / confirmation patterns — auto-handle without AI
+GRATITUDE_PATTERNS = [
+    "thank you", "thanks", "thx", "ty", "appreciate it",
+    "sounds good", "perfect", "great", "awesome", "wonderful",
+    "no problem", "will do", "got it", "understood",
+    "ok", "okay", "confirmed", "works for me",
+]
+
 
 def _is_own_email(from_email: str) -> bool:
     """Check if the email is from one of our own addresses (reply loop prevention)."""
@@ -114,6 +135,18 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         logger.info(f"Skipping own email: {from_email}: {subject}")
         return
 
+    # --- Skip automated senders (no AI needed) ---
+    from_lower = from_email.lower()
+    from_domain = from_lower.split("@")[-1] if "@" in from_lower else ""
+    if from_domain in AUTO_SENDER_DOMAINS or any(p in from_lower for p in AUTO_SENDER_DOMAINS):
+        logger.info(f"Skipping automated sender: {from_email}: {subject}")
+        return
+
+    # --- Skip internal team emails ---
+    if any(p in from_lower for p in INTERNAL_PATTERNS):
+        logger.info(f"Skipping internal email: {from_email}: {subject}")
+        return
+
     logger.info(f"Processing email from {from_email}: {subject}")
 
     # Check if already processed
@@ -153,11 +186,53 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 thread_context += "\nDo NOT create duplicate action items. Only add new actions if this email introduces genuinely new work."
                 existing_action_descriptions = await _get_thread_open_actions(thread.id)
 
+    # --- Quick check for simple thank-you / confirmation messages ---
+    body_stripped = (body or "").strip().lower()
+    # Remove quoted content and signatures for the check
+    first_line = body_stripped.split("\n")[0].strip() if body_stripped else ""
+    # If the entire meaningful content is just a thank-you/confirmation
+    is_gratitude = (
+        len(first_line) < 100
+        and any(p in first_line for p in GRATITUDE_PATTERNS)
+        and not any(q in first_line for q in ["?", "when", "how", "what", "why", "can you", "please", "need"])
+    )
+
+    if is_gratitude:
+        logger.info(f"Auto-handling gratitude message: {first_line[:50]}")
+        async with get_db_context() as db:
+            agent_msg = AgentMessage(
+                organization_id=organization_id,
+                email_uid=uid,
+                direction="inbound",
+                from_email=from_email,
+                to_email=to_header,
+                subject=subject,
+                body=body,
+                status="ignored",
+                category="thank_you",
+                thread_id=thread.id if thread else None,
+                matched_customer_id=thread.matched_customer_id if thread else None,
+                customer_name=thread.customer_name if thread else None,
+            )
+            db.add(agent_msg)
+            if thread:
+                thread_obj = (await db.execute(
+                    select(AgentThread).where(AgentThread.id == thread.id)
+                )).scalar_one_or_none()
+                if thread_obj:
+                    thread_obj.message_count = (thread_obj.message_count or 0) + 1
+                    thread_obj.last_message_at = datetime.now(timezone.utc)
+                    thread_obj.last_direction = "inbound"
+                    thread_obj.last_snippet = first_line[:200]
+                    # Don't flip to pending — it's just a thank you
+            await db.commit()
+        return
+
     # Classify and draft
     result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
 
     category = result.get("category", "general")
-    if category in ("spam", "auto_reply", "no_response"):
+    if category in ("spam", "auto_reply", "no_response", "thank_you"):
         logger.info(f"Skipping {category}: {subject}")
         async with get_db_context() as db:
             agent_msg = AgentMessage(

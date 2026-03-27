@@ -70,6 +70,7 @@ class ChemicalReadingResponse(BaseModel):
     id: str
     property_id: str
     visit_id: Optional[str] = None
+    water_feature_id: Optional[str] = None
     ph: Optional[float] = None
     free_chlorine: Optional[float] = None
     total_chlorine: Optional[float] = None

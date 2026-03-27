@@ -40,6 +40,7 @@ export default function CustomerDetailPage({
   const [heroImages, setHeroImages] = useState<Record<string, PropertyPhoto>>({});
   const [fullWfs, setFullBows] = useState<WaterFeature[]>([]);
   const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>({});
+  const [latestReadings, setLatestReadings] = useState<Record<string, { ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at?: string }>>({});
   const isTech = perms.role === "technician";
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -133,6 +134,23 @@ export default function CustomerDetailPage({
     api.get<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>("/v1/routes/tech-assignments")
       .then(setTechAssignments)
       .catch(() => setTechAssignments({}));
+    // Fetch latest readings per property, build per-WF map
+    Promise.all(
+      properties.map((p) =>
+        api.get<Array<{ water_feature_id?: string | null; ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at: string }>>(`/v1/visits/readings/property/${p.id}?limit=50`).catch(() => [])
+      )
+    ).then((results) => {
+      const map: Record<string, { ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at?: string }> = {};
+      for (const readings of results) {
+        for (const r of readings) {
+          const key = r.water_feature_id || "property";
+          if (!map[key]) {
+            map[key] = { ph: r.ph, free_chlorine: r.free_chlorine, cyanuric_acid: r.cyanuric_acid, created_at: r.created_at };
+          }
+        }
+      }
+      setLatestReadings(map);
+    });
     // Fetch per-WF profitability
     api.get<Array<{ wf_id: string; margin_pct: number; suggested_rate: number; customer_id: string }>>("/v1/profitability/gaps")
       .then((gaps) => {
@@ -365,6 +383,7 @@ export default function CustomerDetailPage({
               heroImages={heroImages}
               techAssignments={techAssignments}
               wfProfitability={wfProfitability}
+              latestReadings={latestReadings}
               perms={perms}
               activeProperty={activeProperty}
               selectedWfId={selectedWfId}

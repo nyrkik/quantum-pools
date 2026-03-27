@@ -24,6 +24,7 @@ interface CustomerWfsTabProps {
   heroImages: Record<string, PropertyPhoto>;
   techAssignments: Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>;
   wfProfitability: Record<string, { margin_pct: number; suggested_rate: number }>;
+  latestReadings: Record<string, { ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at?: string }>;
   perms: Permissions;
   activeProperty: Property | null;
   selectedWfId: string | null;
@@ -53,6 +54,7 @@ export function CustomerWfsTab({
   heroImages,
   techAssignments,
   wfProfitability,
+  latestReadings,
   perms,
   activeProperty,
   selectedWfId,
@@ -232,6 +234,14 @@ export function CustomerWfsTab({
                         suggestedRate={wfProfitability[wf.id]?.suggested_rate ?? null}
                         customerType={customer?.customer_type}
                         collapsed={selectedWfId !== null && selectedWfId !== wf.id}
+                        propertyContext={{
+                          gate_code: prop.gate_code,
+                          access_instructions: prop.access_instructions,
+                          dog_on_property: prop.dog_on_property,
+                          service_day_pattern: prop.service_day_pattern,
+                        }}
+                        customerContext={{ preferred_day: customer?.preferred_day }}
+                        lastReading={latestReadings[wf.id] || null}
                         onExpand={() => onWfSelect(wf.id)}
                         onUpdated={onLoad}
                         onDeleted={onLoad}

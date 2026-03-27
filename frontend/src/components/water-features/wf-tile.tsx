@@ -51,6 +51,7 @@ import {
   MapPin,
   WavesLadder,
 } from "lucide-react";
+import { WfQuickView, type WfQuickViewReading } from "./wf-quick-view";
 
 function waterTypeIcon(type: string, className: string) {
   switch (type) {
@@ -142,6 +143,17 @@ interface DifficultyAdjustments {
   res_system_effectiveness: number;
 }
 
+interface PropertyContext {
+  gate_code: string | null;
+  access_instructions: string | null;
+  dog_on_property: boolean;
+  service_day_pattern: string | null;
+}
+
+interface CustomerContext {
+  preferred_day: string | null;
+}
+
 interface WfTileProps {
   wf: WaterFeature;
   propertyId: string;
@@ -151,12 +163,15 @@ interface WfTileProps {
   marginPct?: number | null;
   customerType?: string;
   collapsed?: boolean;
+  propertyContext?: PropertyContext;
+  customerContext?: CustomerContext;
+  lastReading?: WfQuickViewReading | null;
   onExpand?: () => void;
   onUpdated: () => void;
   onDeleted: () => void;
 }
 
-export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, marginPct, customerType, collapsed, onExpand, onUpdated, onDeleted }: WfTileProps) {
+export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, marginPct, customerType, collapsed, propertyContext, customerContext, lastReading, onExpand, onUpdated, onDeleted }: WfTileProps) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...wf });
   const [diffAdj, setDiffAdj] = useState<DifficultyAdjustments | null>(null);
@@ -614,307 +629,15 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
     );
   }
 
-  // --- View mode ---
+  // --- View mode --- uses WfQuickView
   return (
-    <div className={`rounded-lg border shadow-sm bg-card p-4 space-y-3 ${collapsed ? "cursor-pointer hover:bg-muted/30 transition-colors" : ""}`} onClick={collapsed ? onExpand : undefined}>
-      {/* WF Header Bar */}
-      <div className="flex items-center gap-3">
-        {waterTypeIcon(wf.water_type, "h-4 w-4 text-primary/60")}
-        <span className="text-sm font-semibold uppercase tracking-widest text-foreground/70 capitalize">{wf.name || wf.water_type.replace("_", " ")}</span>
-        {wf.pool_type && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{wf.pool_type}</Badge>}
-        {techAssignment && (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: techAssignment.color }} />
-            {techAssignment.tech_name}
-          </div>
-        )}
-        <div className="ml-auto flex items-center gap-1">
-          {perms.canEditCustomers && (
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(true)}>
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Metric Cards Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {[
-          { icon: Droplets, label: "Volume", value: wf.pool_gallons ? `${wf.pool_gallons.toLocaleString()}` : null, unit: "gal", color: "text-blue-500", source: null as string | null },
-          { icon: Move, label: "Surface", value: wf.pool_sqft ? `${wf.pool_sqft.toLocaleString()}` : null, unit: "ft\u00B2", color: "text-emerald-500", source: wf.dimension_source },
-          { icon: Clock, label: "Service", value: `${wf.estimated_service_minutes}`, unit: "min", color: "text-amber-500", source: null as string | null },
-        ].map((m) => (
-          <div key={m.label} className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
-            <div className="flex items-center gap-1.5 mb-1">
-              <m.icon className={`h-3 w-3 ${m.color}`} />
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{m.label}</span>
-              {m.source && (
-                <Badge className={`${DIM_SOURCE_COLORS[m.source] || "bg-gray-100 text-gray-600"} text-[9px] px-1 py-0 leading-tight font-medium`}>
-                  {DIM_SOURCE_LABELS[m.source] || m.source}
-                </Badge>
-              )}
-            </div>
-            {m.value ? (
-              <p className="text-lg font-bold leading-tight">{m.value}<span className="text-xs font-normal text-muted-foreground ml-0.5">{m.unit}</span></p>
-            ) : (
-              <p className="text-sm text-muted-foreground/50 italic leading-tight mt-0.5">&mdash;</p>
-            )}
-          </div>
-        ))}
-        <div className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
-          <div className="flex items-center gap-1.5 mb-1">
-            <DollarSign className="h-3 w-3 text-violet-500" />
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate</span>
-            {marginPct != null && (
-              <span className={`text-[9px] font-medium px-1 rounded ${
-                marginPct >= 35 ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
-                : marginPct >= 15 ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-                : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
-              }`}>{marginPct.toFixed(0)}%</span>
-            )}
-          </div>
-          {wf.monthly_rate != null ? (
-            <p className="text-lg font-bold leading-tight">${wf.monthly_rate.toFixed(2)}<span className="text-xs font-normal text-muted-foreground ml-0.5">/mo</span></p>
-          ) : suggestedRate != null ? (
-            <p className="text-sm leading-tight">
-              <span className="text-muted-foreground/50 italic">&mdash;</span>
-              <span className="text-[10px] text-muted-foreground ml-1.5">suggest ${suggestedRate.toFixed(0)}</span>
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground/50 italic leading-tight mt-0.5">&mdash;</p>
-          )}
-        </div>
-      </div>
-
-      {!collapsed && <>
-      {/* Residential difficulty adjustments */}
-      {isResidential && diffAdj && (
-        <div className="bg-background border rounded-lg px-3 py-2.5 shadow-sm">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Cost Adjustments (per visit)</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {([
-              { key: "res_tree_debris", label: "Tree Debris", options: [{ v: 0, l: "None" }, { v: 5, l: "+$5" }, { v: 12, l: "+$12" }] },
-              { key: "res_dog", label: "Dog", options: [{ v: 0, l: "None" }, { v: 3, l: "+$3" }, { v: 5, l: "+$5" }] },
-              { key: "res_customer_demands", label: "Demands", options: [{ v: 0, l: "None" }, { v: 5, l: "+$5" }, { v: 10, l: "+$10" }] },
-              { key: "res_system_effectiveness", label: "System", options: [{ v: 0, l: "Good" }, { v: 4, l: "+$4" }, { v: 8, l: "+$8" }] },
-            ] as const).map((factor) => {
-              const current = diffAdj[factor.key as keyof DifficultyAdjustments];
-              return (
-                <div key={factor.key} className="space-y-1">
-                  <span className="text-[9px] text-muted-foreground">{factor.label}</span>
-                  <div className="flex gap-0.5">
-                    {factor.options.map((opt) => (
-                      <button
-                        key={opt.v}
-                        type="button"
-                        disabled={diffSaving}
-                        onClick={() => saveDiffAdj(factor.key, opt.v)}
-                        className={`flex-1 text-[10px] py-1 rounded border cursor-pointer transition-colors ${
-                          current === opt.v
-                            ? opt.v === 0
-                              ? "bg-green-100 text-green-700 border-green-300 dark:bg-green-950 dark:text-green-400 dark:border-green-800 font-medium"
-                              : "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800 font-medium"
-                            : "bg-background text-muted-foreground border-border hover:bg-muted hover:text-foreground"
-                        }`}
-                      >
-                        {opt.l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Two-column grid for category tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* Dimensions Tile */}
-        <div className="bg-background border rounded-lg shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
-            <Ruler className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Dimensions</span>
-          </div>
-          <div className="px-3 py-2.5 space-y-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Shape</span>
-              {fb.pool_shape ? <span className="font-medium capitalize">{fb.pool_shape}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">L &times; W</span>
-              {fb.pool_length_ft && fb.pool_width_ft
-                ? <span className="font-medium">{fb.pool_length_ft} &times; {fb.pool_width_ft} ft</span>
-                : <span className="text-muted-foreground/50 italic">Not set</span>}
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Depth</span>
-              {fb.pool_depth_shallow && fb.pool_depth_deep
-                ? <span className="font-medium">{fb.pool_depth_shallow}&ndash;{fb.pool_depth_deep} ft</span>
-                : fb.pool_depth_avg
-                ? <span className="font-medium">{fb.pool_depth_avg} ft avg</span>
-                : <span className="text-muted-foreground/50 italic">Not set</span>}
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Surface</span>
-              {fb.pool_surface ? <span className="font-medium capitalize">{fb.pool_surface}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
-            </div>
-          </div>
-        </div>
-
-        {/* Chemistry Tile */}
-        <div className="bg-background border rounded-lg shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
-            <FlaskConical className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Chemistry</span>
-          </div>
-          <div className="px-3 py-2.5 space-y-1.5">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-muted-foreground">Sanitizer</span>
-              {fb.sanitizer_type
-                ? <Badge variant="outline" className="text-[10px] capitalize px-1.5 py-0">{fb.sanitizer_type.replace(/_/g, " ")}</Badge>
-                : <span className="text-muted-foreground/50 italic">Not set</span>}
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Last Reading</span>
-              <span className="text-muted-foreground/50 italic">None</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Pool & Equipment Tile */}
-        <div className="sm:col-span-2 bg-background border rounded-lg shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
-            <Wrench className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Pool & Equipment</span>
-          </div>
-          <div className="px-3 py-2.5 space-y-3">
-            {/* Surface & Structure */}
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Surface & Structure</p>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                {[
-                  { icon: Droplets, label: "Surface", value: fb.pool_surface },
-                  { icon: Shield, label: "Cover", value: fb.pool_cover_type },
-                  { icon: CircleDot, label: "Skimmers", value: fb.skimmer_count != null ? String(fb.skimmer_count) : null },
-                ].map((e) => (
-                  <div key={e.label} className="flex items-center gap-2 text-xs">
-                    <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground">{e.label}</span>
-                    <span className="truncate ml-auto">
-                      {e.value ? <span className="font-medium capitalize">{e.value.replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Plumbing & Drains */}
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Plumbing & Drains</p>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                {[
-                  { icon: Pipette, label: "Plumbing", value: fb.plumbing_size_inches != null ? `${fb.plumbing_size_inches} in` : null },
-                  { icon: Droplets, label: "Fill", value: fb.fill_method },
-                  { icon: CircleDot, label: "Drain type", value: fb.drain_type },
-                  { icon: CircleDot, label: "Drain method", value: fb.drain_method },
-                  { icon: CircleDot, label: "Drains", value: fb.drain_count != null ? String(fb.drain_count) : null },
-                  { icon: Clock, label: "Turnover", value: fb.turnover_hours != null ? `${fb.turnover_hours} hrs` : null },
-                ].map((e) => (
-                  <div key={e.label} className="flex items-center gap-2 text-xs">
-                    <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground">{e.label}</span>
-                    <span className="truncate ml-auto">
-                      {e.value ? <span className="font-medium capitalize">{e.value.replace(/_/g, " ")}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Drain Covers */}
-            {(fb.drain_cover_compliant != null || fb.equalizer_cover_compliant != null) && (
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Drain Covers</p>
-                {fb.drain_cover_compliant != null && (
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2 text-xs">
-                      <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="text-muted-foreground">Drain covers</span>
-                      <Badge className={`ml-auto text-[10px] px-1.5 py-0 ${fb.drain_cover_compliant ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
-                        {fb.drain_cover_compliant ? "Compliant" : "Non-compliant"}
-                      </Badge>
-                    </div>
-                    {(fb.drain_cover_install_date || fb.drain_cover_expiry_date) && (
-                      <p className="text-[10px] text-muted-foreground pl-5">
-                        {fb.drain_cover_install_date && `Installed: ${new Date(fb.drain_cover_install_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
-                        {fb.drain_cover_install_date && fb.drain_cover_expiry_date && " \u00b7 "}
-                        {fb.drain_cover_expiry_date && `Expires: ${new Date(fb.drain_cover_expiry_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {fb.equalizer_cover_compliant != null && (
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2 text-xs">
-                      <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="text-muted-foreground">Equalizer covers</span>
-                      <Badge className={`ml-auto text-[10px] px-1.5 py-0 ${fb.equalizer_cover_compliant ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-red-100 text-red-800 hover:bg-red-100"}`}>
-                        {fb.equalizer_cover_compliant ? "Compliant" : "Non-compliant"}
-                      </Badge>
-                    </div>
-                    {(fb.equalizer_cover_install_date || fb.equalizer_cover_expiry_date) && (
-                      <p className="text-[10px] text-muted-foreground pl-5">
-                        {fb.equalizer_cover_install_date && `Installed: ${new Date(fb.equalizer_cover_install_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
-                        {fb.equalizer_cover_install_date && fb.equalizer_cover_expiry_date && " \u00b7 "}
-                        {fb.equalizer_cover_expiry_date && `Expires: ${new Date(fb.equalizer_cover_expiry_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Equipment */}
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">Equipment</p>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                {[
-                  { icon: Gauge, label: "Pump", value: fb.pump_type },
-                  { icon: FlaskConical, label: "Filter", value: fb.filter_type },
-                  { icon: Thermometer, label: "Heater", value: fb.heater_type },
-                  { icon: FlaskConical, label: "Chlorinator", value: fb.chlorinator_type },
-                  { icon: Zap, label: "Automation", value: fb.automation_system },
-                  { icon: Clock, label: "Year", value: fb.equipment_year != null ? String(fb.equipment_year) : null },
-                  { icon: MapPin, label: "Location", value: fb.equipment_pad_location },
-                ].map((e) => (
-                  <div key={e.label} className="flex items-center gap-2 text-xs">
-                    <e.icon className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground">{e.label}</span>
-                    <span className="truncate ml-auto">
-                      {e.value ? <span className="font-medium">{e.value}</span> : <span className="text-muted-foreground/50 italic">Not set</span>}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Notes Tile */}
-        <div className="sm:col-span-2 bg-background border rounded-lg shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5">
-            <StickyNote className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Notes</span>
-          </div>
-          <div className="px-3 py-2.5">
-            {fb.notes
-              ? <p className="text-xs text-muted-foreground whitespace-pre-wrap">{fb.notes}</p>
-              : <p className="text-xs text-muted-foreground/50 italic">No notes</p>}
-          </div>
-        </div>
-      </div>
-      </>}
-    </div>
+    <WfQuickView
+      wf={wf}
+      property={propertyContext || { gate_code: null, access_instructions: null, dog_on_property: false, service_day_pattern: null }}
+      customer={customerContext || { preferred_day: null }}
+      lastReading={lastReading}
+      perms={perms}
+      onEdit={perms.canEditCustomers ? () => setEditing(true) : undefined}
+    />
   );
 }

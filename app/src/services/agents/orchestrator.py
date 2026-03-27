@@ -590,6 +590,7 @@ async def _process_sent_emails(org_id: str) -> int:
     from .mail_agent import fetch_sent_emails, mark_sent_processed, extract_text_body
     from .thread_manager import get_or_create_thread
     from src.models.agent_message import AgentMessage
+    from src.models.agent_action import AgentAction, AgentActionComment
     from src.core.database import get_db_context
     import uuid as uuid_mod
     from email.utils import parsedate_to_datetime
@@ -685,6 +686,24 @@ async def _process_sent_emails(org_id: str) -> int:
                     thread_obj.last_snippet = (body or "")[:200]
                     thread_obj.status = "handled"
                     thread_obj.has_pending = False
+
+                # Link to open jobs on this thread
+                if thread.id:
+                    open_actions = (await db.execute(
+                        select(AgentAction).where(
+                            AgentAction.thread_id == thread.id,
+                            AgentAction.organization_id == org_id,
+                            AgentAction.status.in_(("open", "in_progress")),
+                        )
+                    )).scalars().all()
+                    for action in open_actions:
+                        comment = AgentActionComment(
+                            organization_id=org_id,
+                            action_id=action.id,
+                            author=sender_name or "Team",
+                            text=f"Email sent to {recipient}: {subject}",
+                        )
+                        db.add(comment)
 
                 await db.commit()
 

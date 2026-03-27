@@ -39,28 +39,8 @@ BUSINESS_HOUR_END = 20   # 8 PM
 # Reply loop detection patterns
 LOOP_PATTERNS = ["noreply@", "no-reply@", "mailer-daemon@", "postmaster@"]
 
-# Automated senders — skip without wasting AI tokens
-AUTO_SENDER_DOMAINS = {
-    # Vendor notifications
-    "scppool.com", "pool360.com",
-    # Financial
-    "americanexpress.com", "welcome.americanexpress.com",
-    # Property mgmt portals (keep entrata/emailrelay — some are real customer portals)
-    # Marketing / newsletters / SaaS
-    "getskimmer.com", "mail.bubble.io", "send.zapier.com", "mail.zapier.com",
-    "mailchimp.com", "sendgrid.net", "constantcontact.com",
-    "hubspot.com", "mailgun.net",
-    "mail.replit.com", "lovable.dev", "flutterflow.io", "signwell.com",
-    "mail.anthropic.com", "email.anthropic.com", "email2.anthropic.com",
-    "email.claude.com", "email.openai.com",
-    "snyk.io", "notification.bubble.io", "bubble.io",
-    "accounts.google.com", "google.com", "googlecloud.com",
-    "devprospectscape.com", "teksystems.com", "link.com",
-    "yardi.com",
-    # Generic automated sender prefixes
-    "notifications@", "alerts@", "updates@", "newsletter@", "events@",
-    "noreply@", "no-reply@", "donotreply@", "mailer-daemon@",
-}
+# Block rules are now in DB (inbox_routing_rules with action='block', match_field='from').
+# See migration seed for the full list of blocked sender domains/patterns.
 
 # Internal team addresses — skip (handled by sent folder tracking)
 INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]
@@ -147,17 +127,21 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         logger.info(f"Skipping own email: {from_email}: {subject}")
         return
 
-    # --- Skip automated senders (no AI needed) ---
     from_lower = from_email.lower()
-    from_domain = from_lower.split("@")[-1] if "@" in from_lower else ""
-    if from_domain in AUTO_SENDER_DOMAINS or any(p in from_lower for p in AUTO_SENDER_DOMAINS):
-        logger.info(f"Skipping automated sender: {from_email}: {subject}")
-        return
 
     # --- Skip internal team emails ---
     if any(p in from_lower for p in INTERNAL_PATTERNS):
         logger.info(f"Skipping internal email: {from_email}: {subject}")
         return
+
+    # --- Check DB block rules (replaces hardcoded AUTO_SENDER_DOMAINS) ---
+    if organization_id:
+        from src.services.inbox_routing_service import check_sender_blocked
+        async with get_db_context() as db:
+            block_rule = await check_sender_blocked(db, organization_id, from_email)
+        if block_rule:
+            logger.info(f"Blocked by rule '{block_rule.address_pattern}': {from_email}: {subject}")
+            return
 
     logger.info(f"Processing email from {from_email}: {subject}")
 

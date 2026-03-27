@@ -16,7 +16,10 @@ from fastapi.staticfiles import StaticFiles
 from src.core.config import settings
 from src.core.database import init_database, close_database, check_connection
 from src.core.redis_client import get_redis, close_redis, check_redis
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from src.middleware.error_tracking import ErrorTrackingMiddleware
+from src.core.rate_limiter import limiter
 from src.api.router import api_router
 
 logger = logging.getLogger(__name__)
@@ -60,6 +63,10 @@ def create_app() -> FastAPI:
         docs_url="/api/docs" if settings.environment != "production" else None,
         redoc_url="/api/redoc" if settings.environment != "production" else None,
     )
+
+    # Rate limiter (slowapi)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # CORS
     app.add_middleware(

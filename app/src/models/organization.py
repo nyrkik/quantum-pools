@@ -38,6 +38,13 @@ class Organization(Base):
     agent_service_area: Mapped[str | None] = mapped_column(Text)
     agent_approval_phones: Mapped[str | None] = mapped_column(Text)  # JSON: [{"phone": "+1...", "name": "Brian"}]
 
+    # Inbound email configuration
+    inbound_email_address: Mapped[str | None] = mapped_column(String(255))  # e.g. inbox-sapphire@mail.quantumpoolspro.com
+    inbound_email_provider: Mapped[str | None] = mapped_column(String(50))  # imap, sendgrid, postmark, mailgun
+    imap_host: Mapped[str | None] = mapped_column(String(255))
+    imap_user: Mapped[str | None] = mapped_column(String(255))
+    imap_password_encrypted: Mapped[str | None] = mapped_column(Text)  # Fernet-encrypted — NOT YET IMPLEMENTED
+
     # Billing contact — who manages subscription/payments (separate from permissions)
     billing_contact_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,

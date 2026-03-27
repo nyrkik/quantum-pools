@@ -21,6 +21,8 @@ router = APIRouter(prefix="/inbox-routing-rules", tags=["inbox-routing"])
 class RoutingRuleCreate(BaseModel):
     address_pattern: str = Field(..., min_length=1, max_length=255)
     match_type: str = Field(default="exact", pattern=r"^(exact|contains)$")
+    action: str = Field(default="route", pattern=r"^(route|block)$")
+    match_field: str = Field(default="to", pattern=r"^(to|from)$")
     category: Optional[str] = None
     required_permission: Optional[str] = None
     priority: int = 0
@@ -30,6 +32,8 @@ class RoutingRuleCreate(BaseModel):
 class RoutingRuleUpdate(BaseModel):
     address_pattern: Optional[str] = Field(None, min_length=1, max_length=255)
     match_type: Optional[str] = Field(None, pattern=r"^(exact|contains)$")
+    action: Optional[str] = Field(None, pattern=r"^(route|block)$")
+    match_field: Optional[str] = Field(None, pattern=r"^(to|from)$")
     category: Optional[str] = Field(default=None)
     required_permission: Optional[str] = Field(default=None)
     priority: Optional[int] = None
@@ -40,6 +44,8 @@ class RoutingRuleResponse(BaseModel):
     id: str
     address_pattern: str
     match_type: str
+    action: str
+    match_field: str
     category: str | None
     required_permission: str | None
     priority: int
@@ -52,6 +58,8 @@ def _to_response(rule: InboxRoutingRule) -> RoutingRuleResponse:
         id=rule.id,
         address_pattern=rule.address_pattern,
         match_type=rule.match_type,
+        action=rule.action or "route",
+        match_field=rule.match_field or "to",
         category=rule.category,
         required_permission=rule.required_permission,
         priority=rule.priority,
@@ -88,6 +96,8 @@ async def create_rule(
         organization_id=ctx.organization_id,
         address_pattern=body.address_pattern,
         match_type=body.match_type,
+        action=body.action,
+        match_field=body.match_field,
         category=body.category,
         required_permission=body.required_permission,
         priority=body.priority,
@@ -121,6 +131,10 @@ async def update_rule(
         rule.address_pattern = body.address_pattern
     if body.match_type is not None:
         rule.match_type = body.match_type
+    if body.action is not None:
+        rule.action = body.action
+    if body.match_field is not None:
+        rule.match_field = body.match_field
     if body.category is not None:
         rule.category = body.category if body.category else None
     if body.required_permission is not None:

@@ -14,7 +14,7 @@ async def match_routing_rule(
     org_id: str,
     delivered_to: str,
 ) -> InboxRoutingRule | None:
-    """Match an email address against active routing rules.
+    """Match an email address against active routing rules (match_field='to').
 
     Rules are evaluated in priority order (lower = first). First match wins.
     Returns None if no rule matches.
@@ -29,6 +29,45 @@ async def match_routing_rule(
         .where(
             InboxRoutingRule.organization_id == org_id,
             InboxRoutingRule.is_active == True,
+            InboxRoutingRule.match_field == "to",
+        )
+        .order_by(InboxRoutingRule.priority)
+    )
+    rules = result.scalars().all()
+
+    for rule in rules:
+        pattern = rule.address_pattern.lower().strip()
+        if rule.match_type == "exact":
+            if addr == pattern:
+                return rule
+        elif rule.match_type == "contains":
+            if pattern in addr:
+                return rule
+
+    return None
+
+
+async def check_sender_blocked(
+    db: AsyncSession,
+    org_id: str,
+    from_email: str,
+) -> InboxRoutingRule | None:
+    """Check if a sender email/domain is blocked via match_field='from' rules.
+
+    Returns the blocking rule if matched, None otherwise.
+    """
+    if not from_email:
+        return None
+
+    addr = from_email.lower().strip()
+
+    result = await db.execute(
+        select(InboxRoutingRule)
+        .where(
+            InboxRoutingRule.organization_id == org_id,
+            InboxRoutingRule.is_active == True,
+            InboxRoutingRule.match_field == "from",
+            InboxRoutingRule.action == "block",
         )
         .order_by(InboxRoutingRule.priority)
     )

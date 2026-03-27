@@ -254,11 +254,13 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
                 name = str(p.get("name", "")).strip()
                 if not name:
                     continue
+                cat = self._normalize_category(str(p.get("category", "other")).strip())
                 cleaned.append({
                     "name": name,
                     "sku": str(p["sku"]).strip() if p.get("sku") else None,
                     "brand": str(p.get("brand", "")).strip() or None,
-                    "category": str(p.get("category", "other")).strip(),
+                    "category": cat,
+                    "subcategory": self._normalize_subcategory(cat, name),
                     "estimated_price": float(p["estimated_price"]) if p.get("estimated_price") is not None else None,
                     "compatible_models": p.get("compatible_models", [model]),
                 })
@@ -323,6 +325,50 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
                 return cat
         return "Plumbing & Fittings"
 
+    @staticmethod
+    def _normalize_subcategory(category: str, name: str) -> str:
+        """Assign a clean subcategory based on category + part name."""
+        lower = name.lower()
+        if category == "Pumps & Motors":
+            if "impeller" in lower: return "Impellers"
+            if "motor" in lower: return "Motors"
+            if "pump" in lower and not any(w in lower for w in ["seal", "basket", "lid", "gasket"]): return "Complete Pumps"
+            return "Pump Parts"
+        if category == "Filters & Media":
+            if "cartridge" in lower: return "Cartridges"
+            if "grid" in lower or "de " in lower: return "DE Grids"
+            if "sand" in lower: return "Sand Media"
+            return "Filter Parts"
+        if category == "Heaters":
+            if "heat pump" in lower: return "Heat Pumps"
+            if "heater" in lower and not any(w in lower for w in ["ignit", "thermist", "exchang"]): return "Gas Heaters"
+            return "Heater Parts"
+        if category == "Water Treatment":
+            if "cell" in lower or "sensor" in lower: return "Cells & Sensors"
+            if "feeder" in lower or "stenner" in lower or "rola" in lower: return "Chemical Feeders"
+            return "Salt Systems"
+        if category == "Cleaners & Sweeps":
+            if "polaris" in lower or "pressure" in lower: return "Pressure Side"
+            if "robot" in lower: return "Robotic"
+            return "Suction Side"
+        if category == "Plumbing & Fittings":
+            if "valve" in lower or "actuator" in lower: return "Valves"
+            if "basket" in lower or "skimmer" in lower: return "Skimmers & Baskets"
+            if "drain" in lower or "return" in lower: return "Returns & Drains"
+            if "gauge" in lower: return "Gauges & Accessories"
+            return "Fittings"
+        if category == "Automation & Electrical":
+            if "light" in lower or "led" in lower: return "Lighting"
+            return "Controls"
+        if category == "Seals & O-Rings":
+            if "gasket" in lower: return "Gaskets"
+            if "shaft" in lower or "mechanical" in lower: return "Shaft Seals"
+            if "kit" in lower: return "Seal Kits"
+            return "O-Rings"
+        if category == "Safety & Compliance":
+            return "Drain Covers & SVRS"
+        return None
+
     async def _upsert_parts(self, parts: list[dict], source_model: str) -> int:
         """Upsert parts into catalog. Update compatible_with to include source_model."""
         count = 0
@@ -359,12 +405,14 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
                 compat = list(set(p.get("compatible_models", [source_model])))
                 if source_model not in compat:
                     compat.append(source_model)
+                cat = p.get("category") or self._normalize_category(p.get("category"))
                 part = PartsCatalog(
                     vendor_provider=vendor,
                     sku=sku,
                     name=p["name"],
                     brand=p.get("brand"),
-                    category=self._normalize_category(p.get("category")),
+                    category=cat,
+                    subcategory=p.get("subcategory") or self._normalize_subcategory(cat, p["name"]),
                     compatible_with=compat,
                     last_scraped_at=datetime.now(timezone.utc),
                 )

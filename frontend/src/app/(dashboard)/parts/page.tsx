@@ -58,14 +58,22 @@ interface CategoryInfo {
 }
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  "Equipment": Cog,
-  "Filters": Filter,
+  "Pumps & Motors": Cog,
+  "Filters & Media": Filter,
+  "Heaters": Flame,
+  "Cleaners & Sweeps": Wrench,
+  "Plumbing & Fittings": Settings2,
+  "Automation & Electrical": Cpu,
+  "Seals & O-Rings": CircleDot,
   "Chemicals": Beaker,
-  "Parts & Repair": Wrench,
-  "Tools & Supplies": Settings2,
+  "Tools & Supplies": Box,
 };
 
-const CATEGORY_ORDER = ["Equipment", "Filters", "Chemicals", "Parts & Repair", "Tools & Supplies"];
+const CATEGORY_ORDER = [
+  "Pumps & Motors", "Filters & Media", "Heaters", "Cleaners & Sweeps",
+  "Plumbing & Fittings", "Automation & Electrical", "Seals & O-Rings",
+  "Chemicals", "Tools & Supplies",
+];
 
 function getCategoryIcon(category: string) {
   return CATEGORY_ICONS[category] || Package;
@@ -98,7 +106,7 @@ export default function PartsPage() {
         return { name: c, count: parts.length };
       });
       // Actually, the search endpoint doesn't return count separately. Let's use a different approach.
-      // Just load all parts per category count from search with limit=200
+      // Just load all parts per category count from search with limit=500
       const sorted = [...cats].sort((a, b) => {
         const ai = CATEGORY_ORDER.indexOf(a);
         const bi = CATEGORY_ORDER.indexOf(b);
@@ -108,9 +116,9 @@ export default function PartsPage() {
       setVendors(vends);
       setStats(st);
 
-      // Get actual counts
-      cats.forEach(c => {
-        api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(c)}&limit=200`)
+      // Get actual counts per category
+      sorted.forEach(c => {
+        api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(c)}&limit=500`)
           .then(parts => {
             setCategories(prev => prev.map(cat => cat.name === c ? { ...cat, count: parts.length } : cat));
           })
@@ -152,7 +160,7 @@ export default function PartsPage() {
     if (!categoryParts[category]) {
       setLoadingCategory(category);
       try {
-        const parts = await api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(category)}&limit=200`);
+        const parts = await api.get<CatalogPart[]>(`/v1/parts/search?category=${encodeURIComponent(category)}&limit=500`);
         setCategoryParts(prev => ({ ...prev, [category]: parts }));
       } catch {
         toast.error("Failed to load parts");

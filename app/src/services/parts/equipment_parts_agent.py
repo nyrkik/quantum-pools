@@ -296,25 +296,28 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
 
     @staticmethod
     def _normalize_category(raw: str | None) -> str:
-        """Map any category string to one of 5 standard groups."""
+        """Map any category string to one of 7 standard service categories."""
         if not raw:
-            return "Parts & Repair"
+            return "Plumbing & Fittings"
         lower = raw.lower().strip()
-        equipment = {"pump", "pumps", "motor", "motors", "heater", "heaters", "automation",
-                     "salt", "salt systems", "salt system", "lighting", "cleaner", "cleaners",
-                     "board", "switch", "impeller"}
-        filters = {"filter", "filters", "cartridge", "grid", "element", "de grid", "media"}
-        chemicals = {"chemical", "chemicals", "testing", "test"}
+        pumps = {"pump", "pumps", "motor", "motors", "impeller", "capacitor", "diffuser", "booster"}
+        filters = {"filter", "filters", "cartridge", "grid", "element", "de grid", "media", "lateral", "manifold", "standpipe"}
+        heaters = {"heater", "heaters", "heat pump", "heat exchanger", "ignitor", "igniter", "thermistor", "burner", "header"}
+        cleaners = {"cleaner", "cleaners", "sweep", "polaris", "kreepy", "diaphragm", "robotic"}
+        automation = {"automation", "control", "salt", "salt system", "salt systems", "lighting", "light", "led", "timer", "relay", "transformer", "board", "sensor", "cell"}
+        seals = {"o_ring", "o-ring", "seal", "gasket", "lube"}
+        plumbing = {"valve", "valves", "union", "fitting", "pvc", "basket", "plug", "drain", "skimmer", "return", "coupling", "elbow"}
+        chemicals = {"chemical", "chemicals", "testing", "test", "reagent"}
         tools = {"tool", "tools", "supplies", "accessories"}
-        if lower in equipment or any(lower.startswith(e) for e in equipment):
-            return "Equipment"
-        if lower in filters or any(lower.startswith(f) for f in filters):
-            return "Filters"
-        if lower in chemicals or any(lower.startswith(c) for c in chemicals):
-            return "Chemicals"
-        if lower in tools or any(lower.startswith(t) for t in tools):
-            return "Tools & Supplies"
-        return "Parts & Repair"
+        for words, cat in [
+            (pumps, "Pumps & Motors"), (filters, "Filters & Media"), (heaters, "Heaters"),
+            (cleaners, "Cleaners & Sweeps"), (automation, "Automation & Electrical"),
+            (seals, "Seals & O-Rings"), (plumbing, "Plumbing & Fittings"),
+            (chemicals, "Chemicals"), (tools, "Tools & Supplies"),
+        ]:
+            if lower in words or any(lower.startswith(w) for w in words):
+                return cat
+        return "Plumbing & Fittings"
 
     async def _upsert_parts(self, parts: list[dict], source_model: str) -> int:
         """Upsert parts into catalog. Update compatible_with to include source_model."""

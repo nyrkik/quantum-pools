@@ -27,7 +27,7 @@ async def search_parts(
     vendor: Optional[str] = None,
     category: Optional[str] = None,
     brand: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):

@@ -45,17 +45,21 @@ AUTO_SENDER_DOMAINS = {
     "scppool.com", "pool360.com",
     # Financial
     "americanexpress.com", "welcome.americanexpress.com",
-    # Property mgmt portals
-    "entrata.com", "emailrelay.com",
-    # Marketing / newsletters
-    "getskimmer.com", "mail.bubble.io", "send.zapier.com",
+    # Property mgmt portals (keep entrata/emailrelay — some are real customer portals)
+    # Marketing / newsletters / SaaS
+    "getskimmer.com", "mail.bubble.io", "send.zapier.com", "mail.zapier.com",
     "mailchimp.com", "sendgrid.net", "constantcontact.com",
     "hubspot.com", "mailgun.net",
-    # Cloud / SaaS notifications
-    "google.com", "googlecloud.com",
-    # Generic automated senders
+    "mail.replit.com", "lovable.dev", "flutterflow.io", "signwell.com",
+    "mail.anthropic.com", "email.anthropic.com", "email2.anthropic.com",
+    "email.claude.com", "email.openai.com",
+    "snyk.io", "notification.bubble.io", "bubble.io",
+    "accounts.google.com", "google.com", "googlecloud.com",
+    "devprospectscape.com", "teksystems.com", "link.com",
+    "yardi.com",
+    # Generic automated sender prefixes
     "notifications@", "alerts@", "updates@", "newsletter@", "events@",
-    "noreply@", "no-reply@", "donotreply@",
+    "noreply@", "no-reply@", "donotreply@", "mailer-daemon@",
 }
 
 # Internal team addresses — skip (handled by sent folder tracking)

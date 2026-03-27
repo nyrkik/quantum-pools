@@ -330,9 +330,8 @@ Exclude: the equipment unit itself, tools, chemicals, accessories."""
         """Assign a clean subcategory based on category + part name."""
         lower = name.lower()
         if category == "Pumps & Motors":
-            if "impeller" in lower: return "Impellers"
-            if "motor" in lower: return "Motors"
-            if "pump" in lower and not any(w in lower for w in ["seal", "basket", "lid", "gasket"]): return "Complete Pumps"
+            if "motor" in lower and "pump" not in lower: return "Motors"
+            if "pump" in lower and not any(w in lower for w in ["seal", "basket", "lid", "gasket", "impeller", "diffuser", "capacitor"]): return "Complete Pumps"
             return "Pump Parts"
         if category == "Filters & Media":
             if "cartridge" in lower: return "Cartridges"

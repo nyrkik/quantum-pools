@@ -414,7 +414,7 @@ function PartRow({ part, getSearchUrl }: {
             if (url) window.open(url, "_blank");
           }}
         >
-          <ExternalLink className="h-3.5 w-3.5" />
+          <Search className="h-3.5 w-3.5" />
         </button>
       </div>
       {expanded && part.description && (

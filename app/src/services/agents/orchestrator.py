@@ -41,12 +41,21 @@ LOOP_PATTERNS = ["noreply@", "no-reply@", "mailer-daemon@", "postmaster@"]
 
 # Automated senders — skip without wasting AI tokens
 AUTO_SENDER_DOMAINS = {
-    "scppool.com", "pool360.com",  # SCP order notifications
+    # Vendor notifications
+    "scppool.com", "pool360.com",
+    # Financial
     "americanexpress.com", "welcome.americanexpress.com",
-    "entrata.com", "emailrelay.com",  # Property mgmt portals
-    "getskimmer.com",  # Competitor marketing
+    # Property mgmt portals
+    "entrata.com", "emailrelay.com",
+    # Marketing / newsletters
+    "getskimmer.com", "mail.bubble.io", "send.zapier.com",
     "mailchimp.com", "sendgrid.net", "constantcontact.com",
-    "notifications@", "alerts@", "updates@",
+    "hubspot.com", "mailgun.net",
+    # Cloud / SaaS notifications
+    "google.com", "googlecloud.com",
+    # Generic automated senders
+    "notifications@", "alerts@", "updates@", "newsletter@", "events@",
+    "noreply@", "no-reply@", "donotreply@",
 }
 
 # Internal team addresses — skip (handled by sent folder tracking)
@@ -611,6 +620,12 @@ async def _process_sent_emails(org_id: str) -> int:
 
             # Skip emails sent to org addresses (internal)
             if not to_email or all(addr in to_email.lower() for addr in ["sapphire-pools.com", "quantumpoolspro.com"]):
+                mark_sent_processed(uid)
+                continue
+
+            # Skip system emails (invites, password resets, etc.)
+            subject_lower = (subject or "").lower()
+            if any(skip in subject_lower for skip in ["invited to", "set up your", "password reset", "verify your", "welcome to"]):
                 mark_sent_processed(uid)
                 continue
 

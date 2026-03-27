@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Search,
   ExternalLink,
-  ShoppingCart,
   Loader2,
   Package,
   RefreshCw,
@@ -28,7 +27,6 @@ import {
   Box,
   Clock,
 } from "lucide-react";
-import { LogPurchaseForm } from "@/components/parts/log-purchase-form";
 import { formatCurrency } from "@/lib/format";
 
 // --- Types ---
@@ -101,7 +99,6 @@ export default function CatalogPage() {
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [categoryParts, setCategoryParts] = useState<Record<string, CatalogPart[]>>({});
   const [loadingCategory, setLoadingCategory] = useState<string | null>(null);
-  const [purchasePart, setPurchasePart] = useState<CatalogPart | null>(null);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
@@ -247,18 +244,6 @@ export default function CatalogPage() {
         </div>
       )}
 
-      {/* Log purchase form */}
-      {purchasePart && (
-        <Card className="border-l-4 border-primary shadow-sm">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium">Log Purchase: {purchasePart.name}</p>
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setPurchasePart(null)}>Cancel</Button>
-            </div>
-            <LogPurchaseForm onPurchaseLogged={() => setPurchasePart(null)} onCancel={() => setPurchasePart(null)} />
-          </CardContent>
-        </Card>
-      )}
 
       {/* Search results */}
       {isSearching && activeType !== "services" && (
@@ -279,7 +264,7 @@ export default function CatalogPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground mb-2">{searchResults.length} results</p>
               {searchResults.map(part => (
-                <PartRow key={part.id} part={part} onLogPurchase={() => setPurchasePart(part)} getSearchUrl={getSearchUrl} />
+                <PartRow key={part.id} part={part}  getSearchUrl={getSearchUrl} />
               ))}
             </div>
           )}
@@ -352,7 +337,7 @@ export default function CatalogPage() {
                     {parts.length === 0 && !isLoading
                       ? <p className="text-xs text-muted-foreground text-center py-4">No items</p>
                       : <div className="divide-y">{parts.map(part => (
-                          <PartRow key={part.id} part={part} onLogPurchase={() => setPurchasePart(part)} getSearchUrl={getSearchUrl} />
+                          <PartRow key={part.id} part={part}  getSearchUrl={getSearchUrl} />
                         ))}</div>}
                   </div>
                 )}
@@ -367,8 +352,8 @@ export default function CatalogPage() {
 
 // --- Part Row ---
 
-function PartRow({ part, onLogPurchase, getSearchUrl }: {
-  part: CatalogPart; onLogPurchase: () => void; getSearchUrl: (q: string) => string | null;
+function PartRow({ part, getSearchUrl }: {
+  part: CatalogPart; getSearchUrl: (q: string) => string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -391,15 +376,12 @@ function PartRow({ part, onLogPurchase, getSearchUrl }: {
         <div className="ml-11 mt-2 space-y-2 pb-1">
           {part.description && <p className="text-xs text-muted-foreground">{part.description}</p>}
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); onLogPurchase(); }}>
-              <ShoppingCart className="h-3 w-3 mr-1" /> Log Purchase
-            </Button>
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={(e) => {
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={(e) => {
               e.stopPropagation();
               const url = part.product_url || getSearchUrl(part.name);
               if (url) window.open(url, "_blank");
             }}>
-              <ExternalLink className="h-3 w-3 mr-1" /> Buy Online
+              <ExternalLink className="h-3 w-3 mr-1" /> Search Online
             </Button>
           </div>
         </div>

@@ -6,11 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from src.core.database import get_db
 from src.api.deps import get_current_org_user, require_roles, OrgUserContext
 from src.models.organization_user import OrganizationUser, OrgRole as OrgRoleEnum
+from src.models.user import User
+from src.models.tech import Tech
 from src.models.permission import Permission
 from src.models.permission_preset import PermissionPreset
 from src.models.preset_permission import PresetPermission
@@ -86,6 +88,18 @@ class EffectivePermissionsResponse(BaseModel):
 class OverridesResponse(BaseModel):
     org_user_id: str
     overrides: list[OverrideItem]
+
+class TeamMatrixItem(BaseModel):
+    user_id: str
+    org_user_id: str
+    name: str
+    email: str
+    job_title: str | None = None
+    role: str
+    org_role_name: str | None = None
+    permission_count: int
+    overrides_count: int
+    effective_permissions: dict[str, str]
 
 
 # ── Catalog ──────────────────────────────────────────────────────────
@@ -453,6 +467,77 @@ async def set_user_overrides(
     await service.invalidate_cache(org_user_id)
 
     return OverridesResponse(org_user_id=org_user_id, overrides=overrides)
+
+
+# ── Team Matrix ────────────────────────────────────────────────────────
+
+@router.get("/team-matrix", response_model=list[TeamMatrixItem])
+async def get_team_matrix(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all team members with their effective permissions in one call."""
+    await _require_role_management(ctx, db)
+
+    # Fetch all org users with user relationship
+    result = await db.execute(
+        select(OrganizationUser)
+        .options(joinedload(OrganizationUser.user))
+        .where(
+            OrganizationUser.organization_id == ctx.organization_id,
+            OrganizationUser.is_active == True,
+        )
+        .order_by(OrganizationUser.created_at)
+    )
+    members = result.unique().scalars().all()
+
+    # Fetch job titles
+    user_ids = [m.user_id for m in members]
+    tech_result = await db.execute(
+        select(Tech.user_id, Tech.job_title)
+        .where(Tech.organization_id == ctx.organization_id, Tech.user_id.in_(user_ids), Tech.is_active == True)
+    )
+    title_map = {row.user_id: row.job_title for row in tech_result.all()}
+
+    # Fetch custom role names
+    role_ids = [m.org_role_id for m in members if m.org_role_id]
+    role_name_map: dict[str, str] = {}
+    if role_ids:
+        role_result = await db.execute(
+            select(OrgRole.id, OrgRole.name).where(OrgRole.id.in_(role_ids))
+        )
+        role_name_map = {row[0]: row[1] for row in role_result.all()}
+
+    # Fetch override counts
+    override_counts: dict[str, int] = {}
+    if members:
+        member_ids = [m.id for m in members]
+        from sqlalchemy import func
+        oc_result = await db.execute(
+            select(UserPermissionOverride.org_user_id, func.count())
+            .where(UserPermissionOverride.org_user_id.in_(member_ids))
+            .group_by(UserPermissionOverride.org_user_id)
+        )
+        override_counts = {row[0]: row[1] for row in oc_result.all()}
+
+    # Resolve effective permissions for each member
+    service = PermissionService(db)
+    items = []
+    for m in members:
+        perms = await service.resolve_permissions(m)
+        items.append(TeamMatrixItem(
+            user_id=m.user_id,
+            org_user_id=m.id,
+            name=f"{m.user.first_name} {m.user.last_name}".strip(),
+            email=m.user.email,
+            job_title=title_map.get(m.user_id),
+            role=m.role.value,
+            org_role_name=role_name_map.get(m.org_role_id) if m.org_role_id else None,
+            permission_count=len(perms),
+            overrides_count=override_counts.get(m.id, 0),
+            effective_permissions=perms,
+        ))
+    return items
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

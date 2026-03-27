@@ -27,6 +27,7 @@ import {
   Route,
   FileText,
   Shield,
+  ShieldCheck,
   Settings,
   Wrench,
   LogOut,
@@ -57,6 +58,7 @@ const navItems = [
   { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
+  { href: "/roles", label: "Roles", icon: ShieldCheck, check: "canViewSettings" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];

@@ -393,33 +393,32 @@ function PartRow({ part, getSearchUrl }: {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="px-4 py-2.5 hover:bg-muted/30 transition-colors">
-      <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <div className="flex-shrink-0 h-8 w-8 rounded bg-muted flex items-center justify-center overflow-hidden">
+      <div className="flex items-center gap-3">
+        <div className="flex-shrink-0 h-8 w-8 rounded bg-muted flex items-center justify-center overflow-hidden cursor-pointer" onClick={() => setExpanded(!expanded)}>
           {part.image_url ? <img src={part.image_url} alt="" className="h-full w-full object-cover" />
             : <Package className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpanded(!expanded)}>
           <p className="text-sm font-medium truncate">{part.name}</p>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <span className="font-mono bg-muted px-1 rounded">{part.sku}</span>
             {part.brand && <span>{part.brand}</span>}
           </div>
         </div>
-        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform flex-shrink-0 ${expanded ? "rotate-180" : ""}`} />
+        <button
+          className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+          title="Search online"
+          onClick={(e) => {
+            e.stopPropagation();
+            const url = part.product_url || getSearchUrl(part.name);
+            if (url) window.open(url, "_blank");
+          }}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </button>
       </div>
-      {expanded && (
-        <div className="ml-11 mt-2 space-y-2 pb-1">
-          {part.description && <p className="text-xs text-muted-foreground">{part.description}</p>}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={(e) => {
-              e.stopPropagation();
-              const url = part.product_url || getSearchUrl(part.name);
-              if (url) window.open(url, "_blank");
-            }}>
-              <ExternalLink className="h-3 w-3 mr-1" /> Search Online
-            </Button>
-          </div>
-        </div>
+      {expanded && part.description && (
+        <p className="ml-11 mt-1.5 text-xs text-muted-foreground">{part.description}</p>
       )}
     </div>
   );

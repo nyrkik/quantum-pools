@@ -188,8 +188,24 @@ export default function CatalogPage() {
     }
   };
 
-  const getSearchUrl = (q: string): string => {
-    return `https://www.google.com/search?q=${encodeURIComponent(q + " pool supply buy")}`;
+  const [webSearching, setWebSearching] = useState<string | null>(null);
+  const [webResults, setWebResults] = useState<{ product_name: string; price: number | null; vendor_name: string; vendor_url: string; availability: string }[]>([]);
+  const [webSearchQuery, setWebSearchQuery] = useState("");
+
+  const handleWebSearch = async (q: string) => {
+    setWebSearching(q);
+    setWebSearchQuery(q);
+    setWebResults([]);
+    try {
+      const data = await api.get<{
+        web_results: { product_name: string; price: number | null; vendor_name: string; vendor_url: string; availability: string }[];
+      }>(`/v1/parts/web-search?q=${encodeURIComponent(q)}&limit=8`);
+      setWebResults(data.web_results || []);
+    } catch {
+      toast.error("Web search failed");
+    } finally {
+      setWebSearching(null);
+    }
   };
 
   const handleDiscover = async () => {
@@ -245,6 +261,50 @@ export default function CatalogPage() {
         </div>
       )}
 
+      {/* Web search results panel */}
+      {(webSearching || webResults.length > 0) && (
+        <Card className="shadow-sm border-blue-200 dark:border-blue-800">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-blue-700 dark:text-blue-400">
+                {webSearching ? `Searching for "${webSearching}"...` : `Online results for "${webSearchQuery}"`}
+              </p>
+              {!webSearching && (
+                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setWebResults([]); setWebSearchQuery(""); }}>
+                  Close
+                </Button>
+              )}
+            </div>
+            {webSearching ? (
+              <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-blue-500" /></div>
+            ) : webResults.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-2">No results found online</p>
+            ) : (
+              <div className="divide-y">
+                {webResults.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between py-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{r.product_name}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>{r.vendor_name}</span>
+                        {r.availability === "in_stock" && <Badge variant="outline" className="text-[9px] h-4 px-1 border-green-400 text-green-600">In Stock</Badge>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {r.price && <span className="text-sm font-semibold">${r.price.toFixed(2)}</span>}
+                      <a href={r.vendor_url} target="_blank" rel="noopener noreferrer"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors">
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
 
       {/* Search results */}
       {isSearching && activeType !== "services" && (
@@ -256,8 +316,8 @@ export default function CatalogPage() {
               <Package className="h-8 w-8 text-muted-foreground mx-auto" />
               <p className="text-sm text-muted-foreground">No results for &quot;{query}&quot;</p>
               {activeType === "parts" && (
-                <Button variant="outline" size="sm" onClick={() => { const url = getSearchUrl(query); if (url) window.open(url, "_blank"); }}>
-                  <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Search on SCP
+                <Button variant="outline" size="sm" onClick={() => handleWebSearch(query)}>
+                  <Search className="h-3.5 w-3.5 mr-1.5" /> Search Online
                 </Button>
               )}
             </div>
@@ -265,7 +325,7 @@ export default function CatalogPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground mb-2">{searchResults.length} results</p>
               {searchResults.map(part => (
-                <PartRow key={part.id} part={part}  getSearchUrl={getSearchUrl} />
+                <PartRow key={part.id} part={part}  onWebSearch={handleWebSearch} />
               ))}
             </div>
           )}
@@ -368,7 +428,7 @@ export default function CatalogPage() {
                               </div>
                             )}
                             <div className="divide-y">{filtered.map(part => (
-                              <PartRow key={part.id} part={part} getSearchUrl={getSearchUrl} />
+                              <PartRow key={part.id} part={part} onWebSearch={handleWebSearch} />
                             ))}</div>
                           </>}
                     </div>
@@ -385,8 +445,8 @@ export default function CatalogPage() {
 
 // --- Part Row ---
 
-function PartRow({ part, getSearchUrl }: {
-  part: CatalogPart; getSearchUrl: (q: string) => string | null;
+function PartRow({ part, onWebSearch }: {
+  part: CatalogPart; onWebSearch: (q: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -405,11 +465,10 @@ function PartRow({ part, getSearchUrl }: {
         </div>
         <button
           className="flex-shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-          title="Search online"
+          title="Find pricing online"
           onClick={(e) => {
             e.stopPropagation();
-            const url = part.product_url || getSearchUrl(part.name);
-            if (url) window.open(url, "_blank");
+            onWebSearch(part.sku || part.name);
           }}
         >
           <Search className="h-3.5 w-3.5" />

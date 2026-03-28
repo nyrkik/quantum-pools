@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback, useMemo, use, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -14,23 +13,28 @@ import {
   Building2,
   Home,
   MapPin,
-  Phone,
   Mail,
-  ClipboardCheck,
-  FileText,
-  Copy,
   Play,
-  Activity,
-  Droplets,
-  UserCog,
 } from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
 import { useCompose } from "@/components/email/compose-provider";
 import { AlertsSection } from "@/components/customers/sections/alerts-section";
-import { ActivityTimelineSection } from "@/components/customers/sections/activity-timeline-section";
-import { WaterFeaturesSection } from "@/components/customers/sections/water-features-section";
-import { AccountDetailsSection } from "@/components/customers/sections/account-details-section";
-import type { Customer, Property, Invoice } from "@/components/customers/customer-types";
+import { AccountTile } from "@/components/customers/tiles/account-tile";
+import { CommunicationsTile } from "@/components/customers/tiles/communications-tile";
+import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
+import { PropertyTile } from "@/components/customers/tiles/property-tile";
+import { EquipmentTile } from "@/components/customers/tiles/equipment-tile";
+import { PoolDetailsTile } from "@/components/customers/tiles/pool-details-tile";
+import { InspectionsTile } from "@/components/customers/tiles/inspections-tile";
+import type { Customer, Property } from "@/components/customers/customer-types";
+
+type RoleKey = "tech" | "manager" | "admin";
+
+interface TileDef {
+  id: string;
+  component: ReactNode;
+  order: Record<RoleKey, number>;
+}
 
 export default function CustomerDetailPage({
   params,
@@ -46,6 +50,7 @@ export default function CustomerDetailPage({
   const [loading, setLoading] = useState(true);
 
   const isTech = perms.role === "technician";
+  const isAdmin = perms.role === "admin" || perms.role === "owner";
 
   const load = useCallback(async () => {
     try {
@@ -88,9 +93,75 @@ export default function CustomerDetailPage({
     });
   };
 
-  const handleCreateInvoice = () => {
-    router.push(`/invoices/new?customer=${id}`);
-  };
+  const roleKey: RoleKey = isTech ? "tech" : isAdmin ? "admin" : "manager";
+
+  const tiles = useMemo(() => {
+    if (!customer) return [];
+
+    const all: TileDef[] = [];
+
+    // Always visible
+    all.push({
+      id: "account",
+      component: (
+        <AccountTile
+          customer={customer}
+          perms={perms}
+          onUpdate={(c) => setCustomer(c)}
+        />
+      ),
+      order: { tech: 4, manager: 1, admin: 1 },
+    });
+    all.push({
+      id: "property",
+      component: (
+        <PropertyTile
+          properties={properties}
+          preferredDay={customer.preferred_day}
+        />
+      ),
+      order: { tech: 1, manager: 3, admin: 4 },
+    });
+    all.push({
+      id: "equipment",
+      component: <EquipmentTile properties={properties} />,
+      order: { tech: 2, manager: 4, admin: 5 },
+    });
+    all.push({
+      id: "pool-details",
+      component: <PoolDetailsTile properties={properties} />,
+      order: { tech: 3, manager: 6, admin: 7 },
+    });
+
+    // Permission-gated
+    if (perms.canViewInbox) {
+      all.push({
+        id: "communications",
+        component: <CommunicationsTile customerId={id} />,
+        order: { tech: 5, manager: 2, admin: 2 },
+      });
+    }
+    if (perms.canViewInvoices) {
+      all.push({
+        id: "invoices",
+        component: <InvoicesTile customerId={id} />,
+        order: { tech: 99, manager: 99, admin: 3 },
+      });
+    }
+    if (perms.canViewEmd) {
+      all.push({
+        id: "inspections",
+        component: (
+          <InspectionsTile properties={properties} customerId={id} />
+        ),
+        order: { tech: 99, manager: 5, admin: 6 },
+      });
+    }
+
+    return all
+      .filter((t) => t.order[roleKey] < 99)
+      .sort((a, b) => a.order[roleKey] - b.order[roleKey]);
+  }, [customer, properties, perms, id, roleKey]);
 
   if (loading || !customer) {
     return (
@@ -102,217 +173,56 @@ export default function CustomerDetailPage({
 
   return (
     <div className="pb-20 sm:pb-0">
-      {/* Back button */}
-      <div className="mb-4">
-        <Button variant="ghost" size="sm" className="shrink-0" onClick={() => router.back()}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* Identity Header */}
-      <div className="mb-6 space-y-3">
-        <div className="flex items-center gap-3">
-          <TypeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-muted-foreground shrink-0" />
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate flex-1">
-            {displayName}
-          </h1>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {customer.company_name && (
-              <Badge variant="outline" className="text-xs hidden sm:inline-flex">
-                {customer.company_name}
-              </Badge>
-            )}
-            <Badge
-              variant={
-                customer.status === "active"
-                  ? "default"
-                  : customer.status === "service_call" || customer.status === "one_time"
-                    ? "outline"
-                    : customer.status === "lead" || customer.status === "pending"
-                      ? "outline"
-                      : "secondary"
-              }
-              className={
-                customer.status === "service_call"
-                  ? "border-blue-400 text-blue-600"
-                  : customer.status === "lead" || customer.status === "pending"
-                    ? "border-amber-400 text-amber-600"
-                    : customer.status === "one_time"
-                      ? "border-blue-400 text-blue-600"
-                      : ""
-              }
-            >
-              {customer.status === "service_call"
-                ? "Service Call"
-                : customer.status === "one_time"
-                  ? "One-time"
-                  : (customer.status ?? "active").charAt(0).toUpperCase() +
-                    (customer.status ?? "active").slice(1)}
-            </Badge>
-          </div>
-        </div>
-
-        {/* Contact + address + balance row */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-          {customer.phone && (
-            <a
-              href={`tel:${customer.phone}`}
-              className="flex items-center gap-1 hover:text-foreground transition-colors"
-            >
-              <Phone className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{customer.phone}</span>
-              <span className="sm:hidden">Call</span>
-            </a>
-          )}
-          {customer.email && (
-            <a
-              href={`mailto:${customer.email}`}
-              className="flex items-center gap-1 hover:text-foreground transition-colors"
-            >
-              <Mail className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{customer.email}</span>
-              <span className="sm:hidden">Email</span>
-            </a>
-          )}
-          {primaryAddress && (
-            <Link
-              href={`/map?wf=${properties[0].water_features?.[0]?.id || ""}`}
-              className="flex items-center gap-1 hover:text-foreground transition-colors"
-            >
-              <MapPin className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{primaryAddress}</span>
-              <span className="sm:hidden">{properties[0]?.city}</span>
-            </Link>
-          )}
-          {perms.canViewRates && (
-            <span className="font-medium text-foreground">
-              ${customer.monthly_rate.toFixed(2)}/mo
-            </span>
-          )}
-          {perms.canViewBalance && customer.balance !== 0 && (
-            <Link
-              href={`/invoices?customer_id=${id}`}
-              className={`font-medium hover:underline ${customer.balance > 0 ? "text-red-600" : "text-green-600"}`}
-            >
-              Bal: ${Math.abs(customer.balance).toFixed(2)}
-              {customer.balance > 0 ? " due" : " credit"}
-            </Link>
-          )}
-        </div>
-
-        {/* Tech: gate code banner -- mobile only */}
-        {isTech && properties[0]?.gate_code && (
-          <div className="sm:hidden bg-amber-50 dark:bg-amber-950/30 border border-amber-200 rounded-lg px-4 py-3 flex items-center justify-between">
-            <div>
-              <span className="text-xs text-amber-600 font-medium">Gate Code</span>
-              <p className="text-lg font-bold">{properties[0].gate_code}</p>
+      {/* Top bar */}
+      <div className="mb-4 space-y-1">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <TypeIcon className="h-5 w-5 text-muted-foreground shrink-0" />
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
+                {displayName}
+              </h1>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                navigator.clipboard.writeText(properties[0].gate_code!);
-                toast.success("Copied");
-              }}
-            >
-              <Copy className="h-3.5 w-3.5 mr-1" />
-              Copy
-            </Button>
-          </div>
-        )}
-
-        {/* Tech: gate code -- desktop */}
-        {isTech && properties[0]?.gate_code && (
-          <div className="hidden sm:flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Gate:</span>
-            <span className="text-lg font-bold tracking-wider">{properties[0].gate_code}</span>
-            {properties[0].dog_on_property && (
-              <Badge variant="outline" className="border-amber-400 text-amber-600 text-xs">
-                Dog
-              </Badge>
+            {primaryAddress && (
+              <p className="text-sm text-muted-foreground ml-7 truncate">{primaryAddress}</p>
             )}
           </div>
-        )}
-
-        {/* Quick actions */}
-        <div className="flex flex-wrap gap-2">
-          {properties.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleLogVisit}>
-              <Play className="h-3.5 w-3.5 mr-1.5" />
-              Log Visit
-            </Button>
-          )}
-          {customer.email && (
-            <Button variant="outline" size="sm" onClick={handleNewEmail}>
-              <Mail className="h-3.5 w-3.5 mr-1.5" />
-              Email
-            </Button>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {perms.canViewBalance && customer.balance !== 0 && (
+              <Link
+                href={`/invoices?customer_id=${id}`}
+                className={`text-sm font-medium hover:underline ${customer.balance > 0 ? "text-red-600" : "text-green-600"}`}
+              >
+                ${Math.abs(customer.balance).toFixed(2)}
+                {customer.balance > 0 ? " due" : " cr"}
+              </Link>
+            )}
+            {customer.email && perms.canViewInbox && (
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNewEmail}>
+                <Mail className="h-4 w-4" />
+              </Button>
+            )}
+            {isTech && properties.length > 0 && (
+              <Button size="sm" onClick={handleLogVisit}>
+                <Play className="h-3.5 w-3.5 mr-1.5" />
+                Start Visit
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Alerts (auto-hides when no alerts) */}
+      {/* Alerts */}
       <AlertsSection customerId={id} />
 
-      {/* Sections */}
-      <div className="space-y-4 mt-4">
-        {/* Activity Timeline */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <Activity className="h-4 w-4 text-muted-foreground" />
-              Activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActivityTimelineSection
-              customerId={id}
-              customerEmail={customer.email || undefined}
-              customerName={displayName}
-              properties={properties}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Properties & Pools */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <Droplets className="h-4 w-4 text-muted-foreground" />
-              Properties & Pools
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <WaterFeaturesSection
-              customer={customer}
-              properties={properties}
-              perms={perms}
-              onUpdate={load}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Account Details */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <UserCog className="h-4 w-4 text-muted-foreground" />
-              Account
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AccountDetailsSection
-              customer={customer}
-              perms={perms}
-              onUpdate={(c) => setCustomer(c)}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Recent Invoices */}
-        {perms.canViewInvoices && (
-          <RecentInvoices customerId={id} />
-        )}
+      {/* Tile grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        {tiles.map((t) => (
+          <div key={t.id}>{t.component}</div>
+        ))}
       </div>
 
       {/* Floating Action Button -- tech mobile only */}
@@ -324,56 +234,5 @@ export default function CustomerDetailPage({
         </div>
       )}
     </div>
-  );
-}
-
-function RecentInvoices({ customerId }: { customerId: string }) {
-  const [invoices, setInvoices] = useState<{ id: string; invoice_number: string; subject: string | null; status: string; total: number; issue_date: string }[]>([]);
-  const router = useRouter();
-
-  useEffect(() => {
-    api.get<{ items: { id: string; invoice_number: string; subject: string | null; status: string; total: number; issue_date: string }[] }>(
-      `/v1/invoices?customer_id=${customerId}&limit=5`
-    ).then(d => setInvoices(d.items || [])).catch(() => {});
-  }, [customerId]);
-
-  if (invoices.length === 0) return null;
-
-  const statusColor: Record<string, string> = {
-    draft: "text-muted-foreground",
-    sent: "text-blue-600",
-    paid: "text-green-600",
-    overdue: "text-red-600",
-    void: "text-muted-foreground line-through",
-  };
-
-  return (
-    <Card className="shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => router.push(`/invoices?customer_id=${customerId}`)}>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-sm font-semibold">
-          <span className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            Invoices
-          </span>
-          <span className="text-xs text-muted-foreground font-normal">View all →</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="divide-y">
-          {invoices.map(inv => (
-            <div key={inv.id} className="flex items-center justify-between py-2 text-sm">
-              <div className="min-w-0">
-                <span className="font-mono text-xs text-muted-foreground">{inv.invoice_number}</span>
-                {inv.subject && <span className="ml-2 text-xs truncate">{inv.subject}</span>}
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <span className={`text-xs font-medium capitalize ${statusColor[inv.status] || ""}`}>{inv.status}</span>
-                <span className="text-sm font-medium">${inv.total.toFixed(2)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   );
 }

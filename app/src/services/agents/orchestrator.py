@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
 
+# Auto-close stale visits: only check every 30 minutes
+_last_auto_close_check: datetime | None = None
+AUTO_CLOSE_INTERVAL_MINUTES = 30
+
 # Flood protection: track recent SMS alerts per sender
 _recent_alerts: dict[str, datetime] = {}
 ALERT_COOLDOWN_MINUTES = 10
@@ -742,5 +746,25 @@ async def run_poll_cycle():
             logger.info(f"Tracked {sent_count} sent emails")
     except Exception as e:
         logger.error(f"Error tracking sent emails: {e}", exc_info=True)
+
+    # Auto-close stale visits (every 30 minutes, not every cycle)
+    global _last_auto_close_check
+    now = datetime.now(timezone.utc)
+    should_check = (
+        _last_auto_close_check is None
+        or (now - _last_auto_close_check).total_seconds() >= AUTO_CLOSE_INTERVAL_MINUTES * 60
+    )
+    if should_check:
+        _last_auto_close_check = now
+        try:
+            from src.services.visit_experience_service import VisitExperienceService
+            async with get_db_context() as db:
+                svc = VisitExperienceService(db)
+                closed = await svc.auto_close_stale_visits(org_id)
+                if closed:
+                    logger.info(f"Auto-closed {closed} stale visit(s)")
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Error auto-closing stale visits: {e}", exc_info=True)
 
     return len(messages)

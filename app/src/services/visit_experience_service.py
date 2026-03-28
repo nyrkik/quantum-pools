@@ -458,6 +458,46 @@ class VisitExperienceService:
         }
 
     # ------------------------------------------------------------------
+    # Auto-close stale visits
+    # ------------------------------------------------------------------
+
+    async def auto_close_stale_visits(self, org_id: str) -> int:
+        """Auto-complete visits that have been in_progress for over 8 hours.
+
+        Safety net: no visit should remain open indefinitely. Called periodically
+        by the agent poller (every ~30 minutes).
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=8)
+        result = await self.db.execute(
+            select(Visit).where(
+                Visit.organization_id == org_id,
+                Visit.status == VisitStatus.in_progress.value,
+                Visit.started_at < cutoff,
+            )
+        )
+        stale_visits = result.scalars().all()
+
+        now = datetime.now(timezone.utc)
+        for visit in stale_visits:
+            visit.status = VisitStatus.completed.value
+            visit.actual_departure = now
+            if visit.started_at:
+                visit.duration_minutes = int((now - visit.started_at).total_seconds() / 60)
+            existing_notes = visit.notes or ""
+            auto_note = "Auto-completed at end of day"
+            if existing_notes:
+                visit.notes = f"{existing_notes}\n{auto_note}"
+            else:
+                visit.notes = auto_note
+
+        if stale_visits:
+            await self.db.flush()
+
+        return len(stale_visits)
+
+    # ------------------------------------------------------------------
     # Property history
     # ------------------------------------------------------------------
 

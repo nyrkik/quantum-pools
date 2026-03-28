@@ -31,6 +31,7 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
     d = {
         "id": a.id,
         "agent_message_id": a.agent_message_id,
+        "customer_id": a.customer_id,
         "action_type": a.action_type,
         "description": a.description,
         "assigned_to": a.assigned_to,
@@ -101,6 +102,7 @@ class AgentThreadService:
         limit: int,
         offset: int,
         assigned_to: str | None = None,
+        customer_id: str | None = None,
         current_user_id: str | None = None,
         user_permission_slugs: set[str] | None = None,
     ) -> dict:
@@ -123,6 +125,8 @@ class AgentThreadService:
             base = base.where(AgentThread.status != "ignored")
         if assigned_to:
             base = base.where(AgentThread.assigned_to_user_id == assigned_to)
+        if customer_id:
+            base = base.where(AgentThread.matched_customer_id == customer_id)
         # Visibility filtering: only show threads the user has permission to see
         if user_permission_slugs is not None:
             from sqlalchemy import or_

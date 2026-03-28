@@ -23,6 +23,7 @@ async def list_agent_actions(
     status: Optional[str] = Query(None),
     assigned_to: Optional[str] = Query(None),
     action_type: Optional[str] = Query(None),
+    customer_id: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
@@ -34,6 +35,7 @@ async def list_agent_actions(
         status=status,
         assigned_to=assigned_to,
         action_type=action_type,
+        customer_id=customer_id,
         limit=limit,
     )
 

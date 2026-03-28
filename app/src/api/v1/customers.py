@@ -153,6 +153,89 @@ async def _emd_auto_match(organization_id: str):
         pass
 
 
+@router.get("/{customer_id}/alerts")
+async def get_customer_alerts(
+    customer_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Customer alerts: overdue invoices, expiring drain covers, pending jobs, stale threads."""
+    from datetime import datetime, timedelta, timezone
+    from src.models.invoice import Invoice
+    from src.models.water_feature import WaterFeature
+    from src.models.property import Property
+    from src.models.agent_action import AgentAction
+    from src.models.agent_thread import AgentThread
+
+    org_id = ctx.organization_id
+    now = datetime.now(timezone.utc)
+
+    # Overdue invoices
+    overdue_result = await db.execute(
+        select(func.count(Invoice.id), func.coalesce(func.sum(Invoice.total_amount), 0))
+        .where(
+            Invoice.organization_id == org_id,
+            Invoice.customer_id == customer_id,
+            Invoice.status == "overdue",
+        )
+    )
+    overdue_row = overdue_result.one()
+    overdue_invoices = overdue_row[0] or 0
+    overdue_balance = float(overdue_row[1] or 0)
+
+    # Expiring drain covers (within 30 days)
+    cutoff = now + timedelta(days=30)
+    drain_result = await db.execute(
+        select(WaterFeature.name, WaterFeature.water_type, WaterFeature.drain_cover_expiry_date)
+        .join(Property, WaterFeature.property_id == Property.id)
+        .where(
+            WaterFeature.organization_id == org_id,
+            Property.customer_id == customer_id,
+            WaterFeature.is_active == True,
+            WaterFeature.drain_cover_expiry_date.isnot(None),
+            WaterFeature.drain_cover_expiry_date <= cutoff,
+        )
+    )
+    expiring_drains = [
+        {
+            "wf_name": row[0] or row[1] or "Pool",
+            "expires": row[2].isoformat() if row[2] else None,
+        }
+        for row in drain_result.all()
+    ]
+
+    # Pending jobs (open actions for this customer)
+    pending_jobs = (await db.execute(
+        select(func.count(AgentAction.id))
+        .where(
+            AgentAction.organization_id == org_id,
+            AgentAction.customer_id == customer_id,
+            AgentAction.status.in_(("open", "in_progress")),
+            AgentAction.is_suggested == False,
+        )
+    )).scalar() or 0
+
+    # Stale threads (pending threads for this customer with last message > 24h ago)
+    stale_cutoff = now - timedelta(hours=24)
+    stale_threads = (await db.execute(
+        select(func.count(AgentThread.id))
+        .where(
+            AgentThread.organization_id == org_id,
+            AgentThread.matched_customer_id == customer_id,
+            AgentThread.has_pending == True,
+            AgentThread.last_message_at < stale_cutoff,
+        )
+    )).scalar() or 0
+
+    return {
+        "overdue_balance": overdue_balance,
+        "overdue_invoices": overdue_invoices,
+        "expiring_drain_covers": expiring_drains,
+        "pending_jobs": pending_jobs,
+        "stale_threads": stale_threads,
+    }
+
+
 @router.delete("/{customer_id}", status_code=204)
 async def delete_customer(
     customer_id: str,

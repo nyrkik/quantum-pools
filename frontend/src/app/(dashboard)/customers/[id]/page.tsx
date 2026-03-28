@@ -1,30 +1,96 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo, use } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  Building2,
+  Home,
+  MapPin,
+  Phone,
+  Mail,
+  ClipboardCheck,
+  FileText,
+  AlertTriangle,
+  Wrench,
+  Droplets,
+  DoorOpen,
+  DollarSign,
+  MessageSquare,
+  ClipboardList,
+  UserCog,
+  Package,
+  ChevronDown,
+  ChevronUp,
+  Play,
+  Copy,
+} from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
-import type { PropertyPhoto } from "@/types/photo";
-import type { Customer, WaterFeature, Property, Invoice, RateSplitData } from "@/components/customers/customer-types";
-import { CustomerSidebar, type ViewTab } from "@/components/customers/customer-sidebar";
-import { CustomerServiceTab } from "@/components/customers/customer-service-tab";
-import { CustomerOverviewTab } from "@/components/customers/customer-overview-tab";
-import { CustomerWfsTab } from "@/components/customers/customer-wfs-tab";
-import { CustomerInvoicesTab } from "@/components/customers/customer-invoices-tab";
+import { useCompose } from "@/components/email/compose-provider";
+import { SectionJumpNav, type SectionNavItem } from "@/components/ui/section-jump-nav";
+import { AlertsSection } from "@/components/customers/sections/alerts-section";
+import { ServiceSummarySection } from "@/components/customers/sections/service-summary-section";
+import { CommunicationSection } from "@/components/customers/sections/communication-section";
+import { BillingSection } from "@/components/customers/sections/billing-section";
+import { JobsSection } from "@/components/customers/sections/jobs-section";
+import { WaterFeaturesSection } from "@/components/customers/sections/water-features-section";
+import { SiteAccessSection } from "@/components/customers/sections/site-access-section";
+import { AccountDetailsSection } from "@/components/customers/sections/account-details-section";
 import { CustomerPartsTab } from "@/components/customers/customer-parts-tab";
+import type { Customer, Property, Invoice } from "@/components/customers/customer-types";
+
+interface SectionDef {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  defaultOpen: boolean;
+  component: React.ReactNode;
+}
+
+function CollapsibleSectionWrapper({
+  id,
+  label,
+  icon: Icon,
+  defaultOpen,
+  children,
+}: {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div id={id} className="scroll-mt-20">
+      <Card className="shadow-sm">
+        <button
+          onClick={() => setOpen(!open)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors rounded-t-lg"
+        >
+          <div className="flex items-center gap-2">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold">{label}</span>
+          </div>
+          {open ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        {open && <CardContent className="pt-0 pb-4">{children}</CardContent>}
+      </Card>
+    </div>
+  );
+}
 
 export default function CustomerDetailPage({
   params,
@@ -34,224 +100,218 @@ export default function CustomerDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const perms = usePermissions();
+  const { openCompose } = useCompose();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [heroImages, setHeroImages] = useState<Record<string, PropertyPhoto>>({});
-  const [fullWfs, setFullBows] = useState<WaterFeature[]>([]);
-  const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>({});
-  const [latestReadings, setLatestReadings] = useState<Record<string, { ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at?: string }>>({});
+  const [loading, setLoading] = useState(true);
+
   const isTech = perms.role === "technician";
-  const searchParams = useSearchParams();
-  const tabParam = searchParams.get("tab");
-  const validTabs = ["overview", "service", "details", "wfs", "parts", "invoices"] as const;
-  const resolvedTab = tabParam === "details" && !isTech ? "overview" : tabParam;
-  const initialTab = validTabs.includes(resolvedTab as typeof validTabs[number]) ? (resolvedTab as typeof validTabs[number]) : isTech ? "service" : "overview";
-  const [viewTab, setViewTab] = useState<ViewTab>(initialTab);
-  const [selectedWfId, setSelectedBowId] = useState<string | null>(null);
-  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
-  const [scrollToPropId, setScrollToPropId] = useState<string | null>(null);
-  const [editingDetails, setEditingDetails] = useState(false);
-  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
-  const [discardTarget, setDiscardTarget] = useState<"details" | null>(null);
-  const [wfProfitability, setBowProfitability] = useState<Record<string, { margin_pct: number; suggested_rate: number }>>({});
-  const [showRateSplit, setShowRateSplit] = useState(false);
-  const [rateSplitData, setRateSplitData] = useState<RateSplitData | null>(null);
-  const [rateSplitEdits, setRateSplitEdits] = useState<Record<string, number>>({});
-  const [rateSplitSaving, setRateSplitSaving] = useState(false);
-  const [propRates, setPropRates] = useState<Record<string, number>>({});
-  const [propRatesDirty, setPropRatesDirty] = useState(false);
-  const [companies, setCompanies] = useState<string[]>([]);
-  const [newCompanyCustom, setNewCompanyCustom] = useState("");
-
-  // Customer edit form state
-  const [custForm, setCustForm] = useState<Customer | null>(null);
-  const [custSaving, setCustSaving] = useState(false);
-  const [custDirty, setCustDirty] = useState(false);
-
-  // Single-property inline edit state
-  const singleProp = properties.length <= 1 ? properties[0] ?? null : null;
-  const [propForm, setPropForm] = useState<Property | null>(null);
-  const [propDirty, setPropDirty] = useState(false);
-
-  useEffect(() => {
-    if (singleProp) setPropForm(singleProp);
-  }, [singleProp?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const rates: Record<string, number> = {};
-    properties.forEach(p => { rates[p.id] = p.monthly_rate ?? 0; });
-    setPropRates(rates);
-    setPropRatesDirty(false);
-  }, [properties]);
-
-  const setPropField = (field: string, value: unknown) => {
-    setPropForm((f) => f ? { ...f, [field]: value } : f);
-    setPropDirty(true);
-  };
+  const isAdmin = perms.canViewRates;
+  const isManager = perms.role === "manager" || perms.role === "admin" || perms.role === "owner";
 
   const load = useCallback(async () => {
     try {
-      const [c, p, inv, heroes, companyList] = await Promise.all([
+      const [c, p, inv] = await Promise.all([
         api.get<Customer>(`/v1/customers/${id}`),
         api.get<{ items: Property[] }>(`/v1/properties?customer_id=${id}`),
-        api.get<{ items: Invoice[] }>(`/v1/invoices?customer_id=${id}`),
-        api.get<Record<string, PropertyPhoto>>("/v1/photos/heroes").catch(() => ({})),
-        api.get<string[]>("/v1/customers/companies").catch(() => []),
+        perms.canViewInvoices
+          ? api.get<{ items: Invoice[] }>(`/v1/invoices?customer_id=${id}`)
+          : Promise.resolve({ items: [] as Invoice[] }),
       ]);
       setCustomer(c);
-      setCustForm(c);
       setProperties(p.items);
       setInvoices(inv.items);
-      setHeroImages(heroes);
-      setCompanies(companyList);
     } catch {
       toast.error("Failed to load client");
+    } finally {
+      setLoading(false);
     }
-  }, [id]);
+  }, [id, perms.canViewInvoices]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-select first property for multi-property clients
-  useEffect(() => {
-    if (properties.length > 1 && !selectedPropertyId) {
-      setSelectedPropertyId(properties[0].id);
-    } else if (properties.length === 1) {
-      setSelectedPropertyId(null);
-    }
-  }, [properties, selectedPropertyId]);
-
-  const activeProperty = properties.length > 1
-    ? properties.find(p => p.id === selectedPropertyId) || properties[0]
+  // Identity
+  const displayName = customer
+    ? (customer as { display_name?: string }).display_name || customer.first_name
+    : "";
+  const TypeIcon = customer?.customer_type === "commercial" ? Building2 : Home;
+  const primaryAddress = properties[0]
+    ? `${properties[0].address}, ${properties[0].city}`
     : null;
 
-  // Fetch full WF data + tech assignments for all properties
-  useEffect(() => {
-    if (properties.length === 0) return;
-    Promise.all(
-      properties.map((p) => api.get<WaterFeature[]>(`/v1/water-features/property/${p.id}`).catch(() => []))
-    ).then((results) => setFullBows(results.flat()));
-    api.get<Record<string, Array<{ tech_id: string; tech_name: string; color: string; service_days: string[] }>>>("/v1/routes/tech-assignments")
-      .then(setTechAssignments)
-      .catch(() => setTechAssignments({}));
-    // Fetch latest readings per property, build per-WF map
-    Promise.all(
-      properties.map((p) =>
-        api.get<Array<{ water_feature_id?: string | null; ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at: string }>>(`/v1/visits/readings/property/${p.id}?limit=50`).catch(() => [])
-      )
-    ).then((results) => {
-      const map: Record<string, { ph?: number | null; free_chlorine?: number | null; cyanuric_acid?: number | null; created_at?: string }> = {};
-      for (const readings of results) {
-        for (const r of readings) {
-          const key = r.water_feature_id || "property";
-          if (!map[key]) {
-            map[key] = { ph: r.ph, free_chlorine: r.free_chlorine, cyanuric_acid: r.cyanuric_acid, created_at: r.created_at };
-          }
-        }
-      }
-      setLatestReadings(map);
+  // Quick actions
+  const handleLogVisit = () => {
+    const propId = properties[0]?.id;
+    if (propId) router.push(`/visits/new?property=${propId}`);
+  };
+
+  const handleNewEmail = () => {
+    if (!customer) return;
+    openCompose({
+      to: customer.email || undefined,
+      customerId: customer.id,
+      customerName: displayName,
     });
-    // Fetch per-WF profitability
-    api.get<Array<{ wf_id: string; margin_pct: number; suggested_rate: number; customer_id: string }>>("/v1/profitability/gaps")
-      .then((gaps) => {
-        const map: Record<string, { margin_pct: number; suggested_rate: number }> = {};
-        for (const g of gaps) {
-          if (g.customer_id === id) {
-            map[g.wf_id] = { margin_pct: g.margin_pct, suggested_rate: g.suggested_rate };
-          }
-        }
-        setBowProfitability(map);
-      })
-      .catch(() => setBowProfitability({}));
-  }, [properties, id]);
-
-  const setCustField = (field: string, value: unknown) => {
-    setCustForm((f) => f ? { ...f, [field]: value } : f);
-    setCustDirty(true);
   };
 
-  const handleSaveCustomer = async () => {
-    if (!custForm) return;
-    setCustSaving(true);
-    try {
-      const promises: Promise<unknown>[] = [
-        api.put(`/v1/customers/${id}`, {
-          first_name: custForm.first_name, last_name: custForm.last_name,
-          company_name: (custForm.company_name === "__new__" ? newCompanyCustom : custForm.company_name) || null, customer_type: custForm.customer_type,
-          email: custForm.email || null, phone: custForm.phone || null,
-          billing_address: custForm.billing_address || null, billing_city: custForm.billing_city || null,
-          billing_state: custForm.billing_state || null, billing_zip: custForm.billing_zip || null,
-          service_frequency: custForm.service_frequency || null, preferred_day: custForm.preferred_day || null,
-          billing_frequency: custForm.billing_frequency,
-          payment_method: custForm.payment_method || null, payment_terms_days: custForm.payment_terms_days,
-          difficulty_rating: custForm.difficulty_rating, notes: custForm.notes || null,
-          status: custForm.status,
-          is_active: custForm.status === "active",
-        }),
-      ];
-      if (propForm && propDirty && singleProp) {
-        promises.push(api.put(`/v1/properties/${singleProp.id}`, {
-          address: propForm.address, city: propForm.city, state: propForm.state, zip_code: propForm.zip_code,
-          gate_code: propForm.gate_code || null, access_instructions: propForm.access_instructions || null,
-          dog_on_property: propForm.dog_on_property, is_locked_to_day: propForm.is_locked_to_day,
-          service_day_pattern: propForm.service_day_pattern || null, notes: propForm.notes || null,
-        }));
+  const handleCreateInvoice = () => {
+    router.push(`/invoices/new?customer=${id}`);
+  };
+
+  // Build section list based on role
+  const sections = useMemo((): SectionDef[] => {
+    if (!customer) return [];
+    const all: SectionDef[] = [];
+
+    // Alerts always first (renders nothing if no alerts)
+    all.push({
+      id: "alerts",
+      label: "Alerts",
+      icon: AlertTriangle,
+      defaultOpen: true,
+      component: <AlertsSection customerId={id} />,
+    });
+
+    if (isTech) {
+      // Tech: site access first, then service, then water features
+      all.push({
+        id: "access",
+        label: "Site Access",
+        icon: DoorOpen,
+        defaultOpen: true,
+        component: <SiteAccessSection properties={properties} />,
+      });
+      all.push({
+        id: "service",
+        label: "Service",
+        icon: Wrench,
+        defaultOpen: true,
+        component: <ServiceSummarySection customerId={id} customer={customer} properties={properties} />,
+      });
+      all.push({
+        id: "wfs",
+        label: "Water Features",
+        icon: Droplets,
+        defaultOpen: true,
+        component: <WaterFeaturesSection customer={customer} properties={properties} perms={perms} onUpdate={load} />,
+      });
+      // Jobs — own only
+      if (perms.can("jobs.view")) {
+        all.push({
+          id: "jobs",
+          label: "Jobs",
+          icon: ClipboardList,
+          defaultOpen: false,
+          component: <JobsSection customerId={id} />,
+        });
       }
-      await Promise.all(promises);
-      if (propRatesDirty) {
-        for (const [propId, rate] of Object.entries(propRates)) {
-          const orig = properties.find(p => p.id === propId);
-          if (orig && (orig.monthly_rate ?? 0) !== rate) {
-            await api.put(`/v1/properties/${propId}`, { monthly_rate: rate });
-          }
-        }
+      all.push({
+        id: "account",
+        label: "Account Details",
+        icon: UserCog,
+        defaultOpen: false,
+        component: <AccountDetailsSection customer={customer} perms={perms} onUpdate={(c) => setCustomer(c)} />,
+      });
+    } else {
+      // Manager/Admin: service first, then communication, billing, etc.
+      all.push({
+        id: "service",
+        label: "Service",
+        icon: Wrench,
+        defaultOpen: true,
+        component: <ServiceSummarySection customerId={id} customer={customer} properties={properties} />,
+      });
+      if (perms.canViewInbox) {
+        all.push({
+          id: "communication",
+          label: "Communication",
+          icon: MessageSquare,
+          defaultOpen: true,
+          component: (
+            <CommunicationSection
+              customerId={id}
+              customerEmail={customer.email || undefined}
+              customerName={displayName}
+            />
+          ),
+        });
       }
-      toast.success("Client updated");
-      setCustDirty(false);
-      setPropDirty(false);
-      setPropRatesDirty(false);
-      setNewCompanyCustom("");
-      setEditingDetails(false);
-      load();
-    } catch {
-      toast.error("Failed to update client");
-    } finally {
-      setCustSaving(false);
-    }
-  };
-
-  const openRateSplit = async () => {
-    try {
-      const data = await api.get<RateSplitData>(`/v1/profitability/allocate-rates/${id}`);
-      setRateSplitData(data);
-      const edits: Record<string, number> = {};
-      for (const a of data?.allocations || []) {
-        edits[a.wf_id] = a.proposed_rate;
+      if (isAdmin && perms.canViewInvoices) {
+        all.push({
+          id: "billing",
+          label: "Invoices & Billing",
+          icon: DollarSign,
+          defaultOpen: true,
+          component: <BillingSection customerId={id} customer={customer} invoices={invoices} />,
+        });
       }
-      setRateSplitEdits(edits);
-      setShowRateSplit(true);
-    } catch {
-      toast.error("Failed to load rate allocation");
+      if (perms.can("jobs.view")) {
+        all.push({
+          id: "jobs",
+          label: "Jobs",
+          icon: ClipboardList,
+          defaultOpen: isManager && !isAdmin,
+          component: <JobsSection customerId={id} />,
+        });
+      }
+      if (perms.canViewProfitability) {
+        all.push({
+          id: "profitability",
+          label: "Profitability",
+          icon: DollarSign,
+          defaultOpen: false,
+          component: (
+            <div className="text-sm text-muted-foreground py-2">
+              <Link href={`/profitability/${id}`} className="text-primary hover:underline">
+                View full profitability analysis
+              </Link>
+            </div>
+          ),
+        });
+      }
+      all.push({
+        id: "wfs",
+        label: "Water Features",
+        icon: Droplets,
+        defaultOpen: false,
+        component: <WaterFeaturesSection customer={customer} properties={properties} perms={perms} onUpdate={load} />,
+      });
+      all.push({
+        id: "access",
+        label: "Site Access",
+        icon: DoorOpen,
+        defaultOpen: false,
+        component: <SiteAccessSection properties={properties} />,
+      });
+      all.push({
+        id: "account",
+        label: "Account Details",
+        icon: UserCog,
+        defaultOpen: false,
+        component: <AccountDetailsSection customer={customer} perms={perms} onUpdate={(c) => setCustomer(c)} />,
+      });
+      all.push({
+        id: "parts",
+        label: "Parts",
+        icon: Package,
+        defaultOpen: false,
+        component: <CustomerPartsTab customer={customer} properties={properties} />,
+      });
     }
-  };
 
-  const applyRateSplit = async () => {
-    setRateSplitSaving(true);
-    try {
-      await api.post(`/v1/profitability/apply-rates/${id}`, { rates: rateSplitEdits });
-      toast.success("Rates applied");
-      setShowRateSplit(false);
-      load();
-    } catch {
-      toast.error("Failed to apply rates");
-    } finally {
-      setRateSplitSaving(false);
-    }
-  };
+    return all;
+  }, [customer, id, properties, invoices, perms, isTech, isAdmin, isManager, displayName, load]);
 
-  const wfsNeedRateSplit = fullWfs.length > 1 && fullWfs.some(b => b.monthly_rate == null) && (customer?.monthly_rate ?? 0) > 0;
+  // Jump nav items (filter out alerts since it hides itself)
+  const navItems = useMemo((): SectionNavItem[] =>
+    sections
+      .filter((s) => s.id !== "alerts")
+      .map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
+    [sections]
+  );
 
-  if (!customer || !custForm) {
+  if (loading || !customer) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-6 w-6 animate-spin" />
@@ -259,58 +319,8 @@ export default function CustomerDetailPage({
     );
   }
 
-  const handleCancelCustomer = () => {
-    setCustForm(customer);
-    setCustDirty(false);
-  };
-
-  const handleCancelProperty = () => {
-    if (singleProp) setPropForm(singleProp);
-    setPropDirty(false);
-    const rates: Record<string, number> = {};
-    properties.forEach(p => { rates[p.id] = p.monthly_rate ?? 0; });
-    setPropRates(rates);
-    setPropRatesDirty(false);
-  };
-
-  const handleExitDetails = () => {
-    if (custDirty || propDirty || propRatesDirty) {
-      setDiscardTarget("details");
-      setShowDiscardDialog(true);
-    } else {
-      setEditingDetails(false);
-    }
-  };
-
-  const handleDiscardAndExit = () => {
-    if (discardTarget === "details") {
-      setCustDirty(false);
-      setPropDirty(false);
-      setCustForm(customer);
-      if (singleProp) setPropForm(singleProp);
-      setEditingDetails(false);
-    }
-    setShowDiscardDialog(false);
-    setDiscardTarget(null);
-    load();
-  };
-
   return (
     <div className="pb-20 sm:pb-0">
-      {/* Unsaved changes guard */}
-      <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-            <AlertDialogDescription>You have unsaved changes. Discard them?</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDiscardAndExit} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Discard</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* Back button */}
       <div className="mb-4">
         <Button variant="ghost" size="sm" className="shrink-0" onClick={() => router.back()}>
@@ -318,77 +328,137 @@ export default function CustomerDetailPage({
         </Button>
       </div>
 
-      {/* Two-column layout: sidebar + main */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        <CustomerSidebar
-          customer={customer}
-          properties={properties}
-          invoices={invoices}
-          perms={perms}
-          isTech={isTech}
-          viewTab={viewTab}
-          selectedPropertyId={selectedPropertyId}
-          activeProperty={activeProperty}
-          onTabChange={setViewTab}
-          onPropertySelect={setSelectedPropertyId}
-        />
+      {/* Identity Header */}
+      <div className="mb-6 space-y-3">
+        <div className="flex items-center gap-3">
+          <TypeIcon className="h-6 w-6 sm:h-7 sm:w-7 text-muted-foreground shrink-0" />
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate flex-1">
+            {displayName}
+          </h1>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {customer.company_name && (
+              <Badge variant="outline" className="text-xs hidden sm:inline-flex">{customer.company_name}</Badge>
+            )}
+            <Badge
+              variant={customer.status === "active" ? "default" : customer.status === "service_call" ? "outline" : customer.status === "lead" || customer.status === "pending" ? "outline" : "secondary"}
+              className={customer.status === "service_call" ? "border-blue-400 text-blue-600" : customer.status === "lead" || customer.status === "pending" ? "border-amber-400 text-amber-600" : customer.status === "one_time" ? "border-blue-400 text-blue-600" : ""}
+            >
+              {customer.status === "service_call" ? "Service Call" : customer.status === "one_time" ? "One-time" : (customer.status ?? "active").charAt(0).toUpperCase() + (customer.status ?? "active").slice(1)}
+            </Badge>
+          </div>
+        </div>
 
-        {/* Main content */}
-        <div className="flex-1 min-w-0 space-y-4">
-          {viewTab === "service" && (
-            <CustomerServiceTab customer={customer} properties={properties} />
+        {/* Contact + address row */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          {customer.phone && (
+            <a href={`tel:${customer.phone}`} className="flex items-center gap-1 hover:text-foreground transition-colors">
+              <Phone className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{customer.phone}</span>
+              <span className="sm:hidden">Call</span>
+            </a>
           )}
-
-          {viewTab === "overview" && (
-            <CustomerOverviewTab
-              customer={customer}
-              properties={properties}
-              invoices={invoices}
-              perms={perms}
-              onTabChange={setViewTab}
-              onCustomerUpdate={setCustomer}
-            />
+          {customer.email && (
+            <a href={`mailto:${customer.email}`} className="flex items-center gap-1 hover:text-foreground transition-colors">
+              <Mail className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{customer.email}</span>
+              <span className="sm:hidden">Email</span>
+            </a>
           )}
-
-          {viewTab === "wfs" && (
-            <CustomerWfsTab
-              customer={customer}
-              customerId={id}
-              properties={properties}
-              fullWfs={fullWfs}
-              heroImages={heroImages}
-              techAssignments={techAssignments}
-              wfProfitability={wfProfitability}
-              latestReadings={latestReadings}
-              perms={perms}
-              activeProperty={activeProperty}
-              selectedWfId={selectedWfId}
-              scrollToPropId={scrollToPropId}
-              wfsNeedRateSplit={wfsNeedRateSplit}
-              showRateSplit={showRateSplit}
-              rateSplitData={rateSplitData}
-              rateSplitEdits={rateSplitEdits}
-              rateSplitSaving={rateSplitSaving}
-              onTabChange={setViewTab}
-              onWfSelect={setSelectedBowId}
-              onScrollToPropClear={() => setScrollToPropId(null)}
-              onOpenRateSplit={openRateSplit}
-              onCloseRateSplit={() => setShowRateSplit(false)}
-              onApplyRateSplit={applyRateSplit}
-              onRateSplitEditChange={(wfId, value) => setRateSplitEdits(prev => ({ ...prev, [wfId]: value }))}
-              onLoad={load}
-            />
+          {primaryAddress && (
+            <Link
+              href={`/map?wf=${properties[0].water_features?.[0]?.id || ""}`}
+              className="flex items-center gap-1 hover:text-foreground transition-colors"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{primaryAddress}</span>
+              <span className="sm:hidden">{properties[0]?.city}</span>
+            </Link>
           )}
-
-          {viewTab === "parts" && (
-            <CustomerPartsTab customer={customer} properties={properties} />
+          {perms.canViewRates && (
+            <span className="font-medium text-foreground">${customer.monthly_rate.toFixed(2)}/mo</span>
           )}
+        </div>
 
-          {viewTab === "invoices" && perms.canViewInvoices && (
-            <CustomerInvoicesTab invoices={invoices} />
+        {/* Tech: gate code banner — mobile only */}
+        {isTech && properties[0]?.gate_code && (
+          <div className="sm:hidden bg-amber-50 dark:bg-amber-950/30 border border-amber-200 rounded-lg px-4 py-3 flex items-center justify-between">
+            <div>
+              <span className="text-xs text-amber-600 font-medium">Gate Code</span>
+              <p className="text-lg font-bold">{properties[0].gate_code}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(properties[0].gate_code!); toast.success("Copied"); }}>
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              Copy
+            </Button>
+          </div>
+        )}
+
+        {/* Tech: gate code — desktop */}
+        {isTech && properties[0]?.gate_code && (
+          <div className="hidden sm:flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Gate:</span>
+            <span className="text-lg font-bold tracking-wider">{properties[0].gate_code}</span>
+            {properties[0].dog_on_property && (
+              <Badge variant="outline" className="border-amber-400 text-amber-600 text-xs">Dog</Badge>
+            )}
+          </div>
+        )}
+
+        {/* Quick actions — icon-only on mobile, text labels on desktop */}
+        <div className="flex flex-wrap gap-2">
+          {properties.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleLogVisit}>
+              <ClipboardCheck className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Log Visit</span>
+            </Button>
+          )}
+          {customer.email && (
+            <Button variant="outline" size="sm" onClick={handleNewEmail}>
+              <Mail className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Send Email</span>
+            </Button>
+          )}
+          {perms.canViewInvoices && (
+            <Button variant="outline" size="sm" onClick={handleCreateInvoice}>
+              <FileText className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Create Invoice</span>
+            </Button>
           )}
         </div>
       </div>
+
+      {/* Jump nav + sections */}
+      <div className="flex gap-6">
+        <SectionJumpNav sections={navItems} />
+        <div className="flex-1 min-w-0 space-y-4">
+          {sections.map((section) =>
+            section.id === "alerts" ? (
+              <div key={section.id} id={section.id} className="scroll-mt-20">
+                {section.component}
+              </div>
+            ) : (
+              <CollapsibleSectionWrapper
+                key={section.id}
+                id={section.id}
+                label={section.label}
+                icon={section.icon}
+                defaultOpen={section.defaultOpen}
+              >
+                {section.component}
+              </CollapsibleSectionWrapper>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* Floating Action Button — tech mobile only */}
+      {isTech && properties.length > 0 && (
+        <div className="fixed bottom-6 right-6 sm:hidden z-30">
+          <Button size="lg" className="rounded-full h-14 w-14 shadow-lg" onClick={handleLogVisit}>
+            <Play className="h-6 w-6" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

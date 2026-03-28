@@ -31,6 +31,7 @@ def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
     d = {
         "id": a.id,
         "agent_message_id": a.agent_message_id,
+        "customer_id": a.customer_id,
         "action_type": a.action_type,
         "description": a.description,
         "assigned_to": a.assigned_to,
@@ -210,6 +211,7 @@ class AgentActionService:
         status: str | None = None,
         assigned_to: str | None = None,
         action_type: str | None = None,
+        customer_id: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
         """List actions with optional filters."""
@@ -229,6 +231,8 @@ class AgentActionService:
             query = query.where(AgentAction.assigned_to == assigned_to)
         if action_type:
             query = query.where(AgentAction.action_type == action_type)
+        if customer_id:
+            query = query.where(AgentAction.customer_id == customer_id)
 
         result = await self.db.execute(query)
         rows = result.all()

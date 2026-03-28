@@ -42,6 +42,7 @@ async def list_threads(
     exclude_spam: bool = Query(True),
     exclude_ignored: bool = Query(False),
     assigned_to: Optional[str] = Query(None),
+    customer_id: Optional[str] = Query(None),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -57,6 +58,7 @@ async def list_threads(
         limit=limit,
         offset=offset,
         assigned_to=assigned_to,
+        customer_id=customer_id,
         current_user_id=ctx.user.id,
         user_permission_slugs=perm_slugs,
     )

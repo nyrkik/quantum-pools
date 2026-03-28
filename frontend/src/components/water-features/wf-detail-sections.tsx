@@ -304,15 +304,7 @@ export function WfDetailSections({ wf, perms, canEdit = false, onUpdate }: WfDet
         </div>
       </CollapsibleSection>
 
-      {/* Rate (admin+) */}
-      {perms.canViewRates && (
-        <CollapsibleSection icon={DollarSign} title="Rate & Billing" open={openSection === "rate"} onToggle={() => toggle("rate")}>
-          <div className="px-3 py-2.5 space-y-1.5 border-b">
-            <DetailRow label="Monthly Rate" value={wf.monthly_rate ? `$${wf.monthly_rate.toFixed(2)}` : null} />
-            <DetailRow label="Pool Type" value={wf.pool_type} />
-          </div>
-        </CollapsibleSection>
-      )}
+      {/* Rate & Billing removed — belongs on customer billing context, not WF tile */}
     </div>
   );
 }

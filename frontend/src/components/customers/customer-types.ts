@@ -103,6 +103,18 @@ export interface WaterFeatureSummary {
   pool_type: string | null;
   pool_gallons: number | null;
   pool_sqft: number | null;
+  pool_surface: string | null;
+  pool_length_ft: number | null;
+  pool_width_ft: number | null;
+  pool_depth_shallow: number | null;
+  pool_depth_deep: number | null;
+  pool_shape: string | null;
+  sanitizer_type: string | null;
+  pump_type: string | null;
+  filter_type: string | null;
+  heater_type: string | null;
+  chlorinator_type: string | null;
+  automation_system: string | null;
   estimated_service_minutes: number;
   monthly_rate: number | null;
   dimension_source?: string | null;

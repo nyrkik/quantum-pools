@@ -55,6 +55,13 @@ async def list_properties(
         resp.water_features = [
             {"id": b.id, "name": b.name, "water_type": b.water_type,
              "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
+             "pool_surface": b.pool_surface, "pool_length_ft": b.pool_length_ft,
+             "pool_width_ft": b.pool_width_ft, "pool_depth_shallow": b.pool_depth_shallow,
+             "pool_depth_deep": b.pool_depth_deep, "pool_shape": b.pool_shape,
+             "sanitizer_type": b.sanitizer_type,
+             "pump_type": b.pump_type, "filter_type": b.filter_type,
+             "heater_type": b.heater_type, "chlorinator_type": b.chlorinator_type,
+             "automation_system": b.automation_system,
              "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
             for b in await wf_svc.list_for_property(ctx.organization_id, p.id)
         ]

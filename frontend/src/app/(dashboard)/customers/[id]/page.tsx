@@ -23,8 +23,6 @@ import { AccountTile } from "@/components/customers/tiles/account-tile";
 import { CommunicationsTile } from "@/components/customers/tiles/communications-tile";
 import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
 import { PropertyTile } from "@/components/customers/tiles/property-tile";
-import { EquipmentTile } from "@/components/customers/tiles/equipment-tile";
-import { PoolDetailsTile } from "@/components/customers/tiles/pool-details-tile";
 import { InspectionsTile } from "@/components/customers/tiles/inspections-tile";
 import type { Customer, Property } from "@/components/customers/customer-types";
 
@@ -121,16 +119,6 @@ export default function CustomerDetailPage({
         />
       ),
       order: { tech: 1, manager: 3, admin: 4 },
-    });
-    all.push({
-      id: "equipment",
-      component: <EquipmentTile properties={properties} />,
-      order: { tech: 2, manager: 4, admin: 5 },
-    });
-    all.push({
-      id: "pool-details",
-      component: <PoolDetailsTile properties={properties} />,
-      order: { tech: 3, manager: 6, admin: 7 },
     });
 
     // Permission-gated

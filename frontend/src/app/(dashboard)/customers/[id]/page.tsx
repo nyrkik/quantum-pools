@@ -427,28 +427,28 @@ export default function CustomerDetailPage({
         </div>
       </div>
 
-      {/* Jump nav + sections */}
-      <div className="flex gap-6">
-        <SectionJumpNav sections={navItems} />
-        <div className="flex-1 min-w-0 space-y-4">
-          {sections.map((section) =>
-            section.id === "alerts" ? (
-              <div key={section.id} id={section.id} className="scroll-mt-20">
-                {section.component}
-              </div>
-            ) : (
-              <CollapsibleSectionWrapper
-                key={section.id}
-                id={section.id}
-                label={section.label}
-                icon={section.icon}
-                defaultOpen={section.defaultOpen}
-              >
-                {section.component}
-              </CollapsibleSectionWrapper>
-            )
-          )}
-        </div>
+      {/* Jump nav (horizontal, sticky) */}
+      <SectionJumpNav sections={navItems} />
+
+      {/* Sections */}
+      <div className="space-y-4">
+        {sections.map((section) =>
+          section.id === "alerts" ? (
+            <div key={section.id} id={section.id} className="scroll-mt-20">
+              {section.component}
+            </div>
+          ) : (
+            <CollapsibleSectionWrapper
+              key={section.id}
+              id={section.id}
+              label={section.label}
+              icon={section.icon}
+              defaultOpen={section.defaultOpen}
+            >
+              {section.component}
+            </CollapsibleSectionWrapper>
+          )
+        )}
       </div>
 
       {/* Floating Action Button — tech mobile only */}

@@ -263,29 +263,6 @@ export function CustomerWfsTab({
         );
       })}
 
-      {/* Visit history placeholder */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Visit History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-            Visit history will appear after 3+ service visits
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Chemical trends placeholder */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Chemical Trends</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-            Chemical trends will appear after readings are recorded
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

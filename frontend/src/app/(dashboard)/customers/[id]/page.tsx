@@ -344,33 +344,9 @@ export default function CustomerDetailPage({
               customer={customer}
               properties={properties}
               invoices={invoices}
-              heroImages={heroImages}
               perms={perms}
-              activeProperty={activeProperty}
-              editingDetails={editingDetails}
-              custForm={custForm}
-              custDirty={custDirty}
-              custSaving={custSaving}
-              propForm={propForm}
-              propDirty={propDirty}
-              propRates={propRates}
-              propRatesDirty={propRatesDirty}
-              companies={companies}
-              newCompanyCustom={newCompanyCustom}
-              singleProp={singleProp}
               onTabChange={setViewTab}
-              onWfSelect={setSelectedBowId}
-              onScrollToProp={setScrollToPropId}
-              onEditDetails={() => setEditingDetails(true)}
-              onExitDetails={handleExitDetails}
-              onSaveCustomer={handleSaveCustomer}
-              onCancelCustomer={handleCancelCustomer}
-              onCancelProperty={handleCancelProperty}
-              setCustField={setCustField}
-              setPropField={setPropField}
-              setPropRates={setPropRates}
-              setPropRatesDirty={setPropRatesDirty}
-              setNewCompanyCustom={setNewCompanyCustom}
+              onCustomerUpdate={setCustomer}
             />
           )}
 

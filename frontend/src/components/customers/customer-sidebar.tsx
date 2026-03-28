@@ -11,26 +11,10 @@ import {
   LayoutDashboard,
   Droplets,
   Receipt,
-  History,
   Package,
 } from "lucide-react";
 import type { Permissions } from "@/lib/permissions";
 import type { Customer, Property, Invoice } from "./customer-types";
-
-function SiteDetails({ property, className }: { property: Property; className?: string }) {
-  const items: string[] = [];
-  if (property.gate_code) items.push(`Gate: ${property.gate_code}`);
-  if (property.dog_on_property) items.push("Dog on property");
-  if (property.access_instructions) items.push(property.access_instructions);
-  if (items.length === 0) return null;
-  return (
-    <div className={`flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground ${className || ""}`}>
-      {items.map((item, i) => (
-        <span key={i} className={item === "Dog on property" ? "text-amber-600 font-medium" : ""}>{item}</span>
-      ))}
-    </div>
-  );
-}
 
 const validTabs = ["overview", "service", "details", "wfs", "parts", "invoices"] as const;
 export type ViewTab = typeof validTabs[number];
@@ -116,16 +100,8 @@ export function CustomerSidebar({
                 </Link>
                 <span>{properties[0].address}, {properties[0].city}, {properties[0].state} {properties[0].zip_code}</span>
               </div>
-              {!isTech && <SiteDetails property={properties[0]} className="ml-5" />}
             </div>
           )}
-          {properties.length > 1 && activeProperty && !isTech && (() => {
-            const details: string[] = [];
-            if (activeProperty.gate_code) details.push(`Gate: ${activeProperty.gate_code}`);
-            if (activeProperty.dog_on_property) details.push("Dog on property");
-            if (activeProperty.access_instructions) details.push(activeProperty.access_instructions);
-            return details.length > 0 ? <SiteDetails property={activeProperty} /> : null;
-          })()}
 
           {/* Site access — prominent for techs */}
           {isTech && properties.length >= 1 && (

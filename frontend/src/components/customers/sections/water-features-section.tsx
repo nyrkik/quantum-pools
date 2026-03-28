@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
-import { Loader2 } from "lucide-react";
+import { Loader2, Copy, Check, DogIcon, MapPin } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import type { Permissions } from "@/lib/permissions";
 import type { Customer, Property, WaterFeature, PropertyPhoto } from "../customer-types";
 import { WfTile, type WaterFeature as WfTileWF, type TechAssignment } from "@/components/water-features/wf-tile";
@@ -90,11 +91,23 @@ export function WaterFeaturesSection({ customer, properties, perms, onUpdate }: 
 
         return (
           <div key={prop.id} className="space-y-3">
-            {properties.length > 1 && (
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                {prop.name || prop.address.split(",")[0]}
-              </p>
-            )}
+            {/* Property header with address */}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span>{prop.name || prop.address.split(",")[0]}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {prop.dog_on_property && (
+                  <Badge variant="outline" className="border-amber-400 text-amber-600 gap-1 text-[10px]">
+                    <DogIcon className="h-3 w-3" />
+                    Dog
+                  </Badge>
+                )}
+              </div>
+            </div>
+            {/* Inline access info */}
+            <PropertyAccessInline property={prop} />
             {propWfs.length > 0 ? (
               propWfs.map((wf) => (
                 <WfTile
@@ -129,6 +142,44 @@ export function WaterFeaturesSection({ customer, properties, perms, onUpdate }: 
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* Inline access info — gate code (copyable) + access notes */
+function PropertyAccessInline({ property }: { property: Property }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!property.gate_code) return;
+    navigator.clipboard.writeText(property.gate_code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const hasAccess = property.gate_code || property.access_instructions;
+  if (!hasAccess) return null;
+
+  return (
+    <div className="flex items-center gap-4 flex-wrap text-sm">
+      {property.gate_code && (
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 bg-muted/50 rounded-md px-3 py-1.5 hover:bg-muted transition-colors"
+          title="Tap to copy"
+        >
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Gate</span>
+          <span className="font-bold tracking-wider">{property.gate_code}</span>
+          {copied ? (
+            <Check className="h-3 w-3 text-green-600" />
+          ) : (
+            <Copy className="h-3 w-3 text-muted-foreground" />
+          )}
+        </button>
+      )}
+      {property.access_instructions && (
+        <span className="text-muted-foreground">{property.access_instructions}</span>
+      )}
     </div>
   );
 }

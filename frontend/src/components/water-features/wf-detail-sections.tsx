@@ -67,14 +67,14 @@ interface WfDetailSectionsProps {
 
 // --- Shared components ---
 
-function CollapsibleSection({ icon: Icon, title, children, editing, onEdit, onSave, onCancel, saving, canEdit }: {
+function CollapsibleSection({ icon: Icon, title, children, editing, onEdit, onSave, onCancel, saving, canEdit, open, onToggle }: {
   icon: React.ElementType; title: string; children: React.ReactNode;
   editing?: boolean; onEdit?: () => void; onSave?: () => void; onCancel?: () => void;
   saving?: boolean; canEdit?: boolean;
+  open: boolean; onToggle: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={onToggle}>
       <CollapsibleTrigger asChild>
         <button type="button" className="flex items-center gap-2 w-full px-3 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer min-h-[44px]">
           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -127,6 +127,9 @@ function EditRow({ label, value, onChange, type = "text", placeholder }: {
 // --- Main component ---
 
 export function WfDetailSections({ wf, perms, canEdit = false, onUpdate }: WfDetailSectionsProps) {
+  const [openSection, setOpenSection] = useState<string | null>(null);
+  const toggle = (section: string) => setOpenSection(openSection === section ? null : section);
+
   // Equipment edit state
   const [editingEquip, setEditingEquip] = useState(false);
   const [savingEquip, setSavingEquip] = useState(false);
@@ -184,6 +187,7 @@ export function WfDetailSections({ wf, perms, canEdit = false, onUpdate }: WfDet
       {/* Equipment */}
       <CollapsibleSection
         icon={Wrench} title="Equipment" canEdit={canEdit}
+        open={openSection === "equipment"} onToggle={() => toggle("equipment")}
         editing={editingEquip}
         onEdit={() => setEditingEquip(true)}
         onSave={handleSaveEquip}
@@ -241,6 +245,7 @@ export function WfDetailSections({ wf, perms, canEdit = false, onUpdate }: WfDet
       {perms.canViewDimensions && (
         <CollapsibleSection
           icon={Ruler} title="Dimensions" canEdit={canEdit && perms.canViewDimensions}
+          open={openSection === "dimensions"} onToggle={() => toggle("dimensions")}
           editing={editingDims}
           onEdit={() => setEditingDims(true)}
           onSave={handleSaveDims}
@@ -280,7 +285,7 @@ export function WfDetailSections({ wf, perms, canEdit = false, onUpdate }: WfDet
       )}
 
       {/* Compliance */}
-      <CollapsibleSection icon={Shield} title="Compliance">
+      <CollapsibleSection icon={Shield} title="Compliance" open={openSection === "compliance"} onToggle={() => toggle("compliance")}>
         <div className="px-3 py-2.5 space-y-1.5 border-b">
           <div className="flex justify-between text-xs py-0.5">
             <span className="text-muted-foreground">Drain Covers</span>
@@ -301,7 +306,7 @@ export function WfDetailSections({ wf, perms, canEdit = false, onUpdate }: WfDet
 
       {/* Rate (admin+) */}
       {perms.canViewRates && (
-        <CollapsibleSection icon={DollarSign} title="Rate & Billing">
+        <CollapsibleSection icon={DollarSign} title="Rate & Billing" open={openSection === "rate"} onToggle={() => toggle("rate")}>
           <div className="px-3 py-2.5 space-y-1.5 border-b">
             <DetailRow label="Monthly Rate" value={wf.monthly_rate ? `$${wf.monthly_rate.toFixed(2)}` : null} />
             <DetailRow label="Pool Type" value={wf.pool_type} />

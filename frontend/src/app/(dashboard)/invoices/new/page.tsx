@@ -199,7 +199,13 @@ function NewInvoiceForm() {
     }
   };
 
-  const backUrl = jobId ? "/jobs" : "/invoices";
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      router.back();
+    } else {
+      router.push(jobId ? "/jobs" : "/invoices");
+    }
+  };
 
   if (loadingEdit) {
     return (
@@ -213,7 +219,7 @@ function NewInvoiceForm() {
     <div className="pb-24">
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
-        <Button variant="ghost" size="icon" onClick={() => router.push(backUrl)}>
+        <Button variant="ghost" size="icon" onClick={() => handleBack()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
@@ -314,7 +320,7 @@ function NewInvoiceForm() {
       {/* Sticky footer */}
       <div className="fixed bottom-0 left-0 right-0 border-t bg-background z-40">
         <div className="flex items-center justify-end gap-3 px-4 sm:px-6 py-3 max-w-screen-2xl mx-auto">
-          <Button variant="ghost" onClick={() => router.push(backUrl)}>
+          <Button variant="ghost" onClick={() => handleBack()}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={saving || !customerId}>

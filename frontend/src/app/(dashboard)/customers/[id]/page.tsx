@@ -238,20 +238,20 @@ export default function CustomerDetailPage({
         <div className="flex flex-wrap gap-2">
           {properties.length > 0 && (
             <Button variant="outline" size="sm" onClick={handleLogVisit}>
-              <ClipboardCheck className="h-3.5 w-3.5 sm:mr-1.5" />
-              <span className="hidden sm:inline">Log Visit</span>
+              <Play className="h-3.5 w-3.5 mr-1.5" />
+              Log Visit
             </Button>
           )}
           {customer.email && (
             <Button variant="outline" size="sm" onClick={handleNewEmail}>
-              <Mail className="h-3.5 w-3.5 sm:mr-1.5" />
-              <span className="hidden sm:inline">Send Email</span>
+              <Mail className="h-3.5 w-3.5 mr-1.5" />
+              Email
             </Button>
           )}
           {perms.canViewInvoices && (
             <Button variant="outline" size="sm" onClick={handleCreateInvoice}>
-              <FileText className="h-3.5 w-3.5 sm:mr-1.5" />
-              <span className="hidden sm:inline">Create Invoice</span>
+              <FileText className="h-3.5 w-3.5 mr-1.5" />
+              Invoice
             </Button>
           )}
         </div>

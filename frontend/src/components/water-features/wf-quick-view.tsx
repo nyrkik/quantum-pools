@@ -280,7 +280,7 @@ export function WfQuickView({
       </div>
 
       {/* Expandable detail sections */}
-      <WfDetailSections wf={wf} perms={perms} />
+      <WfDetailSections wf={wf} perms={perms} canEdit={!!onEdit} onUpdate={onEdit} />
     </div>
   );
 }

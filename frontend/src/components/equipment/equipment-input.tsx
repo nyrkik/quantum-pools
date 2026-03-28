@@ -128,12 +128,12 @@ export function EquipmentInput({
         )}
       </div>
       {open && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-md shadow-md overflow-hidden">
+        <div className="absolute z-50 left-0 right-0 sm:right-auto sm:min-w-[320px] mt-1 bg-popover border border-border rounded-md shadow-lg max-h-64 overflow-y-auto">
           {suggestions.map((model, i) => (
             <button
               key={`${model.normalized_name}-${i}`}
               type="button"
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer ${
+              className={`w-full text-left px-3 py-3 hover:bg-accent hover:text-accent-foreground cursor-pointer border-b last:border-0 ${
                 i === selectedIndex ? "bg-accent text-accent-foreground" : ""
               }`}
               onMouseDown={(e) => {
@@ -141,20 +141,18 @@ export function EquipmentInput({
                 handleSelect(model);
               }}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-medium">
-                  {model.normalized_name}
-                </span>
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  {model.count} in system
-                </span>
+              <p className="text-sm font-medium leading-tight">
+                {model.normalized_name}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {model.brand && (
+                  <span className="text-xs text-muted-foreground">{model.brand}</span>
+                )}
+                {model.part_number && (
+                  <span className="text-xs text-muted-foreground font-mono">#{model.part_number}</span>
+                )}
+                <span className="text-[10px] text-muted-foreground ml-auto">{model.count} in system</span>
               </div>
-              {model.brand && (
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {model.brand}
-                  {model.part_number ? ` #${model.part_number}` : ""}
-                </div>
-              )}
             </button>
           ))}
         </div>

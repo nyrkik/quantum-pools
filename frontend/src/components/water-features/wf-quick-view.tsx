@@ -249,34 +249,7 @@ export function WfQuickView({
           </div>
         )}
 
-        {/* Line 5: Last reading summary */}
-        <div className="flex items-center justify-between gap-2 pt-1 border-t border-dashed">
-          {lastReading && lastReading.created_at ? (
-            <>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-muted-foreground">Last:</span>
-                {lastReading.ph != null && (
-                  <span>pH <span className="font-medium">{lastReading.ph.toFixed(1)}</span></span>
-                )}
-                {lastReading.free_chlorine != null && (
-                  <span>
-                    {lastReading.ph != null && <span className="text-muted-foreground"> | </span>}
-                    FC <span className="font-medium">{lastReading.free_chlorine.toFixed(1)}</span>
-                  </span>
-                )}
-                {lastReading.cyanuric_acid != null && (
-                  <span>
-                    {(lastReading.ph != null || lastReading.free_chlorine != null) && <span className="text-muted-foreground"> | </span>}
-                    CYA <span className="font-medium">{lastReading.cyanuric_acid.toFixed(0)}</span>
-                  </span>
-                )}
-              </div>
-              <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(lastReading.created_at)}</span>
-            </>
-          ) : (
-            <span className="text-xs text-muted-foreground/50 italic">No readings yet</span>
-          )}
-        </div>
+        {/* Readings live on the visit/service page, not here */}
       </div>
 
       {/* Expandable detail sections */}

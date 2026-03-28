@@ -160,11 +160,26 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
               const numVal = values[field.key] ? parseFloat(values[field.key]) : undefined;
               const dot = getRangeColor(numVal, field);
 
+              // Trend: compare last reading to ideal range midpoint
+              const lastNum = lastVal != null ? Number(lastVal) : null;
+              const trendArrow = (() => {
+                if (numVal == null || lastNum == null) return null;
+                const diff = numVal - lastNum;
+                if (Math.abs(diff) < field.step * 0.5) return "→";
+                const mid = (field.ranges.ideal[0] + field.ranges.ideal[1]) / 2;
+                // Is the change moving toward ideal or away?
+                const wasCloser = Math.abs(lastNum - mid) > Math.abs(numVal - mid);
+                if (wasCloser) return "↗";  // improving
+                return "↘";  // worsening
+              })();
+              const trendColor = trendArrow === "↗" ? "text-green-600" : trendArrow === "↘" ? "text-red-500" : "text-muted-foreground";
+
               return (
                 <div key={field.key} className="space-y-1">
                   <div className="flex items-center gap-1.5">
                     {dot && <span className={`h-2 w-2 rounded-full ${dot}`} />}
                     <Label className="text-xs text-muted-foreground">{field.label}</Label>
+                    {trendArrow && <span className={`text-xs font-bold ${trendColor}`}>{trendArrow}</span>}
                   </div>
                   <Input
                     type="number"

@@ -249,9 +249,9 @@ export default function CustomerDetailPage({
             </Button>
           )}
           {perms.canViewInvoices && (
-            <Button variant="outline" size="sm" onClick={handleCreateInvoice}>
+            <Button variant="outline" size="sm" onClick={() => router.push(`/invoices?customer_id=${id}`)}>
               <FileText className="h-3.5 w-3.5 mr-1.5" />
-              Invoice
+              Invoices
             </Button>
           )}
         </div>

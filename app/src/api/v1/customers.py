@@ -172,7 +172,7 @@ async def get_customer_alerts(
 
     # Overdue invoices
     overdue_result = await db.execute(
-        select(func.count(Invoice.id), func.coalesce(func.sum(Invoice.total_amount), 0))
+        select(func.count(Invoice.id), func.coalesce(func.sum(Invoice.balance), 0))
         .where(
             Invoice.organization_id == org_id,
             Invoice.customer_id == customer_id,

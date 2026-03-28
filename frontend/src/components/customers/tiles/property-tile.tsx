@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { MapPin, Copy, ChevronDown, Search } from "lucide-react";
+import { MapPin, Copy, ChevronDown, Search, ShieldCheck } from "lucide-react";
+import { api } from "@/lib/api";
 import type { Property, WaterFeatureSummary } from "../customer-types";
 
 interface PropertyTileProps {
@@ -24,8 +25,22 @@ export function PropertyTile({ properties, preferredDay }: PropertyTileProps) {
   );
 }
 
+interface InspectionInfo {
+  id: string;
+  inspection_date: string | null;
+  total_violations: number;
+  closure_required: boolean;
+}
+
 function PropertyCard({ property, preferredDay }: { property: Property; preferredDay: string | null }) {
   const [expandedWfId, setExpandedWfId] = useState<string | null>(null);
+  const [inspections, setInspections] = useState<InspectionInfo[]>([]);
+
+  useEffect(() => {
+    api.get<InspectionInfo[]>(`/v1/emd/property/${property.id}/inspections`)
+      .then(data => setInspections((data || []).slice(0, 3)))
+      .catch(() => {});
+  }, [property.id]);
 
   const copyGate = () => {
     if (!property.gate_code) return;
@@ -86,6 +101,33 @@ function PropertyCard({ property, preferredDay }: { property: Property; preferre
                 onToggle={() => setExpandedWfId(expandedWfId === wf.id ? null : wf.id)}
               />
             ))}
+          </div>
+        )}
+
+        {/* Inspections */}
+        {inspections.length > 0 && (
+          <div className="space-y-1 pt-1 border-t">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium flex items-center gap-1.5">
+              <ShieldCheck className="h-3 w-3" /> Inspections
+            </p>
+            {inspections.map(insp => {
+              const passed = insp.total_violations === 0 && !insp.closure_required;
+              const dateStr = insp.inspection_date
+                ? new Date(insp.inspection_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                : "No date";
+              return (
+                <div key={insp.id} className="flex items-center justify-between text-xs py-0.5">
+                  <span className="text-muted-foreground">{dateStr}</span>
+                  {passed ? (
+                    <Badge variant="default" className="bg-green-600 text-[10px] px-1.5">Pass</Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px] px-1.5">
+                      {insp.total_violations} violations
+                    </Badge>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </CardContent>

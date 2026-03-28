@@ -23,7 +23,6 @@ import { AccountTile } from "@/components/customers/tiles/account-tile";
 import { CommunicationsTile } from "@/components/customers/tiles/communications-tile";
 import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
 import { PropertyTile } from "@/components/customers/tiles/property-tile";
-import { InspectionsTile } from "@/components/customers/tiles/inspections-tile";
 import type { Customer, Property } from "@/components/customers/customer-types";
 
 type RoleKey = "tech" | "manager" | "admin";
@@ -134,15 +133,6 @@ export default function CustomerDetailPage({
         id: "invoices",
         component: <InvoicesTile customerId={id} />,
         order: { tech: 99, manager: 99, admin: 3 },
-      });
-    }
-    if (perms.canViewEmd) {
-      all.push({
-        id: "inspections",
-        component: (
-          <InspectionsTile properties={properties} customerId={id} />
-        ),
-        order: { tech: 99, manager: 5, admin: 6 },
       });
     }
 

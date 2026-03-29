@@ -190,38 +190,36 @@ def strip_quoted_reply(text: str) -> str:
 
 
 def strip_email_signature(text: str) -> str:
-    """Remove email signature block and everything after it."""
+    """Remove everything after the signature/sign-off. Keep only the message body."""
     if not text:
         return text
 
-    # Common signature separators
-    # "-- " (standard sig separator), "---", "___"
-    match = re.search(r'\n-- ?\n', text)
-    if match:
-        return text[:match.start()].strip()
+    # Find the earliest cut point from any of these patterns
+    cut_at = len(text)
 
-    # Look for sign-off lines followed by name/title/contact block
-    # Match: "Best," / "Thanks," / "Regards," / "Thank you," etc. at start of line
-    # followed by a name line (short, no punctuation)
-    signoffs = r'(?:Best|Thanks|Thank you|Regards|Kind regards|Sincerely|Cheers|Warm regards|All the best|Respectfully|Take care),?\s*\n'
+    # Standard sig separator "-- "
+    match = re.search(r'\n-- ?\n', text)
+    if match and match.start() < cut_at:
+        cut_at = match.start()
+
+    # Sign-off line — keep the sign-off, cut after
+    signoffs = r'(?:Best|Thanks|Thank you|Regards|Kind regards|Sincerely|Cheers|Warm regards|All the best|Respectfully|Take care|Sent from my),?[^\n]*\n'
     match = re.search(signoffs, text, re.IGNORECASE)
+    if match and match.start() < cut_at:
+        cut_at = match.end()  # keep the sign-off line
+
+    # Noise blocks — disclaimers, confidentiality, legal footers
+    noise = r'(?:CONFIDENTIAL|DISCLAIMER|NOTICE\s*:|PRIVILEGED|This (?:e-?mail|message|communication) (?:is |contains |and ))'
+    match = re.search(noise, text, re.IGNORECASE)
     if match:
-        # Keep the sign-off line itself but strip everything after the name
-        after = text[match.end():]
-        lines_after = after.split('\n')
-        # Keep up to 2 lines after sign-off (name + maybe title), strip rest
-        kept = []
-        for line in lines_after[:3]:
-            stripped = line.strip()
-            if not stripped:
-                break
-            # Stop at phone numbers, emails, URLs, long lines (company info)
-            if re.search(r'[0-9]{3}[.\-\s]?[0-9]{3}|@|http|www\.|\.com', stripped):
-                break
-            if len(stripped) > 60:
-                break
-            kept.append(stripped)
-        return text[:match.end()].strip() + ('\n' + '\n'.join(kept) if kept else '')
+        # Cut at the start of the line containing the noise
+        line_start = text.rfind('\n', 0, match.start())
+        pos = line_start if line_start >= 0 else match.start()
+        if pos < cut_at:
+            cut_at = pos
+
+    if cut_at < len(text):
+        return text[:cut_at].strip()
 
     return text
 

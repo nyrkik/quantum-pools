@@ -90,21 +90,7 @@ function PropertyCard({ property, preferredDay }: { property: Property; preferre
           <p className="text-xs text-muted-foreground">{property.access_instructions}</p>
         )}
 
-        {/* Pools / Water features */}
-        {wfs.length > 0 && (
-          <div className="space-y-0.5 pt-1 border-t">
-            {wfs.map((wf) => (
-              <WfRow
-                key={wf.id}
-                wf={wf}
-                expanded={expandedWfId === wf.id}
-                onToggle={() => setExpandedWfId(expandedWfId === wf.id ? null : wf.id)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Inspections */}
+        {/* Inspections (property-level, above pools) */}
         {inspections.length > 0 && (
           <div className="space-y-1 pt-1 border-t">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium flex items-center gap-1.5">
@@ -130,6 +116,26 @@ function PropertyCard({ property, preferredDay }: { property: Property; preferre
             })}
           </div>
         )}
+
+        {/* Pools / Water features — nested children */}
+        {wfs.length > 0 && (
+          <div className="pt-2 border-t space-y-1">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
+              {wfs.length === 1 ? "Pool" : `Pools (${wfs.length})`}
+            </p>
+            <div className="border-l-2 border-muted ml-1 pl-3 space-y-0.5">
+              {wfs.map((wf) => (
+                <WfRow
+                  key={wf.id}
+                  wf={wf}
+                  expanded={expandedWfId === wf.id}
+                  onToggle={() => setExpandedWfId(expandedWfId === wf.id ? null : wf.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
       </CardContent>
     </Card>
   );

@@ -4,13 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { resizeImage } from "@/lib/image-utils";
 import { toast } from "sonner";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -183,21 +177,23 @@ export function AddChargeSheet({
   };
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
-      <SheetTrigger asChild>
+    <>
+      <span onClick={() => setOpen(true)}>
         {trigger || (
           <Button size="sm" variant="outline">
             <Receipt className="h-3.5 w-3.5 mr-1.5" />
             Add Charge
           </Button>
         )}
-      </SheetTrigger>
-      <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto sm:max-w-lg sm:mx-auto sm:rounded-t-xl">
-        <SheetHeader className="pb-4">
-          <SheetTitle className="text-base">
-            {step === "pick" ? "Select Charge Type" : "Add Charge"}
-          </SheetTitle>
-        </SheetHeader>
+      </span>
+      <Overlay open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+        <OverlayContent>
+          <OverlayHeader>
+            <OverlayTitle>
+              {step === "pick" ? "Select Charge Type" : "Add Charge"}
+            </OverlayTitle>
+          </OverlayHeader>
+          <OverlayBody>
 
         {loading ? (
           <div className="flex justify-center py-8">
@@ -360,7 +356,9 @@ export function AddChargeSheet({
             </Button>
           </div>
         )}
-      </SheetContent>
+          </OverlayBody>
+        </OverlayContent>
+      </Overlay>
 
       <PartsSearchDialog
         open={partsDialogOpen}
@@ -370,6 +368,6 @@ export function AddChargeSheet({
           setPartsDialogOpen(false);
         }}
       />
-    </Sheet>
+    </>
   );
 }

@@ -10,12 +10,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
 import {
   Select,
   SelectContent,
@@ -497,18 +492,18 @@ export default function JobsPage() {
         </CardContent>
       </Card>
 
-      {/* Action detail sheet */}
-      <Sheet
+      {/* Action detail overlay */}
+      <Overlay
         open={!!selectedActionId}
         onOpenChange={(open) => {
           if (!open) setSelectedActionId(null);
         }}
       >
-        <SheetContent className="w-full sm:max-w-md flex flex-col h-full">
-          <SheetHeader className="px-4 sm:px-6 flex-shrink-0">
-            <SheetTitle className="text-lg">Job Detail</SheetTitle>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6">
+        <OverlayContent>
+          <OverlayHeader>
+            <OverlayTitle>Job Detail</OverlayTitle>
+          </OverlayHeader>
+          <OverlayBody>
             {selectedActionId && (
               <ActionDetailContent
                 actionId={selectedActionId}
@@ -516,9 +511,9 @@ export default function JobsPage() {
                 onUpdate={load}
               />
             )}
-          </div>
-        </SheetContent>
-      </Sheet>
+          </OverlayBody>
+        </OverlayContent>
+      </Overlay>
     </div>
   );
 }

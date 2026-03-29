@@ -33,6 +33,10 @@ class EquipmentItem(Base):
     install_date: Mapped[date | None] = mapped_column(Date)
     warranty_expires: Mapped[date | None] = mapped_column(Date)
     expected_lifespan_years: Mapped[int | None] = mapped_column(Integer)
+    system_group: Mapped[str | None] = mapped_column(String(50))
+    catalog_equipment_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("equipment_catalog.id", ondelete="SET NULL")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     replaced_by_id: Mapped[str | None] = mapped_column(
@@ -50,4 +54,5 @@ class EquipmentItem(Base):
     water_feature = relationship("WaterFeature", lazy="noload")
     catalog_part = relationship("PartsCatalog", lazy="noload")
     replaced_by = relationship("EquipmentItem", remote_side="EquipmentItem.id", lazy="noload")
+    catalog_equipment = relationship("EquipmentCatalog", back_populates="equipment_items", lazy="noload")
     events = relationship("EquipmentEvent", back_populates="equipment_item", lazy="noload")

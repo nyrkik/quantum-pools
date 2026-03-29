@@ -108,3 +108,4 @@ class WaterFeature(Base):
     satellite_analysis = relationship("SatelliteAnalysis", back_populates="water_feature", uselist=False, lazy="noload")
     dimension_estimates = relationship("DimensionEstimate", back_populates="water_feature", lazy="noload")
     chemical_cost_profile = relationship("ChemicalCostProfile", back_populates="water_feature", uselist=False, lazy="noload")
+    equipment_items = relationship("EquipmentItem", back_populates="water_feature", lazy="noload")

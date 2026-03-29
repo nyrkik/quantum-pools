@@ -285,7 +285,7 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
         <div className="flex items-center gap-3">
           {waterTypeIcon(wf.water_type, "h-4 w-4 text-primary/60")}
           <span className="text-xs font-semibold uppercase tracking-widest text-foreground/70 capitalize">
-            {form.name || form.water_type.replace("_", " ")}
+            {form.name || form.water_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
           </span>
           <div className="ml-auto flex items-center gap-1.5">
             {dirty && (
@@ -614,7 +614,7 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Delete {form.name || form.water_type.replace("_", " ")}?</AlertDialogTitle>
+                  <AlertDialogTitle>Delete {form.name || form.water_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}?</AlertDialogTitle>
                   <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

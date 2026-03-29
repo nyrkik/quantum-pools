@@ -63,6 +63,7 @@ from src.models.user_permission_override import UserPermissionOverride
 from src.models.vendor import Vendor
 from src.models.parts_catalog import PartsCatalog
 from src.models.part_purchase import PartPurchase
+from src.models.equipment_catalog import EquipmentCatalog
 from src.models.equipment_item import EquipmentItem
 from src.models.equipment_event import EquipmentEvent
 
@@ -115,6 +116,7 @@ __all__ = [
     "Vendor",
     "PartsCatalog",
     "PartPurchase",
+    "EquipmentCatalog",
     "EquipmentItem",
     "EquipmentEvent",
     "InboxRoutingRule",

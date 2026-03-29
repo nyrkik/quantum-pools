@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from sqlalchemy import select, or_, func, distinct
+from sqlalchemy import select, or_, func, distinct, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.parts_catalog import PartsCatalog
@@ -39,6 +39,7 @@ class PartsSearchService:
                     PartsCatalog.brand.ilike(pattern),
                     PartsCatalog.description.ilike(pattern),
                     PartsCatalog.subcategory.ilike(pattern),
+                    func.lower(cast(PartsCatalog.compatible_with, String)).contains(query.strip().lower()),
                 )
             )
 

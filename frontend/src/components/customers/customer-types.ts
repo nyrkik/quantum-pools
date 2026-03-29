@@ -120,6 +120,47 @@ export interface WaterFeatureSummary {
   dimension_source?: string | null;
 }
 
+export interface EquipmentItem {
+  id: string;
+  water_feature_id: string;
+  equipment_type: string;
+  brand: string | null;
+  model: string | null;
+  part_number: string | null;
+  system_group: string | null;
+  serial_number: string | null;
+  normalized_name: string | null;
+  horsepower: number | null;
+  notes: string | null;
+  is_active: boolean;
+  catalog_equipment_id: string | null;
+  catalog_canonical_name: string | null;
+}
+
+export interface CatalogEntry {
+  id: string;
+  canonical_name: string;
+  equipment_type: string;
+  manufacturer: string | null;
+  model_number: string | null;
+  category: string | null;
+  specs: Record<string, unknown> | null;
+  aliases: string[];
+  is_common: boolean;
+  source: string;
+  parts?: CatalogPart[];
+}
+
+export interface CatalogPart {
+  id: string;
+  name: string;
+  brand: string | null;
+  sku: string | null;
+  category: string | null;
+  description: string | null;
+  product_url: string | null;
+}
+
 export interface Invoice {
   id: string;
   invoice_number: string;

@@ -13,24 +13,42 @@ import {
   Building2,
   Home,
   MapPin,
-  Mail,
+  Phone,
   Play,
+  Pencil,
 } from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
-import { useCompose } from "@/components/email/compose-provider";
 import { AlertsSection } from "@/components/customers/sections/alerts-section";
-import { AccountTile } from "@/components/customers/tiles/account-tile";
+import { AccessTile } from "@/components/customers/tiles/access-tile";
+import { WaterFeaturesTile } from "@/components/customers/tiles/water-features-tile";
+import { InspectionsTile } from "@/components/customers/tiles/inspections-tile";
 import { CommunicationsTile } from "@/components/customers/tiles/communications-tile";
 import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
-import { PropertyTile } from "@/components/customers/tiles/property-tile";
+import { VisitsTile } from "@/components/customers/tiles/visits-tile";
 import type { Customer, Property } from "@/components/customers/customer-types";
 
 type RoleKey = "tech" | "manager" | "admin";
+
+const STATUS_BADGE_MAP: Record<string, { variant: "default" | "secondary" | "outline"; className?: string }> = {
+  active: { variant: "default" },
+  inactive: { variant: "secondary" },
+  lead: { variant: "outline", className: "border-amber-400 text-amber-600" },
+  pending: { variant: "outline", className: "border-amber-400 text-amber-600" },
+  service_call: { variant: "outline", className: "border-blue-400 text-blue-600" },
+  one_time: { variant: "outline", className: "border-blue-400 text-blue-600" },
+};
+
+function statusLabel(s: string) {
+  if (s === "service_call") return "Service Call";
+  if (s === "one_time") return "One-time";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 interface TileDef {
   id: string;
   component: ReactNode;
   order: Record<RoleKey, number>;
+  column: "left" | "right";
 }
 
 export default function CustomerDetailPage({
@@ -41,7 +59,6 @@ export default function CustomerDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const perms = usePermissions();
-  const { openCompose } = useCompose();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +89,7 @@ export default function CustomerDetailPage({
     ? (customer as { display_name?: string }).display_name || customer.first_name
     : "";
   const TypeIcon = customer?.customer_type === "commercial" ? Building2 : Home;
+  const statusBadge = STATUS_BADGE_MAP[customer?.status ?? ""] ?? { variant: "secondary" as const };
   const primaryAddress = properties[0]
     ? `${properties[0].address}, ${properties[0].city}`
     : null;
@@ -79,15 +97,6 @@ export default function CustomerDetailPage({
   const handleLogVisit = () => {
     const propId = properties[0]?.id;
     if (propId) router.push(`/visits/new?property=${propId}`);
-  };
-
-  const handleNewEmail = () => {
-    if (!customer) return;
-    openCompose({
-      to: customer.email || undefined,
-      customerId: customer.id,
-      customerName: displayName,
-    });
   };
 
   const roleKey: RoleKey = isTech ? "tech" : isAdmin ? "admin" : "manager";
@@ -99,40 +108,45 @@ export default function CustomerDetailPage({
 
     // Always visible
     all.push({
-      id: "account",
-      component: (
-        <AccountTile
-          customer={customer}
-          perms={perms}
-          onUpdate={(c) => setCustomer(c)}
-        />
-      ),
-      order: { tech: 4, manager: 1, admin: 1 },
+      id: "access",
+      component: <AccessTile properties={properties} preferredDay={customer.preferred_day} />,
+      order: { tech: 1, manager: 1, admin: 1 },
+      column: "left",
     });
     all.push({
-      id: "property",
-      component: (
-        <PropertyTile
-          properties={properties}
-          preferredDay={customer.preferred_day}
-        />
-      ),
-      order: { tech: 1, manager: 3, admin: 4 },
+      id: "visits",
+      component: <VisitsTile properties={properties} />,
+      order: { tech: 2, manager: 2, admin: 2 },
+      column: "left",
+    });
+    all.push({
+      id: "water-features",
+      component: <WaterFeaturesTile properties={properties} />,
+      order: { tech: 3, manager: 3, admin: 3 },
+      column: "left",
+    });
+    all.push({
+      id: "inspections",
+      component: <InspectionsTile properties={properties} />,
+      order: { tech: 5, manager: 5, admin: 5 },
+      column: "left",
     });
 
     // Permission-gated
     if (perms.canViewInbox) {
       all.push({
         id: "communications",
-        component: <CommunicationsTile customerId={id} />,
-        order: { tech: 5, manager: 2, admin: 2 },
+        component: <CommunicationsTile customerId={id} customerEmail={customer.email} customerName={displayName} />,
+        order: { tech: 4, manager: 4, admin: 4 },
+        column: "right",
       });
     }
     if (perms.canViewInvoices) {
       all.push({
         id: "invoices",
         component: <InvoicesTile customerId={id} />,
-        order: { tech: 99, manager: 99, admin: 3 },
+        order: { tech: 99, manager: 99, admin: 6 },
+        column: "right",
       });
     }
 
@@ -151,24 +165,46 @@ export default function CustomerDetailPage({
 
   return (
     <div className="pb-20 sm:pb-0">
-      {/* Top bar */}
-      <div className="mb-4 space-y-1">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+      {/* Header */}
+      <div className="mb-4">
+        <div className="flex items-start gap-2">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 mt-0.5" onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 space-y-0.5">
             <div className="flex items-center gap-2">
               <TypeIcon className="h-5 w-5 text-muted-foreground shrink-0" />
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
                 {displayName}
               </h1>
+              <Badge variant={statusBadge.variant} className={`${statusBadge.className || ""} text-[10px] shrink-0`}>
+                {statusLabel(customer.status)}
+              </Badge>
             </div>
             {primaryAddress && (
-              <p className="text-sm text-muted-foreground ml-7 truncate">{primaryAddress}</p>
+              <a
+                href={`https://maps.google.com/?q=${encodeURIComponent(primaryAddress)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary transition-colors truncate"
+              >
+                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                {primaryAddress}
+              </a>
             )}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
+              {customer.phone && (
+                <a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <Phone className="h-3.5 w-3.5" />
+                  {customer.phone}
+                </a>
+              )}
+              {customer.company_name && (
+                <span className="text-sm text-muted-foreground">{customer.company_name}</span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 mt-1">
             {perms.canViewBalance && customer.balance !== 0 && (
               <Link
                 href={`/invoices?customer_id=${id}`}
@@ -178,9 +214,9 @@ export default function CustomerDetailPage({
                 {customer.balance > 0 ? " due" : " cr"}
               </Link>
             )}
-            {customer.email && perms.canViewInbox && (
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNewEmail}>
-                <Mail className="h-4 w-4" />
+            {perms.canEditCustomers && (
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.push(`/customers/${id}/edit`)}>
+                <Pencil className="h-3.5 w-3.5" />
               </Button>
             )}
             {isTech && properties.length > 0 && (
@@ -196,11 +232,27 @@ export default function CustomerDetailPage({
       {/* Alerts */}
       <AlertsSection customerId={id} />
 
-      {/* Tile grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+      {/* Mobile/tablet: single column sorted by order */}
+      <div className="mt-4 space-y-4 lg:hidden">
         {tiles.map((t) => (
           <div key={t.id}>{t.component}</div>
         ))}
+      </div>
+
+      {/* Desktop: two columns — left 60%, right 40% */}
+      <div className="mt-4 hidden lg:grid gap-4" style={{ gridTemplateColumns: "2fr 3fr" }}>
+        <div className="space-y-4 min-w-0">
+          {tiles.filter((t) => t.column === "left").map((t) => (
+            <div key={t.id}>{t.component}</div>
+          ))}
+        </div>
+        {tiles.some((t) => t.column === "right") && (
+          <div className="space-y-4 min-w-0">
+            {tiles.filter((t) => t.column === "right").map((t) => (
+              <div key={t.id}>{t.component}</div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Floating Action Button -- tech mobile only */}

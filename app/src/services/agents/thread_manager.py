@@ -121,7 +121,9 @@ async def update_thread_status(thread_id: str):
         last = msgs[-1]
         thread.last_message_at = last.received_at
         thread.last_direction = last.direction
-        thread.last_snippet = (last.body or "")[:200]
+        from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
+        clean = strip_email_signature(strip_quoted_reply(last.body or ""))
+        thread.last_snippet = clean[:200]
 
         # Highest urgency
         prio = {"high": 3, "medium": 2, "low": 1}

@@ -2,8 +2,8 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, JSON, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, Boolean, DateTime, Text, JSON, UniqueConstraint, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
@@ -25,7 +25,12 @@ class PartsCatalog(Base):
     product_url: Mapped[str | None] = mapped_column(String(500))
     specs: Mapped[dict | None] = mapped_column(JSON)
     compatible_with: Mapped[dict | None] = mapped_column(JSON)
+    for_equipment_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("equipment_catalog.id", ondelete="SET NULL")
+    )
     is_chemical: Mapped[bool] = mapped_column(Boolean, default=False)
     last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    for_equipment = relationship("EquipmentCatalog", back_populates="parts", lazy="noload")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

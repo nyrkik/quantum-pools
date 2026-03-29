@@ -20,12 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -413,23 +408,23 @@ export default function InboxPage() {
         </div>
       )}
 
-      {/* Thread detail sheet */}
-      <Sheet open={!!selectedThreadId} onOpenChange={(open) => { if (!open) { setSelectedThreadId(null); loadThreads(); } }}>
-        <SheetContent className="w-full sm:max-w-lg flex flex-col h-full px-4 sm:px-6">
-          <SheetHeader className="flex-shrink-0">
-            <SheetTitle className="text-base">Conversation</SheetTitle>
-          </SheetHeader>
+      {/* Thread detail overlay */}
+      <Overlay open={!!selectedThreadId} onOpenChange={(open) => { if (!open) { setSelectedThreadId(null); loadThreads(); } }}>
+        <OverlayContent className="max-w-xl">
+          <OverlayHeader>
+            <OverlayTitle>Conversation</OverlayTitle>
+          </OverlayHeader>
           {selectedThreadId && (
-            <div className="flex-1 overflow-hidden">
+            <OverlayBody className="p-0">
               <ThreadDetailSheet
                 threadId={selectedThreadId}
                 onClose={() => setSelectedThreadId(null)}
                 onAction={() => { loadThreads(); loadStats(); }}
               />
-            </div>
+            </OverlayBody>
           )}
-        </SheetContent>
-      </Sheet>
+        </OverlayContent>
+      </Overlay>
 
       <InboxSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>

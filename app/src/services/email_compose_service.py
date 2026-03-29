@@ -187,7 +187,8 @@ class EmailComposeService:
         thread.message_count = (thread.message_count or 0) + 1
         thread.last_message_at = now
         thread.last_direction = "outbound"
-        thread.last_snippet = body[:200]
+        from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
+        thread.last_snippet = strip_email_signature(strip_quoted_reply(body))[:200]
         thread.status = "handled"
         thread.has_pending = False
         if not thread.category:

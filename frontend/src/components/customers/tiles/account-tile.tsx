@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { UserCog, Phone, Pencil, Check, X, Loader2 } from "lucide-react";
+import { Phone, Mail, Pencil, X, Loader2 } from "lucide-react";
 import type { Permissions } from "@/lib/permissions";
 import type { Customer } from "../customer-types";
 
@@ -96,10 +96,7 @@ export function AccountTile({ customer, perms, onUpdate }: AccountTileProps) {
       <Card className={`shadow-sm ${dirty ? "border-l-4 border-l-amber-400" : "border-l-4 border-l-primary"}`}>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center justify-between text-sm font-semibold">
-            <span className="flex items-center gap-2">
-              <UserCog className="h-4 w-4 text-muted-foreground" />
-              Account
-            </span>
+            <span className="truncate">{displayName}</span>
             <div className="flex gap-1.5">
               {dirty && (
                 <>
@@ -173,45 +170,41 @@ export function AccountTile({ customer, perms, onUpdate }: AccountTileProps) {
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-sm font-semibold">
-          <span className="flex items-center gap-2">
-            <UserCog className="h-4 w-4 text-muted-foreground" />
-            Account
-          </span>
-          <div className="flex items-center gap-1.5">
-            <Badge variant={badge.variant} className={badge.className}>
+      <CardContent className="py-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <Badge variant={badge.variant} className={`${badge.className} text-[10px]`}>
               {statusLabel(customer.status)}
             </Badge>
-            {perms.canEditCustomers && (
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setForm({ ...customer }); setEditing(true); }}>
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
+            <span className="text-xs text-muted-foreground capitalize">{customer.customer_type}</span>
+            {customer.company_name && (
+              <span className="text-xs text-muted-foreground truncate">· {customer.company_name}</span>
             )}
           </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <div className="text-sm space-y-1">
-          <p className="font-medium">{displayName}</p>
-          {customer.company_name && (
-            <p className="text-muted-foreground">{customer.company_name}</p>
+          {perms.canEditCustomers && (
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setForm({ ...customer }); setEditing(true); }}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
           )}
-          <p className="text-xs text-muted-foreground capitalize">{customer.customer_type}</p>
         </div>
-        {customer.phone && (
-          <a
-            href={`tel:${customer.phone}`}
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Phone className="h-3.5 w-3.5" />
-            {customer.phone}
-          </a>
-        )}
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          {customer.phone && (
+            <a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <Phone className="h-3.5 w-3.5" />
+              {customer.phone}
+            </a>
+          )}
+          {customer.email && (
+            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Mail className="h-3.5 w-3.5" />
+              {customer.email}
+            </span>
+          )}
+        </div>
+
         {customer.notes && (
-          <p className="text-sm text-muted-foreground line-clamp-2 border-t pt-2">
-            {customer.notes}
-          </p>
+          <p className="text-xs text-muted-foreground line-clamp-2">{customer.notes}</p>
         )}
       </CardContent>
     </Card>

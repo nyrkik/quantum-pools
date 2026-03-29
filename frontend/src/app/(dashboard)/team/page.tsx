@@ -42,12 +42,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
 import { Plus, Trash2, Code2, Mail, CheckCircle2, Clock, Loader2, Users, Pencil, Check } from "lucide-react";
 import { formatPhone, unformatPhone, formatRelativeDate } from "@/lib/format";
 
@@ -700,22 +695,24 @@ export default function TeamPage() {
         </Table>
       </div>
 
-      {/* Member detail sheet */}
-      <Sheet open={!!selectedMember} onOpenChange={(open) => { if (!open) setSelectedMember(null); }}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto px-4 sm:px-6">
-          <SheetHeader className="px-0">
-            <SheetTitle>{selectedMember ? `${selectedMember.first_name} ${selectedMember.last_name}` : "Member"}</SheetTitle>
-          </SheetHeader>
-          {selectedMember && (
-            <MemberDetail
-              member={selectedMember}
-              isOwner={isOwner}
-              onUpdate={() => { load(); }}
-              onClose={() => setSelectedMember(null)}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
+      {/* Member detail overlay */}
+      <Overlay open={!!selectedMember} onOpenChange={(open) => { if (!open) setSelectedMember(null); }}>
+        <OverlayContent>
+          <OverlayHeader>
+            <OverlayTitle>{selectedMember ? `${selectedMember.first_name} ${selectedMember.last_name}` : "Member"}</OverlayTitle>
+          </OverlayHeader>
+          <OverlayBody>
+            {selectedMember && (
+              <MemberDetail
+                member={selectedMember}
+                isOwner={isOwner}
+                onUpdate={() => { load(); }}
+                onClose={() => setSelectedMember(null)}
+              />
+            )}
+          </OverlayBody>
+        </OverlayContent>
+      </Overlay>
     </div>
   );
 }

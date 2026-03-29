@@ -37,6 +37,7 @@ from src.api.v1.vendors import router as vendors_router
 from src.api.v1.part_purchases import router as part_purchases_router
 from src.api.v1.parts import router as parts_router
 from src.api.v1.equipment import router as equipment_router
+from src.api.v1.equipment_catalog import router as equipment_catalog_router
 from src.api.v1.inbox_routing import router as inbox_routing_router
 from src.api.v1.inbound_email import router as inbound_email_router
 
@@ -77,5 +78,6 @@ api_router.include_router(vendors_router)
 api_router.include_router(part_purchases_router)
 api_router.include_router(parts_router)
 api_router.include_router(equipment_router)
+api_router.include_router(equipment_catalog_router)
 api_router.include_router(inbox_routing_router)
 api_router.include_router(inbound_email_router)

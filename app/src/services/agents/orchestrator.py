@@ -687,7 +687,8 @@ async def _process_sent_emails(org_id: str) -> int:
                     thread_obj.message_count = (thread_obj.message_count or 0) + 1
                     thread_obj.last_message_at = sent_at
                     thread_obj.last_direction = "outbound"
-                    thread_obj.last_snippet = (body or "")[:200]
+                    sent_clean = strip_email_signature(strip_quoted_reply(body or ""))
+                    thread_obj.last_snippet = sent_clean[:200]
                     thread_obj.status = "handled"
                     thread_obj.has_pending = False
 

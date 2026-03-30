@@ -41,7 +41,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   techs: "Technicians",
   profitability: "Profitability",
   satellite: "Satellite Analysis",
-  emd: "EMD Intelligence",
+  emd: "Health Inspections",
   chemical_costs: "Chemical Costs",
   inbox: "Inbox",
   jobs: "Jobs",

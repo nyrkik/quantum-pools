@@ -10,14 +10,14 @@ import {
   Wrench,
   FileText,
 } from "lucide-react";
-import type { EMDFacilityDetail as EMDFacilityDetailType, EMDInspection, EMDEquipment, FacilityStatus } from "./emd-types";
-import { cleanProgramId, formatDate, getTimelineDotColor, getViolationLabel, hasClosureViolations } from "./emd-constants";
+import type { InspectionFacilityDetail as InspectionFacilityDetailType, Inspection, InspectionEquipment, FacilityStatus } from "./inspection-types";
+import { cleanProgramId, formatDate, getTimelineDotColor, getViolationLabel, hasClosureViolations } from "./inspection-constants";
 
 interface FacilityDetailProps {
-  facility: EMDFacilityDetailType;
-  allInspections: EMDInspection[];
-  selectedInspection: EMDInspection | null;
-  selectedEquipment: EMDEquipment | null;
+  facility: InspectionFacilityDetailType;
+  allInspections: Inspection[];
+  selectedInspection: Inspection | null;
+  selectedEquipment: InspectionEquipment | null;
   facilityStatus: FacilityStatus | null;
   selectedProgramId: string | null;
   detailLoading: boolean;
@@ -156,7 +156,7 @@ export function FacilityDetail({
                           title="View PDF"
                           onClick={(e) => {
                             e.stopPropagation();
-                            window.open(`/api/v1/emd/inspections/${insp.id}/pdf`, "_blank");
+                            window.open(`/api/v1/inspections/inspections/${insp.id}/pdf`, "_blank");
                           }}
                         >
                           <FileText className="h-3 w-3 text-blue-500" />
@@ -188,9 +188,9 @@ function InspectionDetailCard({
   facility,
   equipment,
 }: {
-  inspection: EMDInspection;
-  facility: EMDFacilityDetailType;
-  equipment: EMDEquipment | null;
+  inspection: Inspection;
+  facility: InspectionFacilityDetailType;
+  equipment: InspectionEquipment | null;
 }) {
   return (
     <Card className="shadow-sm">
@@ -202,7 +202,7 @@ function InspectionDetailCard({
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">{inspection.inspection_type || "Inspection"}</Badge>
             {inspection.has_pdf && (
               <Button variant="ghost" size="icon" className="h-6 w-6" title="View PDF"
-                onClick={() => window.open(`/api/v1/emd/inspections/${inspection.id}/pdf`, "_blank")}>
+                onClick={() => window.open(`/api/v1/inspections/inspections/${inspection.id}/pdf`, "_blank")}>
                 <FileText className="h-3.5 w-3.5 text-blue-500" />
               </Button>
             )}

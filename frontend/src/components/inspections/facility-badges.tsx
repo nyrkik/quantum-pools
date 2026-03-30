@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import type { FacilityStatus } from "./emd-types";
+import type { FacilityStatus } from "./inspection-types";
 
 export function StatusBadge({ status }: { status: FacilityStatus }) {
   switch (status) {

@@ -25,12 +25,12 @@ import {
   Lock,
   ShoppingCart,
 } from "lucide-react";
-import type { EMDFacilityListItem, EMDFacilityDetail, SearchResult } from "./emd-types";
-import { cleanProgramId, formatDate } from "./emd-constants";
+import type { InspectionFacilityListItem, InspectionFacilityDetail, SearchResult } from "./inspection-types";
+import { cleanProgramId, formatDate } from "./inspection-constants";
 
 interface FacilityListProps {
-  facilities: EMDFacilityListItem[];
-  filteredFacilities: EMDFacilityListItem[];
+  facilities: InspectionFacilityListItem[];
+  filteredFacilities: InspectionFacilityListItem[];
   search: string;
   setSearch: (search: string) => void;
   sortBy: string;
@@ -41,7 +41,7 @@ interface FacilityListProps {
   setMatchFilter: (filter: "all" | "matched" | "unmatched") => void;
   loading: boolean;
   isFullResearch: boolean;
-  selectedFacility: EMDFacilityDetail | null;
+  selectedFacility: InspectionFacilityDetail | null;
   selectedPermitId: string | null;
   hasDetailOpen: boolean;
   searchMode: boolean;

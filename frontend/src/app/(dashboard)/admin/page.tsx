@@ -131,7 +131,7 @@ function MatchRow({ facility, onMatched }: { facility: UnmatchedFacility; onMatc
   const handleMatch = async (propertyId: string) => {
     setSaving(true);
     try {
-      await api.post("/v1/admin/emd-match", { facility_id: facility.id, property_id: propertyId });
+      await api.post("/v1/admin/inspection-match", { facility_id: facility.id, property_id: propertyId });
       toast.success(`Matched ${facility.name}`);
       setMatching(false);
       onMatched();
@@ -216,8 +216,8 @@ export default function AdminPage() {
   const load = useCallback(() => {
     Promise.all([
       api.get<ScraperRun[]>("/v1/admin/scraper-runs"),
-      api.get<EmdStats>("/v1/admin/emd-stats"),
-      api.get<UnmatchedFacility[]>("/v1/admin/emd-unmatched"),
+      api.get<EmdStats>("/v1/admin/inspection-stats"),
+      api.get<UnmatchedFacility[]>("/v1/admin/inspection-unmatched"),
       api.get<AgentMsg[]>("/v1/admin/agent-messages").catch(() => []),
       api.get<AgentMetrics>("/v1/agent-ops/metrics").catch(() => null),
       api.get<AgentLogEntry[]>("/v1/agent-ops/logs?limit=10&success_only=false").catch(() => []),
@@ -395,7 +395,7 @@ export default function AdminPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Unmatched EMD Facilities ({unmatched.length})</CardTitle>
+              <CardTitle className="text-base">Unmatched Facilities ({unmatched.length})</CardTitle>
             </div>
           </CardHeader>
           <CardContent>
@@ -467,7 +467,7 @@ export default function AdminPage() {
       {/* Scraper Run History */}
       <Card className="shadow-sm">
         <CardHeader>
-          <CardTitle className="text-base">EMD Scraper Runs</CardTitle>
+          <CardTitle className="text-base">Inspection Scraper Runs</CardTitle>
         </CardHeader>
         <CardContent>
           {runs.length === 0 ? (

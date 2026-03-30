@@ -125,7 +125,7 @@ class FeatureService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none() is not None
 
-    async def get_org_emd_tier(self, organization_id: str) -> str | None:
+    async def get_org_inspection_tier(self, organization_id: str) -> str | None:
         """Get the org's active EMD tier slug. Returns 'full_research', 'my_inspections', or None."""
         now = datetime.now(timezone.utc)
 
@@ -137,9 +137,9 @@ class FeatureService:
         if trial_ends_at and trial_ends_at > now:
             return "full_research"
 
-        # Find emd_intelligence feature
+        # Find inspection_intelligence feature
         result = await self.db.execute(
-            select(Feature).where(Feature.slug == "emd_intelligence", Feature.is_active == True)
+            select(Feature).where(Feature.slug == "inspection_intelligence", Feature.is_active == True)
         )
         feature = result.scalar_one_or_none()
         if not feature:

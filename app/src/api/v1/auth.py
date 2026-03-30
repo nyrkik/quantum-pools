@@ -134,13 +134,13 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
     org_user = result.unique().scalar_one_or_none()
 
     features: list[str] = []
-    emd_tier = None
+    inspection_tier = None
     permissions: dict[str, str] = {}
     if org_user:
         from src.services.feature_service import FeatureService
         feature_service = FeatureService(db)
         features = await feature_service.get_org_active_feature_slugs(org_user.organization_id)
-        emd_tier = await feature_service.get_org_emd_tier(org_user.organization_id)
+        inspection_tier = await feature_service.get_org_inspection_tier(org_user.organization_id)
         from src.services.permission_service import PermissionService
         perm_service = PermissionService(db)
         permissions = await perm_service.resolve_permissions(org_user)
@@ -152,7 +152,7 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
         role=org_user.role.value if org_user else "",
         is_developer=org_user.is_developer if org_user else False,
         features=features,
-        emd_tier=emd_tier,
+        inspection_tier=inspection_tier,
         branding=_branding(org_user.organization if org_user else None),
         role_version=org_user.role_version if org_user else 0,
         permissions=permissions,
@@ -201,7 +201,7 @@ async def get_me(
     permissions = await ctx.load_permissions(db)
     from src.services.feature_service import FeatureService
     feature_service = FeatureService(db)
-    emd_tier = await feature_service.get_org_emd_tier(ctx.organization_id)
+    inspection_tier = await feature_service.get_org_inspection_tier(ctx.organization_id)
     # Load org for branding
     org_result = await db.execute(select(Organization).where(Organization.id == ctx.organization_id))
     org = org_result.scalar_one_or_none()
@@ -212,7 +212,7 @@ async def get_me(
         role=ctx.role.value,
         is_developer=ctx.org_user.is_developer,
         features=features,
-        emd_tier=emd_tier,
+        inspection_tier=inspection_tier,
         branding=_branding(org),
         role_version=ctx.org_user.role_version or 0,
         permissions=permissions,

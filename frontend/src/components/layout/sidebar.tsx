@@ -41,21 +41,23 @@ import {
   ClipboardList,
   Receipt,
   Package,
+  MessageSquare,
 } from "lucide-react";
 
 const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
-  { href: "/inbox", label: "Inbox", icon: Bot, check: "canViewInbox" as keyof Permissions, badge: "pending" as const },
-  { href: "/jobs", label: "Jobs", icon: ClipboardList, check: "canViewInbox" as keyof Permissions },
   { href: "/customers", label: "Clients", icon: Users, check: null },
+  { href: "/jobs", label: "Jobs", icon: ClipboardList, check: "canViewInbox" as keyof Permissions },
+  { href: "/inbox", label: "Inbox", icon: Bot, check: "canViewInbox" as keyof Permissions, badge: "pending" as const },
+  { href: "/messages", label: "Messages", icon: MessageSquare, check: null, badge: "messages" as const },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
-  { href: "/parts", label: "Catalog", icon: Package, check: null },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
-  { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
+  { href: "/parts", label: "Catalog", icon: Package, check: null },
   { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },
-  { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
+  { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
+  { href: "/inspections", label: "Inspections", icon: Shield, check: "canViewInspection" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
@@ -74,20 +76,30 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const perms = usePermissions();
   const dev = useDevMode();
   const [pendingCount, setPendingCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
-  const fetchPending = useCallback(() => {
+  const fetchCounts = useCallback(() => {
     if (perms.canViewInbox) {
       api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
         .then((s) => setPendingCount(s.pending ?? 0))
         .catch(() => {});
     }
-  }, [perms.canViewInbox, perms.canViewInvoices]);
+    api.get<{ unread: number }>("/v1/messages/stats")
+      .then((s) => setUnreadMessages(s.unread ?? 0))
+      .catch(() => {});
+  }, [perms.canViewInbox]);
 
   useEffect(() => {
-    fetchPending();
-    const interval = setInterval(fetchPending, 30000);
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30000);
     return () => clearInterval(interval);
-  }, [fetchPending]);
+  }, [fetchCounts]);
+
+  // Tab title with unread count
+  useEffect(() => {
+    const total = pendingCount + unreadMessages;
+    document.title = total > 0 ? `(${total}) QuantumPools` : "QuantumPools";
+  }, [pendingCount, unreadMessages]);
 
   const visibleNav = navItems.filter(
     (item) => item.check === null || perms[item.check] === true
@@ -127,6 +139,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               {"badge" in item && item.badge === "pending" && pendingCount > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
                   {pendingCount}
+                </span>
+              )}
+              {"badge" in item && item.badge === "messages" && unreadMessages > 0 && (
+                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-[10px] font-semibold text-white">
+                  {unreadMessages}
                 </span>
               )}
             </Link>

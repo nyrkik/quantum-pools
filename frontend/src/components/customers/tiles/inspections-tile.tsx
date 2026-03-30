@@ -34,7 +34,7 @@ export function InspectionsTile({ properties }: InspectionsTileProps) {
       const results: PropertyInspections[] = [];
       for (const prop of properties) {
         try {
-          const data = await api.get<InspectionInfo[]>(`/v1/emd/property/${prop.id}/inspections`);
+          const data = await api.get<InspectionInfo[]>(`/v1/inspections/property/${prop.id}/inspections`);
           const inspections = (data || []).slice(0, 5);
           if (inspections.length > 0) {
             const wfs = prop.water_features || [];

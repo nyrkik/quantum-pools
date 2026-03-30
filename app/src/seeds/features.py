@@ -72,8 +72,8 @@ FEATURES = [
         "sort_order": 50,
     },
     {
-        "slug": "emd_intelligence",
-        "name": "EMD Inspection Intel",
+        "slug": "inspection_intelligence",
+        "name": "Inspection Intelligence",
         "description": "Sacramento County health department inspection data, violation tracking, PDF extraction.",
         "category": "intelligence",
         "is_base": False,
@@ -103,7 +103,7 @@ FEATURES = [
     },
 ]
 
-EMD_TIERS = [
+INSPECTION_TIERS = [
     {
         "slug": "my_inspections",
         "name": "My Inspections",
@@ -145,13 +145,13 @@ async def seed_features():
         await db.flush()
 
         # EMD tiers
-        emd_feature = feature_map["emd_intelligence"]
-        for t in EMD_TIERS:
-            tier = FeatureTier(id=str(uuid.uuid4()), feature_id=emd_feature.id, **t)
+        inspection_feature = feature_map["inspection_intelligence"]
+        for t in INSPECTION_TIERS:
+            tier = FeatureTier(id=str(uuid.uuid4()), feature_id=inspection_feature.id, **t)
             db.add(tier)
 
         await db.flush()
-        print(f"Seeded {len(FEATURES)} features + {len(EMD_TIERS)} EMD tiers.")
+        print(f"Seeded {len(FEATURES)} features + {len(INSPECTION_TIERS)} EMD tiers.")
 
 
 async def grandfather_existing_orgs():
@@ -183,7 +183,7 @@ async def grandfather_existing_orgs():
         count = 0
         for org in orgs:
             for feature in features:
-                if feature.slug == "emd_intelligence":
+                if feature.slug == "inspection_intelligence":
                     # Grandfather EMD at full_research tier
                     if full_research_tier:
                         db.add(OrgSubscription(

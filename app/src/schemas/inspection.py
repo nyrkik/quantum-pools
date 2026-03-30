@@ -1,4 +1,4 @@
-"""EMD inspection schemas — request/response models for EMD endpoints."""
+""" inspection schemas — request/response models for  endpoints."""
 
 from pydantic import BaseModel
 from typing import Optional
@@ -7,7 +7,7 @@ from datetime import datetime, date
 
 # --- Facility ---
 
-class EMDFacilityResponse(BaseModel):
+class InspectionFacilityResponse(BaseModel):
     id: str
     organization_id: Optional[str] = None
     name: str
@@ -28,7 +28,7 @@ class EMDFacilityResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class EMDFacilityListResponse(BaseModel):
+class InspectionFacilityListResponse(BaseModel):
     id: str
     name: str
     street_address: Optional[str] = None
@@ -47,8 +47,8 @@ class EMDFacilityListResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class EMDFacilityDetailResponse(EMDFacilityResponse):
-    inspections: list["EMDInspectionDetailResponse"] = []
+class InspectionFacilityDetailResponse(InspectionFacilityResponse):
+    inspections: list["InspectionDetailResponse"] = []
     total_inspections: int = 0
     total_violations: int = 0
     last_inspection_date: Optional[date] = None
@@ -58,7 +58,7 @@ class EMDFacilityDetailResponse(EMDFacilityResponse):
 
 # --- Inspection ---
 
-class EMDInspectionResponse(BaseModel):
+class InspectionResponse(BaseModel):
     id: str
     facility_id: str
     inspection_id: Optional[str] = None
@@ -83,14 +83,14 @@ class EMDInspectionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class EMDInspectionDetailResponse(EMDInspectionResponse):
-    violations: list["EMDViolationResponse"] = []
-    equipment: Optional["EMDEquipmentResponse"] = None
+class InspectionDetailResponse(InspectionResponse):
+    violations: list["InspectionViolationResponse"] = []
+    equipment: Optional["InspectionEquipmentResponse"] = None
 
 
 # --- Violation ---
 
-class EMDViolationResponse(BaseModel):
+class InspectionViolationResponse(BaseModel):
     id: str
     inspection_id: str
     facility_id: str
@@ -108,7 +108,7 @@ class EMDViolationResponse(BaseModel):
 
 # --- Equipment ---
 
-class EMDEquipmentResponse(BaseModel):
+class InspectionEquipmentResponse(BaseModel):
     id: str
     inspection_id: str
     facility_id: str
@@ -163,7 +163,7 @@ class MatchFacilityRequest(BaseModel):
 
 # --- Lead generation ---
 
-class EMDLeadResponse(BaseModel):
+class InspectionLeadResponse(BaseModel):
     facility_id: str
     facility_name: str
     street_address: Optional[str] = None
@@ -177,5 +177,5 @@ class EMDLeadResponse(BaseModel):
 
 
 # Forward refs
-EMDFacilityDetailResponse.model_rebuild()
-EMDInspectionDetailResponse.model_rebuild()
+InspectionFacilityDetailResponse.model_rebuild()
+InspectionDetailResponse.model_rebuild()

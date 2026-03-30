@@ -31,14 +31,14 @@ from src.models.dimension_estimate import DimensionEstimate
 from src.models.regional_default import RegionalDefault
 from src.models.org_chemical_prices import OrgChemicalPrices
 from src.models.chemical_cost_profile import ChemicalCostProfile
-from src.models.emd_facility import EMDFacility
-from src.models.emd_inspection import EMDInspection
-from src.models.emd_violation import EMDViolation
-from src.models.emd_equipment import EMDEquipment
+from src.models.inspection_facility import InspectionFacility
+from src.models.inspection import Inspection
+from src.models.inspection_violation import InspectionViolation
+from src.models.inspection_equipment import InspectionEquipment
 from src.models.service_tier import ServiceTier
 from src.models.feature import Feature, FeatureTier
 from src.models.org_subscription import OrgSubscription
-from src.models.emd_lookup import EMDLookup
+from src.models.inspection_lookup import InspectionLookup
 from src.models.scraper_run import ScraperRun
 from src.models.estimate_approval import EstimateApproval
 from src.models.inbox_routing_rule import InboxRoutingRule
@@ -67,6 +67,7 @@ from src.models.equipment_catalog import EquipmentCatalog
 from src.models.equipment_item import EquipmentItem
 from src.models.equipment_event import EquipmentEvent
 from src.models.feedback_item import FeedbackItem
+from src.models.internal_message import InternalThread, InternalMessage
 
 __all__ = [
     "Base",
@@ -100,14 +101,14 @@ __all__ = [
     "RegionalDefault",
     "OrgChemicalPrices",
     "ChemicalCostProfile",
-    "EMDFacility",
-    "EMDInspection",
-    "EMDViolation",
-    "EMDEquipment",
+    "InspectionFacility",
+    "Inspection",
+    "InspectionViolation",
+    "InspectionEquipment",
     "Feature",
     "FeatureTier",
     "OrgSubscription",
-    "EMDLookup",
+    "InspectionLookup",
     "ChargeTemplate",
     "VisitCharge",
     "VisitPhoto",
@@ -122,4 +123,6 @@ __all__ = [
     "EquipmentEvent",
     "InboxRoutingRule",
     "FeedbackItem",
+    "InternalThread",
+    "InternalMessage",
 ]

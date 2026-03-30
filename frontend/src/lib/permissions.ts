@@ -9,7 +9,7 @@ export type FeatureSlug =
   | "invoicing"
   | "profitability"
   | "satellite_analysis"
-  | "emd_intelligence"
+  | "inspection_intelligence"
   | "chemical_costs"
   | "customer_portal";
 
@@ -31,7 +31,7 @@ export interface Permissions {
   canViewSatellite: boolean;
   canViewSettings: boolean;
   canViewRoutes: boolean;
-  canViewEmd: boolean;
+  canViewInspection: boolean;
   canViewInbox: boolean;
   canViewTeam: boolean;
   canViewChemicalCosts: boolean;
@@ -67,8 +67,8 @@ const FEATURE_GATES: Record<string, FeatureSlug> = {
   "satellite.analyze": "satellite_analysis",
   "routes.view": "route_optimization",
   "routes.manage": "route_optimization",
-  "emd.view": "emd_intelligence",
-  "emd.manage": "emd_intelligence",
+  "inspection.view": "inspection_intelligence",
+  "inspection.manage": "inspection_intelligence",
   "chemical_costs.view": "chemical_costs",
   "chemical_costs.edit": "chemical_costs",
 };
@@ -89,7 +89,7 @@ const FALLBACK_ROLE_PERMS: Record<string, string[]> = {
     "techs.view", "techs.manage",
     "profitability.view", "profitability.edit_settings",
     "satellite.view", "satellite.analyze",
-    "emd.view", "emd.manage", "chemical_costs.view", "chemical_costs.edit",
+    "inspection.view", "inspection.manage", "chemical_costs.view", "chemical_costs.edit",
     "inbox.view", "inbox.manage", "jobs.view", "jobs.create", "jobs.edit", "jobs.manage",
     "team.view", "team.manage", "settings.view",
     "branding.view", "branding.edit", "billing.view",
@@ -104,7 +104,7 @@ const FALLBACK_ROLE_PERMS: Record<string, string[]> = {
     "chemicals.view", "chemicals.create", "chemicals.edit",
     "techs.view", "profitability.view",
     "satellite.view", "satellite.analyze",
-    "emd.view", "emd.manage", "chemical_costs.view",
+    "inspection.view", "inspection.manage", "chemical_costs.view",
     "jobs.view", "jobs.create", "jobs.edit", "jobs.manage",
     "notifications.view",
   ],
@@ -112,7 +112,7 @@ const FALLBACK_ROLE_PERMS: Record<string, string[]> = {
     "customers.view", "properties.view", "water_features.view",
     "routes.view", "visits.view", "visits.create", "visits.edit",
     "chemicals.view", "chemicals.create", "chemicals.edit",
-    "techs.view", "emd.view",
+    "techs.view", "inspection.view",
     "jobs.view", "jobs.edit",
     "notifications.view",
   ],
@@ -121,7 +121,7 @@ const FALLBACK_ROLE_PERMS: Record<string, string[]> = {
     "properties.view", "properties.view_dimensions", "properties.view_difficulty",
     "water_features.view", "routes.view", "visits.view", "chemicals.view",
     "invoices.view", "payments.view", "techs.view",
-    "profitability.view", "satellite.view", "emd.view", "chemical_costs.view",
+    "profitability.view", "satellite.view", "inspection.view", "chemical_costs.view",
     "jobs.view", "notifications.view",
   ],
 };
@@ -173,7 +173,7 @@ function buildPermissions(
     canViewSatellite: can("satellite.view"),
     canViewSettings: can("settings.view"),
     canViewRoutes: can("routes.view"),
-    canViewEmd: can("emd.view"),
+    canViewInspection: can("inspection.view"),
     canViewInbox: can("inbox.view"),
     canViewTeam: can("team.view"),
     canViewChemicalCosts: can("chemical_costs.view"),

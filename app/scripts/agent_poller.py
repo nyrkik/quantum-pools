@@ -98,6 +98,55 @@ async def check_estimate_reminders():
         logger.error(f"Estimate reminder error: {e}")
 
 
+async def check_message_escalations():
+    """Escalate unread internal messages — email after 30 min."""
+    try:
+        from datetime import timedelta
+        from src.core.database import get_db_context
+        from src.models.internal_message import InternalThread
+        from src.models.user import User
+        from src.services.email_service import EmailService
+
+        now = datetime.now(timezone.utc)
+        thirty_min_ago = now - timedelta(minutes=30)
+
+        async with get_db_context() as db:
+            result = await db.execute(
+                select(InternalThread).where(
+                    InternalThread.status == "active",
+                    InternalThread.escalation_level < 3,
+                    InternalThread.last_message_at <= thirty_min_ago,
+                    InternalThread.last_message_by.isnot(None),
+                )
+            )
+            for thread in result.scalars().all():
+                # Find recipients who haven't seen it
+                for pid in (thread.participant_ids or []):
+                    if pid == thread.last_message_by:
+                        continue
+                    # Get user email
+                    user = (await db.execute(select(User).where(User.id == pid))).scalar_one_or_none()
+                    if not user or not user.email:
+                        continue
+
+                    sender = (await db.execute(select(User).where(User.id == thread.last_message_by))).scalar_one_or_none()
+                    sender_name = f"{sender.first_name}" if sender else "A team member"
+
+                    email_svc = EmailService(db)
+                    await email_svc.send_email(
+                        org_id=thread.organization_id,
+                        to=user.email,
+                        subject=f"Message from {sender_name}: {thread.subject or 'New message'}",
+                        body=f"{sender_name} sent you a message. Log in to view and respond.",
+                    )
+                    logger.info(f"Escalated message to {user.email} for thread {thread.id}")
+
+                thread.escalation_level = 3
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Message escalation error: {e}")
+
+
 async def main():
     from src.services.customer_agent import run_poll_cycle
 
@@ -116,6 +165,10 @@ async def main():
             # Check estimate reminders hourly
             if cycle % REMINDER_EVERY == 0:
                 await check_estimate_reminders()
+
+            # Check message escalations every 5 cycles (~5 min)
+            if cycle % 5 == 0:
+                await check_message_escalations()
         except Exception as e:
             logger.error(f"Poll cycle error: {e}")
 

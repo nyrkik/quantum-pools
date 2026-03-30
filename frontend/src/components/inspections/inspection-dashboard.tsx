@@ -12,10 +12,10 @@ import {
   Bell,
   ArrowUpRight,
 } from "lucide-react";
-import type { DashboardData, DashboardTile, ScraperHealth } from "./emd-types";
-import { formatDate } from "./emd-constants";
+import type { DashboardData, DashboardTile, ScraperHealth } from "./inspection-types";
+import { formatDate } from "./inspection-constants";
 
-interface EMDDashboardProps {
+interface InspectionDashboardProps {
   dashboard: DashboardData | null;
   expandedTile: DashboardTile;
   scraperHealth: ScraperHealth | null;
@@ -23,13 +23,13 @@ interface EMDDashboardProps {
   onItemClick: (facilityId: string) => void;
 }
 
-export function EMDDashboard({
+export function InspectionDashboard({
   dashboard,
   expandedTile,
   scraperHealth,
   onTileClick,
   onItemClick,
-}: EMDDashboardProps) {
+}: InspectionDashboardProps) {
   return (
     <div className="shrink-0 space-y-2">
       {/* Backfill status bar */}

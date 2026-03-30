@@ -136,18 +136,18 @@ async def update_customer(
 ):
     svc = CustomerService(db)
     customer = await svc.update(ctx.organization_id, customer_id, **body.model_dump(exclude_unset=True))
-    # Re-run EMD match when status changes (active/inactive affects matching)
+    # Re-run inspection match when status changes (active/inactive affects matching)
     if body.status is not None or body.is_active is not None:
-        background_tasks.add_task(_emd_auto_match, ctx.organization_id)
+        background_tasks.add_task(_inspection_auto_match, ctx.organization_id)
     return CustomerResponse.model_validate(customer)
 
 
-async def _emd_auto_match(organization_id: str):
-    """Background task to auto-match EMD facilities after customer status changes."""
+async def _inspection_auto_match(organization_id: str):
+    """Background task to auto-match inspection facilities after customer status changes."""
     try:
         async with get_db_context() as db:
-            from src.services.emd.service import EMDService
-            svc = EMDService(db)
+            from src.services.inspection.service import InspectionService
+            svc = InspectionService(db)
             await svc.auto_match_facilities(organization_id)
     except Exception:
         pass

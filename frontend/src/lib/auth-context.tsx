@@ -32,7 +32,7 @@ interface AuthState {
   role: string;
   isDeveloper: boolean;
   features: string[];
-  emdTier: string | null;
+  inspectionTier: string | null;
   branding: Branding;
   roleVersion: number;
   permissions: Record<string, string>;
@@ -61,7 +61,7 @@ interface OrgUserResponse {
   role: string;
   is_developer: boolean;
   features: string[];
-  emd_tier: string | null;
+  inspection_tier: string | null;
   branding?: {
     logo_url: string | null;
     primary_color: string | null;
@@ -83,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     role: "",
     isDeveloper: false,
     features: [],
-    emdTier: null,
+    inspectionTier: null,
     branding: DEFAULT_BRANDING,
     roleVersion: 0,
     permissions: {},
@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: data.role,
       isDeveloper: data.is_developer ?? false,
       features: data.features ?? [],
-      emdTier: data.emd_tier ?? null,
+      inspectionTier: data.inspection_tier ?? null,
       branding: data.branding ? {
         logoUrl: data.branding.logo_url,
         primaryColor: data.branding.primary_color,
@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api.get<OrgUserResponse>("/v1/auth/me");
       setFromResponse(data);
     } catch {
-      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], emdTier: null, branding: DEFAULT_BRANDING, roleVersion: 0, permissions: {}, isLoading: false }));
+      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], inspectionTier: null, branding: DEFAULT_BRANDING, roleVersion: 0, permissions: {}, isLoading: false }));
     }
   }, [setFromResponse]);
 
@@ -145,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: "",
       isDeveloper: false,
       features: [],
-      emdTier: null,
+      inspectionTier: null,
       branding: DEFAULT_BRANDING,
       roleVersion: 0,
       permissions: {},

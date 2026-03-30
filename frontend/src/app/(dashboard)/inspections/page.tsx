@@ -4,43 +4,43 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Shield } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { PropertyMatching } from "@/components/emd/property-matching";
-import { EMDDashboard } from "@/components/emd/emd-dashboard";
-import { FacilityList } from "@/components/emd/facility-list";
-import { FacilityDetail } from "@/components/emd/facility-detail";
-import { RecentLookups, LookupCart, RedactedDetailPanel } from "@/components/emd/lookup-cart";
-import { getFacilityStatus } from "@/components/emd/emd-constants";
+import { PropertyMatching } from "@/components/inspections/property-matching";
+import { InspectionDashboard } from "@/components/inspections/inspection-dashboard";
+import { FacilityList } from "@/components/inspections/facility-list";
+import { FacilityDetail } from "@/components/inspections/facility-detail";
+import { RecentLookups, LookupCart, RedactedDetailPanel } from "@/components/inspections/lookup-cart";
+import { getFacilityStatus } from "@/components/inspections/inspection-constants";
 import type {
-  EMDFacilityListItem,
-  EMDFacilityDetail,
-  EMDEquipment,
-  EMDLookup,
+  InspectionFacilityListItem,
+  InspectionFacilityDetail,
+  InspectionEquipment,
+  InspectionLookup,
   SearchResult,
   RedactedDetail,
   DashboardData,
   DashboardTile,
   ScraperHealth,
-} from "@/components/emd/emd-types";
+} from "@/components/inspections/inspection-types";
 
-export default function EMDPage() {
-  const { emdTier } = useAuth();
-  const [facilities, setFacilities] = useState<EMDFacilityListItem[]>([]);
+export default function InspectionsPage() {
+  const { inspectionTier } = useAuth();
+  const [facilities, setFacilities] = useState<InspectionFacilityListItem[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedFacility, setSelectedFacility] = useState<EMDFacilityDetail | null>(null);
-  const [selectedEquipment, setSelectedEquipment] = useState<EMDEquipment | null>(null);
+  const [selectedFacility, setSelectedFacility] = useState<InspectionFacilityDetail | null>(null);
+  const [selectedEquipment, setSelectedEquipment] = useState<InspectionEquipment | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
   const [matchFilter, setMatchFilter] = useState<"all" | "matched" | "unmatched">("matched");
   const [sortBy, setSortBy] = useState<string>("name");
   const [cart, setCart] = useState<Set<string>>(new Set());
-  const [lookups, setLookups] = useState<EMDLookup[]>([]);
+  const [lookups, setLookups] = useState<InspectionLookup[]>([]);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchMode, setSearchMode] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
   const [redactedDetail, setRedactedDetail] = useState<RedactedDetail | null>(null);
-  const isFullResearch = emdTier === "full_research";
+  const isFullResearch = inspectionTier === "full_research";
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [expandedTile, setExpandedTile] = useState<DashboardTile>(null);
   const [scraperHealth, setScraperHealth] = useState<ScraperHealth | null>(null);
@@ -48,7 +48,7 @@ export default function EMDPage() {
   // Poll scraper health every 60s
   useEffect(() => {
     const fetchStatus = () => {
-      api.get<Record<string, unknown>>("/v1/emd/backfill-status")
+      api.get<Record<string, unknown>>("/v1/inspections/backfill-status")
         .then((d) => setScraperHealth(d as ScraperHealth))
         .catch(() => setScraperHealth(null));
     };
@@ -59,14 +59,14 @@ export default function EMDPage() {
 
   // Fetch active lookups
   useEffect(() => {
-    api.get<EMDLookup[]>("/v1/emd/lookups")
+    api.get<InspectionLookup[]>("/v1/inspections/lookups")
       .then(setLookups)
       .catch(() => setLookups([]));
   }, []);
 
   // Fetch dashboard data
   useEffect(() => {
-    api.get<DashboardData>("/v1/emd/dashboard")
+    api.get<DashboardData>("/v1/inspections/dashboard")
       .then(setDashboard)
       .catch(() => setDashboard(null));
   }, []);
@@ -80,15 +80,15 @@ export default function EMDPage() {
         params.set("q", search);
         params.set("limit", "20");
         const data = await api.get<SearchResult[]>(
-          `/v1/emd/search?${params.toString()}`
+          `/v1/inspections/search?${params.toString()}`
         );
         setSearchResults(data);
         const mainParams = new URLSearchParams();
         if (search) mainParams.set("search", search);
         mainParams.set("limit", "5000");
         mainParams.set("sort", sortBy);
-        const mainData = await api.get<EMDFacilityListItem[]>(
-          `/v1/emd/facilities?${mainParams.toString()}`
+        const mainData = await api.get<InspectionFacilityListItem[]>(
+          `/v1/inspections/facilities?${mainParams.toString()}`
         );
         setFacilities(mainData);
       } else {
@@ -98,8 +98,8 @@ export default function EMDPage() {
         if (search) params.set("search", search);
         params.set("limit", "5000");
         params.set("sort", sortBy);
-        const data = await api.get<EMDFacilityListItem[]>(
-          `/v1/emd/facilities?${params.toString()}`
+        const data = await api.get<InspectionFacilityListItem[]>(
+          `/v1/inspections/facilities?${params.toString()}`
         );
         setFacilities(data);
       }
@@ -124,7 +124,7 @@ export default function EMDPage() {
     setSelectedFacility(null);
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const detail: any = await api.get(`/v1/emd/facilities/${id}`);
+      const detail: any = await api.get(`/v1/inspections/facilities/${id}`);
       if (detail.redacted) {
         setRedactedDetail(detail);
         setSelectedFacility(null);
@@ -155,9 +155,9 @@ export default function EMDPage() {
     if (cart.size === 0) return;
     setPurchasing(true);
     try {
-      await api.post("/v1/emd/lookups/purchase", { facility_ids: Array.from(cart) });
+      await api.post("/v1/inspections/lookups/purchase", { facility_ids: Array.from(cart) });
       setCart(new Set());
-      const newLookups = await api.get<EMDLookup[]>("/v1/emd/lookups");
+      const newLookups = await api.get<InspectionLookup[]>("/v1/inspections/lookups");
       setLookups(newLookups);
       fetchFacilities();
     } catch {
@@ -207,9 +207,9 @@ export default function EMDPage() {
   useEffect(() => {
     if (!selectedFacility) return;
     const url = selectedPermitId
-      ? `/v1/emd/facilities/${selectedFacility.id}/equipment?permit_id=${selectedPermitId}`
-      : `/v1/emd/facilities/${selectedFacility.id}/equipment`;
-    api.get<EMDEquipment | null>(url)
+      ? `/v1/inspections/facilities/${selectedFacility.id}/equipment?permit_id=${selectedPermitId}`
+      : `/v1/inspections/facilities/${selectedFacility.id}/equipment`;
+    api.get<InspectionEquipment | null>(url)
       .then(setSelectedEquipment)
       .catch(() => setSelectedEquipment(null));
   }, [selectedPermitId, selectedFacility?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -226,7 +226,7 @@ export default function EMDPage() {
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col gap-3 overflow-hidden">
       {/* Operations Dashboard */}
-      <EMDDashboard
+      <InspectionDashboard
         dashboard={dashboard}
         expandedTile={expandedTile}
         scraperHealth={scraperHealth}

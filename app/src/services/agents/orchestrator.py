@@ -649,14 +649,16 @@ async def _process_sent_emails(org_id: str) -> int:
                 organization_id=org_id,
             )
 
-            # Check if we already recorded this (by checking for outbound message at same time)
+            # Check if we already recorded this — match by thread + direction + time window
             async with get_db_context() as db:
+                from datetime import timedelta
+                time_window = sent_at - timedelta(minutes=5)
                 existing = await db.execute(
                     select(AgentMessage).where(
                         AgentMessage.thread_id == thread.id,
                         AgentMessage.direction == "outbound",
-                        AgentMessage.from_email.ilike(f"%{sender_name.split()[0]}%") if sender_name != "Team" else AgentMessage.id.isnot(None),
                         AgentMessage.subject == subject,
+                        AgentMessage.received_at >= time_window,
                     ).limit(1)
                 )
                 if existing.scalar_one_or_none():

@@ -191,6 +191,18 @@ class EmailComposeService:
         thread.last_snippet = strip_email_signature(strip_quoted_reply(body))[:200]
         thread.status = "handled"
         thread.has_pending = False
+
+        # Mark all pending inbound messages as handled (prevents refresh_thread from flipping back)
+        from src.models.agent_message import AgentMessage
+        pending_msgs = await self.db.execute(
+            select(AgentMessage).where(
+                AgentMessage.thread_id == thread.id,
+                AgentMessage.status == "pending",
+                AgentMessage.direction == "inbound",
+            )
+        )
+        for pm in pending_msgs.scalars().all():
+            pm.status = "handled"
         if not thread.category:
             thread.category = "outbound"
 

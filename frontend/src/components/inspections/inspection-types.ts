@@ -1,4 +1,4 @@
-export interface EMDFacilityListItem {
+export interface InspectionFacilityListItem {
   id: string;
   name: string;
   street_address: string | null;
@@ -15,7 +15,7 @@ export interface EMDFacilityListItem {
   closure_reasons: string[];
 }
 
-export interface EMDInspection {
+export interface Inspection {
   id: string;
   facility_id: string;
   inspection_id: string | null;
@@ -36,10 +36,10 @@ export interface EMDInspection {
   water_chemistry: { free_chlorine?: number; combined_chlorine?: number; ph?: number; cyanuric_acid_ppm?: number } | null;
   has_pdf: boolean;
   created_at: string;
-  violations?: EMDViolation[];
+  violations?: InspectionViolation[];
 }
 
-export interface EMDViolation {
+export interface InspectionViolation {
   id: string;
   violation_code: string | null;
   violation_title: string | null;
@@ -49,7 +49,7 @@ export interface EMDViolation {
   shorthand_summary: string | null;
 }
 
-export interface EMDEquipment {
+export interface InspectionEquipment {
   id: string;
   pool_capacity_gallons: number | null;
   flow_rate_gpm: number | null;
@@ -85,7 +85,7 @@ export interface EMDEquipment {
   equalizer_notes: string | null;
 }
 
-export interface EMDProgram {
+export interface InspectionProgram {
   permit_id: string | null;
   program_identifier: string;
   total_inspections: number;
@@ -94,7 +94,7 @@ export interface EMDProgram {
   is_closed: boolean;
 }
 
-export interface EMDFacilityDetail {
+export interface InspectionFacilityDetail {
   id: string;
   name: string;
   street_address: string | null;
@@ -107,8 +107,8 @@ export interface EMDFacilityDetail {
   facility_type: string | null;
   matched_property_id: string | null;
   matched_at: string | null;
-  inspections: EMDInspection[];
-  programs: EMDProgram[];
+  inspections: Inspection[];
+  programs: InspectionProgram[];
   total_inspections: number;
   total_violations: number;
   last_inspection_date: string | null;
@@ -156,7 +156,7 @@ export type FacilityStatus = "compliant" | "violations" | "reinspection" | "clos
 
 export type DashboardTile = "inspections" | "alerts" | "leads" | "trending" | null;
 
-export interface EMDLookup {
+export interface InspectionLookup {
   id: string;
   facility_id: string;
   facility_name: string;
@@ -166,7 +166,7 @@ export interface EMDLookup {
   days_remaining: number;
 }
 
-export interface SearchResult extends EMDFacilityListItem {
+export interface SearchResult extends InspectionFacilityListItem {
   redacted?: boolean;
   has_lookup?: boolean;
 }

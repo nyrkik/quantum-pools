@@ -7,8 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class EMDFacility(Base):
-    __tablename__ = "emd_facilities"
+class InspectionFacility(Base):
+    __tablename__ = "inspection_facilities"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     organization_id: Mapped[str | None] = mapped_column(
@@ -41,6 +41,6 @@ class EMDFacility(Base):
     )
 
     # Relationships
-    inspections = relationship("EMDInspection", back_populates="facility", lazy="noload")
+    inspections = relationship("Inspection", back_populates="facility", lazy="noload")
     matched_property = relationship("Property", lazy="noload")
     organization = relationship("Organization", lazy="noload")

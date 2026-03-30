@@ -24,12 +24,12 @@ async def _geocode_property(property_id: str, address: str):
             await prop_svc.update_geocode(property_id, result[0], result[1], result[2])
 
 
-async def _emd_auto_match(organization_id: str):
+async def _inspection_auto_match(organization_id: str):
     """Background task to auto-match EMD facilities after property changes."""
     try:
         async with get_db_context() as db:
-            from src.services.emd.service import EMDService
-            svc = EMDService(db)
+            from src.services.inspection.service import InspectionService
+            svc = InspectionService(db)
             await svc.auto_match_facilities(organization_id)
     except Exception:
         pass  # Non-critical
@@ -71,7 +71,7 @@ async def create_property(
     svc = PropertyService(db)
     prop = await svc.create(ctx.organization_id, **body.model_dump())
     background_tasks.add_task(_geocode_property, prop.id, prop.full_address)
-    background_tasks.add_task(_emd_auto_match, ctx.organization_id)
+    background_tasks.add_task(_inspection_auto_match, ctx.organization_id)
     return PropertyResponse.model_validate(prop)
 
 
@@ -107,7 +107,7 @@ async def update_property(
     )
     if address_changed:
         background_tasks.add_task(_geocode_property, prop.id, prop.full_address)
-        background_tasks.add_task(_emd_auto_match, ctx.organization_id)
+        background_tasks.add_task(_inspection_auto_match, ctx.organization_id)
     if rate_changed:
         from src.models.water_feature import WaterFeature
         from src.services.profitability_service import ProfitabilityService

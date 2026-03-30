@@ -10,11 +10,11 @@ import {
   Lock,
   X,
 } from "lucide-react";
-import type { EMDLookup, RedactedDetail } from "./emd-types";
-import { formatDate } from "./emd-constants";
+import type { InspectionLookup, RedactedDetail } from "./inspection-types";
+import { formatDate } from "./inspection-constants";
 
 interface RecentLookupsProps {
-  lookups: EMDLookup[];
+  lookups: InspectionLookup[];
   onSelectFacility: (id: string) => void;
 }
 

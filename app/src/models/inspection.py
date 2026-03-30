@@ -7,12 +7,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class EMDInspection(Base):
-    __tablename__ = "emd_inspections"
+class Inspection(Base):
+    __tablename__ = "inspections"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     facility_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("emd_facilities.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("inspection_facilities.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # EMD data
@@ -56,6 +56,6 @@ class EMDInspection(Base):
         return bool(self.pdf_path and not self.pdf_path.startswith("/mnt"))
 
     # Relationships
-    facility = relationship("EMDFacility", back_populates="inspections", lazy="noload")
-    violations = relationship("EMDViolation", back_populates="inspection", lazy="noload")
-    equipment = relationship("EMDEquipment", back_populates="inspection", uselist=False, lazy="noload")
+    facility = relationship("InspectionFacility", back_populates="inspections", lazy="noload")
+    violations = relationship("InspectionViolation", back_populates="inspection", lazy="noload")
+    equipment = relationship("InspectionEquipment", back_populates="inspection", uselist=False, lazy="noload")

@@ -21,8 +21,27 @@ class ActionPresenter(Presenter):
 
     async def many(self, actions: list[AgentAction], msg_map: dict[str, AgentMessage] | None = None) -> list[dict]:
         """Present a list of actions with batch-loaded customer data."""
-        # Batch load customers
+        # Batch load customers — include message matched_customer_id and thread matched_customer_id
         cust_ids = {a.customer_id for a in actions if a.customer_id}
+        if msg_map:
+            for msg in msg_map.values():
+                if msg.matched_customer_id:
+                    cust_ids.add(msg.matched_customer_id)
+        # Also check threads for any remaining unmatched actions
+        thread_ids = {a.thread_id for a in actions if a.thread_id and not a.customer_id}
+        if thread_ids:
+            from src.models.agent_thread import AgentThread
+            thread_result = await self.db.execute(
+                select(AgentThread.id, AgentThread.matched_customer_id).where(
+                    AgentThread.id.in_(list(thread_ids)),
+                    AgentThread.matched_customer_id.isnot(None),
+                )
+            )
+            thread_cust_map = {tid: cid for tid, cid in thread_result.all()}
+            cust_ids.update(thread_cust_map.values())
+        else:
+            thread_cust_map = {}
+
         customers = await self._load_customers(cust_ids)
         addresses = await self._load_customer_addresses(cust_ids)
 
@@ -32,11 +51,23 @@ class ActionPresenter(Presenter):
             msg = msg_map.get(action.agent_message_id) if msg_map and action.agent_message_id else None
 
             # Customer — always from source of truth
-            cust = customers.get(action.customer_id) if action.customer_id else None
+            # Try action.customer_id → message matched → thread matched
+            cust_id = (action.customer_id
+                       or (msg.matched_customer_id if msg else None)
+                       or thread_cust_map.get(action.thread_id))
+            cust = customers.get(cust_id) if cust_id else None
+            if not cust and cust_id and cust_id not in customers:
+                # Batch didn't include this — load individually
+                extra = await self._load_customers({cust_id})
+                cust = extra.get(cust_id)
+                if cust:
+                    customers[cust_id] = cust
+                    extra_addr = await self._load_customer_addresses({cust_id})
+                    addresses.update(extra_addr)
             if cust:
                 d["customer_name"] = cust.display_name
-                d["contact_name"] = action.customer_name if action.customer_name != cust.display_name else None
-                d["customer_address"] = addresses.get(action.customer_id, action.property_address)
+                d["contact_name"] = action.customer_name if action.customer_name and action.customer_name != cust.display_name else None
+                d["customer_address"] = addresses.get(cust_id, action.property_address)
             else:
                 d["customer_name"] = action.customer_name
                 d["contact_name"] = None

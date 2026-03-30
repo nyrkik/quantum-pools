@@ -2,330 +2,326 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { usePermissions } from "@/lib/permissions";
 import { api } from "@/lib/api";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Users,
-  MapPin,
-  CalendarCheck,
-  DollarSign,
-  Mail,
+  MessageSquare,
   ClipboardList,
+  Mail,
   AlertTriangle,
   Clock,
   CheckCircle2,
-  Bot,
   ArrowRight,
   Loader2,
   Play,
+  CalendarCheck,
+  FileText,
+  Send,
 } from "lucide-react";
 import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
-import type { AgentStats, AgentAction, AgentMessage } from "@/types/agent";
+import type { AgentAction } from "@/types/agent";
 
-interface Stats {
-  customers: number;
-  properties: number;
+interface DashboardData {
+  // My stuff
+  unreadMessages: number;
+  latestMessages: { id: string; participants: string[]; last_message: string; last_message_at: string }[];
+  myJobs: AgentAction[];
   todayVisits: number;
-  monthlyRevenue: number;
-}
-
-function StatusDot({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: "bg-amber-400",
-    sent: "bg-green-500",
-    auto_sent: "bg-blue-500",
-    rejected: "bg-red-500",
-    ignored: "bg-gray-300",
-  };
-  return <span className={`inline-block h-2 w-2 rounded-full ${colors[status] || "bg-gray-300"}`} />;
+  activeVisit: { visit: { id: string; started_at: string }; customer: { name: string }; property: { address: string } } | null;
+  // Needs attention
+  pendingEmails: number;
+  staleEmails: number;
+  overdueJobs: number;
+  pendingEstimates: number;
+  // Recent
+  recentThreads: { id: string; customer_name: string; subject: string; last_message_at: string; status: string }[];
 }
 
 export default function DashboardPage() {
-  const { user, organizationName } = useAuth();
+  const { user } = useAuth();
   const perms = usePermissions();
-  const [stats, setStats] = useState<Stats>({
-    customers: 0,
-    properties: 0,
-    todayVisits: 0,
-    monthlyRevenue: 0,
-  });
-  const [agentStats, setAgentStats] = useState<AgentStats | null>(null);
-  const [pendingMessages, setPendingMessages] = useState<AgentMessage[]>([]);
-  const [openActions, setOpenActions] = useState<AgentAction[]>([]);
-  const [recentMessages, setRecentMessages] = useState<AgentMessage[]>([]);
-  const [activeVisit, setActiveVisit] = useState<{
-    visit: { id: string; started_at: string };
-    customer: { name: string };
-    property: { address: string };
-  } | null>(null);
+  const router = useRouter();
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const promises: Promise<unknown>[] = [
-          api.get<{ total: number }>("/v1/customers?status=active&limit=1"),
-          api.get<{ total: number }>("/v1/properties?limit=1"),
-          api.get<{ total: number }>(
-            `/v1/visits?scheduled_date=${new Date().toISOString().split("T")[0]}&limit=1`
-          ),
+        const d: DashboardData = {
+          unreadMessages: 0, latestMessages: [], myJobs: [],
+          todayVisits: 0, activeVisit: null,
+          pendingEmails: 0, staleEmails: 0, overdueJobs: 0, pendingEstimates: 0,
+          recentThreads: [],
+        };
+
+        const results = await Promise.allSettled([
+          // Messages
+          api.get<{ unread: number }>("/v1/messages/stats"),
+          api.get<{ items: DashboardData["latestMessages"] }>("/v1/messages?limit=3"),
+          // My jobs
+          api.get<AgentAction[]>(`/v1/admin/agent-actions?assigned_to=${user?.first_name}&status=open&limit=5`),
+          api.get<AgentAction[]>("/v1/admin/agent-actions?status=open&limit=5"),
+          // Visits
+          api.get<{ total: number }>(`/v1/visits?scheduled_date=${new Date().toISOString().split("T")[0]}&limit=1`),
           api.get("/v1/visits/active").catch(() => null),
-        ];
+          // Inbox stats
+          perms.canViewInbox ? api.get<{ pending: number; stale_pending: number; overdue_actions: number }>("/v1/admin/agent-threads/stats") : null,
+          // Recent inbox
+          perms.canViewInbox ? api.get<{ items: DashboardData["recentThreads"] }>("/v1/admin/agent-threads?limit=5") : null,
+        ]);
 
-        if (perms.canViewInbox) {
-          promises.push(
-            api.get<AgentStats>("/v1/admin/agent-threads/stats"),
-            api.get<{ items: AgentMessage[] }>("/v1/admin/agent-threads?status=pending&limit=5"),
-            api.get<AgentAction[]>("/v1/admin/agent-actions?status=open&limit=5"),
-            api.get<{ items: AgentMessage[] }>("/v1/admin/agent-threads?limit=5&exclude_spam=true"),
-          );
+        // Messages
+        if (results[0].status === "fulfilled") d.unreadMessages = (results[0].value as { unread: number }).unread;
+        if (results[1].status === "fulfilled") d.latestMessages = ((results[1].value as { items: DashboardData["latestMessages"] }).items || []);
+        // Jobs — my assigned first, fall back to all open
+        if (results[2].status === "fulfilled") d.myJobs = results[2].value as AgentAction[];
+        if (d.myJobs.length === 0 && results[3].status === "fulfilled") d.myJobs = (results[3].value as AgentAction[]).slice(0, 5);
+        // Visits
+        if (results[4].status === "fulfilled") d.todayVisits = (results[4].value as { total: number }).total;
+        if (results[5].status === "fulfilled" && results[5].value) d.activeVisit = results[5].value as DashboardData["activeVisit"];
+        // Inbox
+        if (results[6]?.status === "fulfilled" && results[6].value) {
+          const stats = results[6].value as { pending: number; stale_pending: number; overdue_actions: number };
+          d.pendingEmails = stats.pending;
+          d.staleEmails = stats.stale_pending;
+          d.overdueJobs = stats.overdue_actions;
+        }
+        if (results[7]?.status === "fulfilled" && results[7].value) {
+          d.recentThreads = ((results[7].value as { items: DashboardData["recentThreads"] }).items || []);
         }
 
-        const results = await Promise.all(promises);
-        const [customers, properties, visits, activeVisitData] = results as [
-          { total: number },
-          { total: number },
-          { total: number },
-          { visit: { id: string; started_at: string }; customer: { name: string }; property: { address: string } } | null,
-        ];
-
-        setStats({
-          customers: customers.total,
-          properties: properties.total,
-          todayVisits: visits.total,
-          monthlyRevenue: 0,
-        });
-
-        if (activeVisitData?.visit) {
-          setActiveVisit(activeVisitData);
-        }
-
-        if (perms.canViewInbox && results.length > 4) {
-          setAgentStats(results[4] as AgentStats);
-          setPendingMessages((results[5] as { items: AgentMessage[] }).items || []);
-          setOpenActions(results[6] as AgentAction[]);
-          setRecentMessages((results[7] as { items: AgentMessage[] }).items || []);
-        }
+        setData(d);
       } catch {
-        // Stats will stay at defaults
+        // defaults
       } finally {
         setLoading(false);
       }
     })();
-  }, [perms.canViewInbox]);
+  }, [user, perms.canViewInbox]);
 
-  const statCards = [
-    { title: "Clients", value: stats.customers, icon: Users, href: "/customers" },
-    { title: "Properties", value: stats.properties, icon: MapPin, href: "/customers" },
-    { title: "Today's Visits", value: stats.todayVisits, icon: CalendarCheck, href: "/routes" },
-    { title: "Monthly Revenue", value: `$${stats.monthlyRevenue.toLocaleString()}`, icon: DollarSign, href: "/invoices" },
-  ];
+  if (loading) {
+    return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  }
+
+  if (!data) return null;
+
+  // Build "needs attention" items
+  const alerts: { label: string; count: number; icon: React.ElementType; color: string; href: string }[] = [];
+  if (data.pendingEmails > 0) alerts.push({ label: "Pending emails", count: data.pendingEmails, icon: Mail, color: "text-amber-600", href: "/inbox" });
+  if (data.staleEmails > 0) alerts.push({ label: "Stale (30+ min)", count: data.staleEmails, icon: AlertTriangle, color: "text-red-600", href: "/inbox" });
+  if (data.overdueJobs > 0) alerts.push({ label: "Overdue jobs", count: data.overdueJobs, icon: Clock, color: "text-red-600", href: "/jobs" });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <h1 className="text-xl font-bold">Good {getTimeOfDay()}, {user?.first_name}</h1>
         <p className="text-sm text-muted-foreground">
-          Welcome back, {user?.first_name}
+          {data.todayVisits > 0 ? `${data.todayVisits} visit${data.todayVisits > 1 ? "s" : ""} today` : "No visits scheduled today"}
+          {data.myJobs.length > 0 ? ` · ${data.myJobs.length} open job${data.myJobs.length > 1 ? "s" : ""}` : ""}
         </p>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map((stat) => (
-          <Link key={stat.title} href={stat.href}>
-            <Card className="shadow-sm cursor-pointer transition-shadow hover:shadow-md">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
-                <stat.icon className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{typeof stat.value === "number" ? stat.value.toLocaleString() : stat.value}</div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-
-      {/* Active Visit */}
-      {activeVisit && (
-        <Link href={`/visits/${activeVisit.visit.id}`}>
-          <Card className="shadow-sm border-l-4 border-green-500 cursor-pointer transition-shadow hover:shadow-md">
-            <CardContent className="flex items-center gap-4 py-4">
+      {/* Active Visit Banner */}
+      {data.activeVisit && (
+        <Link href={`/visits/${data.activeVisit.visit.id}`}>
+          <Card className="shadow-sm border-l-4 border-green-500 cursor-pointer hover:shadow-md transition-shadow">
+            <CardContent className="flex items-center gap-4 py-3">
               <div className="rounded-full bg-green-100 dark:bg-green-950 p-2">
                 <Play className="h-5 w-5 text-green-600" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold">Visit In Progress</p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {activeVisit.customer.name} — {activeVisit.property.address}
+                  {data.activeVisit.customer.name} — {data.activeVisit.property.address}
                 </p>
               </div>
-              <Button size="sm" className="bg-green-600 hover:bg-green-700 flex-shrink-0">
-                Resume
-              </Button>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700 shrink-0">Resume</Button>
             </CardContent>
           </Card>
         </Link>
       )}
 
-      {/* Inbox + Actions row */}
-      {perms.canViewInbox && agentStats && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* Pending Messages */}
-          <Card className={`shadow-sm ${agentStats.pending > 0 ? "border-l-4 border-amber-400" : ""}`}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-amber-500" />
-                  <CardTitle className="text-base">Pending Messages</CardTitle>
-                  {agentStats.pending > 0 && (
-                    <Badge variant="outline" className="border-amber-400 text-amber-600 text-xs">
-                      {agentStats.pending}
-                    </Badge>
-                  )}
-                </div>
-                <Link href="/inbox">
-                  <Button variant="ghost" size="sm" className="text-xs">
-                    View All <ArrowRight className="h-3 w-3 ml-1" />
-                  </Button>
-                </Link>
+      {/* Needs Attention */}
+      {alerts.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {alerts.map((a) => (
+            <Link key={a.label} href={a.href}>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 hover:bg-muted transition-colors cursor-pointer">
+                <a.icon className={`h-4 w-4 ${a.color}`} />
+                <span className="text-sm font-medium">{a.count}</span>
+                <span className="text-xs text-muted-foreground">{a.label}</span>
               </div>
-              {agentStats.stale_pending > 0 && (
-                <p className="text-xs text-red-600 flex items-center gap-1 mt-1">
-                  <AlertTriangle className="h-3 w-3" />{agentStats.stale_pending} waiting over 30 min
-                </p>
-              )}
-            </CardHeader>
-            <CardContent>
-              {pendingMessages.length === 0 ? (
-                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  All caught up
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {pendingMessages.map((m) => (
-                    <Link key={m.id} href="/inbox" className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 transition-colors">
-                      <Clock className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{m.customer_name || m.from_email}</p>
-                        <p className="text-xs text-muted-foreground truncate">{m.subject}</p>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground flex-shrink-0">{formatTime(m.received_at)}</span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Open Jobs */}
-          <Card className={`shadow-sm ${agentStats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""}`}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4 text-purple-500" />
-                  <CardTitle className="text-base">Jobs</CardTitle>
-                  {agentStats.open_actions > 0 && (
-                    <Badge variant="outline" className="border-purple-400 text-purple-600 text-xs">
-                      {agentStats.open_actions}
-                    </Badge>
-                  )}
-                </div>
-                <Link href="/jobs">
-                  <Button variant="ghost" size="sm" className="text-xs">
-                    View All <ArrowRight className="h-3 w-3 ml-1" />
-                  </Button>
-                </Link>
-              </div>
-              {agentStats.overdue_actions > 0 && (
-                <p className="text-xs text-red-600 flex items-center gap-1 mt-1">
-                  <AlertTriangle className="h-3 w-3" />{agentStats.overdue_actions} overdue
-                </p>
-              )}
-            </CardHeader>
-            <CardContent>
-              {openActions.length === 0 ? (
-                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  No open jobs
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {openActions.map((a) => {
-                    const overdue = isOverdue(a.due_date);
-                    return (
-                      <div key={a.id} className={`flex items-center gap-3 p-2 rounded-md ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}>
-                        <Badge variant="outline" className="text-[10px] px-1.5 capitalize flex-shrink-0">
-                          {a.action_type.replace("_", " ")}
-                        </Badge>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm truncate">{a.description}</p>
-                          <p className="text-xs text-muted-foreground">{a.customer_name || a.from_email}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          {a.due_date && (
-                            <span className={`text-[10px] ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
-                              {formatDueDate(a.due_date)}
-                            </span>
-                          )}
-                          {a.assigned_to && (
-                            <p className="text-[10px] text-muted-foreground">{a.assigned_to}</p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            </Link>
+          ))}
         </div>
       )}
 
-      {/* Recent Activity */}
-      {perms.canViewInbox && recentMessages.length > 0 && (
+      {/* Main grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Messages */}
         <Card className="shadow-sm">
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-base">Recent Inbox Activity</CardTitle>
+                <MessageSquare className="h-4 w-4 text-blue-500" />
+                <CardTitle className="text-sm font-semibold">Messages</CardTitle>
+                {data.unreadMessages > 0 && (
+                  <Badge variant="default" className="text-[10px] px-1.5">{data.unreadMessages}</Badge>
+                )}
               </div>
-              <Link href="/inbox">
-                <Button variant="ghost" size="sm" className="text-xs">
+              <Link href="/messages">
+                <Button variant="ghost" size="sm" className="text-xs h-7">
                   View All <ArrowRight className="h-3 w-3 ml-1" />
                 </Button>
               </Link>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-1">
-              {recentMessages.map((m) => (
-                <div key={m.id} className="flex items-center gap-3 py-1.5">
-                  <StatusDot status={m.status} />
-                  <span className="text-sm flex-1 truncate">
-                    <span className="font-medium">{m.customer_name || m.from_email}</span>
-                    <span className="text-muted-foreground ml-2">{m.subject}</span>
-                  </span>
-                  <span className="text-[10px] text-muted-foreground flex-shrink-0">{formatTime(m.received_at)}</span>
-                </div>
-              ))}
-            </div>
+            {data.latestMessages.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-3">No messages</p>
+            ) : (
+              <div className="space-y-1">
+                {data.latestMessages.map((m) => (
+                  <Link key={m.id} href={`/messages?thread=${m.id}`}>
+                    <div className="flex items-center gap-3 py-2 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{m.participants?.join(", ") || "Message"}</p>
+                        <p className="text-xs text-muted-foreground truncate">{m.last_message}</p>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(m.last_message_at)}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
+
+        {/* My Jobs */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="h-4 w-4 text-purple-500" />
+                <CardTitle className="text-sm font-semibold">My Jobs</CardTitle>
+                {data.myJobs.length > 0 && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 border-purple-400 text-purple-600">{data.myJobs.length}</Badge>
+                )}
+              </div>
+              <Link href="/jobs">
+                <Button variant="ghost" size="sm" className="text-xs h-7">
+                  View All <ArrowRight className="h-3 w-3 ml-1" />
+                </Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {data.myJobs.length === 0 ? (
+              <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                No open jobs
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {data.myJobs.map((a) => {
+                  const overdue = isOverdue(a.due_date);
+                  return (
+                    <div
+                      key={a.id}
+                      className={`flex items-center gap-3 py-2 -mx-2 px-2 rounded cursor-pointer transition-colors ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}
+                      onClick={() => router.push(`/jobs?action=${a.id}`)}
+                    >
+                      <Badge variant="outline" className="text-[10px] px-1.5 capitalize shrink-0">
+                        {a.action_type.replace(/_/g, " ")}
+                      </Badge>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{a.description}</p>
+                        <p className="text-xs text-muted-foreground">{a.customer_name}</p>
+                      </div>
+                      {a.due_date && (
+                        <span className={`text-[10px] shrink-0 ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+                          {formatDueDate(a.due_date)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent Inbox */}
+        {perms.canViewInbox && data.recentThreads.length > 0 && (
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-semibold">Recent Emails</CardTitle>
+                </div>
+                <Link href="/inbox">
+                  <Button variant="ghost" size="sm" className="text-xs h-7">
+                    Inbox <ArrowRight className="h-3 w-3 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1">
+                {data.recentThreads.map((t) => (
+                  <Link key={t.id} href="/inbox">
+                    <div className="flex items-center gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium">{t.customer_name}</span>
+                        <span className="text-xs text-muted-foreground ml-2">{t.subject}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(t.last_message_at)}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Today's Schedule */}
+        {data.todayVisits > 0 && (
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CalendarCheck className="h-4 w-4 text-green-500" />
+                  <CardTitle className="text-sm font-semibold">Today</CardTitle>
+                  <Badge variant="secondary" className="text-[10px] px-1.5">{data.todayVisits} visit{data.todayVisits > 1 ? "s" : ""}</Badge>
+                </div>
+                <Link href="/routes">
+                  <Button variant="ghost" size="sm" className="text-xs h-7">
+                    Routes <ArrowRight className="h-3 w-3 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                {data.todayVisits} visit{data.todayVisits > 1 ? "s" : ""} scheduled. View routes for details.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
+}
+
+function getTimeOfDay() {
+  const h = new Date().getHours();
+  if (h < 12) return "morning";
+  if (h < 17) return "afternoon";
+  return "evening";
 }

@@ -65,7 +65,7 @@ function MatchingRow({ prop, onRefresh }: { prop: PropertyEMDStatus; onRefresh: 
   const loadSuggestions = useCallback(async () => {
     setLoadingSuggestions(true);
     try {
-      const data = await api.get<Suggestion[]>(`/v1/emd/suggest-matches/${prop.property_id}`);
+      const data = await api.get<Suggestion[]>(`/v1/inspections/suggest-matches/${prop.property_id}`);
       setSuggestions(data);
     } catch {
       setSuggestions([]);
@@ -82,7 +82,7 @@ function MatchingRow({ prop, onRefresh }: { prop: PropertyEMDStatus; onRefresh: 
   const handleConfirm = async (facilityId: string) => {
     setConfirming(true);
     try {
-      await api.post("/v1/emd/confirm-match", {
+      await api.post("/v1/inspections/confirm-match", {
         property_id: prop.property_id,
         facility_id: facilityId,
       });
@@ -99,7 +99,7 @@ function MatchingRow({ prop, onRefresh }: { prop: PropertyEMDStatus; onRefresh: 
   const handleReject = async () => {
     setRejecting(true);
     try {
-      await api.post(`/v1/emd/reject-match/${prop.property_id}`);
+      await api.post(`/v1/inspections/reject-match/${prop.property_id}`);
       toast.success("Match removed");
       setRejectDialog(false);
       onRefresh();
@@ -170,7 +170,7 @@ function MatchingRow({ prop, onRefresh }: { prop: PropertyEMDStatus; onRefresh: 
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : suggestions.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-3">No matching EMD records found for this address</p>
+                <p className="text-sm text-muted-foreground py-3">No matching inspection records found for this address</p>
               ) : (
                 <div className="space-y-1.5">
                   {suggestions.map((s) => {
@@ -211,7 +211,7 @@ function MatchingRow({ prop, onRefresh }: { prop: PropertyEMDStatus; onRefresh: 
       <AlertDialog open={rejectDialog} onOpenChange={setRejectDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove EMD Match</AlertDialogTitle>
+            <AlertDialogTitle>Remove Match</AlertDialogTitle>
             <AlertDialogDescription>
               This will unlink <strong>{prop.facility_name}</strong> from <strong>{prop.property_address}</strong>.
               You&apos;ll be able to search for the correct match afterward.
@@ -235,7 +235,7 @@ export function PropertyMatching() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api.get<PropertyEMDStatus[]>("/v1/emd/my-properties");
+      const data = await api.get<PropertyEMDStatus[]>("/v1/inspections/my-properties");
       setProperties(data);
     } catch {
       setProperties([]);
@@ -265,7 +265,7 @@ export function PropertyMatching() {
     <Card className="shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">My Properties — EMD Inspections</CardTitle>
+          <CardTitle className="text-base">My Properties — Health Inspections</CardTitle>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="text-green-600 font-medium">{matched} matched</span>
             {unmatched > 0 && <span className="text-amber-600 font-medium">{unmatched} unmatched</span>}
@@ -279,7 +279,7 @@ export function PropertyMatching() {
               <TableRow className="bg-slate-100 dark:bg-slate-800">
                 <TableHead className="text-xs font-medium uppercase tracking-wide">Property</TableHead>
                 <TableHead className="text-xs font-medium uppercase tracking-wide">Status</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide">EMD Facility</TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wide">Facility</TableHead>
                 <TableHead className="text-xs font-medium uppercase tracking-wide text-right">Violations</TableHead>
                 <TableHead className="text-xs font-medium uppercase tracking-wide w-32"></TableHead>
               </TableRow>

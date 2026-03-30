@@ -1,4 +1,4 @@
-import type { EMDInspection, EMDFacilityListItem, FacilityStatus } from "./emd-types";
+import type { Inspection, InspectionFacilityListItem, FacilityStatus } from "./inspection-types";
 
 export const VIOLATION_LABELS: Record<string, string> = {
   "1a": "Gate Self-Close/Latch",
@@ -44,7 +44,7 @@ export const VIOLATION_LABELS: Record<string, string> = {
   "37": "Electrical Hazards",
   "38": "Filter Maintenance",
   "39": "Wastewater Disposal",
-  "43": "EMD Approval Required",
+  "43": "Agency Approval Required",
   "44": "Lifeguard Certification",
   "46": "Other",
 };
@@ -57,13 +57,13 @@ export function getViolationLabel(code: string | null, title: string | null): st
   return title || "Violation";
 }
 
-export function hasClosureViolations(insp: EMDInspection): boolean {
+export function hasClosureViolations(insp: Inspection): boolean {
   if (!insp.violations) return false;
   const re = /MAJOR[\s/\-]*(VIOLATION[\s\-]*)?CLOSURE/i;
   return insp.violations.some(v => v.observations && re.test(v.observations));
 }
 
-export function getFacilityStatus(inspections: EMDInspection[]): FacilityStatus {
+export function getFacilityStatus(inspections: Inspection[]): FacilityStatus {
   if (inspections.length === 0) return "compliant";
   const latest = inspections[0];
   if (hasClosureViolations(latest)) return "closure";
@@ -72,7 +72,7 @@ export function getFacilityStatus(inspections: EMDInspection[]): FacilityStatus 
   return "compliant";
 }
 
-export function getListItemStatus(f: EMDFacilityListItem): "green" | "amber" | "red" {
+export function getListItemStatus(f: InspectionFacilityListItem): "green" | "amber" | "red" {
   if (f.total_violations > 10) return "red";
   if (f.total_violations > 0) return "amber";
   return "green";
@@ -84,7 +84,7 @@ export function getStatusDotColor(status: "green" | "amber" | "red") {
   return "bg-green-500";
 }
 
-export function getTimelineDotColor(insp: EMDInspection): string {
+export function getTimelineDotColor(insp: Inspection): string {
   if (hasClosureViolations(insp)) return "bg-red-500";
   if (insp.major_violations > 0) return "bg-red-500";
   if (insp.total_violations > 0) return "bg-amber-500";

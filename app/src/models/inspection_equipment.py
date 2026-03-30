@@ -7,15 +7,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class EMDEquipment(Base):
-    __tablename__ = "emd_equipment"
+class InspectionEquipment(Base):
+    __tablename__ = "inspection_equipment"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     inspection_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("emd_inspections.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("inspections.id", ondelete="CASCADE"), nullable=False, index=True
     )
     facility_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("emd_facilities.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("inspection_facilities.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Pool specs
@@ -92,5 +92,5 @@ class EMDEquipment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    inspection = relationship("EMDInspection", back_populates="equipment", lazy="noload")
-    facility = relationship("EMDFacility", lazy="noload")
+    inspection = relationship("Inspection", back_populates="equipment", lazy="noload")
+    facility = relationship("InspectionFacility", lazy="noload")

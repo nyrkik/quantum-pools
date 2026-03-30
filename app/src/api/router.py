@@ -16,14 +16,14 @@ from src.api.v1.photos import router as photos_router
 from src.api.v1.team import router as team_router
 from src.api.v1.dimensions import router as dimensions_router
 from src.api.v1.chemical_costs import router as chemical_costs_router
-from src.api.v1.emd import router as emd_router
+from src.api.v1.inspection import router as inspection_router
 from src.api.v1.billing import router as billing_router
 from src.api.v1.service_tiers import router as service_tiers_router
 from src.api.v1.notifications import router as notifications_router
 from src.api.v1.branding import router as branding_router
 from src.api.v1.agent_ops import router as agent_ops_router
 from src.api.v1.permissions import router as permissions_router
-from src.api.v1.admin_emd import router as admin_emd_router
+from src.api.v1.admin_inspection import router as admin_inspection_router
 from src.api.v1.admin_threads import router as admin_threads_router
 from src.api.v1.admin_messages import router as admin_messages_router
 from src.api.v1.admin_actions import router as admin_actions_router
@@ -42,6 +42,7 @@ from src.api.v1.inbox_routing import router as inbox_routing_router
 from src.api.v1.inbound_email import router as inbound_email_router
 from src.api.v1.public import router as public_router
 from src.api.v1.feedback import router as feedback_router
+from src.api.v1.messages import router as messages_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -59,14 +60,14 @@ api_router.include_router(photos_router)
 api_router.include_router(team_router)
 api_router.include_router(dimensions_router)
 api_router.include_router(chemical_costs_router)
-api_router.include_router(emd_router)
+api_router.include_router(inspection_router)
 api_router.include_router(billing_router)
 api_router.include_router(service_tiers_router)
 api_router.include_router(notifications_router)
 api_router.include_router(branding_router)
 api_router.include_router(agent_ops_router)
 api_router.include_router(permissions_router)
-api_router.include_router(admin_emd_router)
+api_router.include_router(admin_inspection_router)
 api_router.include_router(admin_threads_router)
 api_router.include_router(admin_messages_router)
 api_router.include_router(admin_actions_router)
@@ -85,3 +86,4 @@ api_router.include_router(inbox_routing_router)
 api_router.include_router(inbound_email_router)
 api_router.include_router(public_router)
 api_router.include_router(feedback_router)
+api_router.include_router(messages_router)

@@ -9,13 +9,13 @@ from sqlalchemy import select, func, desc
 from src.core.database import get_db
 from src.api.deps import get_current_org_user, OrgUserContext, require_roles, OrgRole
 from src.models.scraper_run import ScraperRun
-from src.models.emd_facility import EMDFacility
-from src.models.emd_inspection import EMDInspection
-from src.models.emd_violation import EMDViolation
+from src.models.inspection_facility import InspectionFacility
+from src.models.inspection import Inspection
+from src.models.inspection_violation import InspectionViolation
 from src.models.property import Property
 from src.models.customer import Customer
 
-router = APIRouter(prefix="/admin", tags=["admin-emd"])
+router = APIRouter(prefix="/admin", tags=["admin-inspection"])
 
 
 @router.get("/scraper-runs")
@@ -47,19 +47,19 @@ async def list_scraper_runs(
     ]
 
 
-@router.get("/emd-stats")
+@router.get("/inspection-stats")
 async def get_emd_stats(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """EMD database statistics."""
-    facilities = (await db.execute(select(func.count(EMDFacility.id)))).scalar()
-    inspections = (await db.execute(select(func.count(EMDInspection.id)))).scalar()
-    violations = (await db.execute(select(func.count(EMDViolation.id)))).scalar()
+    facilities = (await db.execute(select(func.count(InspectionFacility.id)))).scalar()
+    inspections = (await db.execute(select(func.count(Inspection.id)))).scalar()
+    violations = (await db.execute(select(func.count(InspectionViolation.id)))).scalar()
 
     latest = (await db.execute(
-        select(EMDInspection.inspection_date)
-        .order_by(desc(EMDInspection.inspection_date))
+        select(Inspection.inspection_date)
+        .order_by(desc(Inspection.inspection_date))
         .limit(1)
     )).scalar()
 
@@ -76,12 +76,12 @@ async def get_emd_stats(
         "violations": violations,
         "latest_inspection_date": latest.isoformat() if latest else None,
         "last_successful_run": last_run.started_at.isoformat() if last_run else None,
-        "matched": (await db.execute(select(func.count(EMDFacility.id)).where(EMDFacility.matched_property_id.isnot(None)))).scalar(),
-        "unmatched": (await db.execute(select(func.count(EMDFacility.id)).where(EMDFacility.matched_property_id.is_(None)))).scalar(),
+        "matched": (await db.execute(select(func.count(InspectionFacility.id)).where(InspectionFacility.matched_property_id.isnot(None)))).scalar(),
+        "unmatched": (await db.execute(select(func.count(InspectionFacility.id)).where(InspectionFacility.matched_property_id.is_(None)))).scalar(),
     }
 
 
-@router.get("/emd-unmatched")
+@router.get("/inspection-unmatched")
 async def list_unmatched_facilities(
     limit: int = Query(50, ge=1, le=200),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
@@ -89,9 +89,9 @@ async def list_unmatched_facilities(
 ):
     """List EMD facilities not yet matched to a property."""
     result = await db.execute(
-        select(EMDFacility)
-        .where(EMDFacility.matched_property_id.is_(None))
-        .order_by(EMDFacility.name)
+        select(InspectionFacility)
+        .where(InspectionFacility.matched_property_id.is_(None))
+        .order_by(InspectionFacility.name)
         .limit(limit)
     )
     facilities = result.scalars().all()
@@ -101,9 +101,9 @@ async def list_unmatched_facilities(
     if facilities:
         fac_ids = [f.id for f in facilities]
         count_result = await db.execute(
-            select(EMDInspection.facility_id, func.count(EMDInspection.id))
-            .where(EMDInspection.facility_id.in_(fac_ids))
-            .group_by(EMDInspection.facility_id)
+            select(Inspection.facility_id, func.count(Inspection.id))
+            .where(Inspection.facility_id.in_(fac_ids))
+            .group_by(Inspection.facility_id)
         )
         insp_counts = {row[0]: row[1] for row in count_result.all()}
 
@@ -162,8 +162,8 @@ async def manual_match_facility(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually match an EMD facility to a property."""
-    from src.services.emd.service import EMDService
-    svc = EMDService(db)
+    from src.services.inspection.service import InspectionService
+    svc = InspectionService(db)
     try:
         facility = await svc.match_facility(body.facility_id, body.property_id, ctx.organization_id)
         # Copy FA number to property if not already set
@@ -183,7 +183,7 @@ async def unmatch_facility(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove match between EMD facility and property."""
-    result = await db.execute(select(EMDFacility).where(EMDFacility.id == facility_id))
+    result = await db.execute(select(InspectionFacility).where(InspectionFacility.id == facility_id))
     facility = result.scalar_one_or_none()
     if not facility:
         raise HTTPException(status_code=404, detail="Facility not found")

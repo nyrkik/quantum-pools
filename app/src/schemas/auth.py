@@ -68,7 +68,7 @@ class OrgUserResponse(BaseModel):
     role: str
     is_developer: bool = False
     features: list[str] = []
-    emd_tier: Optional[str] = None
+    inspection_tier: Optional[str] = None
     branding: Optional[OrgBrandingResponse] = None
     role_version: int = 0
     permissions: dict[str, str] = {}

@@ -7,8 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class EMDLookup(Base):
-    __tablename__ = "emd_lookups"
+class InspectionLookup(Base):
+    __tablename__ = "inspection_lookups"
     __table_args__ = (
         UniqueConstraint("organization_id", "facility_id", name="uq_org_facility_lookup"),
     )
@@ -18,7 +18,7 @@ class EMDLookup(Base):
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     facility_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("emd_facilities.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("inspection_facilities.id", ondelete="CASCADE"), nullable=False, index=True
     )
     price_cents: Mapped[int] = mapped_column(Integer, default=99)
     stripe_payment_id: Mapped[str | None] = mapped_column(String(100))
@@ -26,4 +26,4 @@ class EMDLookup(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     organization = relationship("Organization", lazy="noload")
-    facility = relationship("EMDFacility", lazy="noload")
+    facility = relationship("InspectionFacility", lazy="noload")

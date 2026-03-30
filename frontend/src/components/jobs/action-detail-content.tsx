@@ -41,19 +41,40 @@ import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges"
 import { TasksSection } from "@/components/jobs/tasks-section";
 import type { ActionDetail } from "@/types/agent";
 import { JobPartsSection } from "@/components/jobs/job-parts-section";
+import { useTeamMembers } from "@/hooks/use-team-members";
 
 // --- Utility components ---
 
-function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
-  detail: ActionDetail; actionId: string; onUpdate: () => void; loadDetail: () => void;
+function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
+  detail: ActionDetail; actionId: string; onUpdate: () => void; loadDetail: () => void; onClose: () => void;
 }) {
   const isSuggested = detail.is_suggested === true;
 
+  const [sending, setSending] = useState(false);
+  const isCustomerJob = detail.job_path === "customer";
+
   const statusColors: Record<string, string> = {
-    open: "bg-blue-500",
-    in_progress: "bg-amber-500",
-    done: "bg-green-500",
-    cancelled: "bg-slate-400",
+    open: "bg-blue-100 dark:bg-blue-950",
+    in_progress: "bg-amber-100 dark:bg-amber-950",
+    done: "bg-green-100 dark:bg-green-950",
+    cancelled: "bg-slate-100 dark:bg-slate-800",
+    pending_approval: "bg-purple-100 dark:bg-purple-950",
+    approved: "bg-green-100 dark:bg-green-950",
+  };
+
+  const handleSendEstimate = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-actions/${actionId}/send-estimate`);
+      toast.success("Estimate sent to customer");
+      loadDetail();
+      onUpdate();
+    } catch (e: unknown) {
+      const msg = e && typeof e === "object" && "message" in e ? (e as { message: string }).message : "Failed to send";
+      toast.error(msg);
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleStatusChange = async (status: string) => {
@@ -110,7 +131,7 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
   }
 
   return (
-    <div className={`${statusColors[detail.status] || "bg-slate-400"} rounded-lg p-3 text-white`}>
+    <div className={`${statusColors[detail.status] || "bg-slate-100 dark:bg-slate-800"} rounded-lg p-3`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ActionStatusIcon status={detail.status} />
@@ -120,14 +141,50 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail }: {
             <Badge variant="destructive" className="text-[10px] px-1.5 bg-red-700">Overdue</Badge>
           )}
         </div>
-        {(detail.status === "open" || detail.status === "in_progress") && (
-          <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => handleStatusChange("done")}>
-            <CheckCircle2 className="h-3 w-3 mr-1" /> Done
-          </Button>
-        )}
+        <div className="flex gap-1.5">
+          {isCustomerJob && detail.status === "open" && detail.invoice_id && (
+            <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={handleSendEstimate} disabled={sending}>
+              {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+              Send Estimate
+            </Button>
+          )}
+          {isCustomerJob && detail.status === "pending_approval" && (
+            <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={handleSendEstimate} disabled={sending}>
+              {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+              Resend
+            </Button>
+          )}
+          {(detail.status === "open" || detail.status === "in_progress" || detail.status === "approved") && (
+            <>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" className="h-7 text-xs bg-red-700 hover:bg-red-800 text-white">
+                    Cancel Job
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Cancel this job?</AlertDialogTitle>
+                    <AlertDialogDescription>This will cancel the job. Comments and history will be preserved.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Keep Job</AlertDialogCancel>
+                    <AlertDialogAction onClick={async () => {
+                      try { await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" }); toast.success("Job cancelled"); onClose(); onUpdate(); }
+                      catch { toast.error("Failed"); }
+                    }}>Cancel Job</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => handleStatusChange("done")}>
+                <CheckCircle2 className="h-3 w-3 mr-1" /> Mark Job Done
+              </Button>
+            </>
+          )}
+        </div>
       </div>
-      <p className="text-sm mt-2 text-white/90">{detail.description}</p>
-      <div className="flex items-center gap-4 text-xs text-white/70 mt-1">
+      <p className="text-sm mt-2">{detail.description}</p>
+      <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
         {detail.customer_name && <span>{detail.customer_name}</span>}
         {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
         <DueDateEditor actionId={actionId} currentDate={detail.due_date} onUpdate={() => { loadDetail(); onUpdate(); }} />
@@ -231,6 +288,9 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  const teamMembers = useTeamMembers();
   const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
   const [followUpText, setFollowUpText] = useState("");
   const [draftingFollowUp, setDraftingFollowUp] = useState(false);
@@ -324,7 +384,7 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
   return (
     <div className="space-y-3 pt-2">
       {/* 1. Status Bar — always on top */}
-      <StatusBar detail={detail} actionId={actionId} onUpdate={onUpdate} loadDetail={loadDetail} />
+      <StatusBar detail={detail} actionId={actionId} onUpdate={onUpdate} loadDetail={loadDetail} onClose={onClose} />
 
       {/* 2. Action Buttons — grouped by purpose */}
       {isActive && !followUp && (
@@ -333,13 +393,6 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
           {detail.action_type === "site_visit" && visitPropertyId && (
             <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/visits/new?property=${visitPropertyId}&job=${actionId}`)}>
               <Play className="h-3.5 w-3.5 mr-2 text-green-600" /> Start Visit
-            </Button>
-          )}
-          {/* Communication */}
-          {detail.agent_message_id && (
-            <Button variant="outline" size="sm" className="justify-start" onClick={handleDraftFollowUp} disabled={draftingFollowUp}>
-              {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" /> : <Mail className="h-3.5 w-3.5 mr-2 text-blue-600" />}
-              Draft Follow-up Email
             </Button>
           )}
           {/* Billing */}
@@ -394,22 +447,27 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
 
       {/* 4. Parts — purchased parts for this job */}
       <CollapsibleSection title="Parts" icon={Package} defaultOpen={false}>
-        <JobPartsSection jobId={actionId} />
+        <JobPartsSection jobId={actionId} customerId={detail.matched_customer_id} />
       </CollapsibleSection>
 
-      {/* 5. Context — email thread + related jobs (collapsed by default) */}
-      {(detail.subject || detail.related_jobs?.length) && (
-        <CollapsibleSection title="Context" icon={ClipboardList} defaultOpen={false} count={detail.related_jobs?.length}>
-          <div className="space-y-2">
-            {detail.subject && (
-              <ExpandableCard label={`Email: ${detail.from_email}`} title={detail.subject}>
-                {detail.email_body}
-              </ExpandableCard>
-            )}
+      {/* 5. Timeline — unified: original request, replies, comments, related jobs */}
+      <CollapsibleSection title="Timeline" icon={MessageSquare} defaultOpen={true}>
+        {/* Original request (email, phone, etc.) */}
+        {detail.subject && (
+          <div className="space-y-2 mb-3">
+            <ExpandableCard label={detail.from_email ? `Email: ${detail.from_email}` : "Original Request"} title={detail.subject}>
+              {detail.email_body}
+            </ExpandableCard>
             {detail.our_response && (
               <ExpandableCard label="Our reply" variant="green">{detail.our_response}</ExpandableCard>
             )}
-            {detail.related_jobs?.map((job) => (
+          </div>
+        )}
+
+        {/* Related jobs */}
+        {detail.related_jobs && detail.related_jobs.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {detail.related_jobs.map((job) => (
               <div key={job.id} className="bg-muted/30 rounded-md p-2.5 text-sm">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <ActionStatusIcon status={job.status} />
@@ -426,11 +484,9 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
               </div>
             ))}
           </div>
-        </CollapsibleSection>
-      )}
+        )}
 
-      {/* 5. Activity — visually distinct from tasks */}
-      <CollapsibleSection title="Activity" icon={MessageSquare} count={detail.comments?.length} defaultOpen={true}>
+        {/* Comments / activity */}
         {detail.comments && detail.comments.length > 0 ? (
           <div className="space-y-2 mb-3">
             {detail.comments.map((c) => {
@@ -479,43 +535,71 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
         ) : (
           <p className="text-xs text-muted-foreground mb-3">No comments yet</p>
         )}
-        <div className="flex gap-2 items-end">
-          <Textarea value={comment} onChange={(e) => setComment(e.target.value)}
-            placeholder="Add a comment or give AI a command..." className="text-sm min-h-[2.5rem] resize-none flex-1" rows={2} />
-          <Button size="sm" className="h-9 flex-shrink-0" onClick={handleAddComment} disabled={posting || !comment.trim()}>
-            {posting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Post"}
+        {isActive && detail.agent_message_id && (
+          <Button variant="outline" size="sm" className="w-full justify-start mb-3" onClick={handleDraftFollowUp} disabled={draftingFollowUp}>
+            {draftingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" /> : <Mail className="h-3.5 w-3.5 mr-2 text-blue-600" />}
+            Draft Follow-up Email
           </Button>
+        )}
+        <div className="relative">
+          <div className="flex gap-2 items-end">
+            <Textarea
+              value={comment}
+              onChange={(e) => {
+                const val = e.target.value;
+                setComment(val);
+                // Detect @ trigger
+                const lastAt = val.lastIndexOf("@");
+                if (lastAt >= 0 && (lastAt === 0 || val[lastAt - 1] === " " || val[lastAt - 1] === "\n")) {
+                  const afterAt = val.slice(lastAt + 1);
+                  if (!afterAt.includes(" ") || afterAt.split(" ").length <= 1) {
+                    setMentionOpen(true);
+                    setMentionFilter(afterAt.toLowerCase());
+                  } else {
+                    setMentionOpen(false);
+                  }
+                } else {
+                  setMentionOpen(false);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setMentionOpen(false);
+              }}
+              placeholder="Comment, or type @ to mention..."
+              className="text-sm min-h-[2.5rem] resize-none flex-1"
+              rows={2}
+            />
+            <Button size="sm" className="h-9 flex-shrink-0" onClick={() => { handleAddComment(); setMentionOpen(false); }} disabled={posting || !comment.trim()}>
+              {posting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Post"}
+            </Button>
+          </div>
+
+          {/* Mention autocomplete dropdown */}
+          {mentionOpen && (
+            <div className="absolute bottom-full left-0 mb-1 w-48 bg-background border rounded-md shadow-lg z-10 py-1 max-h-40 overflow-y-auto">
+              {[{ name: "DeepBlue", label: "AI Assistant" }, ...teamMembers.map(n => ({ name: n, label: "" }))].filter(
+                (m) => m.name.toLowerCase().startsWith(mentionFilter) || !mentionFilter
+              ).map((m) => (
+                <button
+                  key={m.name}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors flex items-center justify-between"
+                  onClick={() => {
+                    // Replace @partial with @Name
+                    const lastAt = comment.lastIndexOf("@");
+                    const before = comment.slice(0, lastAt);
+                    setComment(`${before}@${m.name} `);
+                    setMentionOpen(false);
+                  }}
+                >
+                  <span className={m.name === "DeepBlue" ? "font-medium text-violet-600" : ""}>{m.name}</span>
+                  {m.label && <span className="text-[10px] text-muted-foreground">{m.label}</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1">
-          Try: "draft email to client", "assign to Shane", "mark as done"
-        </p>
       </CollapsibleSection>
 
-      {/* 6. Danger zone — bottom, subtle */}
-      {detail.status !== "cancelled" && (
-        <div className="flex justify-end pt-1">
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-destructive">
-                <Trash2 className="h-3 w-3 mr-1" /> Cancel Job
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Cancel this job?</AlertDialogTitle>
-                <AlertDialogDescription>This will cancel the job. Comments and history will be preserved.</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Keep Job</AlertDialogCancel>
-                <AlertDialogAction onClick={async () => {
-                  try { await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" }); toast.success("Job cancelled"); onClose(); onUpdate(); }
-                  catch { toast.error("Failed"); }
-                }}>Cancel Job</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      )}
     </div>
   );
 }

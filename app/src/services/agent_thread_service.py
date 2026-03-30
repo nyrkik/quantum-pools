@@ -27,35 +27,7 @@ AGENT_FROM_EMAIL = os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.co
 AGENT_FROM_NAME = os.environ.get("AGENT_FROM_NAME", "Sapphire Pools")
 
 
-def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
-    d = {
-        "id": a.id,
-        "agent_message_id": a.agent_message_id,
-        "customer_id": a.customer_id,
-        "action_type": a.action_type,
-        "description": a.description,
-        "assigned_to": a.assigned_to,
-        "due_date": a.due_date.isoformat() if a.due_date else None,
-        "status": a.status,
-        "notes": a.notes,
-        "customer_name": a.customer_name,
-        "property_address": a.property_address,
-        "created_by": a.created_by,
-        "invoice_id": a.invoice_id,
-        "parent_action_id": a.parent_action_id,
-        "task_count": a.task_count or 0,
-        "tasks_completed": a.tasks_completed or 0,
-        "completed_at": a.completed_at.isoformat() if a.completed_at else None,
-        "created_at": a.created_at.isoformat() if a.created_at else None,
-        "is_suggested": a.is_suggested if hasattr(a, "is_suggested") else False,
-        "suggestion_confidence": a.suggestion_confidence if hasattr(a, "suggestion_confidence") else None,
-    }
-    if include_comments and hasattr(a, "comments") and a.comments:
-        d["comments"] = [
-            {"id": c.id, "author": c.author, "text": c.text, "created_at": c.created_at.isoformat()}
-            for c in a.comments
-        ]
-    return d
+from src.presenters.action_presenter import ActionPresenter
 
 
 class AgentThreadService:
@@ -152,6 +124,27 @@ class AgentThreadService:
         )
         threads = result.scalars().all()
 
+        # Look up matched customer display names + first property address
+        customer_names: dict[str, str] = {}
+        customer_addresses: dict[str, str] = {}
+        cust_ids = [t.matched_customer_id for t in threads if t.matched_customer_id]
+        if cust_ids:
+            from src.models.customer import Customer
+            from src.models.property import Property
+            cust_result = await self.db.execute(
+                select(Customer).where(Customer.id.in_(cust_ids))
+            )
+            for c in cust_result.scalars().all():
+                customer_names[c.id] = c.display_name
+            # Get first property address for each customer
+            for cid in cust_ids:
+                prop_result = await self.db.execute(
+                    select(Property).where(Property.customer_id == cid, Property.is_active == True).limit(1)
+                )
+                prop = prop_result.scalar_one_or_none()
+                if prop:
+                    customer_addresses[cid] = f"{prop.address}, {prop.city}"
+
         # Look up read status for current user
         read_map: dict[str, datetime] = {}
         if current_user_id and threads:
@@ -168,7 +161,9 @@ class AgentThreadService:
                     "id": t.id,
                     "contact_email": t.contact_email,
                     "subject": t.subject,
-                    "customer_name": t.customer_name,
+                    "customer_name": customer_names.get(t.matched_customer_id, t.customer_name),
+                    "contact_name": t.customer_name if t.matched_customer_id and customer_names.get(t.matched_customer_id) != t.customer_name else None,
+                    "customer_address": customer_addresses.get(t.matched_customer_id) if t.matched_customer_id else None,
                     "matched_customer_id": t.matched_customer_id,
                     "status": t.status,
                     "urgency": t.urgency,
@@ -314,7 +309,7 @@ class AgentThreadService:
             .where(AgentAction.thread_id == thread_id, AgentAction.organization_id == org_id)
             .order_by(AgentAction.created_at)
         )
-        actions = [_serialize_action(a, include_comments=True) for a in actions_result.scalars().all()]
+        actions = await ActionPresenter(self.db).many(list(actions_result.scalars().all()))
 
         return {
             "id": thread.id,

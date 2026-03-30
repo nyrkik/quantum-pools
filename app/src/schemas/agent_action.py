@@ -4,6 +4,12 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class LineItemBody(BaseModel):
+    description: str
+    quantity: float = 1
+    unit_price: float = 0
+
+
 class CreateActionBody(BaseModel):
     agent_message_id: Optional[str] = None
     action_type: str
@@ -12,6 +18,8 @@ class CreateActionBody(BaseModel):
     due_date: Optional[str] = None
     customer_name: Optional[str] = None
     property_address: Optional[str] = None
+    job_path: str = "internal"  # "internal" or "customer"
+    line_items: Optional[list[LineItemBody]] = None  # for customer path
 
 
 class UpdateActionBody(BaseModel):

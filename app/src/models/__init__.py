@@ -66,6 +66,7 @@ from src.models.part_purchase import PartPurchase
 from src.models.equipment_catalog import EquipmentCatalog
 from src.models.equipment_item import EquipmentItem
 from src.models.equipment_event import EquipmentEvent
+from src.models.feedback_item import FeedbackItem
 
 __all__ = [
     "Base",
@@ -120,4 +121,5 @@ __all__ = [
     "EquipmentItem",
     "EquipmentEvent",
     "InboxRoutingRule",
+    "FeedbackItem",
 ]

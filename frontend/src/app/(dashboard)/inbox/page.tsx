@@ -314,9 +314,9 @@ export default function InboxPage() {
                       {formatTime(t.last_message_at)}
                     </div>
                   </TableCell>
-                  <TableCell className="truncate max-w-[180px]">
+                  <TableCell className="max-w-[200px]">
                     <div className="flex items-center gap-1.5">
-                      <span className={t.is_unread ? "font-semibold" : t.has_pending ? "font-medium" : ""}>
+                      <span className={`truncate ${t.is_unread ? "font-semibold" : t.has_pending ? "font-medium" : ""}`}>
                         {t.customer_name || t.contact_email.split("@")[0]}
                       </span>
                       {t.visibility_permission && (
@@ -330,6 +330,12 @@ export default function InboxPage() {
                         </Badge>
                       )}
                     </div>
+                    {t.customer_address && (
+                      <p className="text-[10px] text-muted-foreground truncate">{t.customer_address}</p>
+                    )}
+                    {t.contact_name && (
+                      <p className="text-[10px] text-muted-foreground truncate">Contact: {t.contact_name}</p>
+                    )}
                   </TableCell>
                   <TableCell className="truncate max-w-[250px] text-sm">
                     <span className={t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}>

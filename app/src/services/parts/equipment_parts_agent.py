@@ -139,30 +139,11 @@ class EquipmentPartsAgent:
         }
 
     async def _get_unique_equipment_models(self, org_id: str) -> list[dict]:
-        """Extract unique equipment models from water_features + equipment_items."""
+        """Extract unique equipment models from equipment_items (source of truth)."""
         seen = set()
         results = []
 
-        # Water feature equipment fields
-        for field_name, eq_type in _WF_EQUIPMENT_FIELDS.items():
-            col = getattr(WaterFeature, field_name)
-            stmt = (
-                select(func.distinct(col))
-                .where(
-                    WaterFeature.organization_id == org_id,
-                    col.isnot(None),
-                    col != "",
-                )
-            )
-            rows = await self.db.execute(stmt)
-            for (val,) in rows:
-                normalized = val.strip()
-                key = normalized.lower()
-                if key not in seen and len(normalized) >= _MIN_MODEL_LEN:
-                    seen.add(key)
-                    results.append({"model": normalized, "type": eq_type, "source": "water_feature"})
-
-        # Equipment items (brand + model)
+        # Equipment items table is the source of truth
         stmt = (
             select(EquipmentItem.brand, EquipmentItem.model, EquipmentItem.equipment_type)
             .where(

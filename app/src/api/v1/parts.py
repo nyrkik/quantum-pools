@@ -162,25 +162,26 @@ async def get_customer_parts(
     )
     water_features = wf_result.scalars().all()
 
-    # 3. Extract unique equipment models per water feature
-    equipment_fields = [
-        ("pump", "pump_type"),
-        ("filter", "filter_type"),
-        ("heater", "heater_type"),
-        ("chlorinator", "chlorinator_type"),
-        ("automation", "automation_system"),
-    ]
+    # 3. Extract equipment from equipment_items table (source of truth)
+    from src.models.equipment_item import EquipmentItem
+    from sqlalchemy.orm import selectinload
 
     equipment_entries: list[dict] = []
     seen_models: set[str] = set()
 
     for wf in water_features:
-        for eq_type, field in equipment_fields:
-            model = getattr(wf, field, None)
-            if not model or not model.strip():
+        eq_result = await db.execute(
+            select(EquipmentItem).options(selectinload(EquipmentItem.catalog_equipment)).where(
+                EquipmentItem.water_feature_id == wf.id,
+                EquipmentItem.is_active == True,
+            )
+        )
+        for ei in eq_result.scalars().all():
+            model = (ei.catalog_equipment.canonical_name if ei.catalog_equipment else
+                     ei.normalized_name or f"{ei.brand or ''} {ei.model or ''}".strip())
+            if not model:
                 continue
-            model = model.strip()
-            key = f"{wf.id}:{eq_type}:{model}"
+            key = f"{wf.id}:{ei.equipment_type}:{model}"
             if key in seen_models:
                 continue
             seen_models.add(key)
@@ -188,7 +189,7 @@ async def get_customer_parts(
                 "water_feature_id": wf.id,
                 "water_feature_name": wf.name or wf.water_type.replace("_", " ").title(),
                 "property_id": wf.property_id,
-                "equipment_type": eq_type,
+                "equipment_type": ei.equipment_type,
                 "model": model,
             })
 

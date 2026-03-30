@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { formatDueDate, isOverdue } from "@/lib/format";
 import { useTeamMembers } from "@/hooks/use-team-members";
-import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
+import { ActionTypeBadge, ActionStatusIcon, JobPathBadge } from "@/components/jobs/job-badges";
 import { ActionDetailContent } from "@/components/jobs/action-detail-content";
 import { NewJobForm } from "@/components/jobs/new-job-form";
 import type { AgentAction, AgentStats } from "@/types/agent";
@@ -133,7 +133,7 @@ export default function JobsPage() {
   // Group actions by parent message (event) or standalone
   const grouped = new Map<
     string,
-    { label: string; from: string; actions: AgentAction[] }
+    { label: string; from: string; address: string; actions: AgentAction[] }
   >();
   for (const a of actions) {
     const key = a.agent_message_id || `standalone-${a.id}`;
@@ -141,6 +141,7 @@ export default function JobsPage() {
       grouped.set(key, {
         label: a.subject || "Unknown",
         from: a.customer_name || a.from_email || "",
+        address: (a as unknown as Record<string, string>).customer_address || "",
         actions: [],
       });
     }
@@ -284,15 +285,14 @@ export default function JobsPage() {
       </div>
 
       {/* New Job form */}
-      {newActionOpen && (
-        <NewJobForm
-          onCreated={() => {
-            setNewActionOpen(false);
-            load();
-          }}
-          onClose={() => setNewActionOpen(false)}
-        />
-      )}
+      <NewJobForm
+        open={newActionOpen}
+        onCreated={() => {
+          setNewActionOpen(false);
+          load();
+        }}
+        onClose={() => setNewActionOpen(false)}
+      />
 
       {/* Grouped jobs list */}
       <Card className="shadow-sm">
@@ -322,13 +322,14 @@ export default function JobsPage() {
                   >
                     {/* Event header */}
                     <div className="flex items-center justify-between px-4 pt-3 pb-1">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {group.from}
-                        </p>
-                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-                          — {group.label}
-                        </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium truncate">{group.from}</p>
+                          <span className="text-xs text-muted-foreground truncate hidden sm:inline">— {group.label}</span>
+                        </div>
+                        {group.address && (
+                          <p className="text-[10px] text-muted-foreground truncate">{group.address}</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                       </div>
@@ -363,6 +364,7 @@ export default function JobsPage() {
                                 <ActionTypeBadge
                                   type={a.action_type}
                                 />
+                                <JobPathBadge path={a.job_path} />
                                 {isSuggested && (
                                   <Badge
                                     variant="outline"

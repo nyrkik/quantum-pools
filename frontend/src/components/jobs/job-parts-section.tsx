@@ -32,16 +32,25 @@ interface PartPurchase {
   notes: string | null;
 }
 
+interface EquipmentParts {
+  model: string;
+  equipment_type: string;
+  water_feature_name: string;
+  parts: { id: string; name: string; brand: string | null; sku: string | null; category: string | null }[];
+}
+
 interface JobPartsSectionProps {
   jobId: string;
   propertyId?: string | null;
+  customerId?: string | null;
 }
 
-export function JobPartsSection({ jobId, propertyId }: JobPartsSectionProps) {
+export function JobPartsSection({ jobId, propertyId, customerId }: JobPartsSectionProps) {
   const [parts, setParts] = useState<PartPurchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [equipParts, setEquipParts] = useState<EquipmentParts[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -53,6 +62,17 @@ export function JobPartsSection({ jobId, propertyId }: JobPartsSectionProps) {
       setLoading(false);
     }
   }, [jobId]);
+
+  // Load relevant parts from customer's equipment
+  useEffect(() => {
+    if (!customerId) return;
+    api.get<{ equipment: EquipmentParts[] }>(`/v1/parts/customer/${customerId}`)
+      .then((data) => {
+        // Filter to only equipment that has parts
+        setEquipParts((data.equipment || []).filter(e => e.parts && e.parts.length > 0));
+      })
+      .catch(() => {});
+  }, [customerId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -121,8 +141,31 @@ export function JobPartsSection({ jobId, propertyId }: JobPartsSectionProps) {
         </div>
       )}
 
-      {parts.length === 0 && !showAdd && (
-        <p className="text-xs text-muted-foreground text-center py-2">No parts purchased yet</p>
+      {/* Relevant parts from customer equipment */}
+      {equipParts.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Equipment Parts</p>
+          {equipParts.map((eq, idx) => (
+            <div key={idx} className="space-y-0.5">
+              <p className="text-xs font-medium">{eq.model}</p>
+              <div className="border-l-2 border-muted pl-2 space-y-0.5">
+                {eq.parts.slice(0, 5).map((p) => (
+                  <div key={p.id} className="flex items-center justify-between text-xs py-0.5">
+                    <span className="text-muted-foreground truncate">{p.name}</span>
+                    {p.sku && <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1 rounded shrink-0 ml-2">{p.sku}</span>}
+                  </div>
+                ))}
+                {eq.parts.length > 5 && (
+                  <p className="text-[10px] text-muted-foreground">+{eq.parts.length - 5} more</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {parts.length === 0 && equipParts.length === 0 && !showAdd && (
+        <p className="text-xs text-muted-foreground text-center py-2">No parts found</p>
       )}
 
       {/* Add purchase form */}

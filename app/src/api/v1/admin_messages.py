@@ -40,32 +40,7 @@ def _serialize_agent_msg(m: AgentMessage, include_body: bool = False) -> dict:
     return d
 
 
-def _serialize_action(a: AgentAction, include_comments: bool = False) -> dict:
-    d = {
-        "id": a.id,
-        "agent_message_id": a.agent_message_id,
-        "action_type": a.action_type,
-        "description": a.description,
-        "assigned_to": a.assigned_to,
-        "due_date": a.due_date.isoformat() if a.due_date else None,
-        "status": a.status,
-        "notes": a.notes,
-        "customer_name": a.customer_name,
-        "property_address": a.property_address,
-        "created_by": a.created_by,
-        "invoice_id": a.invoice_id,
-        "parent_action_id": a.parent_action_id,
-        "task_count": a.task_count or 0,
-        "tasks_completed": a.tasks_completed or 0,
-        "completed_at": a.completed_at.isoformat() if a.completed_at else None,
-        "created_at": a.created_at.isoformat() if a.created_at else None,
-    }
-    if include_comments and hasattr(a, "comments") and a.comments:
-        d["comments"] = [
-            {"id": c.id, "author": c.author, "text": c.text, "created_at": c.created_at.isoformat()}
-            for c in a.comments
-        ]
-    return d
+from src.presenters.action_presenter import ActionPresenter
 
 
 class ApproveBody(BaseModel):
@@ -216,7 +191,7 @@ async def get_agent_message(
     actions_result = await db.execute(
         select(AgentAction).where(AgentAction.agent_message_id == message_id, AgentAction.organization_id == ctx.organization_id).order_by(AgentAction.created_at)
     )
-    d["actions"] = [_serialize_action(a) for a in actions_result.scalars().all()]
+    d["actions"] = await ActionPresenter(db).many(list(actions_result.scalars().all()))
     # Response time
     if msg.sent_at and msg.received_at:
         d["response_time_seconds"] = int((msg.sent_at - msg.received_at).total_seconds())

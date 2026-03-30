@@ -200,18 +200,32 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
             )
             water_features = wf_result.scalars().all()
 
+            from src.models.equipment_item import EquipmentItem
+            from sqlalchemy.orm import selectinload
+
             wf_lines = []
             for wf in water_features:
-                parts = [f"{wf.name or wf.water_type}"]
+                wf_parts = [f"{wf.name or wf.water_type}"]
                 if wf.pool_gallons:
-                    parts.append(f"{wf.pool_gallons:,} gal")
+                    wf_parts.append(f"{wf.pool_gallons:,} gal")
                 if wf.sanitizer_type:
-                    parts.append(f"sanitizer: {wf.sanitizer_type}")
-                if wf.estimated_service_minutes:
-                    parts.append(f"{wf.estimated_service_minutes} min service")
-                if wf.monthly_rate:
-                    parts.append(f"${wf.monthly_rate:.2f}/mo")
-                wf_lines.append(", ".join(parts))
+                    wf_parts.append(f"sanitizer: {wf.sanitizer_type}")
+
+                # Equipment from catalog
+                equip_result = await db.execute(
+                    select(EquipmentItem).options(selectinload(EquipmentItem.catalog_equipment)).where(
+                        EquipmentItem.water_feature_id == wf.id,
+                        EquipmentItem.is_active == True,
+                    )
+                )
+                equip_items = equip_result.scalars().all()
+                for ei in equip_items:
+                    name = (ei.catalog_equipment.canonical_name if ei.catalog_equipment else
+                            ei.normalized_name or f"{ei.brand or ''} {ei.model or ''}".strip())
+                    if name:
+                        wf_parts.append(f"{ei.equipment_type}: {name}")
+
+                wf_lines.append(", ".join(wf_parts))
 
             p_parts = [prop.full_address]
             if prop.gate_code:

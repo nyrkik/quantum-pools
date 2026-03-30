@@ -202,8 +202,9 @@ def strip_email_signature(text: str) -> str:
     if match and match.start() < cut_at:
         cut_at = match.start()
 
-    # Sign-off line — keep the sign-off, cut after
-    signoffs = r'(?:Best|Thanks|Thank you|Regards|Kind regards|Sincerely|Cheers|Warm regards|All the best|Respectfully|Take care|Sent from my),?[^\n]*\n'
+    # Sign-off line — must be on its own line (possibly followed by comma and name, but not a sentence)
+    # Requires: start of line, sign-off word, then comma/newline/end — NOT followed by lowercase continuation
+    signoffs = r'\n(?:Best|Thanks|Thank you|Regards|Kind regards|Sincerely|Cheers|Warm regards|All the best|Respectfully|Take care|Sent from my),?\s*\n'
     match = re.search(signoffs, text, re.IGNORECASE)
     if match and match.start() < cut_at:
         cut_at = match.end()  # keep the sign-off line

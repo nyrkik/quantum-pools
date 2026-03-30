@@ -51,14 +51,12 @@ const navItems = [
   { href: "/jobs", label: "Jobs", icon: ClipboardList, check: "canViewInbox" as keyof Permissions },
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
-  { href: "/charges", label: "Charges", icon: Receipt, check: "canViewInvoices" as keyof Permissions, badge: "charges" as const },
   { href: "/parts", label: "Catalog", icon: Package, check: null },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
   { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
   { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },
   { href: "/emd", label: "EMD Intel", icon: Shield, check: "canViewEmd" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
-  { href: "/roles", label: "Roles", icon: ShieldCheck, check: "canViewSettings" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
@@ -76,17 +74,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const perms = usePermissions();
   const dev = useDevMode();
   const [pendingCount, setPendingCount] = useState(0);
-  const [chargePendingCount, setChargePendingCount] = useState(0);
 
   const fetchPending = useCallback(() => {
     if (perms.canViewInbox) {
       api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
         .then((s) => setPendingCount(s.pending ?? 0))
-        .catch(() => {});
-    }
-    if (perms.canViewInvoices) {
-      api.get<{ pending: number }>("/v1/visit-charges/pending")
-        .then((s) => setChargePendingCount(s.pending ?? 0))
         .catch(() => {});
     }
   }, [perms.canViewInbox, perms.canViewInvoices]);
@@ -135,11 +127,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               {"badge" in item && item.badge === "pending" && pendingCount > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
                   {pendingCount}
-                </span>
-              )}
-              {"badge" in item && item.badge === "charges" && chargePendingCount > 0 && (
-                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white">
-                  {chargePendingCount}
                 </span>
               )}
             </Link>

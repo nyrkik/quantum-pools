@@ -369,10 +369,22 @@ async def get_bather_load(
     prof_svc = ProfitabilityService(db)
     diff = await prof_svc.get_or_create_difficulty(ctx.organization_id, property_id)
 
+    # Aggregate pool dimensions from WaterFeatures (source of truth)
+    from src.models.water_feature import WaterFeature
+    wf_result = await db.execute(
+        select(WaterFeature).where(
+            WaterFeature.property_id == property_id,
+            WaterFeature.is_active == True,
+        )
+    )
+    wfs = wf_result.scalars().all()
+    total_sqft = sum(wf.pool_sqft or 0 for wf in wfs) or prop.pool_sqft
+    total_gallons = sum(wf.pool_gallons or 0 for wf in wfs) or prop.pool_gallons
+
     return bl_svc.calculate(
         jurisdiction,
-        pool_sqft=prop.pool_sqft,
-        pool_gallons=prop.pool_gallons,
+        pool_sqft=total_sqft,
+        pool_gallons=total_gallons,
         shallow_sqft=diff.shallow_sqft,
         deep_sqft=diff.deep_sqft,
         has_deep_end=diff.has_deep_end,

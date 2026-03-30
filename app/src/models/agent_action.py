@@ -24,7 +24,8 @@ class AgentAction(Base):
     assigned_to: Mapped[str | None] = mapped_column(String(100))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     parent_action_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_actions.id"), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, suggested, cancelled
+    job_path: Mapped[str] = mapped_column(String(20), default="internal", server_default="internal")  # internal, customer
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, suggested, cancelled, pending_approval, approved
     is_suggested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     suggestion_confidence: Mapped[str | None] = mapped_column(String(10))  # high, medium, low
     created_by: Mapped[str | None] = mapped_column(String(100))  # user name or "DeepBlue"

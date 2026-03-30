@@ -201,6 +201,14 @@ Frontend views are filtered by role. A `usePermissions()` hook exposes feature f
 | Tech management | no | no | yes | yes |
 | Settings/org | no | no | no | yes |
 
+## Data Architecture Rules (MANDATORY)
+
+**Single Source of Truth — never duplicate data between tables.**
+- **Customer data** (name, address, phone): always read from `customers` table via FK. Agent tables (`agent_threads`, `agent_actions`, `agent_messages`) have `customer_name` as a FALLBACK for unmatched records only — when `customer_id`/`matched_customer_id` exists, join to Customer table for display.
+- **Equipment**: read from `equipment_items` table (linked to `equipment_catalog` via `catalog_equipment_id`). Legacy flat strings on WaterFeature (`pump_type`, `filter_type`, etc.) are DEPRECATED — kept for backward compat but never read for display or business logic.
+- **Pool dimensions** (gallons, sqft, shape, depth): read from `water_features` table. Legacy pool fields on `properties` table are DEPRECATED fallbacks — only used when WaterFeature records don't exist.
+- **New features**: NEVER copy data from one table to another. Always FK to the source table and join at read time.
+
 ## Key Relationships
 
 ```

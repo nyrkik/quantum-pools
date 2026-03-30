@@ -8,6 +8,7 @@ import { ComposeProvider } from "@/components/email/compose-provider";
 import { ComposeEmail } from "@/components/email/compose-email";
 import { Sidebar } from "@/components/layout/sidebar";
 import { ActiveVisitBanner } from "@/components/layout/active-visit-banner";
+import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { Code2 } from "lucide-react";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-y-auto bg-muted/40 p-4 sm:p-6 pt-16 sm:pt-6">
           {children}
         </main>
+        <FeedbackButton />
       </div>
     </div>
   );

@@ -20,6 +20,7 @@ class CatalogEntryResponse(BaseModel):
     manufacturer: Optional[str] = None
     model_number: Optional[str] = None
     category: Optional[str] = None
+    image_url: Optional[str] = None
     specs: Optional[dict] = None
     aliases: list = []
     is_common: bool = False
@@ -45,7 +46,7 @@ class ResolveRequest(BaseModel):
 async def search_catalog(
     q: str = Query("", min_length=0),
     type: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):

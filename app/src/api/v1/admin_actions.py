@@ -58,7 +58,123 @@ async def create_agent_action(
         due_date=body.due_date,
         customer_name=body.customer_name,
         property_address=body.property_address,
+        job_path=body.job_path,
+        line_items=[li.model_dump() for li in body.line_items] if body.line_items else None,
     )
+
+
+@router.post("/agent-actions/{action_id}/send-estimate")
+async def send_estimate(
+    action_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send estimate email to customer for a customer-path job."""
+    import secrets
+    from sqlalchemy import select
+    from src.models.agent_action import AgentAction
+    from src.models.invoice import Invoice, InvoiceLineItem
+    from src.models.estimate_approval import EstimateApproval
+    from src.models.customer import Customer
+    from src.services.email_service import EmailService
+
+    # Get the job
+    action_result = await db.execute(
+        select(AgentAction).where(
+            AgentAction.id == action_id,
+            AgentAction.organization_id == ctx.organization_id,
+        )
+    )
+    action = action_result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if action.job_path != "customer":
+        raise HTTPException(status_code=400, detail="Not a customer job")
+    if not action.invoice_id:
+        raise HTTPException(status_code=400, detail="No estimate linked to this job")
+
+    # Get invoice + line items
+    invoice_result = await db.execute(
+        select(Invoice).where(Invoice.id == action.invoice_id)
+    )
+    invoice = invoice_result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+
+    items_result = await db.execute(
+        select(InvoiceLineItem).where(
+            InvoiceLineItem.invoice_id == invoice.id
+        ).order_by(InvoiceLineItem.sort_order)
+    )
+    items = items_result.scalars().all()
+
+    # Get customer email
+    if not invoice.customer_id:
+        raise HTTPException(status_code=400, detail="No customer linked")
+
+    cust_result = await db.execute(
+        select(Customer).where(Customer.id == invoice.customer_id)
+    )
+    customer = cust_result.scalar_one_or_none()
+    if not customer or not customer.email:
+        raise HTTPException(status_code=400, detail="Customer has no email address")
+
+    # Create or reuse approval record with token
+    existing_approval = await db.execute(
+        select(EstimateApproval).where(EstimateApproval.invoice_id == invoice.id)
+    )
+    approval = existing_approval.scalar_one_or_none()
+    if not approval:
+        import uuid
+        snapshot = {
+            "line_items": [
+                {"description": li.description, "quantity": float(li.quantity),
+                 "unit_price": float(li.unit_price), "total": float(li.total)}
+                for li in items
+            ],
+            "total": float(invoice.total or 0),
+            "subject": invoice.subject,
+        }
+        approval = EstimateApproval(
+            id=str(uuid.uuid4()),
+            organization_id=ctx.organization_id,
+            invoice_id=invoice.id,
+            approval_token=secrets.token_urlsafe(32),
+            snapshot_json=snapshot,
+        )
+        db.add(approval)
+        await db.flush()
+
+    # Build approval URL
+    from src.core.config import settings
+    base_url = getattr(settings, "FRONTEND_URL", None) or "https://app.quantumpoolspro.com"
+    approve_url = f"{base_url}/approve/{approval.approval_token}"
+
+    # Send email
+    customer_name = f"{customer.first_name} {customer.last_name}".strip()
+    email_svc = EmailService(db)
+    result = await email_svc.send_estimate_email(
+        org_id=ctx.organization_id,
+        to=customer.email,
+        customer_name=customer_name,
+        estimate_number=invoice.invoice_number,
+        subject=f"Estimate: {invoice.subject or 'Service Estimate'}",
+        total=float(invoice.total or 0),
+        view_url=approve_url,
+    )
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=f"Failed to send: {result.error}")
+
+    # Update statuses
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    invoice.status = "sent"
+    invoice.sent_at = now
+    action.status = "pending_approval"
+    await db.commit()
+
+    return {"sent": True, "to": customer.email, "approval_token": approval.approval_token}
 
 
 @router.put("/agent-actions/{action_id}")

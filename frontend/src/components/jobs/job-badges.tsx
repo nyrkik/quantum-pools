@@ -6,6 +6,10 @@ import {
   Timer,
   CheckCircle2,
   X,
+  Clock,
+  ThumbsUp,
+  Users,
+  UserCheck,
 } from "lucide-react";
 
 export function ActionTypeBadge({ type }: { type: string }) {
@@ -40,7 +44,21 @@ export function ActionStatusIcon({ status }: { status: string }) {
       return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
     case "cancelled":
       return <X className="h-3.5 w-3.5 text-muted-foreground" />;
+    case "pending_approval":
+      return <Clock className="h-3.5 w-3.5 text-purple-500" />;
+    case "approved":
+      return <ThumbsUp className="h-3.5 w-3.5 text-green-500" />;
     default:
       return <Circle className="h-3.5 w-3.5 text-muted-foreground" />;
   }
+}
+
+export function JobPathBadge({ path }: { path?: string }) {
+  if (!path || path === "internal") return null;
+  return (
+    <Badge variant="outline" className="text-[10px] px-1.5 border-purple-400 text-purple-600 gap-0.5">
+      <UserCheck className="h-2.5 w-2.5" />
+      Customer
+    </Badge>
+  );
 }

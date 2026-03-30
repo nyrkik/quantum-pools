@@ -10,6 +10,8 @@ export interface AgentAction {
   assigned_to: string | null;
   due_date: string | null;
   status: string;
+  job_path?: "internal" | "customer";
+  invoice_id?: string | null;
   task_count?: number;
   tasks_completed?: number;
   completed_at: string | null;
@@ -84,6 +86,8 @@ export interface Thread {
   contact_email: string;
   subject: string | null;
   customer_name: string | null;
+  contact_name: string | null;
+  customer_address: string | null;
   matched_customer_id: string | null;
   status: string;
   urgency: string | null;

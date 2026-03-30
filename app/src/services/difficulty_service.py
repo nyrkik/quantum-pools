@@ -95,19 +95,17 @@ class DifficultyService:
 
         scores = {}
 
-        # Aggregate from WFs if available, else fall back to property fields
-        if wfs:
-            total_gallons = sum(b.pool_gallons or 0 for b in wfs) or None
-            total_sqft = sum(b.pool_sqft or 0 for b in wfs) or None
-            total_service_minutes = sum(b.estimated_service_minutes or 0 for b in wfs) or None
-            has_spa = any(b.water_type == "spa" for b in wfs)
-            has_water_feature = any(b.water_type in ("water_feature", "fountain") for b in wfs)
-        else:
-            total_gallons = prop.pool_gallons
-            total_sqft = prop.pool_sqft
-            total_service_minutes = prop.estimated_service_minutes
-            has_spa = prop.has_spa
-            has_water_feature = prop.has_water_feature
+        # Aggregate from WFs (source of truth), Property fields as last resort
+        total_gallons = sum(b.pool_gallons or 0 for b in wfs) if wfs else None
+        total_sqft = sum(b.pool_sqft or 0 for b in wfs) if wfs else None
+        total_service_minutes = sum(b.estimated_service_minutes or 0 for b in wfs) if wfs else None
+        has_spa = any(b.water_type == "spa" for b in wfs) if wfs else getattr(prop, "has_spa", False)
+        has_water_feature = any(b.water_type in ("water_feature", "fountain") for b in wfs) if wfs else getattr(prop, "has_water_feature", False)
+        # Fallback to Property only if WFs yielded nothing
+        if not total_gallons:
+            total_gallons = getattr(prop, "pool_gallons", None)
+        if not total_sqft:
+            total_sqft = getattr(prop, "pool_sqft", None)
 
         # Measured factors
         scores["pool_gallons"] = _range_score(total_gallons, GALLON_RANGES)

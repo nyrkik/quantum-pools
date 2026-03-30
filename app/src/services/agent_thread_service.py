@@ -28,6 +28,7 @@ AGENT_FROM_NAME = os.environ.get("AGENT_FROM_NAME", "Sapphire Pools")
 
 
 from src.presenters.action_presenter import ActionPresenter
+from src.presenters.thread_presenter import ThreadPresenter
 
 
 class AgentThreadService:
@@ -124,27 +125,6 @@ class AgentThreadService:
         )
         threads = result.scalars().all()
 
-        # Look up matched customer display names + first property address
-        customer_names: dict[str, str] = {}
-        customer_addresses: dict[str, str] = {}
-        cust_ids = [t.matched_customer_id for t in threads if t.matched_customer_id]
-        if cust_ids:
-            from src.models.customer import Customer
-            from src.models.property import Property
-            cust_result = await self.db.execute(
-                select(Customer).where(Customer.id.in_(cust_ids))
-            )
-            for c in cust_result.scalars().all():
-                customer_names[c.id] = c.display_name
-            # Get first property address for each customer
-            for cid in cust_ids:
-                prop_result = await self.db.execute(
-                    select(Property).where(Property.customer_id == cid, Property.is_active == True).limit(1)
-                )
-                prop = prop_result.scalar_one_or_none()
-                if prop:
-                    customer_addresses[cid] = f"{prop.address}, {prop.city}"
-
         # Look up read status for current user
         read_map: dict[str, datetime] = {}
         if current_user_id and threads:
@@ -155,39 +135,10 @@ class AgentThreadService:
             )
             read_map = {row[0]: row[1] for row in read_result.all()}
 
-        return {
-            "items": [
-                {
-                    "id": t.id,
-                    "contact_email": t.contact_email,
-                    "subject": t.subject,
-                    "customer_name": customer_names.get(t.matched_customer_id, t.customer_name),
-                    "contact_name": t.customer_name if t.matched_customer_id and customer_names.get(t.matched_customer_id) != t.customer_name else None,
-                    "customer_address": customer_addresses.get(t.matched_customer_id) if t.matched_customer_id else None,
-                    "matched_customer_id": t.matched_customer_id,
-                    "status": t.status,
-                    "urgency": t.urgency,
-                    "category": t.category,
-                    "message_count": t.message_count,
-                    "last_message_at": t.last_message_at.isoformat() if t.last_message_at else None,
-                    "last_direction": t.last_direction,
-                    "last_snippet": t.last_snippet,
-                    "has_pending": t.has_pending,
-                    "has_open_actions": t.has_open_actions,
-                    "assigned_to_user_id": t.assigned_to_user_id,
-                    "assigned_to_name": t.assigned_to_name,
-                    "assigned_at": t.assigned_at.isoformat() if t.assigned_at else None,
-                    "is_unread": (
-                        t.last_message_at > read_map[t.id] if t.id in read_map and t.last_message_at
-                        else t.last_message_at is not None  # Never read = unread
-                    ),
-                    "visibility_permission": t.visibility_permission,
-                    "delivered_to": t.delivered_to,
-                }
-                for t in threads
-            ],
-            "total": total,
-        }
+        presenter = ThreadPresenter(self.db)
+        items = await presenter.many(threads, read_map=read_map)
+
+        return {"items": items, "total": total}
 
     async def get_thread_stats(self, org_id: str, user_permission_slugs: set[str] | None = None) -> dict:
         """Thread-level stats. If user_permission_slugs provided, counts only visible threads."""
@@ -311,28 +262,12 @@ class AgentThreadService:
         )
         actions = await ActionPresenter(self.db).many(list(actions_result.scalars().all()))
 
-        return {
-            "id": thread.id,
-            "contact_email": thread.contact_email,
-            "subject": thread.subject,
-            "customer_name": thread.customer_name,
-            "matched_customer_id": thread.matched_customer_id,
-            "property_address": thread.property_address,
-            "status": thread.status,
-            "urgency": thread.urgency,
-            "category": thread.category,
-            "message_count": thread.message_count,
-            "has_pending": thread.has_pending,
-            "has_open_actions": thread.has_open_actions,
-            "assigned_to_user_id": thread.assigned_to_user_id,
-            "assigned_to_name": thread.assigned_to_name,
-            "assigned_at": thread.assigned_at.isoformat() if thread.assigned_at else None,
-            "visibility_permission": thread.visibility_permission,
-            "delivered_to": thread.delivered_to,
-            "routing_rule_id": thread.routing_rule_id,
-            "timeline": timeline,
-            "actions": actions,
-        }
+        presenter = ThreadPresenter(self.db)
+        d = await presenter.one(thread)
+        d["routing_rule_id"] = thread.routing_rule_id
+        d["timeline"] = timeline
+        d["actions"] = actions
+        return d
 
     async def approve_thread(self, org_id: str, thread_id: str, response_text: str | None, user_name: str) -> dict:
         """Approve the latest pending message in a thread — send email and update status."""

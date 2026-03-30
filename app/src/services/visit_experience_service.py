@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
+from src.presenters.visit_presenter import VisitPresenter
 
 from src.models.visit import Visit, VisitStatus
 from src.models.visit_photo import VisitPhoto
@@ -173,7 +174,7 @@ class VisitExperienceService:
                 "access_instructions": prop.access_instructions,
                 "dog_on_property": prop.dog_on_property,
             },
-            "water_features": await self._build_wf_context(water_features),
+            "water_features": await VisitPresenter(self.db).water_features(water_features),
             "checklist": [
                 {
                     "id": entry.id,
@@ -485,37 +486,7 @@ class VisitExperienceService:
         return len(stale_visits)
 
     # ------------------------------------------------------------------
-    # Property history
-    async def _build_wf_context(self, water_features: list) -> list[dict]:
-        """Build WF context with equipment from equipment_items table."""
-        from src.models.equipment_item import EquipmentItem
-        from sqlalchemy.orm import selectinload
-
-        result = []
-        for wf in water_features:
-            wf_dict = {
-                "id": wf.id,
-                "name": wf.name,
-                "water_type": wf.water_type,
-                "pool_gallons": wf.pool_gallons,
-                "pool_type": wf.pool_type,
-            }
-            # Get equipment from structured table
-            eq_result = await self.db.execute(
-                select(EquipmentItem).options(selectinload(EquipmentItem.catalog_equipment)).where(
-                    EquipmentItem.water_feature_id == wf.id,
-                    EquipmentItem.is_active == True,
-                )
-            )
-            equipment = []
-            for ei in eq_result.scalars().all():
-                name = (ei.catalog_equipment.canonical_name if ei.catalog_equipment else
-                        ei.normalized_name or f"{ei.brand or ''} {ei.model or ''}".strip())
-                if name:
-                    equipment.append({"type": ei.equipment_type, "name": name})
-            wf_dict["equipment"] = equipment
-            result.append(wf_dict)
-        return result
+    # _build_wf_context REMOVED — use VisitPresenter.water_features() instead
 
     # ------------------------------------------------------------------
 

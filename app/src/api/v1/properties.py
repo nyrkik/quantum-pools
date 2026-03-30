@@ -44,28 +44,20 @@ async def list_properties(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from src.presenters.property_presenter import PropertyPresenter
+
     svc = PropertyService(db)
     wf_svc = WaterFeatureService(db)
     properties, total = await svc.list(
         ctx.organization_id, customer_id=customer_id, is_active=is_active, skip=skip, limit=limit
     )
-    results = []
+    # Build WF map for batch presentation
+    wf_map = {}
     for p in properties:
-        resp = PropertyResponse.model_validate(p)
-        resp.water_features = [
-            {"id": b.id, "name": b.name, "water_type": b.water_type,
-             "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
-             "pool_surface": b.pool_surface, "pool_length_ft": b.pool_length_ft,
-             "pool_width_ft": b.pool_width_ft, "pool_depth_shallow": b.pool_depth_shallow,
-             "pool_depth_deep": b.pool_depth_deep, "pool_shape": b.pool_shape,
-             "sanitizer_type": b.sanitizer_type,
-             "pump_type": b.pump_type, "filter_type": b.filter_type,
-             "heater_type": b.heater_type, "chlorinator_type": b.chlorinator_type,
-             "automation_system": b.automation_system,
-             "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
-            for b in await wf_svc.list_for_property(ctx.organization_id, p.id)
-        ]
-        results.append(resp)
+        wf_map[p.id] = await wf_svc.list_for_property(ctx.organization_id, p.id)
+
+    presenter = PropertyPresenter(db)
+    results = await presenter.many(properties, wf_map=wf_map)
     return {"items": results, "total": total}
 
 
@@ -89,17 +81,14 @@ async def get_property(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from src.presenters.property_presenter import PropertyPresenter
+
     svc = PropertyService(db)
     wf_svc = WaterFeatureService(db)
     prop = await svc.get(ctx.organization_id, property_id)
-    resp = PropertyResponse.model_validate(prop)
-    resp.water_features = [
-        {"id": b.id, "name": b.name, "water_type": b.water_type,
-         "pool_type": b.pool_type, "pool_gallons": b.pool_gallons, "pool_sqft": b.pool_sqft,
-         "estimated_service_minutes": b.estimated_service_minutes, "monthly_rate": b.monthly_rate}
-        for b in await wf_svc.list_for_property(ctx.organization_id, prop.id)
-    ]
-    return resp
+    wfs = await wf_svc.list_for_property(ctx.organization_id, prop.id)
+    presenter = PropertyPresenter(db)
+    return await presenter.one(prop, water_features=wfs)
 
 
 @router.put("/{property_id}", response_model=PropertyResponse)

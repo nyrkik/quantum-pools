@@ -85,14 +85,9 @@ async def list_equipment(
         )
         .order_by(EquipmentItem.system_group.nulls_last(), EquipmentItem.equipment_type)
     )
+    from src.presenters.equipment_presenter import EquipmentPresenter
     items = result.scalars().all()
-    responses = []
-    for e in items:
-        resp = EquipmentItemResponse.model_validate(e)
-        if e.catalog_equipment:
-            resp.catalog_canonical_name = e.catalog_equipment.canonical_name
-        responses.append(resp)
-    return responses
+    return await EquipmentPresenter(db).many(list(items))
 
 
 @router.post("/wf/{wf_id}", response_model=EquipmentItemResponse, status_code=201)

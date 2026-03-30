@@ -11,3 +11,8 @@ Pattern:
 
 from src.presenters.base import Presenter
 from src.presenters.action_presenter import ActionPresenter
+from src.presenters.thread_presenter import ThreadPresenter
+from src.presenters.invoice_presenter import InvoicePresenter
+from src.presenters.equipment_presenter import EquipmentPresenter
+from src.presenters.property_presenter import PropertyPresenter
+from src.presenters.visit_presenter import VisitPresenter

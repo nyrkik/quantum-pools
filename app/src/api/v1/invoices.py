@@ -15,14 +15,11 @@ from src.services.invoice_service import InvoiceService
 router = APIRouter(prefix="/invoices", tags=["invoices"], dependencies=[Depends(require_feature("invoicing"))])
 
 
-def _invoice_to_response(invoice) -> InvoiceResponse:
-    """Convert Invoice model to response, populating customer_name and line_items."""
-    resp = InvoiceResponse.model_validate(invoice)
-    if invoice.customer:
-        resp.customer_name = invoice.customer.display_name
-    if hasattr(invoice, "line_items") and invoice.line_items:
-        resp.line_items = [InvoiceLineItemResponse.model_validate(li) for li in invoice.line_items]
-    return resp
+from src.presenters.invoice_presenter import InvoicePresenter
+
+def _invoice_to_response(invoice) -> dict:
+    """Present invoice via InvoicePresenter (sync — customer already loaded via relationship)."""
+    return InvoicePresenter(None)._serialize(invoice)
 
 
 @router.get("", response_model=dict)

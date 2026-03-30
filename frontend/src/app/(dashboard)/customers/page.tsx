@@ -38,6 +38,8 @@ import {
 import { toast } from "sonner";
 import { Plus, Search, Building2, Home, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
+import { Overlay, OverlayContent, OverlayBody } from "@/components/ui/overlay";
+import { CustomerDetailContent } from "@/components/customers/customer-detail-content";
 
 interface Customer {
   id: string;
@@ -83,6 +85,7 @@ function ClientTable({
   toggleSort,
   thClass,
   techAssignments,
+  onSelectCustomer,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -93,6 +96,7 @@ function ClientTable({
   toggleSort: (key: SortKey) => void;
   thClass: string;
   techAssignments: Record<string, Array<{ tech_name: string; color: string }>>;
+  onSelectCustomer: (id: string) => void;
 }) {
   const colSpan = 6 + (perms.canViewRates ? 1 : 0) + (perms.canViewBalance ? 1 : 0);
   return (
@@ -147,9 +151,9 @@ function ClientTable({
             items.map((c, i) => (
               <TableRow key={c.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
                 <TableCell>
-                  <Link href={`/customers/${c.id}`} className="font-medium hover:underline">
+                  <button onClick={() => onSelectCustomer(c.id)} className="font-medium hover:underline text-left">
                     {customerDisplayName(c)}
-                  </Link>
+                  </button>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
                   {c.first_property_address || "\u2014"}
@@ -209,6 +213,7 @@ export default function CustomersPage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_name: string; color: string }>>>({});
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -535,6 +540,7 @@ export default function CustomersPage() {
                 toggleSort={toggleSort}
                 thClass={thClass}
                 techAssignments={techAssignments}
+                onSelectCustomer={setSelectedCustomerId}
               />
             )}
             {(typeFilter === null || typeFilter === "residential") && (
@@ -548,11 +554,29 @@ export default function CustomersPage() {
                 toggleSort={toggleSort}
                 thClass={thClass}
                 techAssignments={techAssignments}
+                onSelectCustomer={setSelectedCustomerId}
               />
             )}
           </div>
         </TooltipProvider>
       )}
+
+      {/* Customer detail overlay */}
+      <Overlay open={!!selectedCustomerId} onOpenChange={(o) => { if (!o) setSelectedCustomerId(null); }}>
+        <OverlayContent className="max-w-3xl max-h-[92vh]">
+          <OverlayBody className="p-0">
+            {selectedCustomerId && (
+              <div className="p-4">
+                <CustomerDetailContent
+                  id={selectedCustomerId}
+                  onClose={() => setSelectedCustomerId(null)}
+                  compact
+                />
+              </div>
+            )}
+          </OverlayBody>
+        </OverlayContent>
+      </Overlay>
     </div>
   );
 }

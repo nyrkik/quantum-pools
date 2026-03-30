@@ -71,7 +71,7 @@ async def view_estimate(token: str, db: AsyncSession = Depends(get_db)):
             "description": li.description,
             "quantity": float(li.quantity),
             "unit_price": float(li.unit_price),
-            "total": float(li.total),
+            "total": float(li.amount or li.quantity * li.unit_price),
         }
         for li in items_result.scalars().all()
     ]

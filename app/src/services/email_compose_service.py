@@ -193,7 +193,6 @@ class EmailComposeService:
         thread.has_pending = False
 
         # Mark all pending inbound messages as handled (prevents refresh_thread from flipping back)
-        from src.models.agent_message import AgentMessage
         pending_msgs = await self.db.execute(
             select(AgentMessage).where(
                 AgentMessage.thread_id == thread.id,
@@ -334,6 +333,7 @@ class EmailComposeService:
         system_prompt = (
             f"You are an email assistant for {org_name}, a professional pool service company.\n"
             f"Write professional but friendly emails. Be concise and specific.\n"
+            f"Start with a generic greeting like 'Hi,' or 'Hello,' — do NOT use the customer's name, property name, or any personal identifier in the greeting. This avoids misgendering and keeps it professional for any recipient.\n"
             f"Use details from the customer context when relevant.\n"
             f"Do NOT include a signature block — it will be appended automatically.\n"
             f"End the body with a brief closing like 'Best,' or 'Thanks,' on its own line. Do NOT add a name after the closing — the signature system handles that.\n"

@@ -485,6 +485,7 @@ JSON only, no markdown."""}],
         user_id: str,
         user_first_name: str,
         status: str | None = None,
+        action_type: str | None = None,
         assigned_to: str | None = None,
         description: str | None = None,
         due_date: str | None = None,
@@ -510,6 +511,8 @@ JSON only, no markdown."""}],
                 action.completed_at = datetime.now(timezone.utc)
             elif status in ("open", "in_progress"):
                 action.completed_at = None
+        if action_type is not None:
+            action.action_type = action_type
         old_assignee = action.assigned_to
         if assigned_to is not None:
             action.assigned_to = assigned_to
@@ -729,7 +732,7 @@ JSON only, no markdown."""}],
             cust_result = await self.db.execute(
                 select(Customer.id).where(
                     Customer.organization_id == org_id,
-                    Customer.display_name.ilike(f"%{action.customer_name}%"),
+                    Customer.display_name_col.ilike(f"%{action.customer_name}%"),
                 ).limit(1)
             )
             customer_id = cust_result.scalar_one_or_none()

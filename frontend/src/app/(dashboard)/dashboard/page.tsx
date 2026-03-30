@@ -38,6 +38,7 @@ interface DashboardData {
   staleEmails: number;
   overdueJobs: number;
   pendingEstimates: number;
+  draftEstimates: number;
   // Recent
   recentThreads: { id: string; customer_name: string; subject: string; last_message_at: string; status: string }[];
 }
@@ -55,7 +56,7 @@ export default function DashboardPage() {
         const d: DashboardData = {
           unreadMessages: 0, latestMessages: [], myJobs: [],
           todayVisits: 0, activeVisit: null,
-          pendingEmails: 0, staleEmails: 0, overdueJobs: 0, pendingEstimates: 0,
+          pendingEmails: 0, staleEmails: 0, overdueJobs: 0, pendingEstimates: 0, draftEstimates: 0,
           recentThreads: [],
         };
 
@@ -73,6 +74,9 @@ export default function DashboardPage() {
           perms.canViewInbox ? api.get<{ pending: number; stale_pending: number; overdue_actions: number }>("/v1/admin/agent-threads/stats") : null,
           // Recent inbox
           perms.canViewInbox ? api.get<{ items: DashboardData["recentThreads"] }>("/v1/admin/agent-threads?limit=5") : null,
+          // Estimate counts
+          perms.canViewInvoices ? api.get<{ total: number }>("/v1/invoices?status=sent&limit=1") : null,
+          perms.canViewInvoices ? api.get<{ total: number }>("/v1/invoices?status=draft&limit=1") : null,
         ]);
 
         // Messages
@@ -93,6 +97,12 @@ export default function DashboardPage() {
         }
         if (results[7]?.status === "fulfilled" && results[7].value) {
           d.recentThreads = ((results[7].value as { items: DashboardData["recentThreads"] }).items || []);
+        }
+        if (results[8]?.status === "fulfilled" && results[8].value) {
+          d.pendingEstimates = (results[8].value as { total: number }).total;
+        }
+        if (results[9]?.status === "fulfilled" && results[9].value) {
+          d.draftEstimates = (results[9].value as { total: number }).total;
         }
 
         setData(d);
@@ -115,6 +125,8 @@ export default function DashboardPage() {
   if (data.pendingEmails > 0) alerts.push({ label: "Pending emails", count: data.pendingEmails, icon: Mail, color: "text-amber-600", href: "/inbox" });
   if (data.staleEmails > 0) alerts.push({ label: "Stale (30+ min)", count: data.staleEmails, icon: AlertTriangle, color: "text-red-600", href: "/inbox" });
   if (data.overdueJobs > 0) alerts.push({ label: "Overdue jobs", count: data.overdueJobs, icon: Clock, color: "text-red-600", href: "/jobs" });
+  if (data.pendingEstimates > 0) alerts.push({ label: "Awaiting approval", count: data.pendingEstimates, icon: FileText, color: "text-purple-600", href: "/invoices" });
+  if (data.draftEstimates > 0) alerts.push({ label: "Draft estimates", count: data.draftEstimates, icon: FileText, color: "text-blue-600", href: "/invoices" });
 
   return (
     <div className="space-y-4">

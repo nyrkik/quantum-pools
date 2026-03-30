@@ -24,6 +24,7 @@ class CreateActionBody(BaseModel):
 
 class UpdateActionBody(BaseModel):
     status: Optional[str] = None
+    action_type: Optional[str] = None
     assigned_to: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[str] = None

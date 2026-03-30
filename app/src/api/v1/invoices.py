@@ -44,7 +44,7 @@ async def list_invoices(
     return {"items": results, "total": total}
 
 
-@router.post("", response_model=InvoiceResponse, status_code=201)
+@router.post("", status_code=201)
 async def create_invoice(
     body: InvoiceCreate,
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -91,7 +91,7 @@ async def get_invoice_stats(
     return InvoiceStatsResponse(**stats)
 
 
-@router.get("/{invoice_id}", response_model=InvoiceResponse)
+@router.get("/{invoice_id}", )
 async def get_invoice(
     invoice_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -102,7 +102,7 @@ async def get_invoice(
     return _invoice_to_response(invoice)
 
 
-@router.put("/{invoice_id}", response_model=InvoiceResponse)
+@router.put("/{invoice_id}", )
 async def update_invoice(
     invoice_id: str,
     body: InvoiceUpdate,
@@ -125,7 +125,7 @@ async def update_invoice(
     return _invoice_to_response(invoice)
 
 
-@router.post("/{invoice_id}/send", response_model=InvoiceResponse)
+@router.post("/{invoice_id}/send", )
 async def send_invoice(
     invoice_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -136,7 +136,7 @@ async def send_invoice(
     return _invoice_to_response(invoice)
 
 
-@router.post("/{invoice_id}/void", response_model=InvoiceResponse)
+@router.post("/{invoice_id}/void", )
 async def void_invoice(
     invoice_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -147,7 +147,7 @@ async def void_invoice(
     return _invoice_to_response(invoice)
 
 
-@router.post("/{invoice_id}/write-off", response_model=InvoiceResponse)
+@router.post("/{invoice_id}/write-off", )
 async def write_off_invoice(
     invoice_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -281,7 +281,7 @@ async def get_approval(
     }
 
 
-@router.post("/{invoice_id}/convert-to-invoice", response_model=InvoiceResponse)
+@router.post("/{invoice_id}/convert-to-invoice", )
 async def convert_to_invoice(
     invoice_id: str,
     ctx: OrgUserContext = Depends(get_current_org_user),

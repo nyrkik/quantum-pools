@@ -36,7 +36,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
   useEffect(() => {
     fetch(`${backendOrigin}/api/v1/public/estimate/${token}`)
       .then(async (res) => {
-        if (!res.ok) throw new Error("Estimate not found");
+        if (!res.ok) throw new Error();
         return res.json();
       })
       .then((d) => {
@@ -44,7 +44,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
         if (d.status === "approved") setApproved(true);
         if (d.customer_name) setName(d.customer_name);
       })
-      .catch((e) => setError(e.message))
+      .catch(() => setError("This estimate is no longer available."))
       .finally(() => setLoading(false));
   }, [token, backendOrigin]);
 
@@ -80,8 +80,8 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
         <Card className="max-w-md w-full mx-4">
           <CardContent className="py-12 text-center">
             <FileText className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-            <p className="text-lg font-medium text-slate-700">{error || "Estimate not found"}</p>
-            <p className="text-sm text-slate-500 mt-2">This link may have expired or is invalid.</p>
+            <p className="text-lg font-medium text-slate-700">Estimate Unavailable</p>
+            <p className="text-sm text-slate-500 mt-2">This estimate is no longer available or the link has expired. Please contact us if you need assistance.</p>
           </CardContent>
         </Card>
       </div>

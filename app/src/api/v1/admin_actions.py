@@ -1,6 +1,8 @@
 """Admin action endpoints — thin router delegating to AgentActionService."""
 
+import json
 from typing import Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,9 +65,14 @@ async def create_agent_action(
     )
 
 
+class SendEstimateBody(BaseModel):
+    to_email: Optional[str] = None  # Override recipient email
+
+
 @router.post("/agent-actions/{action_id}/send-estimate")
 async def send_estimate(
     action_id: str,
+    body: SendEstimateBody = SendEstimateBody(),
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -88,8 +95,6 @@ async def send_estimate(
     action = action_result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Job not found")
-    if action.job_path != "customer":
-        raise HTTPException(status_code=400, detail="Not a customer job")
     if not action.invoice_id:
         raise HTTPException(status_code=400, detail="No estimate linked to this job")
 
@@ -129,7 +134,7 @@ async def send_estimate(
         snapshot = {
             "line_items": [
                 {"description": li.description, "quantity": float(li.quantity),
-                 "unit_price": float(li.unit_price), "total": float(li.total)}
+                 "unit_price": float(li.unit_price), "total": float(li.amount or li.quantity * li.unit_price)}
                 for li in items
             ],
             "total": float(invoice.total or 0),
@@ -139,8 +144,11 @@ async def send_estimate(
             id=str(uuid.uuid4()),
             organization_id=ctx.organization_id,
             invoice_id=invoice.id,
+            approved_by_type="pending",
+            approved_by_name="",
             approval_token=secrets.token_urlsafe(32),
-            snapshot_json=snapshot,
+            approval_method="email_link",
+            snapshot_json=json.dumps(snapshot),
         )
         db.add(approval)
         await db.flush()
@@ -150,12 +158,15 @@ async def send_estimate(
     base_url = getattr(settings, "FRONTEND_URL", None) or "https://app.quantumpoolspro.com"
     approve_url = f"{base_url}/approve/{approval.approval_token}"
 
-    # Send email
+    # Send email — use override if provided
+    recipient_email = body.to_email or customer.email
+    if not recipient_email:
+        raise HTTPException(status_code=400, detail="No email address for recipient")
     customer_name = f"{customer.first_name} {customer.last_name}".strip()
     email_svc = EmailService(db)
     result = await email_svc.send_estimate_email(
         org_id=ctx.organization_id,
-        to=customer.email,
+        to=recipient_email,
         customer_name=customer_name,
         estimate_number=invoice.invoice_number,
         subject=f"Estimate: {invoice.subject or 'Service Estimate'}",
@@ -174,7 +185,7 @@ async def send_estimate(
     action.status = "pending_approval"
     await db.commit()
 
-    return {"sent": True, "to": customer.email, "approval_token": approval.approval_token}
+    return {"sent": True, "to": recipient_email, "approval_token": approval.approval_token}
 
 
 @router.put("/agent-actions/{action_id}")
@@ -192,6 +203,7 @@ async def update_agent_action(
         user_id=ctx.user.id,
         user_first_name=ctx.user.first_name,
         status=body.status,
+        action_type=body.action_type,
         assigned_to=body.assigned_to,
         description=body.description,
         due_date=body.due_date,

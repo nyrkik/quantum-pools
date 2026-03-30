@@ -139,7 +139,7 @@ export default function JobsPage() {
     const key = a.agent_message_id || `standalone-${a.id}`;
     if (!grouped.has(key)) {
       grouped.set(key, {
-        label: a.subject || "Unknown",
+        label: a.subject || a.description || "",
         from: a.customer_name || a.from_email || "",
         address: (a as unknown as Record<string, string>).customer_address || "",
         actions: [],
@@ -323,10 +323,7 @@ export default function JobsPage() {
                     {/* Event header */}
                     <div className="flex items-center justify-between px-4 pt-3 pb-1">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium truncate">{group.from}</p>
-                          <span className="text-xs text-muted-foreground truncate hidden sm:inline">— {group.label}</span>
-                        </div>
+                        <p className="text-sm font-medium truncate">{group.from}</p>
                         {group.address && (
                           <p className="text-[10px] text-muted-foreground truncate">{group.address}</p>
                         )}

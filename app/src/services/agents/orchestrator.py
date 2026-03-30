@@ -642,22 +642,48 @@ async def _process_sent_emails(org_id: str) -> int:
             date_header = msg.get("Date")
             sent_at = parsedate_to_datetime(date_header) if date_header else datetime.now(timezone.utc)
 
-            # Find or create thread
-            thread = await get_or_create_thread(
-                contact_email=recipient,
-                subject=subject,
-                organization_id=org_id,
-            )
+            # Decode MIME-encoded subject
+            from email.header import decode_header
+            decoded_parts = decode_header(subject)
+            clean_subject = ""
+            for part, charset in decoded_parts:
+                if isinstance(part, bytes):
+                    clean_subject += part.decode(charset or "utf-8", errors="replace")
+                else:
+                    clean_subject += part
+            subject = clean_subject.strip()
 
-            # Check if we already recorded this — match by thread + direction + time window
+            # Find existing thread only — do NOT create new threads for sent emails
+            from src.models.agent_thread import AgentThread
             async with get_db_context() as db:
+                # Try to match by recipient + similar subject
+                thread_result = await db.execute(
+                    select(AgentThread).where(
+                        AgentThread.organization_id == org_id,
+                        AgentThread.contact_email == recipient,
+                    ).order_by(AgentThread.last_message_at.desc()).limit(5)
+                )
+                thread = None
+                for t in thread_result.scalars().all():
+                    # Match by subject (strip Re:/Fwd: prefixes)
+                    t_subj = re.sub(r'^(?:Re|Fwd|Fw):\s*', '', t.subject or '', flags=re.IGNORECASE).strip().lower()
+                    s_subj = re.sub(r'^(?:Re|Fwd|Fw):\s*', '', subject, flags=re.IGNORECASE).strip().lower()
+                    if t_subj == s_subj or t_subj in s_subj or s_subj in t_subj:
+                        thread = t
+                        break
+
+                if not thread:
+                    # No matching thread — skip this sent email, don't create orphan threads
+                    mark_sent_processed(uid)
+                    continue
+
+                # Check if we already recorded this — match by thread + direction + time window
                 from datetime import timedelta
                 time_window = sent_at - timedelta(minutes=5)
                 existing = await db.execute(
                     select(AgentMessage).where(
                         AgentMessage.thread_id == thread.id,
                         AgentMessage.direction == "outbound",
-                        AgentMessage.subject == subject,
                         AgentMessage.received_at >= time_window,
                     ).limit(1)
                 )
@@ -682,17 +708,13 @@ async def _process_sent_emails(org_id: str) -> int:
                 db.add(outbound)
 
                 # Update thread — mark as handled since we replied
-                thread_obj = (await db.execute(
-                    select(AgentThread).where(AgentThread.id == thread.id)
-                )).scalar_one_or_none()
-                if thread_obj:
-                    thread_obj.message_count = (thread_obj.message_count or 0) + 1
-                    thread_obj.last_message_at = sent_at
-                    thread_obj.last_direction = "outbound"
-                    sent_clean = strip_email_signature(strip_quoted_reply(body or ""))
-                    thread_obj.last_snippet = sent_clean[:200]
-                    thread_obj.status = "handled"
-                    thread_obj.has_pending = False
+                thread.message_count = (thread.message_count or 0) + 1
+                thread.last_message_at = sent_at
+                thread.last_direction = "outbound"
+                sent_clean = strip_email_signature(strip_quoted_reply(body or ""))
+                thread.last_snippet = sent_clean[:200]
+                thread.status = "handled"
+                thread.has_pending = False
 
                 # Link to open jobs on this thread
                 if thread.id:

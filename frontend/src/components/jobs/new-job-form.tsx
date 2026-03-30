@@ -34,7 +34,7 @@ export function NewJobForm({ open, onCreated, onClose }: NewJobFormProps) {
   const teamMembers = useTeamMembers();
   const [jobPath, setJobPath] = useState<"internal" | "customer">("internal");
   const [newAction, setNewAction] = useState({
-    action_type: "follow_up",
+    action_type: "",
     description: "",
     assigned_to: "",
     due_days: "",
@@ -125,7 +125,7 @@ export function NewJobForm({ open, onCreated, onClose }: NewJobFormProps) {
               onValueChange={(v) => setNewAction({ ...newAction, action_type: v })}
             >
               <SelectTrigger className="h-8 text-sm w-40 capitalize">
-                <SelectValue placeholder="Job type..." />
+                <SelectValue placeholder="Select type *" />
               </SelectTrigger>
               <SelectContent>
                 {ACTION_TYPES.map((t) => (
@@ -224,7 +224,7 @@ export function NewJobForm({ open, onCreated, onClose }: NewJobFormProps) {
         <OverlayFooter>
           <Button
             className="flex-1"
-            disabled={!newAction.description.trim()}
+            disabled={!newAction.description.trim() || !newAction.action_type}
             onClick={handleCreate}
           >
             {jobPath === "customer" ? "Create + Draft Estimate" : "Create Job"}

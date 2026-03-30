@@ -140,15 +140,24 @@ class ActionPresenter(Presenter):
         else:
             d["customer_name"] = action.customer_name
 
-        # Comments
-        if include_comments and hasattr(action, "comments") and action.comments:
-            d["comments"] = [
-                {"id": c.id, "author": c.author, "text": c.text, "created_at": self._iso(c.created_at)}
-                for c in action.comments
-            ]
+        # Comments — only access if explicitly loaded (avoid lazy load in async)
+        if include_comments:
+            try:
+                comments = action.comments
+                if comments:
+                    d["comments"] = [
+                        {"id": c.id, "author": c.author, "text": c.text, "created_at": self._iso(c.created_at)}
+                        for c in comments
+                    ]
+            except Exception:
+                d["comments"] = []
 
-        # Tasks
-        d["tasks"] = [self._task(t) for t in (action.tasks or [])] if hasattr(action, "tasks") else []
+        # Tasks — only access if explicitly loaded
+        try:
+            tasks = action.tasks
+            d["tasks"] = [self._task(t) for t in (tasks or [])]
+        except Exception:
+            d["tasks"] = []
 
         return d
 

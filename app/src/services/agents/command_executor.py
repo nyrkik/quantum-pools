@@ -137,14 +137,33 @@ class CommandExecutor:
         for cm in comments.scalars().all():
             comments_context += f"\n{cm.author}: {cm.text}"
 
+        # Job status context for accurate drafting
+        job_status_ctx = f"\nJob status: {action.status}"
+        if action.job_path == "customer":
+            job_status_ctx += f" (customer-facing job, path: {action.job_path})"
+        if action.invoice_id:
+            job_status_ctx += " — has linked estimate/invoice"
+        else:
+            job_status_ctx += " — NO estimate sent yet"
+        if action.status in ("open", "in_progress"):
+            job_status_ctx += " — work NOT yet scheduled or approved by customer"
+        elif action.status == "pending_approval":
+            job_status_ctx += " — estimate sent, waiting for customer approval"
+        elif action.status == "approved":
+            job_status_ctx += " — customer approved, ready to schedule"
+
         instruction = (
             f"Job: {action.description}\n"
             f"Request: {c['details'] or 'Draft email to customer about this job'}\n"
+            f"{job_status_ctx}\n"
             f"\nEmail thread (DO NOT repeat information already communicated):{thread_context or ' (no prior emails)'}\n"
             f"\nJob comments (latest status/plans):{comments_context or ' (none)'}\n"
             f"\nCustomer info: {(c['customer_context'] or '')[:500]}\n"
-            f"\nIMPORTANT: Be concise. Only cover what's NEW since the last email. "
-            f"Don't re-explain things already discussed. 3-5 sentences max."
+            f"\nIMPORTANT: Be concise and ACCURATE about job status. "
+            f"Start with 'Hi,' or 'Hello,' — do NOT use customer name or property name in greeting. "
+            f"Do NOT say work is scheduled unless the job is approved and assigned. "
+            f"If no estimate has been sent, say you'll follow up with an estimate/plan. "
+            f"Only cover what's NEW since the last email. 3-5 sentences max."
         )
         draft = await svc.generate_draft(org_id=c["org_id"], instruction=instruction, customer_id=c["customer_id"])
         if draft.get("error"):

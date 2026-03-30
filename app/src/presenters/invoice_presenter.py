@@ -33,7 +33,6 @@ class InvoicePresenter(Presenter):
             "due_date": inv.due_date.isoformat() if inv.due_date else None,
             "total": float(inv.total or 0),
             "balance": float(inv.balance or 0),
-            "payment_terms_days": inv.payment_terms_days,
             "notes": inv.notes,
             "approved_at": self._iso(inv.approved_at) if hasattr(inv, "approved_at") else None,
             "approved_by": inv.approved_by if hasattr(inv, "approved_by") else None,
@@ -49,7 +48,7 @@ class InvoicePresenter(Presenter):
                     "description": li.description,
                     "quantity": float(li.quantity),
                     "unit_price": float(li.unit_price),
-                    "total": float(li.total),
+                    "total": float(li.amount or li.quantity * li.unit_price),
                     "sort_order": li.sort_order,
                 }
                 for li in inv.line_items

@@ -65,6 +65,7 @@ function NewInvoiceForm() {
   const [lineItems, setLineItems] = useState<LineItem[]>([
     { description: "", quantity: 1, unit_price: 0, is_taxed: false },
   ]);
+  const [sendTo, setSendTo] = useState("");
   const [aiDrafted, setAiDrafted] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -140,6 +141,14 @@ function NewInvoiceForm() {
   useEffect(() => {
     loadAiDraft();
   }, [loadAiDraft]);
+
+  // Fetch customer email when customer changes
+  useEffect(() => {
+    if (!customerId) { setSendTo(""); return; }
+    api.get<{ email: string | null }>(`/v1/customers/${customerId}`)
+      .then((c) => { if (c.email && !sendTo) setSendTo(c.email); })
+      .catch(() => {});
+  }, [customerId]);
 
   const handleSubmit = async () => {
     if (!customerId) {
@@ -274,59 +283,147 @@ function NewInvoiceForm() {
         </div>
       )}
 
-      {/* Main layout */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        {/* Left: Line items */}
-        <div className="space-y-4">
+      {/* Main layout — single column, logical order */}
+      <div className="max-w-2xl space-y-4">
+        {/* 1. Client + Details */}
+        <InvoiceSummary
+          customerId={customerId}
+          onCustomerChange={setCustomerId}
+          subject={subject}
+          onSubjectChange={setSubject}
+          issueDate={issueDate}
+          onIssueDateChange={setIssueDate}
+          dueDate={dueDate}
+          onDueDateChange={setDueDate}
+          taxRate={taxRate}
+          onTaxRateChange={setTaxRate}
+          discount={discount}
+          onDiscountChange={setDiscount}
+          notes={notes}
+          onNotesChange={setNotes}
+          lineItems={lineItems}
+          section="top"
+        />
+
+        {/* Send To — for estimates */}
+        {docType === "estimate" && (
           <Card className="shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Line Items</CardTitle>
-                {lineItems.length > 0 && (
-                  <Badge variant="secondary" className="text-xs">
-                    {lineItems.filter((li) => li.description.trim()).length} item{lineItems.filter((li) => li.description.trim()).length !== 1 ? "s" : ""}
-                  </Badge>
-                )}
+            <CardContent className="py-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Send Estimate To</label>
+                <input
+                  type="email"
+                  value={sendTo}
+                  onChange={(e) => setSendTo(e.target.value)}
+                  placeholder="recipient@email.com"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
               </div>
-            </CardHeader>
-            <CardContent>
-              <LineItemsEditor items={lineItems} onChange={setLineItems} />
             </CardContent>
           </Card>
-        </div>
+        )}
 
-        {/* Right: Summary sidebar */}
-        <div>
-          <InvoiceSummary
-            customerId={customerId}
-            onCustomerChange={setCustomerId}
-            subject={subject}
-            onSubjectChange={setSubject}
-            issueDate={issueDate}
-            onIssueDateChange={setIssueDate}
-            dueDate={dueDate}
-            onDueDateChange={setDueDate}
-            taxRate={taxRate}
-            onTaxRateChange={setTaxRate}
-            discount={discount}
-            onDiscountChange={setDiscount}
-            notes={notes}
-            onNotesChange={setNotes}
-            lineItems={lineItems}
-          />
-        </div>
+        {/* 2. Line Items */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">Line Items</CardTitle>
+              {lineItems.length > 0 && (
+                <Badge variant="secondary" className="text-xs">
+                  {lineItems.filter((li) => li.description.trim()).length} item{lineItems.filter((li) => li.description.trim()).length !== 1 ? "s" : ""}
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <LineItemsEditor items={lineItems} onChange={setLineItems} />
+          </CardContent>
+        </Card>
+
+        {/* 3. Tax/Discount, Notes, Totals */}
+        <InvoiceSummary
+          customerId={customerId}
+          onCustomerChange={setCustomerId}
+          subject={subject}
+          onSubjectChange={setSubject}
+          issueDate={issueDate}
+          onIssueDateChange={setIssueDate}
+          dueDate={dueDate}
+          onDueDateChange={setDueDate}
+          taxRate={taxRate}
+          onTaxRateChange={setTaxRate}
+          discount={discount}
+          onDiscountChange={setDiscount}
+          notes={notes}
+          onNotesChange={setNotes}
+          lineItems={lineItems}
+          section="bottom"
+        />
       </div>
 
       {/* Sticky footer */}
       <div className="fixed bottom-0 left-0 right-0 border-t bg-background z-40">
-        <div className="flex items-center justify-end gap-3 px-4 sm:px-6 py-3 max-w-screen-2xl mx-auto">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 max-w-screen-2xl mx-auto">
           <Button variant="ghost" onClick={() => handleBack()}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={saving || !customerId}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            {isEdit ? "Save Changes" : `Create ${label}`}
-          </Button>
+          <div className="flex gap-2">
+            {docType === "estimate" && !isEdit && (
+              <Button variant="outline" onClick={async () => {
+                const validItems = lineItems.filter((li) => li.description.trim());
+                if (!customerId) { toast.error("Select a client"); return; }
+                setSaving(true);
+                try {
+                  const result = await api.post<{ id: string }>("/v1/invoices", {
+                    customer_id: customerId, document_type: "estimate", subject: subject || undefined,
+                    issue_date: issueDate, due_date: dueDate, status: "draft",
+                    tax_rate: taxRate, discount, notes: notes || undefined,
+                    line_items: validItems.map((li, i) => ({ description: li.description, quantity: li.quantity, unit_price: li.unit_price, is_taxed: li.is_taxed, sort_order: i })),
+                  });
+                  if (jobId) await api.put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: result.id }).catch(() => {});
+                  toast.success("Draft saved");
+                  router.push(jobId ? "/jobs" : "/invoices");
+                } catch { toast.error("Failed to save draft"); }
+                finally { setSaving(false); }
+              }} disabled={saving || !customerId}>
+                Save Draft
+              </Button>
+            )}
+            <Button variant="outline" onClick={handleSubmit} disabled={saving || !customerId}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {isEdit ? "Save Changes" : `Create ${label}`}
+            </Button>
+            {docType === "estimate" && !isEdit && jobId && (
+              <Button onClick={async () => {
+                if (!customerId) { toast.error("Select a client"); return; }
+                const validItems = lineItems.filter((li) => li.description.trim());
+                if (validItems.length === 0) { toast.error("Add at least one line item"); return; }
+                setSaving(true);
+                try {
+                  // Create the estimate
+                  const result = await api.post<{ id: string }>("/v1/invoices", {
+                    customer_id: customerId, document_type: "estimate", subject: subject || undefined,
+                    issue_date: issueDate, due_date: dueDate,
+                    tax_rate: taxRate, discount, notes: notes || undefined,
+                    line_items: validItems.map((li, i) => ({ description: li.description, quantity: li.quantity, unit_price: li.unit_price, is_taxed: li.is_taxed, sort_order: i })),
+                  });
+                  // Link to job
+                  await api.put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: result.id }).catch(() => {});
+                  // Send to customer
+                  await api.post(`/v1/admin/agent-actions/${jobId}/send-estimate`, { to_email: sendTo || undefined });
+                  toast.success("Estimate created & sent to customer");
+                  router.push("/jobs");
+                } catch {
+                  toast.error("Failed to create & send");
+                } finally {
+                  setSaving(false);
+                }
+              }} disabled={saving || !customerId}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Create & Send
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

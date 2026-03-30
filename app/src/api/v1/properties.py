@@ -160,3 +160,66 @@ async def geocode_property(
         await prop_svc.update_geocode(prop.id, result[0], result[1], result[2])
         return {"lat": result[0], "lng": result[1], "provider": result[2]}
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Could not geocode address")
+
+
+# --- Access Codes CRUD ---
+
+@router.get("/{property_id}/access-codes")
+async def list_access_codes(
+    property_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.property_access_code import PropertyAccessCode
+    from sqlalchemy import select
+    result = await db.execute(
+        select(PropertyAccessCode).where(PropertyAccessCode.property_id == property_id)
+        .order_by(PropertyAccessCode.sort_order, PropertyAccessCode.label)
+    )
+    return [
+        {"id": c.id, "label": c.label, "code": c.code, "notes": c.notes, "sort_order": c.sort_order}
+        for c in result.scalars().all()
+    ]
+
+
+@router.post("/{property_id}/access-codes", status_code=201)
+async def create_access_code(
+    property_id: str,
+    body: dict,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    import uuid
+    from src.models.property_access_code import PropertyAccessCode
+    code = PropertyAccessCode(
+        id=str(uuid.uuid4()),
+        property_id=property_id,
+        label=body.get("label", "Gate"),
+        code=body.get("code", ""),
+        notes=body.get("notes"),
+        sort_order=body.get("sort_order", 0),
+    )
+    db.add(code)
+    await db.commit()
+    return {"id": code.id, "label": code.label, "code": code.code, "notes": code.notes}
+
+
+@router.delete("/{property_id}/access-codes/{code_id}", status_code=204)
+async def delete_access_code(
+    property_id: str,
+    code_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.property_access_code import PropertyAccessCode
+    from sqlalchemy import select
+    result = await db.execute(
+        select(PropertyAccessCode).where(
+            PropertyAccessCode.id == code_id,
+            PropertyAccessCode.property_id == property_id,
+        )
+    )
+    code = result.scalar_one_or_none()
+    if code:
+        await db.delete(code)
+        await db.commit()

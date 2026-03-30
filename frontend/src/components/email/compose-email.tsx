@@ -232,7 +232,7 @@ export function ComposeEmail() {
   // Minimized bar
   if (isMinimized) {
     return (
-      <div className="fixed bottom-0 right-4 z-[60] w-72 sm:w-80">
+      <div className="fixed bottom-0 right-4 z-[200] w-72 sm:w-80" style={{ pointerEvents: "auto" }}>
         <button
           type="button"
           onClick={toggleMinimize}
@@ -255,7 +255,7 @@ export function ComposeEmail() {
 
   // Full compose window
   return (
-    <div className="fixed bottom-0 right-4 z-[60] flex w-[calc(100vw-2rem)] flex-col rounded-t-lg border bg-background shadow-2xl sm:w-[480px] sm:right-6 max-h-[85vh]">
+    <div className="fixed bottom-0 right-4 z-[200] flex w-[calc(100vw-2rem)] flex-col rounded-t-lg border bg-background shadow-2xl sm:w-[480px] sm:right-6 max-h-[85vh]" style={{ pointerEvents: "auto" }}>
       {/* Header */}
       <div className="flex items-center justify-between rounded-t-lg bg-primary px-4 py-2.5 text-primary-foreground">
         <span className="text-sm font-medium">New Email</span>

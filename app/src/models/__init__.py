@@ -67,6 +67,7 @@ from src.models.equipment_catalog import EquipmentCatalog
 from src.models.equipment_item import EquipmentItem
 from src.models.equipment_event import EquipmentEvent
 from src.models.feedback_item import FeedbackItem
+from src.models.property_access_code import PropertyAccessCode
 from src.models.internal_message import InternalThread, InternalMessage
 
 __all__ = [
@@ -123,6 +124,7 @@ __all__ = [
     "EquipmentEvent",
     "InboxRoutingRule",
     "FeedbackItem",
+    "PropertyAccessCode",
     "InternalThread",
     "InternalMessage",
 ]

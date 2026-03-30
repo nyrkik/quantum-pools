@@ -79,7 +79,7 @@ export function LineItemsEditor({ items, onChange }: LineItemsEditorProps) {
                 <TableCell className="p-1.5">
                   <Input
                     type="number"
-                    value={item.unit_price}
+                    value={item.unit_price || ""}
                     onChange={(e) => updateItem(i, "unit_price", parseFloat(e.target.value) || 0)}
                     min="0"
                     step="0.01"

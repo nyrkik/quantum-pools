@@ -35,7 +35,7 @@ class InvoiceService:
         invoice.subtotal = round(subtotal, 2)
         invoice.tax_amount = tax_amount
         invoice.total = total
-        invoice.balance = round(total - invoice.amount_paid, 2)
+        invoice.balance = round(total - (invoice.amount_paid or 0), 2)
 
     async def list(
         self,

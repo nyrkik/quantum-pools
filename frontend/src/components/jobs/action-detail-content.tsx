@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ import {
   ClipboardList,
   Package,
   Lightbulb,
+  Pencil,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCompose } from "@/components/email/compose-provider";
@@ -41,9 +42,136 @@ import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges"
 import { TasksSection } from "@/components/jobs/tasks-section";
 import type { ActionDetail } from "@/types/agent";
 import { JobPartsSection } from "@/components/jobs/job-parts-section";
-import { useTeamMembers } from "@/hooks/use-team-members";
+import { useTeamMembers, ACTION_TYPES } from "@/hooks/use-team-members";
 
 // --- Utility components ---
+
+function DraftEmailBlock({ commentId, isSent, to: origTo, subject: origSubject, body: origBody, createdAt, actionId, onSent }: {
+  commentId: string; isSent: boolean; to: string; subject: string; body: string; createdAt: string; actionId: string; onSent: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editTo, setEditTo] = useState(origTo);
+  const [editSubject, setEditSubject] = useState(origSubject);
+  const [editBody, setEditBody] = useState(origBody);
+  const [sendingDraft, setSendingDraft] = useState(false);
+  const compose = useCompose();
+
+  const handleSend = async () => {
+    setSendingDraft(true);
+    try {
+      await api.post("/v1/email/compose", {
+        to: editTo,
+        subject: editSubject,
+        body: editBody,
+        job_id: actionId,
+      });
+      toast.success("Email sent");
+      onSent();
+    } catch {
+      toast.error("Failed to send");
+    } finally {
+      setSendingDraft(false);
+    }
+  };
+
+  const handleDiscard = () => {
+    setEditTo(origTo);
+    setEditSubject(origSubject);
+    setEditBody(origBody);
+    setEditing(false);
+  };
+
+  return (
+    <div className={`rounded-md p-3 border ${isSent ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" : "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800"}`}>
+      <div className="flex items-center justify-between mb-1">
+        <span className={`text-xs font-medium ${isSent ? "text-green-700 dark:text-green-400" : "text-blue-700 dark:text-blue-400"}`}>
+          {isSent ? "✓ Email Sent" : editing ? "Editing Draft" : "Draft Email"}
+        </span>
+        <span className="text-[10px] text-muted-foreground">{formatTime(createdAt)}</span>
+      </div>
+
+      {editing ? (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">To</label>
+            <Input value={editTo} onChange={(e) => setEditTo(e.target.value)} className="h-7 text-xs" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">Subject</label>
+            <Input value={editSubject} onChange={(e) => setEditSubject(e.target.value)} className="h-7 text-xs" />
+          </div>
+          <Textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} className="text-sm min-h-[120px] resize-none" />
+          <div className="flex items-center justify-between">
+            <Button size="sm" variant="ghost" className="text-xs" onClick={handleDiscard}>Discard</Button>
+            <Button size="sm" variant="default" className="text-xs" onClick={handleSend} disabled={sendingDraft || !editTo.trim()}>
+              {sendingDraft ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+              Send
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground mb-1">To: {origTo}</p>
+          <p className="text-xs font-medium mb-1">Subject: {origSubject}</p>
+          <p className="text-sm whitespace-pre-wrap">{origBody}</p>
+          {!isSent && (
+            <div className="flex items-center justify-between mt-3">
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => setEditing(true)}>
+                <Pencil className="h-3 w-3 mr-1.5" /> Edit
+              </Button>
+              <Button size="sm" variant="default" className="text-xs" onClick={handleSend} disabled={sendingDraft}>
+                {sendingDraft ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+                Send to {origTo.split("@")[0]}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function EditableTypeBadge({ type, actionId, onUpdate }: { type: string; actionId: string; onUpdate: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleChange = async (newType: string) => {
+    if (newType === type) { setOpen(false); return; }
+    setSaving(true);
+    try {
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { action_type: newType });
+      toast.success(`Type changed to ${newType.replace(/_/g, " ")}`);
+      setOpen(false);
+      onUpdate();
+    } catch { toast.error("Failed to update"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}>
+        <ActionTypeBadge type={type} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 bg-background border rounded-md shadow-lg z-20 py-1 w-36">
+            {ACTION_TYPES.map((t) => (
+              <button
+                key={t}
+                onClick={() => handleChange(t)}
+                disabled={saving}
+                className={`w-full text-left px-3 py-1.5 text-xs capitalize hover:bg-muted transition-colors ${t === type ? "font-medium bg-muted/50" : ""}`}
+              >
+                {t.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
   detail: ActionDetail; actionId: string; onUpdate: () => void; loadDetail: () => void; onClose: () => void;
@@ -136,7 +264,7 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
         <div className="flex items-center gap-2">
           <ActionStatusIcon status={detail.status} />
           <span className="text-sm font-semibold capitalize">{detail.status.replace("_", " ")}</span>
-          <ActionTypeBadge type={detail.action_type} />
+          <EditableTypeBadge type={detail.action_type} actionId={actionId} onUpdate={() => { loadDetail(); onUpdate(); }} />
           {detail.due_date && isOverdue(detail.due_date) && detail.status !== "done" && (
             <Badge variant="destructive" className="text-[10px] px-1.5 bg-red-700">Overdue</Badge>
           )}
@@ -155,39 +283,41 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
             </Button>
           )}
           {(detail.status === "open" || detail.status === "in_progress" || detail.status === "approved") && (
-            <>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" className="h-7 text-xs bg-red-700 hover:bg-red-800 text-white">
-                    Cancel Job
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Cancel this job?</AlertDialogTitle>
-                    <AlertDialogDescription>This will cancel the job. Comments and history will be preserved.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep Job</AlertDialogCancel>
-                    <AlertDialogAction onClick={async () => {
-                      try { await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" }); toast.success("Job cancelled"); onClose(); onUpdate(); }
-                      catch { toast.error("Failed"); }
-                    }}>Cancel Job</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => handleStatusChange("done")}>
-                <CheckCircle2 className="h-3 w-3 mr-1" /> Mark Job Done
-              </Button>
-            </>
+            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white" onClick={() => handleStatusChange("done")}>
+              <CheckCircle2 className="h-3 w-3 mr-1" /> Mark Job Done
+            </Button>
           )}
         </div>
       </div>
       <p className="text-sm mt-2">{detail.description}</p>
-      <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
-        {detail.customer_name && <span>{detail.customer_name}</span>}
-        {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
-        <DueDateEditor actionId={actionId} currentDate={detail.due_date} onUpdate={() => { loadDetail(); onUpdate(); }} />
+      <div className="flex items-center justify-between mt-1">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          {detail.customer_name && <span>{detail.customer_name}</span>}
+          {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
+          <DueDateEditor actionId={actionId} currentDate={detail.due_date} onUpdate={() => { loadDetail(); onUpdate(); }} />
+        </div>
+        {detail.status !== "cancelled" && detail.status !== "done" && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" title="Delete Job">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel this job?</AlertDialogTitle>
+                <AlertDialogDescription>This will cancel the job. Comments and history will be preserved.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep Job</AlertDialogCancel>
+                <AlertDialogAction onClick={async () => {
+                  try { await api.put(`/v1/admin/agent-actions/${actionId}`, { status: "cancelled" }); toast.success("Job cancelled"); onClose(); onUpdate(); }
+                  catch { toast.error("Failed"); }
+                }}>Cancel Job</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
     </div>
   );
@@ -289,6 +419,7 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
   const [mentionFilter, setMentionFilter] = useState("");
   const teamMembers = useTeamMembers();
   const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
@@ -397,9 +528,14 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
           )}
           {/* Billing */}
           {detail.invoice_id ? (
-            <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/${detail.invoice_id}`)}>
-              <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> View Estimate
-            </Button>
+            <div className="flex gap-1.5">
+              <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/${detail.invoice_id}`)}>
+                <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> View Estimate
+              </Button>
+              <Button variant="ghost" size="sm" className="justify-start text-xs" onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}>
+                New Estimate
+              </Button>
+            </div>
           ) : (
             <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}>
               <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> Create Estimate
@@ -495,27 +631,21 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
               if (isDraft || isSent) {
                 const lines = c.text.replace(/\[(DRAFT|SENT)_EMAIL\]\n/, "").split("\n---\n");
                 const header = lines[0] || "";
-                const body = lines[1] || "";
-                const to = header.match(/To: (.+)/)?.[1] || "";
-                const subject = header.match(/Subject: (.+)/)?.[1] || "";
+                const origBody = lines[1] || "";
+                const origTo = header.match(/To: (.+)/)?.[1] || "";
+                const origSubject = header.match(/Subject: (.+)/)?.[1] || "";
                 return (
-                  <div key={c.id} className={`rounded-md p-3 border ${isSent ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" : "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800"}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={`text-xs font-medium ${isSent ? "text-green-700 dark:text-green-400" : "text-blue-700 dark:text-blue-400"}`}>
-                        {isSent ? "✓ Email Sent" : "Draft Email"}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">{formatTime(c.created_at)}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mb-1">To: {to}</p>
-                    <p className="text-xs font-medium mb-1">Subject: {subject}</p>
-                    <p className="text-sm whitespace-pre-wrap line-clamp-6">{body}</p>
-                    {!isSent && (
-                      <Button size="sm" variant="default" className="mt-2"
-                        onClick={() => compose.openCompose({ to, subject, body, jobId: actionId, originalDraft: body, originalSubject: subject, onSent: () => { loadDetail(); onUpdate(); } })}>
-                        <Send className="h-3.5 w-3.5 mr-1.5" /> Edit & Send
-                      </Button>
-                    )}
-                  </div>
+                  <DraftEmailBlock
+                    key={c.id}
+                    commentId={c.id}
+                    isSent={isSent}
+                    to={origTo}
+                    subject={origSubject}
+                    body={origBody}
+                    createdAt={c.created_at}
+                    actionId={actionId}
+                    onSent={() => { loadDetail(); onUpdate(); }}
+                  />
                 );
               }
               const isBot = c.author === "DeepBlue";
@@ -544,6 +674,7 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
         <div className="relative">
           <div className="flex gap-2 items-end">
             <Textarea
+              ref={commentRef}
               value={comment}
               onChange={(e) => {
                 const val = e.target.value;
@@ -576,7 +707,7 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
 
           {/* Mention autocomplete dropdown */}
           {mentionOpen && (
-            <div className="absolute bottom-full left-0 mb-1 w-48 bg-background border rounded-md shadow-lg z-10 py-1 max-h-40 overflow-y-auto">
+            <div className="fixed bottom-16 left-4 right-4 sm:left-auto sm:right-auto sm:w-48 bg-background border rounded-md shadow-lg z-[100] py-1 max-h-40 overflow-y-auto">
               {[{ name: "DeepBlue", label: "AI Assistant" }, ...teamMembers.map(n => ({ name: n, label: "" }))].filter(
                 (m) => m.name.toLowerCase().startsWith(mentionFilter) || !mentionFilter
               ).map((m) => (
@@ -584,11 +715,19 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
                   key={m.name}
                   className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors flex items-center justify-between"
                   onClick={() => {
-                    // Replace @partial with @Name
                     const lastAt = comment.lastIndexOf("@");
                     const before = comment.slice(0, lastAt);
-                    setComment(`${before}@${m.name} `);
+                    const newVal = `${before}@${m.name} `;
+                    setComment(newVal);
                     setMentionOpen(false);
+                    // Refocus textarea with cursor at end
+                    setTimeout(() => {
+                      if (commentRef.current) {
+                        commentRef.current.focus();
+                        commentRef.current.selectionStart = newVal.length;
+                        commentRef.current.selectionEnd = newVal.length;
+                      }
+                    }, 0);
                   }}
                 >
                   <span className={m.name === "DeepBlue" ? "font-medium text-violet-600" : ""}>{m.name}</span>

@@ -152,7 +152,8 @@ export function InvoiceSummary({
   notes,
   onNotesChange,
   lineItems,
-}: InvoiceSummaryProps) {
+  section,
+}: InvoiceSummaryProps & { section?: "top" | "bottom" }) {
   const subtotal = useMemo(
     () => lineItems.reduce((sum, li) => sum + li.quantity * li.unit_price, 0),
     [lineItems]
@@ -169,133 +170,108 @@ export function InvoiceSummary({
   const taxAmount = taxableAmount * (taxRate / 100);
   const total = subtotal + taxAmount - discount;
 
+  const showTop = !section || section === "top";
+  const showBottom = !section || section === "bottom";
+
   return (
     <div className="space-y-4">
-      {/* Customer */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Client</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <CustomerSearch value={customerId} onChange={onCustomerChange} />
-        </CardContent>
-      </Card>
+      {/* TOP: Client + Details */}
+      {showTop && (
+        <>
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Client</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CustomerSearch value={customerId} onChange={onCustomerChange} />
+            </CardContent>
+          </Card>
 
-      {/* Subject */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Subject</Label>
-            <Input
-              value={subject}
-              onChange={(e) => onSubjectChange(e.target.value)}
-              placeholder="e.g., Monthly pool service"
-              className="text-sm"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Issue Date</Label>
-              <Input
-                type="date"
-                value={issueDate}
-                onChange={(e) => onIssueDateChange(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Due Date</Label>
-              <Input
-                type="date"
-                value={dueDate}
-                onChange={(e) => onDueDateChange(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Subject</Label>
+                <Input
+                  value={subject}
+                  onChange={(e) => onSubjectChange(e.target.value)}
+                  placeholder="e.g., Monthly pool service"
+                  className="text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Issue Date</Label>
+                  <Input type="date" value={issueDate} onChange={(e) => onIssueDateChange(e.target.value)} className="text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Due Date</Label>
+                  <Input type="date" value={dueDate} onChange={(e) => onDueDateChange(e.target.value)} className="text-sm" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
-      {/* Tax & Discount */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Tax & Discount</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Tax Rate (%)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={taxRate}
-                onChange={(e) => onTaxRateChange(parseFloat(e.target.value) || 0)}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Discount ($)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={discount}
-                onChange={(e) => onDiscountChange(parseFloat(e.target.value) || 0)}
-                className="text-sm"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* BOTTOM: Tax/Discount + Notes + Totals */}
+      {showBottom && (
+        <>
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Tax & Discount</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Tax Rate (%)</Label>
+                  <Input type="number" min="0" step="0.01" value={taxRate || ""} onChange={(e) => onTaxRateChange(parseFloat(e.target.value) || 0)} className="text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Discount ($)</Label>
+                  <Input type="number" min="0" step="0.01" value={discount || ""} onChange={(e) => onDiscountChange(parseFloat(e.target.value) || 0)} className="text-sm" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Notes */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Notes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Textarea
-            value={notes}
-            onChange={(e) => onNotesChange(e.target.value)}
-            placeholder="Additional notes for the client..."
-            rows={3}
-            className="text-sm"
-          />
-        </CardContent>
-      </Card>
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Notes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Textarea value={notes} onChange={(e) => onNotesChange(e.target.value)} placeholder="Additional notes for the client..." rows={3} className="text-sm" />
+            </CardContent>
+          </Card>
 
-      {/* Totals */}
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Totals</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Subtotal</span>
-            <span>{formatCurrency(subtotal)}</span>
-          </div>
-          {taxRate > 0 && (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Tax ({taxRate}%)</span>
-              <span>{formatCurrency(taxAmount)}</span>
-            </div>
-          )}
-          {discount > 0 && (
-            <div className="flex justify-between text-red-600">
-              <span>Discount</span>
-              <span>-{formatCurrency(discount)}</span>
-            </div>
-          )}
-          <div className="flex justify-between font-bold border-t pt-2 text-base">
-            <span>Total</span>
-            <span>{formatCurrency(Math.max(0, total))}</span>
-          </div>
-        </CardContent>
-      </Card>
+          <Card className="shadow-sm">
+            <CardContent className="space-y-2 text-sm py-4">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span>{formatCurrency(subtotal)}</span>
+              </div>
+              {taxRate > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Tax ({taxRate}%)</span>
+                  <span>{formatCurrency(taxAmount)}</span>
+                </div>
+              )}
+              {discount > 0 && (
+                <div className="flex justify-between text-red-600">
+                  <span>Discount</span>
+                  <span>-{formatCurrency(discount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold border-t pt-2 text-base">
+                <span>Total</span>
+                <span>{formatCurrency(Math.max(0, total))}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

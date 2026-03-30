@@ -6,7 +6,7 @@
 Enterprise pool service management platform consolidating:
 - **BarkurrRX** (architecture reference): FastAPI + Next.js 16 + React 19 + TypeScript + Tailwind 4 + shadcn/ui
 - **Quantum Pools (NAS)**: OR-Tools VRP route optimization, Leaflet maps, customer/tech management, multi-tenancy
-- **Pool Scout Pro**: EMD inspection scraping, PDF extraction, violation analysis, AI summarization
+- **Pool Scout Pro**: Health inspection scraping, PDF extraction, violation analysis, AI summarization
 
 ## Architecture
 
@@ -114,7 +114,7 @@ QuantumPools/
 │       ├── models/                    # SQLAlchemy ORM (one file per model)
 │       ├── schemas/                   # Pydantic request/response
 │       ├── services/                  # Business logic layer
-│       │   └── emd/                   # EMD-specific services
+│       │   └── inspection/            # Inspection-specific services
 │       ├── seeds/
 │       └── utils/
 ├── frontend/                          # Next.js 16
@@ -158,8 +158,8 @@ QuantumPools/
 - **Dashboard tiles**: Clickable — link to Customers, Properties, Routes, Invoices respectively.
 - **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`. Uploads bypass the Next.js rewrite proxy (body size limits) and go directly to the backend on port 7061. Photos are resized client-side to max 1600px before upload. CORS allows Tailscale + LAN origins.
 - **BodyOfWater (BOW)**: Each Property has 1+ BodyOfWater records (pool, spa, hot_tub, wading_pool, fountain, water_feature). One is `is_primary=True`. Pool dimensions, equipment, gallons, service minutes all live on BOW. Property still has the old columns for backward compat during transition. Profitability, route optimization, measurements, and chemical readings all aggregate from BOWs. Migration `8c1a65b5a13d` created BOW table and backfilled from properties. API: `/api/v1/bodies-of-water/property/{id}` (list/create), `/api/v1/bodies-of-water/{id}` (get/update/delete).
-- **EMD Inspection Intelligence**: Sacramento County health department inspection data. 5 models: `EMDFacility`, `EMDInspection`, `EMDViolation`, `EMDEquipment`, `EMDLookup`. Migration `2f849d9d94e2`. 908 facilities, 1386 inspections, 8505 violations migrated from Pool Scout Pro SQLite. Playwright scraper at `app/src/services/emd/scraper.py`. PyMuPDF PDF extractor at `app/src/services/emd/pdf_extractor.py`. **Tier-gated access**: `my_inspections` ($9.99/mo, matched facilities only), `full_research` ($24.99/mo, all facilities + leads), `single_lookup` ($0.99/facility, 30-day access). `emd_lookups` table tracks purchased single lookups (org_id, facility_id, expires_at). API: `/api/v1/emd/facilities` (tier-filtered list), `/api/v1/emd/search` (returns redacted results for non-accessible facilities), `/api/v1/emd/lookups` (active lookups), `/api/v1/emd/lookups/purchase` (bulk purchase), `/api/v1/emd/leads` (full_research only), `/api/v1/emd/scrape` (admin only). Frontend: `/emd` — tier-aware facility list, redacted rows with cart for single lookups, "Recent Lookups" section, blurred detail tease with unlock CTA. PDFs stored in `./uploads/emd/`.
-- **À La Carte Subscriptions**: Feature subscription system. 3 tables: `features` (9 features), `feature_tiers` (3 EMD tiers), `org_subscriptions`. Migration `e2caa91ea93a`. Organizations columns: `stripe_customer_id`, `billing_email`, `trial_ends_at`. `require_feature()` dependency in `deps.py` gates API endpoints. `FeatureService` checks subscriptions, base features, trials. `/v1/auth/me` returns `features: string[]` + `emd_tier`. Frontend: `usePermissions()` merges role + feature checks. `FeatureGate` + `UpgradePrompt` components. Existing org grandfathered with all features. 8 routers gated: routes, invoices, payments, profitability, satellite, measurements, emd, chemical-costs. Billing API: `GET /v1/billing/features` (public catalog), `GET /v1/billing/subscription` (owner/admin).
+- **Inspection Intelligence**: Health department inspection data. 5 models: `InspectionFacility`, `Inspection`, `InspectionViolation`, `InspectionEquipment`, `InspectionLookup`. 908 facilities, 1386 inspections, 8505 violations. Playwright scraper at `app/src/services/inspection/scraper.py`. PyMuPDF PDF extractor at `app/src/services/inspection/pdf_extractor.py`. **Tier-gated access**: `my_inspections`, `full_research`, `single_lookup`. API: `/api/v1/inspections/`. Frontend: `/inspections`. PDFs stored in `./uploads/inspection/`.
+- **À La Carte Subscriptions**: Feature subscription system. 3 tables: `features` (9 features), `feature_tiers` (3 inspection tiers), `org_subscriptions`. Migration `e2caa91ea93a`. Organizations columns: `stripe_customer_id`, `billing_email`, `trial_ends_at`. `require_feature()` dependency in `deps.py` gates API endpoints. `FeatureService` checks subscriptions, base features, trials. `/v1/auth/me` returns `features: string[]` + `inspection_tier`. Frontend: `usePermissions()` merges role + feature checks. `FeatureGate` + `UpgradePrompt` components. Existing org grandfathered with all features. 8 routers gated: routes, invoices, payments, profitability, satellite, measurements, inspections, chemical-costs. Billing API: `GET /v1/billing/features` (public catalog), `GET /v1/billing/subscription` (owner/admin).
 - **Satellite analysis per-BOW**: Each pool BOW gets its own satellite analysis and pin (1:1 via `body_of_water_id` on `satellite_analyses`). Spas/fountains excluded from satellite (use measurement tool). `SatelliteImage` stays property-keyed (one set of overhead photos per yard). API: `/v1/satellite/pool-bows` (list pool BOWs), `/v1/satellite/bows/{bow_id}` (get/pin/analyze). Frontend: `/satellite?bow={id}`. Migration `75f82d5141d5` added column + backfilled 73 analyses.
 
 ## Critical Reference Files
@@ -172,7 +172,7 @@ QuantumPools/
 
 ## RBAC Roles
 
-| Role | Customers | Properties | Routes | Visits | Invoices | Techs | EMD | Settings |
+| Role | Customers | Properties | Routes | Visits | Invoices | Techs | Inspections | Settings |
 |------|-----------|------------|--------|--------|----------|-------|-----|----------|
 | owner | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
 | admin | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | Read |
@@ -232,9 +232,9 @@ Property 1──* PoolMeasurement ──? BodyOfWater
 Visit 1──* ChemicalReading
 Visit *──* Service (through VisitService)
 Tech 1──* Route 1──* RouteStop ──1 Property
-EMDFacility 1──* EMDInspection 1──* EMDViolation
-EMDFacility 1──* EMDInspection 1──1 EMDEquipment
-EMDFacility ──? Property (matched via address)
+InspectionFacility 1──* Inspection 1──* InspectionViolation
+InspectionFacility 1──* Inspection 1──1 InspectionEquipment
+InspectionFacility ──? Property (matched via address)
 ```
 
 ## Phase Status
@@ -249,5 +249,5 @@ EMDFacility ──? Property (matched via address)
 - [ ] Phase 3c: Complete Invoicing (email, PDF, Stripe, AutoPay, background worker)
 - [ ] Phase 3d: Core Pool Ops (LSI/dosing, workflows)
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
-- [x] Phase 5: EMD Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities migrated, frontend)
+- [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities migrated, frontend)
 - [ ] Phase 6: Advanced Features (Stripe, equipment tracking, SMS, PWA)

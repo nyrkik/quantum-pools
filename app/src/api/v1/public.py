@@ -29,10 +29,21 @@ class ApprovalResponse(BaseModel):
     approved_at: str | None = None
 
 
+class SendCodeRequest(BaseModel):
+    email: str
+
+
 class ApproveRequest(BaseModel):
     name: str
     email: str | None = None
+    signature: str | None = None
+    verification_code: str | None = None
+    user_agent: str | None = None
     notes: str | None = None
+
+
+# In-memory code store (short-lived, per-token)
+_verification_codes: dict[str, tuple[str, datetime]] = {}
 
 
 @router.get("/estimate/{token}")
@@ -101,9 +112,49 @@ async def view_estimate(token: str, db: AsyncSession = Depends(get_db)):
         "org_color": org.brand_color if org and hasattr(org, "brand_color") else None,
         "line_items": items,
         "total": float(invoice.total or 0),
-        "status": "approved" if approval.approved_at else "pending",
-        "approved_at": approval.approved_at.isoformat() if approval.approved_at else None,
+        "customer_email": cust.email if cust else None,
+        "status": "approved" if approval.approved_by_type and approval.approved_by_type != "pending" else "pending",
+        "approved_at": approval.approved_at.isoformat() if approval.approved_by_type and approval.approved_by_type != "pending" else None,
     }
+
+
+@router.post("/estimate/{token}/send-code")
+async def send_verification_code(
+    token: str,
+    body: SendCodeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a 6-digit verification code to the customer's email."""
+    import random
+
+    # Verify token exists
+    result = await db.execute(
+        select(EstimateApproval).where(EstimateApproval.approval_token == token)
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+
+    # Generate 6-digit code
+    code = f"{random.randint(100000, 999999)}"
+    _verification_codes[token] = (code, datetime.now(timezone.utc))
+
+    # Get org for branding
+    invoice_result = await db.execute(select(Invoice).where(Invoice.id == approval.invoice_id))
+    invoice = invoice_result.scalar_one_or_none()
+
+    # Send email with code
+    from src.services.email_service import EmailService
+    email_svc = EmailService(db)
+    org_id = approval.organization_id
+    await email_svc.send_email(
+        org_id=org_id,
+        to=body.email,
+        subject="Your verification code",
+        body=f"Your verification code is: {code}\n\nEnter this code to approve estimate {invoice.invoice_number if invoice else ''}.\n\nThis code expires in 15 minutes.",
+    )
+
+    return {"sent": True}
 
 
 @router.post("/estimate/{token}/approve")
@@ -121,8 +172,21 @@ async def approve_estimate(
     if not approval:
         raise HTTPException(status_code=404, detail="Estimate not found or link expired")
 
-    if approval.approved_at:
+    if approval.approved_by_type and approval.approved_by_type != "pending":
         return {"already_approved": True, "approved_at": approval.approved_at.isoformat()}
+
+    # Verify code
+    from datetime import timedelta
+    stored = _verification_codes.get(token)
+    if not stored:
+        raise HTTPException(status_code=400, detail="Verification code expired. Please request a new code.")
+    stored_code, stored_at = stored
+    if datetime.now(timezone.utc) - stored_at > timedelta(minutes=15):
+        del _verification_codes[token]
+        raise HTTPException(status_code=400, detail="Verification code expired. Please request a new code.")
+    if body.verification_code != stored_code:
+        raise HTTPException(status_code=400, detail="Invalid verification code. Please check and try again.")
+    del _verification_codes[token]
 
     # Record approval
     now = datetime.now(timezone.utc)
@@ -132,7 +196,8 @@ async def approve_estimate(
     approval.client_email = body.email
     approval.client_ip = request.client.host if request.client else None
     approval.approval_method = "email_link"
-    approval.notes = body.notes
+    approval.signature_data = body.signature
+    approval.notes = f"User-Agent: {body.user_agent or 'unknown'}" + (f"\n{body.notes}" if body.notes else "")
 
     # Update invoice
     invoice_result = await db.execute(

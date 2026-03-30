@@ -31,10 +31,19 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
   const [approved, setApproved] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [typedAuth, setTypedAuth] = useState("");
+  const [verificationStep, setVerificationStep] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeError, setCodeError] = useState("");
   const backendOrigin = getBackendOrigin();
 
   useEffect(() => {
-    fetch(`${backendOrigin}/api/v1/public/estimate/${token}`)
+    // Use relative URL for public pages — works through tunnel and direct access
+    const apiBase = typeof window !== "undefined" && window.location.hostname.endsWith("quantumpoolspro.com")
+      ? "" : backendOrigin;
+    fetch(`${apiBase}/api/v1/public/estimate/${token}`)
       .then(async (res) => {
         if (!res.ok) throw new Error();
         return res.json();
@@ -43,24 +52,62 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
         setData(d);
         if (d.status === "approved") setApproved(true);
         if (d.customer_name) setName(d.customer_name);
+        if (d.customer_email) setEmail(d.customer_email);
       })
       .catch(() => setError("This estimate is no longer available."))
       .finally(() => setLoading(false));
   }, [token, backendOrigin]);
 
-  const handleApprove = async () => {
-    if (!name.trim()) return;
-    setApproving(true);
+  const getApiBase = () =>
+    typeof window !== "undefined" && window.location.hostname.endsWith("quantumpoolspro.com") ? "" : backendOrigin;
+
+  const handleSendCode = async () => {
+    if (!email.trim()) return;
+    setSendingCode(true);
+    setCodeError("");
     try {
-      const res = await fetch(`${backendOrigin}/api/v1/public/estimate/${token}/approve`, {
+      const res = await fetch(`${getApiBase()}/api/v1/public/estimate/${token}/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), email: email.trim() || null }),
+        body: JSON.stringify({ email: email.trim() }),
       });
-      if (!res.ok) throw new Error("Approval failed");
-      setApproved(true);
+      if (!res.ok) throw new Error();
+      setVerificationStep(true);
     } catch {
-      setError("Failed to submit approval. Please try again.");
+      setCodeError("Failed to send verification code. Check email and try again.");
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!name.trim() || !verificationCode.trim()) return;
+    setApproving(true);
+    setCodeError("");
+    try {
+      const res = await fetch(`${getApiBase()}/api/v1/public/estimate/${token}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim() || null,
+          signature: typedAuth.trim(),
+          verification_code: verificationCode.trim(),
+          user_agent: navigator.userAgent,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Approval failed");
+      }
+      setApproved(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to submit approval.";
+      if (msg.toLowerCase().includes("code")) {
+        setCodeError(msg);
+      } else {
+        setCodeError(msg);
+      }
     } finally {
       setApproving(false);
     }
@@ -144,8 +191,9 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                 <p className="text-xs text-green-600">Thank you! We'll be in touch to schedule the work.</p>
               </div>
             ) : (
-              <div className="space-y-3 border-t pt-4">
-                <p className="text-sm text-slate-600">To approve this estimate, please confirm below:</p>
+              <div className="space-y-4 border-t pt-4">
+                <p className="text-sm font-medium text-slate-700">Authorization</p>
+
                 <div className="space-y-2">
                   <div className="space-y-1">
                     <Label className="text-xs">Your Name *</Label>
@@ -157,7 +205,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Email (optional)</Label>
+                    <Label className="text-xs">Email *</Label>
                     <Input
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -166,16 +214,82 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                       type="email"
                     />
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Type your name to sign *</Label>
+                    <Input
+                      value={typedAuth}
+                      onChange={(e) => setTypedAuth(e.target.value)}
+                      placeholder="Type your full name"
+                      className="h-9 italic"
+                    />
+                  </div>
                 </div>
-                <Button
-                  className="w-full"
-                  style={{ backgroundColor: brandColor }}
-                  disabled={!name.trim() || approving}
-                  onClick={handleApprove}
-                >
-                  {approving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                  Approve Estimate
-                </Button>
+
+                <div className="bg-slate-50 rounded-md p-3 border">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={(e) => setConsent(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span className="text-xs text-slate-600 leading-relaxed">
+                      I, <strong>{name || "___"}</strong>, authorize the work described in this estimate totaling{" "}
+                      <strong>${data.total.toFixed(2)}</strong> and agree to the terms presented. I understand this constitutes
+                      a binding authorization to proceed with the described services.
+                    </span>
+                  </label>
+                </div>
+
+                {!verificationStep ? (
+                  <>
+                    <Button
+                      className="w-full"
+                      style={{ backgroundColor: brandColor }}
+                      disabled={!name.trim() || !email.trim() || !typedAuth.trim() || !consent || sendingCode || typedAuth.toLowerCase() !== name.toLowerCase()}
+                      onClick={handleSendCode}
+                    >
+                      {sendingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Send Verification Code
+                    </Button>
+
+                    {typedAuth && name && typedAuth.toLowerCase() !== name.toLowerCase() && (
+                      <p className="text-xs text-red-500 text-center">Typed name must match your name above</p>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-3 border-t pt-3">
+                    <p className="text-sm text-slate-600">A 6-digit code was sent to <strong>{email}</strong>. Enter it below to complete your approval.</p>
+                    <Input
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="Enter 6-digit code"
+                      className="h-11 text-center text-lg tracking-widest font-mono"
+                      maxLength={6}
+                      autoFocus
+                    />
+                    <Button
+                      className="w-full"
+                      style={{ backgroundColor: brandColor }}
+                      disabled={verificationCode.length !== 6 || approving}
+                      onClick={handleApprove}
+                    >
+                      {approving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      Approve & Authorize
+                    </Button>
+                    <button
+                      className="w-full text-xs text-slate-500 hover:text-slate-700"
+                      onClick={handleSendCode}
+                      disabled={sendingCode}
+                    >
+                      {sendingCode ? "Sending..." : "Resend code"}
+                    </button>
+                  </div>
+                )}
+
+                {codeError && (
+                  <p className="text-xs text-red-500 text-center">{codeError}</p>
+                )}
               </div>
             )}
           </CardContent>

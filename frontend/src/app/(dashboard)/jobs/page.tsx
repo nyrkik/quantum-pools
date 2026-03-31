@@ -34,6 +34,7 @@ import { useTeamMembers } from "@/hooks/use-team-members";
 import { ActionTypeBadge, ActionStatusIcon, JobPathBadge } from "@/components/jobs/job-badges";
 import { ActionDetailContent } from "@/components/jobs/action-detail-content";
 import { NewJobForm } from "@/components/jobs/new-job-form";
+import { PageLayout } from "@/components/layout/page-layout";
 import type { AgentAction, AgentStats } from "@/types/agent";
 
 // ─── Main Page ──────────────────────────────────────────────────────
@@ -150,31 +151,33 @@ export default function JobsPage() {
   const groups = Array.from(grouped.entries());
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <ClipboardList className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Jobs</h1>
-      </div>
-
-      {/* Open Jobs tile + New Job */}
-      <div className="flex items-center justify-between gap-4">
-        {stats && (
-          <Card className={`shadow-sm py-3 px-4 ${stats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""}`}>
-            <div className="flex items-center gap-3">
-              <ClipboardList className="h-4 w-4 text-purple-500" />
-              <span className="text-sm font-medium">Open Jobs</span>
-              <span className="text-2xl font-bold">{stats.open_actions}</span>
-              {stats.overdue_actions > 0 && (
-                <Badge variant="destructive" className="text-[10px]">{stats.overdue_actions} overdue</Badge>
-              )}
-            </div>
-          </Card>
-        )}
+    <PageLayout
+      title="Jobs"
+      icon={<ClipboardList className="h-5 w-5 text-primary" />}
+      action={
         <Button onClick={() => setNewActionOpen(!newActionOpen)}>
           <Plus className="h-4 w-4 mr-2" />
           New Job
         </Button>
-      </div>
+      }
+      context={
+        <div className="space-y-6">
+          {/* Open Jobs tile */}
+          {stats && (
+            <Card className={`shadow-sm py-3 px-4 ${stats.overdue_actions > 0 ? "border-l-4 border-red-500" : ""}`}>
+              <div className="flex items-center gap-3">
+                <ClipboardList className="h-4 w-4 text-purple-500" />
+                <span className="text-sm font-medium">Open Jobs</span>
+                <span className="text-2xl font-bold">{stats.open_actions}</span>
+                {stats.overdue_actions > 0 && (
+                  <Badge variant="destructive" className="text-[10px]">{stats.overdue_actions} overdue</Badge>
+                )}
+              </div>
+            </Card>
+          )}
+        </div>
+      }
+    >
 
       {/* AI Suggestion banner */}
       {suggestion && (
@@ -513,6 +516,6 @@ export default function JobsPage() {
           </OverlayBody>
         </OverlayContent>
       </Overlay>
-    </div>
+    </PageLayout>
   );
 }

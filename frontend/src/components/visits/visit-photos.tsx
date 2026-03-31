@@ -121,7 +121,7 @@ export function VisitPhotos({ visitId, photos, onUpdate }: VisitPhotosProps) {
                   <button
                     onClick={() => handleDelete(photo.id)}
                     disabled={deleting === photo.id}
-                    className="absolute top-1 right-1 rounded-full bg-black/60 p-1 text-white opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity"
+                    className="absolute top-1 right-1 rounded-full bg-black/60 p-1 text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100 active:opacity-100 transition-opacity"
                   >
                     {deleting === photo.id ? (
                       <Loader2 className="h-3 w-3 animate-spin" />

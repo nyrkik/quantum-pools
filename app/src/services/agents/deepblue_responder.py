@@ -64,6 +64,19 @@ class DeepBlueResponder:
             customer_context=customer_context,
         )
 
+        # Inject lessons from past corrections
+        try:
+            from src.services.agent_learning_service import AgentLearningService, AGENT_DEEPBLUE
+            learner = AgentLearningService(self.db)
+            lessons = await learner.build_lessons_prompt(
+                org_id, AGENT_DEEPBLUE,
+                customer_id=action.customer_id,
+            )
+            if lessons:
+                prompt += "\n\n" + lessons
+        except Exception:
+            pass
+
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
             with AgentTimer() as timer:

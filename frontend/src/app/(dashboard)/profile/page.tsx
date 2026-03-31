@@ -230,7 +230,7 @@ export default function ProfilePage() {
               placeholder="123 Main St"
             />
           </div>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             <div className="col-span-2 space-y-1">
               <Label className="text-xs text-muted-foreground">City</Label>
               <Input

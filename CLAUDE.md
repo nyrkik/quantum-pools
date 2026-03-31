@@ -201,6 +201,34 @@ Frontend views are filtered by role. A `usePermissions()` hook exposes feature f
 | Tech management | no | no | yes | yes |
 | Settings/org | no | no | no | yes |
 
+## Architecture Principles (MANDATORY)
+
+### Charts & Visualization
+- **Simple bar charts**: use pure HTML/CSS divs. Full control over hover, click, selection — no library fighting us. The invoice monthly chart is a good example.
+- **Complex charts** (scatter plots, line charts, multi-series, whale curves): use Recharts. It handles axis scaling, legends, and data density well.
+- **Rule of thumb**: if you need per-bar click/hover interaction, don't use a charting library. If you need mathematical axis scaling across dozens of data points, use Recharts.
+
+### Single Exit Points — one function per operation type.
+Every operation that has side effects MUST go through a single service method. No inline implementations in routers.
+- **Outbound customer email**: ALL paths go through `EmailService.send_agent_reply()` — signature, from-name, subject prefix handled there. Never call `send_email()` directly for customer-facing email.
+- **Thread status**: after ANY message creation or modification, call `update_thread_status(thread_id)`. Never manually set thread.message_count, thread.status, etc.
+- **Invoice creation**: always through `InvoiceService.create()` for numbering and totals. Agent code uses `InvoiceService` methods, not direct `Invoice()` constructors.
+- **Visit completion**: always through `VisitService.complete()` or `VisitExperienceService.complete_visit()` — both calculate duration_minutes.
+
+### Agent Learning — every AI agent gets smarter over time.
+All AI agents use `AgentLearningService` to learn from human corrections:
+- **Before generating**: call `learner.build_lessons_prompt()` to inject relevant past corrections into the prompt
+- **After human action**: call `learner.record_correction()` with type "edit" (modified), "rejection" (dismissed), or "acceptance" (approved unchanged)
+- **Agent types**: `email_classifier`, `email_drafter`, `deepblue_responder`, `command_executor`, `job_evaluator`, `estimate_generator`, `customer_matcher`, `equipment_resolver`
+- **Relevance**: corrections are matched by agent_type + category + customer_id, limited to 10 most recent from last 90 days
+- **Non-blocking**: learning queries are wrapped in try/except — never break the primary operation
+- Table: `agent_corrections` — stores input_context, original_output, corrected_output, correction_type
+
+### Notification Consistency
+- Notification type strings are centralized in `src/core/notification_types.py` — never use string literals
+- Job assignment, completion, and auto-close all trigger notifications
+- Thread assignment triggers notification
+
 ## Data Architecture Rules (MANDATORY)
 
 **Single Source of Truth — never duplicate data between tables.**

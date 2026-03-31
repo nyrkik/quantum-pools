@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { MapPin } from "lucide-react";
 import Link from "next/link";
+import { PageLayout } from "@/components/layout/page-layout";
 
 interface WaterFeatureSummary {
   id: string;
@@ -66,12 +67,10 @@ export default function PropertiesPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Properties</h1>
-        <p className="text-muted-foreground">{total} service locations</p>
-      </div>
-
+    <PageLayout
+      title="Properties"
+      subtitle={`${total} service locations`}
+    >
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -149,6 +148,6 @@ export default function PropertiesPage() {
           </TableBody>
         </Table>
       </div>
-    </div>
+    </PageLayout>
   );
 }

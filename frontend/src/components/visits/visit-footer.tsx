@@ -74,7 +74,7 @@ export function VisitFooter({ context, notes, onChargesChanged }: VisitFooterPro
   return (
     <>
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-background shadow-[0_-2px_10px_rgba(0,0,0,0.08)]">
-        <div className="flex items-center justify-between px-4 py-3 max-w-lg mx-auto">
+        <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 max-w-lg mx-auto">
           <AddChargeSheet
             propertyId={context.visit.property_id}
             customerId={context.visit.customer_id}

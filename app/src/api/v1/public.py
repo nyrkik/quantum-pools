@@ -141,7 +141,7 @@ async def approve_estimate(
     approval.signature_data = body.signature.strip()
     approval.notes = f"User-Agent: {body.user_agent or 'unknown'}" + (f"\n{body.notes}" if body.notes else "")
 
-    # Update invoice
+    # Update invoice and create/update job
     invoice_result = await db.execute(
         select(Invoice).where(Invoice.id == approval.invoice_id)
     )
@@ -151,16 +151,30 @@ async def approve_estimate(
         invoice.approved_by = body.name.strip()
         invoice.status = "approved"
 
-        # Update linked job status
+        # Update linked job if exists, otherwise create one
         action_result = await db.execute(
             select(AgentAction).where(
                 AgentAction.invoice_id == invoice.id,
-                AgentAction.status == "pending_approval",
             )
         )
         action = action_result.scalar_one_or_none()
         if action:
             action.status = "approved"
+        else:
+            # Auto-create job for approved estimate
+            import uuid
+            action = AgentAction(
+                id=str(uuid.uuid4()),
+                organization_id=approval.organization_id,
+                invoice_id=invoice.id,
+                customer_id=invoice.customer_id,
+                action_type="repair",
+                description=f"Approved: {invoice.subject or 'Service Estimate'}",
+                status="approved",
+                job_path="customer",
+                created_by=body.name.strip(),
+            )
+            db.add(action)
 
     await db.commit()
 

@@ -38,7 +38,7 @@ class Invoice(Base):
 
     # Dates
     issue_date: Mapped[date] = mapped_column(Date, nullable=False)
-    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     paid_date: Mapped[date | None] = mapped_column(Date)
 
     # Amounts

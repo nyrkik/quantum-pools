@@ -363,11 +363,11 @@ function NewInvoiceForm() {
 
       {/* Sticky footer */}
       <div className="fixed bottom-0 left-0 right-0 border-t bg-background z-40">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-3 max-w-screen-2xl mx-auto">
+        <div className="flex items-center justify-between flex-wrap gap-2 px-4 sm:px-6 py-3 max-w-screen-2xl mx-auto">
           <Button variant="ghost" onClick={() => handleBack()}>
             Cancel
           </Button>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {docType === "estimate" && !isEdit && (
               <Button variant="outline" onClick={async () => {
                 const validItems = lineItems.filter((li) => li.description.trim());

@@ -133,18 +133,30 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
 
             {/* Line items */}
             <div className="space-y-2">
-              <div className="grid grid-cols-[1fr_60px_80px_80px] gap-2 text-xs text-slate-500 font-medium uppercase tracking-wide border-b pb-2">
+              {/* Desktop table layout */}
+              <div className="hidden sm:grid grid-cols-[1fr_60px_80px_80px] gap-2 text-xs text-slate-500 font-medium uppercase tracking-wide border-b pb-2">
                 <span>Description</span>
                 <span className="text-center">Qty</span>
                 <span className="text-right">Price</span>
                 <span className="text-right">Total</span>
               </div>
               {data.line_items.map((li, i) => (
-                <div key={i} className="grid grid-cols-[1fr_60px_80px_80px] gap-2 text-sm py-1.5">
-                  <span className="break-words">{li.description}</span>
-                  <span className="text-center text-slate-500">{li.quantity}</span>
-                  <span className="text-right text-slate-500">${li.unit_price.toFixed(2)}</span>
-                  <span className="text-right font-medium">${li.total.toFixed(2)}</span>
+                <div key={i}>
+                  {/* Desktop row */}
+                  <div className="hidden sm:grid grid-cols-[1fr_60px_80px_80px] gap-2 text-sm py-1.5">
+                    <span className="break-words">{li.description}</span>
+                    <span className="text-center text-slate-500">{li.quantity}</span>
+                    <span className="text-right text-slate-500">${li.unit_price.toFixed(2)}</span>
+                    <span className="text-right font-medium">${li.total.toFixed(2)}</span>
+                  </div>
+                  {/* Mobile card */}
+                  <div className="sm:hidden border-b py-2 space-y-1">
+                    <p className="text-sm font-medium break-words">{li.description}</p>
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Qty {li.quantity} x ${li.unit_price.toFixed(2)}</span>
+                      <span className="font-medium text-sm text-slate-800">${li.total.toFixed(2)}</span>
+                    </div>
+                  </div>
                 </div>
               ))}
               <div className="border-t pt-3 flex items-center justify-between">

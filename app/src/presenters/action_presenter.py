@@ -102,6 +102,7 @@ class ActionPresenter(Presenter):
                 from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
                 d["email_body"] = strip_email_signature(strip_quoted_reply(msg.body)) if msg.body else ""
                 d["our_response"] = msg.final_response or msg.draft_response
+                d["response_is_draft"] = not msg.final_response and bool(msg.draft_response)
 
                 # Related jobs from same message
                 siblings_result = await self.db.execute(
@@ -166,6 +167,7 @@ class ActionPresenter(Presenter):
         return {
             "id": a.id,
             "agent_message_id": a.agent_message_id,
+            "thread_id": a.thread_id,
             "customer_id": a.customer_id,
             "action_type": a.action_type,
             "description": a.description,

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Shield } from "lucide-react";
+import { PageLayout } from "@/components/layout/page-layout";
 import { useAuth } from "@/lib/auth-context";
 import { PropertyMatching } from "@/components/inspections/property-matching";
 import { InspectionDashboard } from "@/components/inspections/inspection-dashboard";
@@ -224,7 +225,12 @@ export default function InspectionsPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col gap-3 overflow-hidden">
+    <PageLayout
+      title="Inspections"
+      icon={<Shield className="h-5 w-5 text-muted-foreground" />}
+      subtitle="Health department inspection data"
+    >
+    <div className="h-[calc(100vh-8rem)] flex flex-col gap-3 overflow-hidden">
       {/* Operations Dashboard */}
       <InspectionDashboard
         dashboard={dashboard}
@@ -312,5 +318,6 @@ export default function InspectionsPage() {
         )}
       </div>
     </div>
+    </PageLayout>
   );
 }

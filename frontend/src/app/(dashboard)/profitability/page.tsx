@@ -53,6 +53,7 @@ import type {
 import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { CostSettingsSheet } from "@/components/profitability/cost-settings-sheet";
+import { PageLayout } from "@/components/layout/page-layout";
 
 function marginColor(margin: number, target: number) {
   if (margin >= target) return "text-green-600";
@@ -147,14 +148,10 @@ export default function ProfitabilityPage() {
     });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Profitability Analysis</h1>
-          <p className="text-muted-foreground">
-            {filteredAccounts.length} of {overview.total_accounts} accounts
-          </p>
-        </div>
+    <PageLayout
+      title="Profitability Analysis"
+      subtitle={`${filteredAccounts.length} of ${overview.total_accounts} accounts`}
+      action={
         <div className="flex gap-2 items-center">
           {perms.can("profitability.edit_settings") && (
             <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
@@ -184,8 +181,8 @@ export default function ProfitabilityPage() {
             </Button>
           </Link>
         </div>
-      </div>
-
+      }
+    >
       {/* Summary Cards — reflect filter */}
       {(() => {
         const fRev = filteredAccounts.reduce((s, a) => s + a.cost_breakdown.revenue, 0);
@@ -520,6 +517,6 @@ export default function ProfitabilityPage() {
       </Card>
 
       <CostSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
-    </div>
+    </PageLayout>
   );
 }

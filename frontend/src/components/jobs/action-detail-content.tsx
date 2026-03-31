@@ -46,6 +46,118 @@ import { useTeamMembers, ACTION_TYPES } from "@/hooks/use-team-members";
 
 // --- Utility components ---
 
+function DraftReplyBlock({ threadId, draft, onAction }: { threadId: string; draft: string; onAction: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(draft);
+  const [reviseInstruction, setReviseInstruction] = useState("");
+  const [revising, setRevising] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const handleRevise = async () => {
+    if (!reviseInstruction.trim()) return;
+    setRevising(true);
+    try {
+      const result = await api.post<{ draft: string }>(`/v1/admin/agent-threads/${threadId}/revise-draft`, {
+        draft: editText, instruction: reviseInstruction,
+      });
+      setEditText(result.draft);
+      setReviseInstruction("");
+    } catch { toast.error("Failed to revise"); }
+    finally { setRevising(false); }
+  };
+
+  const handleSaveDraft = async () => {
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: editText });
+      toast.success("Draft saved");
+      setEditing(false);
+      onAction();
+    } catch { toast.error("Failed to save"); }
+  };
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/approve`, { response_text: editing ? editText : undefined });
+      toast.success("Reply sent");
+      setEditing(false);
+      onAction();
+    } catch { toast.error("Failed to send"); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <>
+      {/* Inline draft display */}
+      {!editing && (
+        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Draft reply (not sent)</span>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setEditText(draft); setEditing(true); }}>
+              <Pencil className="h-3 w-3 mr-1" />Edit
+            </Button>
+          </div>
+          <p className="text-sm whitespace-pre-wrap">{draft}</p>
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <Textarea
+                value={reviseInstruction}
+                onChange={(e) => setReviseInstruction(e.target.value)}
+                placeholder="Tell AI how to change it..."
+                className="text-sm min-h-[2rem] resize-none"
+                rows={1}
+                onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRevise(); } }}
+              />
+            </div>
+            <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
+              {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+            </Button>
+          </div>
+          <Button onClick={handleSend} disabled={sending} size="sm">
+            {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+            Approve & Send
+          </Button>
+        </div>
+      )}
+
+      {/* Full-screen editor — bottom sheet mobile, centered desktop */}
+      {editing && (
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setEditing(false); setEditText(draft); }} />
+          <div className="relative w-full sm:max-w-lg max-h-[95vh] sm:max-h-[85vh] bg-background border-t sm:border sm:rounded-lg shadow-xl flex flex-col rounded-t-xl sm:rounded-xl animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+              <p className="text-sm font-semibold">Edit Draft</p>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setEditing(false); setEditText(draft); }}>Cancel</Button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="text-sm min-h-[200px] sm:min-h-[250px]" rows={12} autoFocus />
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <Textarea value={reviseInstruction} onChange={(e) => setReviseInstruction(e.target.value)} placeholder="Tell AI how to change it..."
+                    className="text-sm min-h-[2rem] resize-none" rows={1}
+                    onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRevise(); } }} />
+                </div>
+                <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
+                  {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+                </Button>
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t shrink-0 flex gap-2">
+              <Button variant="outline" onClick={handleSaveDraft} className="flex-1">Save Draft</Button>
+              <Button onClick={handleSend} disabled={sending} className="flex-1">
+                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                Send
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function DraftEmailBlock({ commentId, isSent, to: origTo, subject: origSubject, body: origBody, createdAt, actionId, onSent }: {
   commentId: string; isSent: boolean; to: string; subject: string; body: string; createdAt: string; actionId: string; onSent: () => void;
 }) {
@@ -388,11 +500,11 @@ function CollapsibleSection({ title, icon: Icon, children, defaultOpen = true, c
 }
 
 function ExpandableCard({ label, title, children, variant }: {
-  label?: string; title?: string; children?: string | null; variant?: "green";
+  label?: string; title?: string; children?: string | null; variant?: "green" | "amber";
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!children) return null;
-  const bg = variant === "green" ? "bg-green-50 dark:bg-green-950/20" : "bg-muted/50";
+  const bg = variant === "green" ? "bg-green-50 dark:bg-green-950/20" : variant === "amber" ? "bg-amber-50 dark:bg-amber-950/20" : "bg-muted/50";
   return (
     <div className={`${bg} rounded-md p-3 text-sm space-y-1 cursor-pointer`} onClick={() => setExpanded(!expanded)}>
       {label && <p className="text-xs text-muted-foreground">{label}</p>}
@@ -553,9 +665,11 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
             <Textarea value={followUpText} onChange={(e) => setFollowUpText(e.target.value)} rows={6} className="text-sm" />
           </div>
           <div className="flex gap-2 items-end">
-            <Input value={reviseInstruction} onChange={(e) => setReviseInstruction(e.target.value)}
-              placeholder="Tell AI how to change it..." className="text-sm h-8 flex-1"
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleRevise(); } }} />
+            <Textarea value={reviseInstruction} onChange={(e) => setReviseInstruction(e.target.value)}
+              placeholder="Tell AI how to change it..." className="text-sm min-h-[2rem] resize-none flex-1"
+              rows={1}
+              onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRevise(); } }} />
             <Button variant="outline" size="sm" className="h-8" onClick={handleRevise} disabled={revising || !reviseInstruction.trim()}>
               {revising && <Loader2 className="h-3 w-3 animate-spin mr-1" />} Revise
             </Button>
@@ -594,8 +708,18 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
             <ExpandableCard label={detail.from_email ? `Email: ${detail.from_email}` : "Original Request"} title={detail.subject}>
               {detail.email_body}
             </ExpandableCard>
-            {detail.our_response && (
+            {detail.our_response && !detail.response_is_draft && (
               <ExpandableCard label="Our reply" variant="green">{detail.our_response}</ExpandableCard>
+            )}
+            {detail.our_response && detail.response_is_draft && detail.thread_id && (
+              <DraftReplyBlock
+                threadId={detail.thread_id}
+                draft={detail.our_response}
+                onAction={() => { onUpdate(); loadDetail(); }}
+              />
+            )}
+            {detail.our_response && detail.response_is_draft && !detail.thread_id && (
+              <ExpandableCard label="Draft reply (not sent)" variant="amber">{detail.our_response}</ExpandableCard>
             )}
           </div>
         )}

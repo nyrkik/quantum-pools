@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { api, getBackendOrigin } from "@/lib/api";
 import { toast } from "sonner";
 import { Loader2, Save, Pencil, Upload } from "lucide-react";
+import { PageLayout } from "@/components/layout/page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -393,49 +394,19 @@ export default function SettingsPage() {
     }
   };
 
-  const TABS: { key: SettingsTab; label: string }[] = [
-    { key: "general", label: "General" },
-    { key: "billing", label: "Billing" },
-    { key: "tiers", label: "Service Tiers" },
-  ];
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground text-sm">Organization configuration</p>
-        </div>
-        {canEdit && !editMode && (
-          <Button variant="outline" size="sm" onClick={() => setEditMode(true)}>
-            <Pencil className="h-3.5 w-3.5 mr-1.5" />
-            Edit
-          </Button>
-        )}
-        {editMode && (
-          <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
-            Done
-          </Button>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
+    <PageLayout
+      title="Settings"
+      subtitle="Organization configuration"
+      action={canEdit ? (editMode ? <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>Done</Button> : <Button variant="outline" size="sm" onClick={() => setEditMode(true)}><Pencil className="h-3.5 w-3.5 mr-1.5" />Edit</Button>) : undefined}
+      tabs={[
+        { key: "general", label: "General" },
+        { key: "billing", label: "Billing" },
+        { key: "tiers", label: "Service Tiers" },
+      ]}
+      activeTab={tab}
+      onTabChange={(key) => setTab(key as SettingsTab)}
+    >
       {/* General */}
       {tab === "general" && (
         <div className="space-y-4">
@@ -556,6 +527,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageLayout>
   );
 }

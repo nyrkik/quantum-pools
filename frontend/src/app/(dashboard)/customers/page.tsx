@@ -38,6 +38,7 @@ import {
 import { toast } from "sonner";
 import { Plus, Search, Building2, Home, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
+import { PageLayout } from "@/components/layout/page-layout";
 import { Overlay, OverlayContent, OverlayBody } from "@/components/ui/overlay";
 import { CustomerDetailContent } from "@/components/customers/customer-detail-content";
 
@@ -333,14 +334,12 @@ export default function CustomersPage() {
   const thClass = "cursor-pointer select-none";
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Clients</h1>
-          <p className="text-muted-foreground text-sm">{total} total</p>
-        </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          {perms.canCreateCustomers && (
+    <PageLayout
+      title="Clients"
+      subtitle={`${total} total`}
+      action={
+        perms.canCreateCustomers ? (
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -348,8 +347,7 @@ export default function CustomersPage() {
                 <span className="sm:hidden">Add</span>
               </Button>
             </DialogTrigger>
-          )}
-          <DialogContent>
+            <DialogContent>
             <DialogHeader>
               <DialogTitle>New Client</DialogTitle>
             </DialogHeader>
@@ -468,9 +466,10 @@ export default function CustomersPage() {
               </Button>
             </form>
           </DialogContent>
-        </Dialog>
-      </div>
-
+          </Dialog>
+        ) : undefined
+      }
+    >
       <div className="flex items-center gap-2">
         <Search className="h-4 w-4 text-muted-foreground" />
         <Input
@@ -577,6 +576,6 @@ export default function CustomersPage() {
           </OverlayBody>
         </OverlayContent>
       </Overlay>
-    </div>
+    </PageLayout>
   );
 }

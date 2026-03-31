@@ -5,6 +5,7 @@
 export interface AgentAction {
   id: string;
   agent_message_id: string;
+  thread_id?: string | null;
   action_type: string;
   description: string;
   assigned_to: string | null;
@@ -62,6 +63,7 @@ export interface ActionDetail extends AgentAction {
   subject?: string;
   email_body?: string;
   our_response?: string;
+  response_is_draft?: boolean;
   related_jobs?: RelatedJob[];
 }
 
@@ -127,11 +129,13 @@ export interface ThreadDetail {
   contact_email: string;
   subject: string | null;
   customer_name: string | null;
+  matched_customer_id: string | null;
   status: string;
   urgency: string | null;
   category: string | null;
   message_count: number;
   has_pending: boolean;
+  has_open_actions: boolean;
   assigned_to_user_id: string | null;
   assigned_to_name: string | null;
   assigned_at: string | null;

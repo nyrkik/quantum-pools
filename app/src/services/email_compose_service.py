@@ -297,6 +297,8 @@ class EmailComposeService:
             f"Write professional but friendly emails. Be concise and specific.\n"
             f"Start with a generic greeting like 'Hi,' or 'Hello,' — do NOT use the customer's name, property name, or any personal identifier in the greeting. This avoids misgendering and keeps it professional for any recipient.\n"
             f"Use details from the customer context when relevant.\n"
+            f"NEVER include the property address or street address in the email body. The client knows where they live. Reference the property by name only if it has one (e.g., 'Pinebrook Village'), otherwise don't reference the location at all.\n"
+            f"NEVER include account numbers, invoice numbers, or internal reference IDs unless the customer specifically asked about them.\n"
             f"Do NOT include a signature block — it will be appended automatically.\n"
             f"End the body with a brief closing like 'Best,' or 'Thanks,' on its own line. Do NOT add a name after the closing — the signature system handles that.\n"
             f"Do NOT include greeting headers like 'Subject:' in the body.\n\n"
@@ -306,6 +308,19 @@ class EmailComposeService:
             f"The body should be plain text (no HTML). Use natural line breaks.\n"
             f"Do NOT wrap in markdown code blocks. Do NOT add any text before or after the JSON."
         )
+
+        # Inject lessons from past corrections
+        try:
+            from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_DRAFTER
+            learner = AgentLearningService(self.db)
+            lessons = await learner.build_lessons_prompt(
+                org_id, AGENT_EMAIL_DRAFTER,
+                category=None, customer_id=customer_id,
+            )
+            if lessons:
+                system_prompt += "\n\n" + lessons
+        except Exception:
+            pass
 
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)

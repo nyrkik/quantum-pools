@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { ComposeMessage } from "@/components/messages/compose-message";
+import { PageLayout } from "@/components/layout/page-layout";
 
 interface ThreadSummary {
   id: string;
@@ -144,16 +145,20 @@ export default function MessagesPage() {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-8rem)]">
+    <PageLayout
+      title="Messages"
+      icon={<MessageSquare className="h-5 w-5 text-muted-foreground" />}
+      action={
+        <Button size="sm" onClick={() => setComposeOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          Compose
+        </Button>
+      }
+    >
+    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-12rem)]">
       {/* Thread list */}
       <div className="lg:w-80 xl:w-96 shrink-0 border rounded-lg bg-background overflow-y-auto">
         <div className="p-3 border-b space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Messages</h2>
-            <Button size="sm" className="h-7 text-xs gap-1" onClick={() => setComposeOpen(true)}>
-              <Plus className="h-3 w-3" /> New
-            </Button>
-          </div>
           {isAdmin && (
             <div className="flex gap-1 bg-muted p-0.5 rounded-md">
               <button
@@ -286,5 +291,6 @@ export default function MessagesPage() {
         onSent={() => { setComposeOpen(false); loadThreads(); }}
       />
     </div>
+    </PageLayout>
   );
 }

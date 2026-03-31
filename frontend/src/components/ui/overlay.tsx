@@ -26,7 +26,7 @@ function OverlayContent({
       <DialogPrimitive.Content
         className={cn(
           "fixed top-[50%] left-[50%] z-50 translate-x-[-50%] translate-y-[-50%]",
-          "w-[calc(100%-1.5rem)] max-w-xl max-h-[90vh]",
+          "w-[calc(100%-1rem)] sm:w-[calc(100%-1.5rem)] max-w-xl max-h-[85vh] sm:max-h-[90vh]",
           "bg-background border rounded-lg shadow-xl",
           "flex flex-col overflow-hidden",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
@@ -38,7 +38,7 @@ function OverlayContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute top-3 right-3 rounded-sm opacity-70 hover:opacity-100 transition-opacity outline-none">
+        <DialogPrimitive.Close className="absolute top-2 right-2 rounded-md opacity-70 hover:opacity-100 transition-opacity outline-none h-9 w-9 flex items-center justify-center">
           <XIcon className="h-4 w-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>

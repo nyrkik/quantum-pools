@@ -398,10 +398,12 @@ export default function InvoiceDetailPage({
               <span className="text-muted-foreground">Issue Date: </span>
               {invoice.issue_date}
             </div>
-            <div>
-              <span className="text-muted-foreground">Due Date: </span>
-              {invoice.due_date}
-            </div>
+            {invoice.due_date && (
+              <div>
+                <span className="text-muted-foreground">Due Date: </span>
+                {invoice.due_date}
+              </div>
+            )}
             {invoice.paid_date && (
               <div>
                 <span className="text-muted-foreground">Paid Date: </span>
@@ -433,10 +435,10 @@ export default function InvoiceDetailPage({
                 <span>${invoice.tax_amount.toFixed(2)}</span>
               </div>
             )}
-            {invoice.discount > 0 && (
+            {(invoice.discount || 0) > 0 && (
               <div className="flex justify-between text-red-600">
                 <span>Discount</span>
-                <span>-${invoice.discount.toFixed(2)}</span>
+                <span>-${(invoice.discount || 0).toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between font-bold border-t pt-2">

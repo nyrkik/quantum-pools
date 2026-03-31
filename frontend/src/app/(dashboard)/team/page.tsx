@@ -45,6 +45,7 @@ import { toast } from "sonner";
 import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
 import { Plus, Trash2, Code2, Mail, CheckCircle2, Clock, Loader2, Users, Pencil, Check } from "lucide-react";
 import { formatPhone, unformatPhone, formatRelativeDate } from "@/lib/format";
+import { PageLayout } from "@/components/layout/page-layout";
 
 interface TeamMember {
   id: string;
@@ -388,7 +389,7 @@ function MemberDetail({
               <Label className="text-xs text-muted-foreground">Street</Label>
               <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="h-8 text-sm" placeholder="123 Main St" />
             </div>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               <div className="col-span-2 space-y-1">
                 <Label className="text-xs text-muted-foreground">City</Label>
                 <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} className="h-8 text-sm" placeholder="Elk Grove" />
@@ -554,18 +555,16 @@ export default function TeamPage() {
   const pending = members.filter(m => !m.is_verified).length;
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Users className="h-6 w-6 text-primary" />
-          <div>
-            <h1 className="text-2xl font-bold">Team</h1>
-            <p className="text-muted-foreground text-sm">
-              {members.length} member{members.length !== 1 ? "s" : ""}
-              {pending > 0 && <span className="text-amber-600 ml-1">({pending} pending)</span>}
-            </p>
-          </div>
-        </div>
+    <PageLayout
+      title="Team"
+      icon={<Users className="h-5 w-5 text-muted-foreground" />}
+      subtitle={
+        <>
+          {members.length} member{members.length !== 1 ? "s" : ""}
+          {pending > 0 && <span className="text-amber-600 ml-1">({pending} pending)</span>}
+        </>
+      }
+      action={
         <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -622,8 +621,8 @@ export default function TeamPage() {
             </form>
           </DialogContent>
         </Dialog>
-      </div>
-
+      }
+    >
       {/* Read-only table */}
       <div className="rounded-md border">
         <Table>
@@ -713,6 +712,6 @@ export default function TeamPage() {
           </OverlayBody>
         </OverlayContent>
       </Overlay>
-    </div>
+    </PageLayout>
   );
 }

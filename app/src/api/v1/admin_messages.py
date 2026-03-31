@@ -243,6 +243,20 @@ async def approve_agent_message(
     msg.approved_by = sender_name
     msg.approved_at = now
     msg.sent_at = now
+
+    # Record correction for agent learning
+    from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
+    learner = AgentLearningService(db)
+    draft = msg.draft_response
+    if draft and response_text != draft:
+        await learner.record_correction(
+            ctx.organization_id, AGENT_EMAIL_CLASSIFIER, "edit",
+            original_output=draft, corrected_output=response_text,
+            input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
+            category=msg.category, customer_id=msg.matched_customer_id,
+            source_id=msg.id, source_type="agent_message",
+        )
+
     await db.commit()
 
     # Recalculate thread status
@@ -387,13 +401,24 @@ Rules:
 - Never admit fault or accept blame
 - Reference specific findings from the comments
 - Keep it concise — 2-4 sentences
-- End with the signature:
+- NEVER include the property address in the email. The client knows where they live. Use property name if it has one, otherwise skip.
+- Do NOT include a signature — the system appends it automatically
+- End with a brief closing like "Best," on its own line
 
-Best,
-The {os.environ.get("AGENT_FROM_NAME", "Sapphire Pools")} Team
-{os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.com")}
+Return ONLY the email body text (no signature, no JSON, no subject line)."""
 
-Return ONLY the email body text, no JSON, no subject line."""
+    # Inject lessons from past corrections
+    try:
+        from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_DRAFTER
+        learner = AgentLearningService(db)
+        lessons = await learner.build_lessons_prompt(
+            ctx.organization_id, AGENT_EMAIL_DRAFTER,
+            category=msg.category, customer_id=msg.matched_customer_id,
+        )
+        if lessons:
+            prompt += "\n\n" + lessons
+    except Exception:
+        pass
 
     try:
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))

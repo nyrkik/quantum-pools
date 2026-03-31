@@ -46,18 +46,10 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { Badge } from "@/components/ui/badge";
 
 interface Invoice {
   id: string;
@@ -66,10 +58,13 @@ interface Invoice {
   customer_name: string;
   subject: string | null;
   status: string;
+  document_type: string;
   issue_date: string;
   due_date: string;
   total: number;
   balance: number;
+  approved_at: string | null;
+  approved_by: string | null;
 }
 
 interface InvoiceStats {
@@ -102,6 +97,7 @@ interface LineItem {
 }
 
 import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
+import { PageLayout, PageTabs } from "@/components/layout/page-layout";
 
 const OPEN_STATUSES = "draft,sent,viewed,overdue";
 
@@ -127,6 +123,9 @@ export default function InvoicesPage() {
     { description: "", quantity: 1, unit_price: 0, is_taxed: false },
   ]);
   const [taxRate, setTaxRate] = useState(0);
+  const [approveDialogId, setApproveDialogId] = useState<string | null>(null);
+  const [approveNote, setApproveNote] = useState("");
+  const [approving, setApproving] = useState(false);
   const [discount, setDiscount] = useState(0);
 
   const fetchInvoices = useCallback(async () => {
@@ -259,6 +258,22 @@ export default function InvoicesPage() {
   const taxAmount = taxableAmount * (taxRate / 100);
   const computedTotal = subtotal + taxAmount - discount;
 
+  const handleApproveEstimate = async () => {
+    if (!approveDialogId) return;
+    setApproving(true);
+    try {
+      await api.post(`/v1/invoices/${approveDialogId}/approve`, {});
+      toast.success("Estimate approved");
+      setApproveDialogId(null);
+      setApproveNote("");
+      fetchInvoices();
+    } catch {
+      toast.error("Failed to approve estimate");
+    } finally {
+      setApproving(false);
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -300,6 +315,13 @@ export default function InvoicesPage() {
 
   const today = new Date().toISOString().split("T")[0];
   const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth(); // 0-indexed
+
+  const [hoveredMonth, setHoveredMonth] = useState<number | null>(null);
+  const chartData = monthlyData.map((m, i) => ({
+    ...m,
+    isFuture: chartYear > currentYear || (chartYear === currentYear && i > currentMonth),
+  }));
 
   const tabs: { key: TabFilter; label: string; count?: number }[] = [
     {
@@ -315,26 +337,10 @@ export default function InvoicesPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-1 mb-1">
-            {(["invoices", "estimates"] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => { setDocView(v); setSearch(""); setSelectedMonth(null); setChartSegment("all"); setActiveTab("open"); }}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  docView === v
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }`}
-              >
-                {v === "invoices" ? "Invoices" : "Estimates"}
-              </button>
-            ))}
-          </div>
-          <p className="text-muted-foreground text-sm">{total} {docView === "estimates" ? "estimates" : "invoices"}</p>
-        </div>
+    <PageLayout
+      title="Invoices"
+      subtitle={undefined}
+      action={
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -559,249 +565,131 @@ export default function InvoicesPage() {
             </form>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Chart + Summary — invoices only */}
-      {docView === "invoices" && <div className="grid gap-4 md:grid-cols-[280px_1fr]">
-        {/* Summary Card */}
-        {stats && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Open</p>
-                <p className="text-2xl font-bold">
-                  ${stats.total_outstanding.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Total Paid (this month)</p>
-                <p className="text-2xl font-bold">
-                  ${stats.monthly_revenue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              {stats.total_overdue > 0 && (
-                <div>
-                  <p className="text-sm text-muted-foreground flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 text-destructive" />
-                    Overdue
-                  </p>
-                  <p className="text-2xl font-bold text-destructive">
-                    ${stats.total_overdue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {stats.overdue_count} invoice{stats.overdue_count !== 1 ? "s" : ""}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Monthly Chart */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-base">
-              Invoices issued in {chartYear}
-            </CardTitle>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => { setChartYear((y) => y - 1); setSelectedMonth(null); setChartSegment("all"); }}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => { setChartYear(currentYear); setSelectedMonth(null); setChartSegment("all"); }}
-              >
-                This Year
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => { setChartYear((y) => y + 1); setSelectedMonth(null); setChartSegment("all"); }}
-                disabled={chartYear >= currentYear}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+      }
+      tabs={[
+        { key: "invoices", label: "Invoices" },
+        { key: "estimates", label: "Estimates" },
+      ]}
+      activeTab={docView}
+      onTabChange={(key) => { setDocView(key as DocView); setSearch(""); setSelectedMonth(null); setChartSegment("all"); setActiveTab("open"); }}
+      context={docView === "invoices" ? (
+        <>
+      {/* Chart */}
+      <Card>
+        <CardContent className="pt-4 px-3 sm:px-6">
+          <div className="flex items-center justify-between mb-2">
+            {/* Paid/Open — left */}
+            <div className="flex items-baseline gap-3 sm:gap-5">
+              {(() => {
+                const activeIdx = selectedMonth ?? hoveredMonth;
+                const paid = activeIdx !== null ? (monthlyData[activeIdx]?.paid || 0) : monthlyData.reduce((s, m) => s + m.paid, 0);
+                const open = activeIdx !== null ? (monthlyData[activeIdx]?.open || 0) : monthlyData.reduce((s, m) => s + m.open, 0);
+                return (
+                  <>
+                    <span className="text-green-700 text-base sm:text-lg font-bold">Paid ${paid.toLocaleString("en-US", { minimumFractionDigits: 0 })}</span>
+                    <span className="text-amber-600 text-base sm:text-lg font-bold">Open ${open.toLocaleString("en-US", { minimumFractionDigits: 0 })}</span>
+                    {stats && stats.total_overdue > 0 && selectedMonth === null && hoveredMonth === null && (
+                      <span className="text-destructive text-base sm:text-lg font-bold">Overdue ${stats.total_overdue.toLocaleString("en-US", { minimumFractionDigits: 0 })}</span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={monthlyData} style={{ cursor: "pointer" }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(v) =>
-                    v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`
-                  }
-                />
-                <Tooltip
-                  formatter={(value) => [
-                    `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
-                  ]}
-                />
-                <Legend
-                  onClick={(e) => {
-                    if (selectedMonth === null) return;
-                    const key = e.dataKey as string;
-                    const seg = key === "paid" ? "paid" : "open";
-                    setChartSegment(chartSegment === seg ? "all" : seg);
-                  }}
-                  formatter={(value) => (
-                    <span
-                      style={{
-                        cursor: selectedMonth !== null ? "pointer" : "default",
-                        textDecoration:
-                          selectedMonth !== null &&
-                          chartSegment !== "all" &&
-                          ((value === "Paid" && chartSegment !== "paid") ||
-                            (value === "Open" && chartSegment !== "open"))
-                            ? "line-through"
-                            : "none",
-                        opacity:
-                          selectedMonth !== null &&
-                          chartSegment !== "all" &&
-                          ((value === "Paid" && chartSegment !== "paid") ||
-                            (value === "Open" && chartSegment !== "open"))
-                            ? 0.4
-                            : 1,
-                      }}
-                    >
-                      {value}
-                    </span>
-                  )}
-                />
-                <Bar
-                  dataKey="paid"
-                  name="Paid"
-                  stackId="a"
-                  radius={[0, 0, 0, 0]}
-                  onClick={(_, idx) => {
-                    if (selectedMonth === idx) {
-                      if (chartSegment === "paid") {
-                        // Already on paid — clear entirely
-                        setSelectedMonth(null);
-                        setChartSegment("all");
-                      } else {
-                        // Was on open or all — narrow to paid
-                        setChartSegment("paid");
-                      }
-                    } else {
-                      setSelectedMonth(idx);
-                      setChartSegment("paid");
-                    }
-                  }}
-                >
-                  {monthlyData.map((_, i) => {
-                    if (selectedMonth === null) return <Cell key={i} fill="#16a34a" opacity={1} />;
-                    const isMonth = selectedMonth === i;
-                    const dimmed = chartSegment === "open";
-                    return <Cell key={i} fill="#16a34a" opacity={!isMonth ? 0.15 : dimmed ? 0.3 : 1} />;
-                  })}
-                </Bar>
-                <Bar
-                  dataKey="open"
-                  name="Open"
-                  stackId="a"
-                  radius={[4, 4, 0, 0]}
-                  onClick={(_, idx) => {
-                    if (selectedMonth === idx) {
-                      if (chartSegment === "open") {
-                        setSelectedMonth(null);
-                        setChartSegment("all");
-                      } else {
-                        setChartSegment("open");
-                      }
-                    } else {
-                      setSelectedMonth(idx);
-                      setChartSegment("open");
-                    }
-                  }}
-                >
-                  {monthlyData.map((_, i) => {
-                    if (selectedMonth === null) return <Cell key={i} fill="#86efac" opacity={1} />;
-                    const isMonth = selectedMonth === i;
-                    const dimmed = chartSegment === "paid";
-                    return <Cell key={i} fill="#86efac" opacity={!isMonth ? 0.15 : dimmed ? 0.3 : 1} />;
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>}
-
-      {/* Month filter indicator */}
-      {docView === "invoices" && selectedMonth !== null && (
-        <div className="flex items-center gap-2 text-sm">
-          <span
-            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-              chartSegment === "open"
-                ? "bg-[#86efac] text-[#14532d]"
-                : "bg-[#16a34a] text-white"
-            }`}
-          >
-            {monthlyData[selectedMonth]?.month} {chartYear}
-            {chartSegment !== "all" && (
-              <span className="font-semibold">
-                {" \u2014 "}{chartSegment === "paid" ? "Paid" : "Unpaid"}
-              </span>
-            )}
-            <button
-              onClick={() => { setSelectedMonth(null); setChartSegment("all"); }}
-              className="ml-1 opacity-70 hover:opacity-100"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        </div>
-      )}
-
-      {/* Tab Filters + Search */}
-      <div className="flex items-center justify-between">
-        {docView === "invoices" ? (
-          <div className="flex border-b">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab.key
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {tab.label}
-                {tab.count !== undefined && (
-                  <span className="ml-1.5 text-xs text-muted-foreground">
-                    ({tab.count})
-                  </span>
-                )}
-              </button>
-            ))}
+            {/* Selected month + year nav — right */}
+            <div className="flex items-center gap-2">
+              {selectedMonth !== null && (
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-green-600 text-white">
+                  {monthlyData[selectedMonth]?.month}
+                  <button onClick={() => { setSelectedMonth(null); setChartSegment("all"); }} className="ml-0.5 opacity-70 hover:opacity-100"><X className="h-3 w-3" /></button>
+                </span>
+              )}
+              <div className="flex items-center gap-0.5">
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setChartYear((y) => y - 1); setSelectedMonth(null); setChartSegment("all"); }}>
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <span className="text-sm font-semibold w-10 text-center">{chartYear}</span>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setChartYear((y) => y + 1); setSelectedMonth(null); setChartSegment("all"); }} disabled={chartYear >= currentYear}>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div />
-        )}
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder={docView === "estimates" ? "Search estimates..." : "Search invoices..."}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-64"
-          />
-        </div>
+            {/* Pure CSS bar chart */}
+            {(() => {
+              const maxVal = Math.max(...chartData.map(d => d.paid + d.open), 1);
+              const chartHeight = 160;
+              return (
+                <div className="flex gap-1 sm:gap-2" style={{ height: chartHeight }} onMouseLeave={() => setHoveredMonth(null)}>
+                  {chartData.map((d, i) => {
+                    const total = d.paid + d.open;
+                    const paidPct = total > 0 ? (d.paid / maxVal) * 100 : 0;
+                    const openPct = total > 0 ? (d.open / maxVal) * 100 : 0;
+                    const greyPct = d.isFuture ? 100 : 100 - paidPct - openPct;
+
+                    const isSelected = selectedMonth === i;
+                    const isHovered = hoveredMonth === i;
+                    const highlighted = isSelected || isHovered;
+                    const faded = (selectedMonth !== null && !isSelected) || (hoveredMonth !== null && selectedMonth === null && !isHovered);
+
+                    return (
+                      <div
+                        key={i}
+                        className={`relative flex-1 flex flex-col items-stretch ${d.isFuture ? "cursor-default" : "cursor-pointer"}`}
+                        onMouseEnter={() => !d.isFuture && setHoveredMonth(i)}
+                        onMouseLeave={() => setHoveredMonth(null)}
+                        onClick={() => {
+                          if (d.isFuture) return;
+                          setHoveredMonth(null);
+                          setSelectedMonth(selectedMonth === i ? null : i);
+                          setChartSegment("all");
+                        }}
+                      >
+                        {/* Tooltip on hover only */}
+                        {isHovered && !d.isFuture && (
+                          <div className="absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full bg-popover border rounded shadow-md px-2.5 py-1.5 text-[11px] whitespace-nowrap z-20 pointer-events-none">
+                            <div className="font-medium mb-0.5">{d.month}</div>
+                            <div className="text-green-700">Paid ${d.paid.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
+                            <div className="text-amber-600">Open ${d.open.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
+                          </div>
+                        )}
+                        {/* Bar container — always full height */}
+                        <div className={`flex-1 flex flex-col justify-end rounded-t overflow-hidden transition-opacity duration-150 ${d.isFuture ? "opacity-40" : highlighted ? "opacity-100" : faded ? "opacity-40" : "opacity-100"}`}>
+                          {/* Grey remainder — top */}
+                          <div className={`${highlighted ? "bg-slate-300" : "bg-slate-200"} transition-colors duration-150`} style={{ flexBasis: `${greyPct}%`, minHeight: 0 }} />
+                          {/* Open (amber) — middle */}
+                          {openPct > 0 && <div className="bg-amber-400" style={{ flexBasis: `${openPct}%`, minHeight: 0 }} />}
+                          {/* Paid (green) — bottom */}
+                          {paidPct > 0 && <div className="bg-green-600" style={{ flexBasis: `${paidPct}%`, minHeight: 0 }} />}
+                        </div>
+                        {/* Month label */}
+                        <p className="text-[10px] sm:text-[11px] text-center text-muted-foreground mt-1.5 select-none">{d.month}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+        </CardContent>
+      </Card>
+
+      {/* Sub-tabs: Open / All / Paid / Overdue */}
+      <PageTabs
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={(key) => setActiveTab(key as TabFilter)}
+      />
+        </>
+      ) : undefined}
+    >
+      {/* Search */}
+      <div className="flex items-center gap-2">
+        <Search className="h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder={docView === "estimates" ? "Search estimates..." : "Search invoices..."}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-64"
+        />
       </div>
 
       {/* Table */}
@@ -816,19 +704,21 @@ export default function InvoicesPage() {
               <TableHead>Subject</TableHead>
               <TableHead className="text-right">Total</TableHead>
               {docView === "invoices" && <TableHead className="text-right">Balance</TableHead>}
+              {docView === "estimates" && <TableHead>Approval</TableHead>}
+              {docView === "estimates" && <TableHead></TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={docView === "invoices" ? 7 : 6} className="text-center py-8">
+                <TableCell colSpan={docView === "invoices" ? 7 : 8} className="text-center py-8">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : invoices.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={docView === "invoices" ? 7 : 6}
+                  colSpan={docView === "invoices" ? 7 : 8}
                   className="text-center py-8 text-muted-foreground"
                 >
                   No {docView === "estimates" ? "estimates" : "invoices"} found
@@ -863,12 +753,68 @@ export default function InvoicesPage() {
                       ${inv.balance.toFixed(2)}
                     </TableCell>
                   )}
+                  {docView === "estimates" && (
+                    <TableCell>
+                      {inv.approved_at ? (
+                        <div className="flex items-center gap-1">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                          <span className="text-xs text-green-700">{inv.approved_by}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Pending</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {docView === "estimates" && (
+                    <TableCell>
+                      {!inv.approved_at && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => { setApproveDialogId(inv.id); setApproveNote(""); }}
+                        >
+                          Approve
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
       </div>
-    </div>
+
+      {/* Approve Estimate Dialog */}
+      <Dialog open={!!approveDialogId} onOpenChange={(open) => { if (!open) setApproveDialogId(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Approve Estimate</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This will approve the estimate on behalf of the client. A job will be created automatically.
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs">Note (optional)</Label>
+              <Input
+                value={approveNote}
+                onChange={(e) => setApproveNote(e.target.value)}
+                placeholder="e.g. Client approved via email 3/30"
+                className="text-sm"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="ghost" size="sm" onClick={() => setApproveDialogId(null)}>Cancel</Button>
+              <Button size="sm" onClick={handleApproveEstimate} disabled={approving}>
+                {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />}
+                Approve
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </PageLayout>
   );
 }

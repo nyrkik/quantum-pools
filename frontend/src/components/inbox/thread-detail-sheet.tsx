@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,8 @@ import {
   Pencil,
   AlertTriangle,
   User,
+  ClipboardList,
+  FileText,
 } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { formatTime } from "@/lib/format";
@@ -52,6 +55,7 @@ export function ThreadDetailSheet({
   onClose: () => void;
   onAction: () => void;
 }) {
+  const router = useRouter();
   const [thread, setThread] = useState<ThreadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -70,6 +74,8 @@ export function ThreadDetailSheet({
   const [followUpRevise, setFollowUpRevise] = useState("");
   const [followUpRevising, setFollowUpRevising] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [creatingJob, setCreatingJob] = useState(false);
+  const [draftingEstimate, setDraftingEstimate] = useState(false);
   const teamMembers = useTeamMembersFull();
 
   const timelineEndRef = useRef<HTMLDivElement>(null);
@@ -139,8 +145,14 @@ export function ThreadDetailSheet({
         draft: currentDraft,
         instruction: reviseInstruction,
       });
-      setEditText(result.draft);
-      setEditing(true);
+      if (editing) {
+        // Update the textarea in-place
+        setEditText(result.draft);
+      } else {
+        // Save revised draft directly and reload
+        await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: result.draft });
+        loadThread();
+      }
       setReviseInstruction("");
     } catch {
       toast.error("Failed to revise");
@@ -253,6 +265,47 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleCreateJob = async () => {
+    setCreatingJob(true);
+    try {
+      const result = await api.post<{ action_id: string; description: string }>(`/v1/admin/agent-threads/${threadId}/create-job`, {});
+      toast.success(`Job created: ${result.description}`);
+      onAction();
+      onClose();
+      router.push(`/jobs?action=${result.action_id}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("already exists")) {
+        toast.info("Job already exists for this thread");
+      } else {
+        toast.error("Failed to create job");
+      }
+    } finally {
+      setCreatingJob(false);
+    }
+  };
+
+  const handleDraftEstimate = async () => {
+    setDraftingEstimate(true);
+    try {
+      const result = await api.post<{ invoice_id: string; invoice_number: string; subject: string; total: number; existing?: boolean }>(
+        `/v1/admin/agent-threads/${threadId}/draft-estimate`, {}
+      );
+      if (result.existing) {
+        toast.info(`Estimate ${result.invoice_number} already exists`);
+      } else {
+        toast.success(`Estimate ${result.invoice_number} drafted — $${result.total.toFixed(2)}`);
+      }
+      onAction();
+      onClose();
+      router.push(`/invoices/${result.invoice_id}`);
+    } catch {
+      toast.error("Failed to draft estimate");
+    } finally {
+      setDraftingEstimate(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -264,7 +317,7 @@ export function ThreadDetailSheet({
   if (!thread) return null;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full px-5 py-3">
       {/* Header */}
       <div className="flex-shrink-0 space-y-2 pb-4 border-b">
         <div className="flex items-center gap-2 flex-wrap">
@@ -366,59 +419,75 @@ export function ThreadDetailSheet({
         <div ref={timelineEndRef} />
       </div>
 
-      {/* Bottom action area — scrollable on mobile when draft is long */}
-      <div className="flex-shrink-0 border-t pt-4 space-y-3 max-h-[50vh] overflow-y-auto">
-        {/* Draft area for pending messages */}
+      {/* Bottom action area */}
+      <div className="flex-shrink-0 border-t pt-4 space-y-3">
+        {/* Draft box — view or edit inline, no popup */}
         {pendingMessage && pendingMessage.draft_response && (
-          <div className="space-y-2">
+          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Draft Response</p>
-              {!editing && (
-                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditing(true)}>
+              <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Draft Response</p>
+              {!editing ? (
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-700" onClick={() => setEditing(true)}>
                   <Pencil className="h-3 w-3 mr-1" />Edit
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-700" onClick={() => { setEditing(false); setEditText(pendingMessage.draft_response || ""); }}>
+                  Cancel
                 </Button>
               )}
             </div>
+
             {editing ? (
               <Textarea
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
-                rows={5}
-                className="text-sm"
+                className="text-sm min-h-[120px] bg-white dark:bg-background"
+                rows={6}
+                autoFocus
               />
             ) : (
-              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3 text-sm whitespace-pre-wrap max-h-24 sm:max-h-40 overflow-y-auto">
-                {pendingMessage.draft_response}
-              </div>
+              <p className="text-sm whitespace-pre-wrap">{pendingMessage.draft_response}</p>
             )}
+
             <div className="flex gap-2 items-end">
               <div className="flex-1">
-                <Input
+                <Textarea
                   value={reviseInstruction}
                   onChange={(e) => setReviseInstruction(e.target.value)}
                   placeholder="Tell AI how to change it..."
-                  className="text-sm h-8"
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleReviseDraft(); } }}
+                  className="text-sm min-h-[2rem] bg-white dark:bg-background resize-none"
+                  rows={1}
+                  onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReviseDraft(); } }}
                 />
               </div>
-              <Button variant="outline" size="sm" className="h-8" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
+              <Button variant="outline" size="sm" className="h-8 bg-white dark:bg-background" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
                 {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
               </Button>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => handleApprove(editing ? editText : undefined)}
-                disabled={sending}
-                className="flex-1"
-              >
-                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                {editing ? "Send Edited" : "Approve & Send"}
-              </Button>
+
+            <div className="flex gap-2">
               {editing && (
-                <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setEditText(pendingMessage.draft_response || ""); }}>
-                  Cancel Edit
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={async () => {
+                    try {
+                      await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: editText });
+                      toast.success("Draft saved");
+                      setEditing(false);
+                      loadThread();
+                    } catch { toast.error("Failed to save draft"); }
+                  }}
+                  disabled={sending}
+                >
+                  Save Draft
                 </Button>
               )}
+              <Button onClick={() => handleApprove(editing ? editText : undefined)} disabled={sending} className="flex-1">
+                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                {editing ? "Send" : "Approve & Send"}
+              </Button>
             </div>
           </div>
         )}
@@ -436,41 +505,71 @@ export function ThreadDetailSheet({
           </Button>
         )}
 
+        {/* Follow-up editor — inline, same pattern as draft */}
         {followUp && (
-          <div className="space-y-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Follow-up Draft</p>
-            <p className="text-xs text-muted-foreground">To: {followUp.to} — Re: {followUp.subject}</p>
-            <Textarea
-              value={followUpText}
-              onChange={(e) => setFollowUpText(e.target.value)}
-              rows={5}
-              className="text-sm"
-            />
-            <div className="flex gap-2 items-end">
-              <div className="flex-1">
-                <Input
-                  value={followUpRevise}
-                  onChange={(e) => setFollowUpRevise(e.target.value)}
-                  placeholder="Tell AI how to change it..."
-                  className="text-sm h-8"
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleReviseFollowUp(); } }}
-                />
+          <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-green-700 dark:text-green-400">Follow-up</p>
+                <p className="text-[10px] text-muted-foreground">To: {followUp.to}</p>
               </div>
-              <Button variant="outline" size="sm" className="h-8" onClick={handleReviseFollowUp} disabled={followUpRevising || !followUpRevise.trim()}>
-                {followUpRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-              </Button>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()}>
-                {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                Send Follow-up
-              </Button>
-              <Button variant="ghost" onClick={() => { setFollowUp(null); setFollowUpText(""); setFollowUpRevise(""); }}>
+              <Button variant="ghost" size="sm" className="h-6 text-xs text-green-700" onClick={() => { setFollowUp(null); setFollowUpText(""); setFollowUpRevise(""); }}>
                 Cancel
               </Button>
             </div>
+            <Textarea
+              value={followUpText}
+              onChange={(e) => setFollowUpText(e.target.value)}
+              className="text-sm min-h-[120px] bg-white dark:bg-background"
+              rows={6}
+              autoFocus
+            />
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Textarea
+                  value={followUpRevise}
+                  onChange={(e) => setFollowUpRevise(e.target.value)}
+                  placeholder="Tell AI how to change it..."
+                  className="text-sm min-h-[2rem] bg-white dark:bg-background resize-none"
+                  rows={1}
+                  onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReviseFollowUp(); } }}
+                />
+              </div>
+              <Button variant="outline" size="sm" className="h-8 bg-white dark:bg-background" onClick={handleReviseFollowUp} disabled={followUpRevising || !followUpRevise.trim()}>
+                {followUpRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+              </Button>
+            </div>
+            <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()} className="w-full">
+              {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+              Send Follow-up
+            </Button>
           </div>
         )}
+
+        {/* Quick actions: Create Job, Draft Estimate */}
+        <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCreateJob}
+              disabled={creatingJob}
+            >
+              {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
+              Create Job
+            </Button>
+            {thread.matched_customer_id && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDraftEstimate}
+                disabled={draftingEstimate}
+              >
+                {draftingEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+                Draft Estimate
+              </Button>
+            )}
+          </div>
 
         {/* Actions: Dismiss, Archive, Delete */}
         <div className="flex justify-between items-center pt-2 border-t">

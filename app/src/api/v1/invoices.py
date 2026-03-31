@@ -238,6 +238,27 @@ async def approve_estimate(
     invoice.approved_by = approver_name
     invoice.approval_id = approval.id
 
+    # Create or update linked job
+    from src.models.agent_action import AgentAction
+    action_result = await db.execute(
+        select(AgentAction).where(AgentAction.invoice_id == invoice_id)
+    )
+    action = action_result.scalar_one_or_none()
+    if action:
+        action.status = "approved"
+    else:
+        action = AgentAction(
+            organization_id=ctx.organization_id,
+            invoice_id=invoice_id,
+            customer_id=invoice.customer_id,
+            action_type="repair",
+            description=f"Approved: {invoice.subject or 'Service Estimate'}",
+            status="approved",
+            job_path="customer",
+            created_by=approver_name,
+        )
+        db.add(action)
+
     await db.commit()
 
     return {

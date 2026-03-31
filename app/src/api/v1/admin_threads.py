@@ -171,6 +171,35 @@ async def assign_thread(
     return result
 
 
+@router.post("/agent-threads/{thread_id}/save-draft")
+async def save_thread_draft(
+    thread_id: str,
+    body: ApproveBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save edited draft without sending."""
+    from sqlalchemy import select, desc
+    from src.models.agent_message import AgentMessage
+    result = await db.execute(
+        select(AgentMessage)
+        .where(
+            AgentMessage.thread_id == thread_id,
+            AgentMessage.organization_id == ctx.organization_id,
+            AgentMessage.status == "pending",
+            AgentMessage.direction == "inbound",
+        )
+        .order_by(desc(AgentMessage.received_at))
+        .limit(1)
+    )
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="No pending message in this thread")
+    msg.draft_response = body.response_text
+    await db.commit()
+    return {"saved": True}
+
+
 @router.post("/agent-threads/{thread_id}/send-followup")
 async def send_thread_followup(
     thread_id: str,
@@ -253,4 +282,42 @@ async def update_thread_visibility(
     )
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["detail"])
+    return result
+
+
+@router.post("/agent-threads/{thread_id}/create-job")
+async def create_job_from_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI creates a job from thread conversation context."""
+    service = AgentThreadService(db)
+    result = await service.create_job_from_thread(
+        org_id=ctx.organization_id,
+        thread_id=thread_id,
+        created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
+    )
+    if "error" in result:
+        code = {"not_found": 404, "ai_failed": 500}.get(result["error"], 400)
+        raise HTTPException(status_code=code, detail=result["detail"])
+    return result
+
+
+@router.post("/agent-threads/{thread_id}/draft-estimate")
+async def draft_estimate_from_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI drafts an estimate from thread conversation context."""
+    service = AgentThreadService(db)
+    result = await service.draft_estimate_from_thread(
+        org_id=ctx.organization_id,
+        thread_id=thread_id,
+        created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
+    )
+    if "error" in result:
+        code = {"not_found": 404, "ai_failed": 500}.get(result["error"], 400)
+        raise HTTPException(status_code=code, detail=result["detail"])
     return result

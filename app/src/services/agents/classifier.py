@@ -30,8 +30,10 @@ DEFAULT_TONE_RULES = """CRITICAL TONE RULES — follow these exactly:
 - Address clients by first name if known, or "Hi" with their name. Use the contact name from the customer record when available.
 - Don't use "family" as a suffix (e.g., "Blomquist family"). Just use their name.
 - Don't over-promise urgency. "We'll look into this" or "we'll follow up" is fine — avoid "prioritizing", "right away", "ASAP" unless truly critical.
-- Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines, then the signature. Use \\n for line breaks in the JSON string.
-- Always end with this exact signature (no variations):\\n\\nBest,\\nThe {from_name} Team\\n{from_email}"""
+- NEVER include the property address or street address in the email body. The client knows where they live. Including it looks robotic and auto-generated. Reference the property by name only if it has one (e.g., "Pinebrook Village"), otherwise don't reference the location at all.
+- NEVER include the customer's account number, invoice number, or internal reference IDs unless the customer specifically asked about them.
+- Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines. Use \\n for line breaks in the JSON string.
+- Do NOT include a signature block in the draft — the system appends it automatically. End with a brief closing like "Best," or "Thanks," on its own line."""
 
 
 def _get_system_prompt():
@@ -86,11 +88,13 @@ CRITICAL TONE RULES — follow these exactly:
 - Address clients by first name if known, or "Hi" with their name. Use the contact name from the customer record when available.
 - Don't use "family" as a suffix (e.g., "Blomquist family"). Just use their name.
 - Don't over-promise urgency. "We'll look into this" or "we'll follow up" is fine — avoid "prioritizing", "right away", "ASAP" unless truly critical.
-- Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines, then the signature. Use \\n for line breaks in the JSON string.
-- Always end with this exact signature (no variations):\\n\\nBest,\\nThe """ + from_name + """ Team\\n""" + from_email + """
+- NEVER include the property address or street address in the email body. The client knows where they live. Including it looks robotic and auto-generated. Reference the property by name only if it has one (e.g., "Pinebrook Village"), otherwise don't reference the location at all.
+- NEVER include the customer's account number, invoice number, or internal reference IDs unless the customer specifically asked about them.
+- Format draft_response as a proper email: greeting on its own line, body paragraphs separated by blank lines. Use \\n for line breaks in the JSON string.
+- Do NOT include a signature block in the draft — the system appends it automatically. End with a brief closing like "Best," or "Thanks," on its own line.
 - "actions" array: extract follow-up work the team needs to do. MAXIMUM 2 actions per email. ONE action per distinct task — do NOT split a single task into steps or create separate actions for related follow-ups. For example, "inspect pool and report back" is ONE action, not two. "Get termination details and clarify timeline" is ONE action, not five. When in doubt, combine into fewer actions. Include due_days (business days). Leave empty [] if no action needed.
 - Common action types: "bid" (send a quote/proposal), "follow_up" (check back with client), "schedule_change" (modify service day/frequency), "site_visit" (go inspect/assess), "callback" (phone call needed), "repair" (fix equipment/issue), "equipment" (order/replace equipment)
-- Action descriptions should be specific — include property address, client name, part numbers, and any details from the email. "Replace filter" is too vague. "Replace spa filter at 751 Central Park Dr for Ashley Overton (Coventry Park)" is good."""
+- Action descriptions should be specific — include property name, client name, part numbers, and any details from the email. "Replace filter" is too vague. "Replace spa filter — Coventry Park (Overton)" is good."""
 
 
 SYSTEM_PROMPT = _get_system_prompt()
@@ -255,6 +259,25 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
     full_system = SYSTEM_PROMPT
     if context_block:
         full_system += "\n\n" + context_block
+
+    # Inject lessons from past corrections
+    try:
+        async with get_db_context() as learn_db:
+            from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
+            learner = AgentLearningService(learn_db)
+            org_id = customer_ctx.get("organization_id") if customer_ctx else None
+            customer_id = customer_ctx.get("customer_id") if customer_ctx else None
+            category = customer_ctx.get("category") if customer_ctx else None
+            if org_id:
+                lessons = await learner.build_lessons_prompt(
+                    org_id, AGENT_EMAIL_CLASSIFIER,
+                    category=category, customer_id=customer_id,
+                )
+                if lessons:
+                    full_system += "\n\n" + lessons
+                await learn_db.commit()
+    except Exception:
+        pass  # learning is non-critical
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 

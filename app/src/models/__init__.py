@@ -70,6 +70,7 @@ from src.models.feedback_item import FeedbackItem
 from src.models.property_access_code import PropertyAccessCode
 from src.models.internal_message import InternalThread, InternalMessage
 from src.models.customer_contact import CustomerContact
+from src.models.agent_correction import AgentCorrection
 
 __all__ = [
     "Base",
@@ -129,4 +130,5 @@ __all__ = [
     "InternalThread",
     "InternalMessage",
     "CustomerContact",
+    "AgentCorrection",
 ]

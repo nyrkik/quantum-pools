@@ -84,7 +84,7 @@ class InvoiceService:
         subtotal = sum(item.amount for item in line_items)
         taxable = sum(item.amount for item in line_items if item.is_taxed)
         tax_amount = round(taxable * (invoice.tax_rate / 100), 2) if invoice.tax_rate else 0.0
-        total = round(subtotal - invoice.discount + tax_amount, 2)
+        total = round(subtotal - (invoice.discount or 0) + tax_amount, 2)
 
         invoice.subtotal = round(subtotal, 2)
         invoice.tax_amount = tax_amount

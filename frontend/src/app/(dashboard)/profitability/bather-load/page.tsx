@@ -285,7 +285,7 @@ export default function BatherLoadPage() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                   <div>
                     <span className="text-muted-foreground">Total sqft:</span>
                     <span className="ml-2 font-medium">{result.pool_sqft_used.toFixed(0)}</span>

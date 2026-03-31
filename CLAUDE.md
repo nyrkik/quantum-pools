@@ -49,9 +49,15 @@ All inline action icons use `Button variant="ghost" size="icon"`. No text labels
 - **No "Edit" in title** — the page title stays the same as view mode
 - **Edit mode indicator**: Cards get `border-l-4 border-primary` left border to signal edit state
 - **Close edit**: `X` icon in top-right of the name/header tile (not in page header)
-- **Dirty section indicator**: When a section has unsaved changes, it gets `border-l-4 border-amber-400` left border and shows Check (save) + X (cancel) icons in the section header
-- **Unsaved changes guard**: If user clicks X to exit edit mode while any section is dirty, show AlertDialog confirming discard
-- **Section-level saves**: Each section (client, property, BOW) saves independently via its own API endpoint. "Save" (variant=default) and "Cancel" (variant=ghost) buttons appear in the section header only when that section is dirty. Buttons use `size="sm"` with text labels — no icon-only save/cancel (too small on mobile).
+- **Section-level saves**: Each section saves independently via its own API endpoint
+
+**Dirty tracking (MANDATORY for all edit modes):**
+- Every editable component MUST track `isDirty` by comparing current form state to the original loaded state
+- **Save/Cancel buttons**: Only visible when `isDirty === true`. Hidden when form matches original state.
+- **Dirty border**: When dirty, card gets `border-l-4 border-amber-400` left border (replaces the `border-primary` edit indicator)
+- **Unsaved changes guard**: If user clicks Cancel/X while dirty, show AlertDialog confirming discard
+- **Implementation**: Store original state on edit enter (`useRef` or `useState`), compute `isDirty` by deep comparison with current form. Do NOT track dirty as a separate boolean that gets set on every keystroke — derive it from state comparison.
+- **Buttons**: Save (`variant="default"`) and Cancel (`variant="ghost"`) use `size="sm"` with text labels — no icon-only save/cancel (too small on mobile)
 
 ### Visual Polish (MANDATORY — apply everywhere)
 
@@ -76,6 +82,11 @@ All inline action icons use `Button variant="ghost" size="icon"`. No text labels
 - Inactive: `variant="secondary"` (gray)
 - Pending: `variant="outline" className="border-amber-400 text-amber-600"`
 - One-time: `variant="outline" className="border-blue-400 text-blue-600"`
+
+**Enum/status display:**
+- NEVER display raw enum values to users. Always title-case: `.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())`
+- CSS `capitalize` is NOT sufficient — it only capitalizes the first letter ("written off" not "Written Off")
+- Applies to: status badges, action types, payment methods, categories — any DB enum shown in UI
 
 **General:**
 - No gradients, heavy shadows, or heavy rounded corners

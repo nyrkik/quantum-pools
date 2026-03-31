@@ -47,5 +47,11 @@ async def create_payment(
     db: AsyncSession = Depends(get_db),
 ):
     svc = PaymentService(db)
-    payment = await svc.create(ctx.organization_id, **body.model_dump())
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    payment = await svc.create(ctx.organization_id, **body.model_dump(), recorded_by=user_name)
+    if body.invoice_id:
+        from src.services.invoice_service import log_job_activity
+        method = body.payment_method.replace("_", " ").title() if body.payment_method else "Payment"
+        await log_job_activity(db, body.invoice_id, f"Payment recorded: ${body.amount:,.2f} ({method})")
+        await db.commit()
     return PaymentResponse.model_validate(payment)

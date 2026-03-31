@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +54,7 @@ import { Badge } from "@/components/ui/badge";
 
 interface Invoice {
   id: string;
-  invoice_number: string;
+  invoice_number: string | null;
   customer_id: string;
   customer_name: string;
   subject: string | null;
@@ -99,14 +100,20 @@ interface LineItem {
 import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
 import { PageLayout, PageTabs } from "@/components/layout/page-layout";
 
-const OPEN_STATUSES = "draft,sent,viewed,overdue";
+const OPEN_STATUSES = "draft,sent,revised,viewed,overdue";
 
 type DocView = "invoices" | "estimates";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
 
 export default function InvoicesPage() {
-  const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const [docView, setDocView] = useState<DocView>(urlParams?.get("tab") === "estimates" ? "estimates" : "invoices");
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [docView, setDocView] = useState<DocView>(tabParam === "estimates" ? "estimates" : "invoices");
+
+  // Sync docView when URL tab param changes (e.g. back navigation)
+  useEffect(() => {
+    setDocView(tabParam === "estimates" ? "estimates" : "invoices");
+  }, [tabParam]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<InvoiceStats | null>(null);
@@ -280,6 +287,7 @@ export default function InvoicesPage() {
     const form = new FormData(e.currentTarget);
     const body = {
       customer_id: selectedCustomerId,
+      document_type: docView === "estimates" ? "estimate" : "invoice",
       subject: (form.get("subject") as string) || undefined,
       issue_date: form.get("issue_date") as string,
       due_date: form.get("due_date") as string,
@@ -298,7 +306,7 @@ export default function InvoicesPage() {
     };
     try {
       await api.post("/v1/invoices", body);
-      toast.success("Invoice created");
+      toast.success(docView === "estimates" ? "Estimate created" : "Invoice created");
       setDialogOpen(false);
       setSelectedCustomerId("");
       setLineItems([
@@ -351,7 +359,7 @@ export default function InvoicesPage() {
           </DialogTrigger>
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>New Invoice</DialogTitle>
+              <DialogTitle>{docView === "estimates" ? "New Estimate" : "New Invoice"}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -561,7 +569,7 @@ export default function InvoicesPage() {
                 className="w-full"
                 disabled={!selectedCustomerId}
               >
-                Create Invoice
+                {docView === "estimates" ? "Create Estimate" : "Create Invoice"}
               </Button>
             </form>
           </DialogContent>
@@ -645,9 +653,9 @@ export default function InvoicesPage() {
                           setChartSegment("all");
                         }}
                       >
-                        {/* Tooltip on hover only */}
+                        {/* Tooltip on hover — centered over column */}
                         {isHovered && !d.isFuture && (
-                          <div className="absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full bg-popover border rounded shadow-md px-2.5 py-1.5 text-[11px] whitespace-nowrap z-20 pointer-events-none">
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-popover/95 backdrop-blur-sm border rounded shadow-md px-2.5 py-1.5 text-[11px] whitespace-nowrap z-20 pointer-events-none">
                             <div className="font-medium mb-0.5">{d.month}</div>
                             <div className="text-green-700">Paid ${d.paid.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
                             <div className="text-amber-600">Open ${d.open.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
@@ -737,7 +745,7 @@ export default function InvoicesPage() {
                       href={`/invoices/${inv.id}`}
                       className="font-medium hover:underline"
                     >
-                      {inv.invoice_number}
+                      {inv.invoice_number || "Draft"}
                     </Link>
                   </TableCell>
                   <TableCell>{inv.customer_name}</TableCell>
@@ -761,14 +769,14 @@ export default function InvoicesPage() {
                           <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
                           <span className="text-xs text-green-700">{inv.approved_by}</span>
                         </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Pending</span>
-                      )}
+                      ) : ["sent", "revised", "viewed"].includes(inv.status) ? (
+                        <span className="text-xs text-muted-foreground">Awaiting</span>
+                      ) : null}
                     </TableCell>
                   )}
                   {docView === "estimates" && (
                     <TableCell>
-                      {!inv.approved_at && (
+                      {!inv.approved_at && ["sent", "revised", "viewed"].includes(inv.status) && (
                         <Button
                           variant="outline"
                           size="sm"

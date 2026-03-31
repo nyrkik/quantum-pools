@@ -36,7 +36,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Plus, Search, Building2, Home, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Plus, Search, Building2, Home, ArrowUp, ArrowDown, ArrowUpDown, Loader2 } from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
 import { PageLayout } from "@/components/layout/page-layout";
 import { Overlay, OverlayContent, OverlayBody } from "@/components/ui/overlay";
@@ -65,6 +65,8 @@ interface Customer {
 type SortKey = "name" | "property" | "company" | "pool" | "rate" | "balance" | "status";
 type SortDir = "asc" | "desc";
 
+const PAGE_SIZE = 50;
+
 function customerDisplayName(c: Customer) {
   return c.display_name || c.first_name;
 }
@@ -76,73 +78,127 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
     : <ArrowDown className="h-3.5 w-3.5 ml-1" />;
 }
 
-function ClientTable({
+// --- Paginated section for one customer type ---
+function ClientSection({
+  customerType,
   title,
   icon: Icon,
-  items,
   perms,
+  search,
+  statusFilter,
   sortKey,
   sortDir,
-  toggleSort,
-  thClass,
+  onToggleSort,
   techAssignments,
   onSelectCustomer,
 }: {
+  customerType: "commercial" | "residential";
   title: string;
   icon: React.ComponentType<{ className?: string }>;
-  items: Customer[];
   perms: ReturnType<typeof usePermissions>;
+  search: string;
+  statusFilter: Set<string>;
   sortKey: SortKey;
   sortDir: SortDir;
-  toggleSort: (key: SortKey) => void;
-  thClass: string;
+  onToggleSort: (key: SortKey) => void;
   techAssignments: Record<string, Array<{ tech_name: string; color: string }>>;
   onSelectCustomer: (id: string) => void;
 }) {
+  const [items, setItems] = useState<Customer[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const fetchPage = useCallback(async (skip: number, append: boolean) => {
+    if (skip === 0) setLoading(true);
+    else setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("customer_type", customerType);
+      params.set("sort_by", sortKey);
+      params.set("sort_dir", sortDir);
+      params.set("skip", String(skip));
+      params.set("limit", String(PAGE_SIZE));
+      if (search) params.set("search", search);
+      statusFilter.forEach(s => params.append("status", s));
+
+      const data = await api.get<{ items: Customer[]; total: number }>(
+        `/v1/customers?${params}`
+      );
+      setItems(prev => append ? [...prev, ...data.items] : data.items);
+      setTotal(data.total);
+    } catch {
+      toast.error(`Failed to load ${title.toLowerCase()}`);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [customerType, search, sortKey, sortDir, [...statusFilter].sort().join(",")]);
+
+  // Reset and fetch first page when filters/sort change
+  useEffect(() => {
+    fetchPage(0, false);
+  }, [fetchPage]);
+
+  // Refetch on window focus
+  useEffect(() => {
+    const handleFocus = () => fetchPage(0, false);
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [fetchPage]);
+
+  const hasMore = items.length < total;
+  const thClass = "cursor-pointer select-none";
   const colSpan = 6 + (perms.canViewRates ? 1 : 0) + (perms.canViewBalance ? 1 : 0);
+
   return (
     <div className="rounded-lg border shadow-sm overflow-hidden">
-      {/* Section header */}
       <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-2.5">
         <Icon className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{title}</h2>
-        <span className="text-[11px] text-muted-foreground/50">({items.length})</span>
+        <span className="text-[11px] text-muted-foreground/50">({total})</span>
       </div>
       <Table>
         <TableHeader>
           <TableRow className="bg-slate-100 dark:bg-slate-800">
-            <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("name")}>
+            <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => onToggleSort("name")}>
               <div className="flex items-center">Name<SortIcon active={sortKey === "name"} dir={sortDir} /></div>
             </TableHead>
-            <TableHead className={`hidden md:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("property")}>
-              <div className="flex items-center">Property<SortIcon active={sortKey === "property"} dir={sortDir} /></div>
+            <TableHead className={`hidden md:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`}>
+              Property
             </TableHead>
-            <TableHead className={`hidden lg:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("company")}>
+            <TableHead className={`hidden lg:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => onToggleSort("company")}>
               <div className="flex items-center">Mgmt Company<SortIcon active={sortKey === "company"} dir={sortDir} /></div>
             </TableHead>
-            <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("pool")}>
-              <div className="flex items-center">Pool Type<SortIcon active={sortKey === "pool"} dir={sortDir} /></div>
+            <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`}>
+              Pool Type
             </TableHead>
-            <TableHead className={`hidden lg:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`}>
+            <TableHead className="hidden lg:table-cell text-xs font-medium uppercase tracking-wide">
               Tech
             </TableHead>
             {perms.canViewRates && (
-              <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("rate")}>
+              <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => onToggleSort("rate")}>
                 <div className="flex items-center">Rate<SortIcon active={sortKey === "rate"} dir={sortDir} /></div>
               </TableHead>
             )}
             {perms.canViewBalance && (
-              <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("balance")}>
+              <TableHead className={`hidden sm:table-cell text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => onToggleSort("balance")}>
                 <div className="flex items-center">Balance<SortIcon active={sortKey === "balance"} dir={sortDir} /></div>
               </TableHead>
             )}
-            <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => toggleSort("status")}>
+            <TableHead className={`text-xs font-medium uppercase tracking-wide ${thClass}`} onClick={() => onToggleSort("status")}>
               <div className="flex items-center">Status<SortIcon active={sortKey === "status"} dir={sortDir} /></div>
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.length === 0 ? (
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={colSpan} className="text-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
+              </TableCell>
+            </TableRow>
+          ) : items.length === 0 ? (
             <TableRow>
               <TableCell colSpan={colSpan} className="text-center py-6 text-muted-foreground text-sm">
                 No {title.toLowerCase()} clients
@@ -195,16 +251,21 @@ function ClientTable({
           )}
         </TableBody>
       </Table>
+      {hasMore && !loading && (
+        <div className="border-t px-4 py-2 text-center">
+          <Button variant="ghost" size="sm" className="text-xs" onClick={() => fetchPage(items.length, true)} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Load More ({total - items.length} remaining)
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function CustomersPage() {
   const perms = usePermissions();
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newType, setNewType] = useState("residential");
   const [newCompany, setNewCompany] = useState("");
@@ -215,6 +276,9 @@ export default function CustomersPage() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [techAssignments, setTechAssignments] = useState<Record<string, Array<{ tech_name: string; color: string }>>>({});
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [existingCompanies, setExistingCompanies] = useState<string[]>([]);
+  // Key to force section remount on create
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -225,38 +289,20 @@ export default function CustomersPage() {
     }
   };
 
-  const fetchCustomers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (search) params.set("search", search);
-      statusFilter.forEach(s => params.append("status", s));
-      const data = await api.get<{ items: Customer[]; total: number }>(
-        `/v1/customers?${params}`
-      );
-      setCustomers(data.items);
-      setTotal(data.total);
-    } catch {
-      toast.error("Failed to load clients");
-    } finally {
-      setLoading(false);
-    }
-  }, [search, [...statusFilter].sort().join(",")]);
-
   useEffect(() => {
     api.get<Record<string, Array<{ tech_name: string; color: string }>>>("/v1/routes/tech-assignments")
       .then(setTechAssignments).catch(() => {});
   }, []);
 
+  // Fetch company names for the create dialog
   useEffect(() => {
-    fetchCustomers();
-  }, [fetchCustomers]);
-
-  useEffect(() => {
-    const handleFocus = () => fetchCustomers();
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, [fetchCustomers]);
+    api.get<{ items: Customer[] }>("/v1/customers?limit=200&sort_by=name")
+      .then(data => {
+        const names = new Set<string>();
+        data.items.forEach(c => { if (c.company_name) names.add(c.company_name); });
+        setExistingCompanies([...names].sort());
+      }).catch(() => {});
+  }, [refreshKey]);
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -288,55 +334,15 @@ export default function CustomersPage() {
       setNewType("residential");
       setNewCompany("");
       setNewCompanyCustom("");
-      fetchCustomers();
+      setRefreshKey(k => k + 1);
     } catch {
       toast.error("Failed to create client");
     }
   };
 
-  const sortFn = useCallback((a: Customer, b: Customer) => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    switch (sortKey) {
-      case "name":
-        return dir * customerDisplayName(a).localeCompare(customerDisplayName(b));
-      case "property":
-        return dir * (a.first_property_address ?? "").localeCompare(b.first_property_address ?? "");
-      case "company":
-        return dir * (a.company_name ?? "").localeCompare(b.company_name ?? "");
-      case "pool":
-        return dir * (a.wf_summary ?? a.first_property_pool_type ?? "").localeCompare(b.wf_summary ?? b.first_property_pool_type ?? "");
-      case "rate":
-        return dir * (a.monthly_rate - b.monthly_rate);
-      case "balance":
-        return dir * (a.balance - b.balance);
-      case "status":
-        return dir * (a.status ?? "").localeCompare(b.status ?? "");
-      default:
-        return 0;
-    }
-  }, [sortKey, sortDir]);
-
-  const commercialList = useMemo(() =>
-    customers.filter(c => c.customer_type === "commercial").sort(sortFn),
-    [customers, sortFn]
-  );
-  const residentialList = useMemo(() =>
-    customers.filter(c => c.customer_type === "residential").sort(sortFn),
-    [customers, sortFn]
-  );
-
-  const existingCompanies = useMemo(() => {
-    const names = new Set<string>();
-    customers.forEach(c => { if (c.company_name) names.add(c.company_name); });
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [customers]);
-
-  const thClass = "cursor-pointer select-none";
-
   return (
     <PageLayout
       title="Clients"
-      subtitle={`${total} total`}
       action={
         perms.canCreateCustomers ? (
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -523,42 +529,42 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {loading ? (
-        <div className="text-center py-8 text-muted-foreground">Loading...</div>
-      ) : (
-        <TooltipProvider>
-          <div className="space-y-6">
-            {(typeFilter === null || typeFilter === "commercial") && (
-              <ClientTable
-                title="Commercial"
-                icon={Building2}
-                items={commercialList}
-                perms={perms}
-                sortKey={sortKey}
-                sortDir={sortDir}
-                toggleSort={toggleSort}
-                thClass={thClass}
-                techAssignments={techAssignments}
-                onSelectCustomer={setSelectedCustomerId}
-              />
-            )}
-            {(typeFilter === null || typeFilter === "residential") && (
-              <ClientTable
-                title="Residential"
-                icon={Home}
-                items={residentialList}
-                perms={perms}
-                sortKey={sortKey}
-                sortDir={sortDir}
-                toggleSort={toggleSort}
-                thClass={thClass}
-                techAssignments={techAssignments}
-                onSelectCustomer={setSelectedCustomerId}
-              />
-            )}
-          </div>
-        </TooltipProvider>
-      )}
+      <TooltipProvider>
+        <div className="space-y-6">
+          {(typeFilter === null || typeFilter === "commercial") && (
+            <ClientSection
+              key={`commercial-${refreshKey}`}
+              customerType="commercial"
+              title="Commercial"
+              icon={Building2}
+              perms={perms}
+              search={search}
+              statusFilter={statusFilter}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onToggleSort={toggleSort}
+              techAssignments={techAssignments}
+              onSelectCustomer={setSelectedCustomerId}
+            />
+          )}
+          {(typeFilter === null || typeFilter === "residential") && (
+            <ClientSection
+              key={`residential-${refreshKey}`}
+              customerType="residential"
+              title="Residential"
+              icon={Home}
+              perms={perms}
+              search={search}
+              statusFilter={statusFilter}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onToggleSort={toggleSort}
+              techAssignments={techAssignments}
+              onSelectCustomer={setSelectedCustomerId}
+            />
+          )}
+        </div>
+      </TooltipProvider>
 
       {/* Customer detail overlay */}
       <Overlay open={!!selectedCustomerId} onOpenChange={(o) => { if (!o) setSelectedCustomerId(null); }}>

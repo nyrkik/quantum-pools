@@ -104,6 +104,16 @@ async def view_estimate(token: str, db: AsyncSession = Depends(get_db)):
         },
         "status": "approved" if approval.approved_by_type and approval.approved_by_type != "pending" else "pending",
         "approved_at": approval.approved_at.isoformat() if approval.approved_by_type and approval.approved_by_type != "pending" else None,
+        "approval_evidence": {
+            "signed_by": approval.approved_by_name,
+            "signature": approval.signature_data,
+            "sent_to_email": approval.recipient_email,
+            "ip_address": approval.client_ip,
+            "method": approval.approval_method,
+            "timestamp": approval.approved_at.isoformat() if approval.approved_at else None,
+        } if approval.approved_by_type and approval.approved_by_type != "pending" else None,
+        "revision_count": invoice.revision_count or 0,
+        "revised_at": invoice.revised_at.isoformat() if invoice.revised_at else None,
     }
 
 
@@ -152,29 +162,53 @@ async def approve_estimate(
         invoice.status = "approved"
 
         # Update linked job if exists, otherwise create one
-        action_result = await db.execute(
-            select(AgentAction).where(
-                AgentAction.invoice_id == invoice.id,
-            )
-        )
-        action = action_result.scalar_one_or_none()
+        from src.services.job_invoice_service import get_first_job_for_invoice, link_job_invoice
+        action = await get_first_job_for_invoice(db, invoice.id)
         if action:
-            action.status = "approved"
+            action.status = "open"
         else:
             # Auto-create job for approved estimate
             import uuid
             action = AgentAction(
                 id=str(uuid.uuid4()),
                 organization_id=approval.organization_id,
-                invoice_id=invoice.id,
                 customer_id=invoice.customer_id,
                 action_type="repair",
                 description=f"Approved: {invoice.subject or 'Service Estimate'}",
-                status="approved",
+                status="open",
                 job_path="customer",
                 created_by=body.name.strip(),
             )
             db.add(action)
+            await db.flush()
+            await link_job_invoice(db, action.id, invoice.id, linked_by=body.name.strip())
+
+    # Notify admins/owners
+    if invoice:
+        from src.models.organization_user import OrganizationUser
+        from src.models.notification import Notification
+        admins = (await db.execute(
+            select(OrganizationUser).where(
+                OrganizationUser.organization_id == approval.organization_id,
+                OrganizationUser.role.in_(("owner", "admin")),
+            )
+        )).scalars().all()
+
+        customer_name = body.name.strip()
+        for admin in admins:
+            db.add(Notification(
+                organization_id=approval.organization_id,
+                user_id=admin.user_id,
+                type="estimate_approved",
+                title=f"Estimate approved by {customer_name}",
+                body=f"{invoice.invoice_number} — {invoice.subject or 'Service Estimate'} (${invoice.total:,.2f})",
+                link=f"/invoices/{invoice.id}",
+            ))
+
+    # Log activity on linked job
+    if invoice:
+        from src.services.invoice_service import log_job_activity
+        await log_job_activity(db, invoice.id, f"Estimate {invoice.invoice_number} approved by customer ({body.name.strip()})")
 
     await db.commit()
 

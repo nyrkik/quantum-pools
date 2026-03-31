@@ -12,7 +12,7 @@ export interface AgentAction {
   due_date: string | null;
   status: string;
   job_path?: "internal" | "customer";
-  invoice_id?: string | null;
+  invoice_ids?: string[];
   task_count?: number;
   tasks_completed?: number;
   completed_at: string | null;
@@ -53,7 +53,7 @@ export interface JobTask {
 export interface ActionDetail extends AgentAction {
   comments?: ActionComment[];
   notes?: string | null;
-  invoice_id?: string | null;
+  invoice_ids?: string[];
   matched_customer_id?: string | null;
   task_count?: number;
   tasks_completed?: number;
@@ -64,6 +64,7 @@ export interface ActionDetail extends AgentAction {
   email_body?: string;
   our_response?: string;
   response_is_draft?: boolean;
+  thread_messages?: { direction: string; from_email: string; to_email: string; subject: string; body: string; created_at: string }[];
   related_jobs?: RelatedJob[];
 }
 

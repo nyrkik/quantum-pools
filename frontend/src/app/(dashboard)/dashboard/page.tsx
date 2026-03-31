@@ -29,7 +29,7 @@ import type { AgentAction } from "@/types/agent";
 interface DashboardData {
   // My stuff
   unreadMessages: number;
-  latestMessages: { id: string; participants: string[]; last_message: string; last_message_at: string }[];
+  latestMessages: { id: string; participants: string[]; subject: string | null; last_message: string; last_message_at: string }[];
   myJobs: AgentAction[];
   todayVisits: number;
   activeVisit: { visit: { id: string; started_at: string }; customer: { name: string }; property: { address: string } } | null;
@@ -125,8 +125,8 @@ export default function DashboardPage() {
   if (data.pendingEmails > 0) alerts.push({ label: "Pending emails", count: data.pendingEmails, icon: Mail, color: "text-amber-600", href: "/inbox" });
   if (data.staleEmails > 0) alerts.push({ label: "Stale (30+ min)", count: data.staleEmails, icon: AlertTriangle, color: "text-red-600", href: "/inbox" });
   if (data.overdueJobs > 0) alerts.push({ label: "Overdue jobs", count: data.overdueJobs, icon: Clock, color: "text-red-600", href: "/jobs" });
-  if (data.pendingEstimates > 0) alerts.push({ label: "Awaiting approval", count: data.pendingEstimates, icon: FileText, color: "text-purple-600", href: "/invoices" });
-  if (data.draftEstimates > 0) alerts.push({ label: "Draft estimates", count: data.draftEstimates, icon: FileText, color: "text-blue-600", href: "/invoices" });
+  if (data.pendingEstimates > 0) alerts.push({ label: "Awaiting approval", count: data.pendingEstimates, icon: FileText, color: "text-purple-600", href: "/invoices?tab=estimates" });
+  if (data.draftEstimates > 0) alerts.push({ label: "Draft estimates", count: data.draftEstimates, icon: FileText, color: "text-blue-600", href: "/invoices?tab=estimates" });
 
   return (
     <div className="space-y-4">
@@ -202,7 +202,7 @@ export default function DashboardPage() {
                   <Link key={m.id} href={`/messages?thread=${m.id}`}>
                     <div className="flex items-center gap-3 py-2 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors cursor-pointer">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{m.participants?.join(", ") || "Message"}</p>
+                        <p className="text-sm font-medium truncate">{m.subject || m.participants?.join(", ") || "Message"}</p>
                         <p className="text-xs text-muted-foreground truncate">{m.last_message}</p>
                       </div>
                       <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(m.last_message_at)}</span>

@@ -42,6 +42,7 @@ import {
   Receipt,
   Package,
   MessageSquare,
+  MessageCircleQuestion,
 } from "lucide-react";
 
 const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
@@ -60,6 +61,7 @@ const navItems = [
   { href: "/inspections", label: "Inspections", icon: Shield, check: "canViewInspection" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
+  { href: "/feedback", label: "Feedback", icon: MessageCircleQuestion, check: "canViewSettings" as keyof Permissions },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 
@@ -80,8 +82,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   const fetchCounts = useCallback(() => {
     if (perms.canViewInbox) {
-      api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
-        .then((s) => setPendingCount(s.pending ?? 0))
+      api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
+        .then((s) => setPendingCount(s.unread ?? s.pending ?? 0))
         .catch(() => {});
     }
     api.get<{ unread: number }>("/v1/messages/stats")
@@ -255,8 +257,8 @@ export function Sidebar() {
   useEffect(() => {
     const poll = () => {
       if (perms.canViewInbox) {
-        api.get<{ pending: number }>("/v1/admin/agent-threads/stats")
-          .then((s) => setMobilePending(s.pending ?? 0))
+        api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
+          .then((s) => setMobilePending(s.unread ?? s.pending ?? 0))
           .catch(() => {});
       }
       api.get<{ unread: number; role_version?: number }>("/v1/notifications/count")

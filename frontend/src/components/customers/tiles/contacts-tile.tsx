@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,8 +43,9 @@ import {
 interface Contact {
   id: string;
   customer_id: string;
-  name: string;
-  title: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
   email: string | null;
   phone: string | null;
   role: string;
@@ -55,33 +56,63 @@ interface Contact {
   notes: string | null;
 }
 
+interface ContactForm {
+  id: string | null;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  role: string;
+  receives_estimates: boolean;
+  receives_invoices: boolean;
+  receives_service_updates: boolean;
+  is_primary: boolean;
+  _delete?: boolean;
+}
+
 const ROLE_LABELS: Record<string, string> = {
-  primary: "Primary",
   billing: "Billing",
   property_manager: "Property Mgr",
+  regional_manager: "Regional Mgr",
   maintenance: "Maintenance",
-  other: "Other",
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  primary: "bg-blue-100 text-blue-700",
   billing: "bg-green-100 text-green-700",
   property_manager: "bg-purple-100 text-purple-700",
+  regional_manager: "bg-indigo-100 text-indigo-700",
   maintenance: "bg-orange-100 text-orange-700",
-  other: "bg-slate-100 text-slate-700",
 };
 
-const EMPTY_FORM = {
-  name: "",
-  title: "",
-  email: "",
-  phone: "",
-  role: "primary",
-  receives_estimates: false,
-  receives_invoices: false,
-  receives_service_updates: false,
-  is_primary: false,
-};
+function contactToForm(c: Contact): ContactForm {
+  return {
+    id: c.id,
+    first_name: c.first_name || "",
+    last_name: c.last_name || "",
+    email: c.email || "",
+    phone: c.phone || "",
+    role: c.role,
+    receives_estimates: c.receives_estimates,
+    receives_invoices: c.receives_invoices,
+    receives_service_updates: c.receives_service_updates,
+    is_primary: c.is_primary,
+  };
+}
+
+function newContactForm(): ContactForm {
+  return {
+    id: null,
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+    role: "other",
+    receives_estimates: false,
+    receives_invoices: false,
+    receives_service_updates: false,
+    is_primary: false,
+  };
+}
 
 interface ContactsTileProps {
   customerId: string;
@@ -91,10 +122,16 @@ interface ContactsTileProps {
 export function ContactsTile({ customerId, canEdit = true }: ContactsTileProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [forms, setForms] = useState<ContactForm[]>([]);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const originalForms = useRef<string>("");
+
+  const isDirty = useMemo(() => {
+    if (!editing) return false;
+    return JSON.stringify(forms) !== originalForms.current;
+  }, [editing, forms]);
 
   const load = useCallback(async () => {
     try {
@@ -111,164 +148,249 @@ export function ContactsTile({ customerId, canEdit = true }: ContactsTileProps) 
     load();
   }, [load]);
 
-  const set = (field: string, value: unknown) =>
-    setForm((f) => ({ ...f, [field]: value }));
-
-  const startAdd = () => {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setAdding(true);
+  const startEdit = () => {
+    const initial = contacts.map(contactToForm);
+    setForms(initial);
+    originalForms.current = JSON.stringify(initial);
+    setEditing(true);
   };
 
-  const startEdit = (c: Contact) => {
-    setAdding(false);
-    setEditingId(c.id);
-    setForm({
-      name: c.name,
-      title: c.title || "",
-      email: c.email || "",
-      phone: c.phone || "",
-      role: c.role,
-      receives_estimates: c.receives_estimates,
-      receives_invoices: c.receives_invoices,
-      receives_service_updates: c.receives_service_updates,
-      is_primary: c.is_primary,
-    });
+  const cancelEdit = () => {
+    if (isDirty) {
+      setConfirmCancel(true);
+      return;
+    }
+    setEditing(false);
+    setForms([]);
   };
 
-  const cancel = () => {
-    setEditingId(null);
-    setAdding(false);
+  const confirmDiscardAndClose = () => {
+    setConfirmCancel(false);
+    setEditing(false);
+    setForms([]);
+  };
+
+  const addContact = () => {
+    setForms((f) => [...f, newContactForm()]);
+  };
+
+  const updateForm = (index: number, field: string, value: unknown) => {
+    setForms((prev) =>
+      prev.map((f, i) => {
+        if (i !== index) {
+          // If setting primary, clear it on others
+          if (field === "is_primary" && value === true) {
+            return { ...f, is_primary: false };
+          }
+          return f;
+        }
+        return { ...f, [field]: value };
+      })
+    );
+  };
+
+  const markDelete = (index: number) => {
+    setForms((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
-      toast.error("Name is required");
-      return;
+    // Validate: each contact needs email or phone
+    const active = forms.filter((f) => !f._delete);
+    for (const f of active) {
+      if (!f.email.trim() && !f.phone.trim()) {
+        toast.error("Each contact needs an email or phone");
+        return;
+      }
     }
+
     setSaving(true);
     try {
-      const payload = {
-        name: form.name.trim(),
-        title: form.title.trim() || null,
-        email: form.email.trim() || null,
-        phone: form.phone.trim() || null,
-        role: form.role,
-        receives_estimates: form.receives_estimates,
-        receives_invoices: form.receives_invoices,
-        receives_service_updates: form.receives_service_updates,
-        is_primary: form.is_primary,
-      };
-
-      if (adding) {
-        await api.post(`/v1/customers/${customerId}/contacts`, payload);
-        toast.success("Contact added");
-      } else if (editingId) {
-        await api.put(`/v1/customers/${customerId}/contacts/${editingId}`, payload);
-        toast.success("Contact updated");
+      // Delete removed contacts
+      const formIds = new Set(active.map((f) => f.id).filter(Boolean));
+      for (const c of contacts) {
+        if (!formIds.has(c.id)) {
+          await api.delete(`/v1/customers/${customerId}/contacts/${c.id}`);
+        }
       }
-      cancel();
+
+      // Create/update contacts
+      for (const f of active) {
+        const payload = {
+          first_name: f.first_name.trim() || null,
+          last_name: f.last_name.trim() || null,
+          email: f.email.trim() || null,
+          phone: f.phone.trim() || null,
+          role: f.role,
+          receives_estimates: f.receives_estimates,
+          receives_invoices: f.receives_invoices,
+          receives_service_updates: f.receives_service_updates,
+          is_primary: f.is_primary,
+        };
+
+        if (f.id) {
+          await api.put(`/v1/customers/${customerId}/contacts/${f.id}`, payload);
+        } else {
+          await api.post(`/v1/customers/${customerId}/contacts`, payload);
+        }
+      }
+
+      toast.success("Contacts saved");
+      setEditing(false);
       load();
     } catch {
-      toast.error("Failed to save contact");
+      toast.error("Failed to save contacts");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    try {
-      await api.delete(`/v1/customers/${customerId}/contacts/${id}`);
-      toast.success("Contact removed");
-      load();
-    } catch {
-      toast.error("Failed to delete");
-    }
-  };
+  // --- VIEW MODE ---
+  const renderView = () => (
+    <>
+      {contacts.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-center py-3">No contacts yet</p>
+      ) : (
+        contacts.map((c) => (
+          <div key={c.id} className="py-2 px-2 space-y-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium">{c.display_name || c.email || c.phone || "Unknown"}</span>
+              {c.is_primary && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
+              {c.role && c.role !== "other" && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${ROLE_COLORS[c.role] || ROLE_COLORS.other}`}>
+                  {ROLE_LABELS[c.role] || c.role}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              {c.email && c.display_name && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <Mail className="h-3 w-3" /> {c.email}
+                </span>
+              )}
+              {c.phone && (
+                <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                  <Phone className="h-3 w-3" /> {c.phone}
+                </a>
+              )}
+            </div>
+            {(c.receives_estimates || c.receives_invoices || c.receives_service_updates) && (
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {c.receives_estimates && <Badge variant="outline" className="text-[9px] h-4 px-1">Estimates</Badge>}
+                {c.receives_invoices && <Badge variant="outline" className="text-[9px] h-4 px-1">Invoices</Badge>}
+                {c.receives_service_updates && <Badge variant="outline" className="text-[9px] h-4 px-1">Updates</Badge>}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+    </>
+  );
 
-  const renderForm = () => (
-    <div className="space-y-3 p-3 bg-muted/50 rounded-md border">
+  // --- EDIT MODE ---
+  const renderEditForm = (f: ContactForm, index: number) => (
+    <div key={f.id || `new-${index}`} className="p-3 bg-background rounded-md border space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {f.is_primary && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
+          <span className="text-xs font-medium text-muted-foreground">
+            {(f.role && ROLE_LABELS[f.role]) || "Contact"}
+            {!f.id && " (new)"}
+          </span>
+        </div>
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => markDelete(index)}>
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <Label className="text-xs">Name *</Label>
-          <Input value={form.name} onChange={(e) => set("name", e.target.value)} className="h-8 text-sm" placeholder="Full name" />
+          <Label className="text-xs">First Name</Label>
+          <Input value={f.first_name} onChange={(e) => updateForm(index, "first_name", e.target.value)} className="h-8 text-sm" placeholder="If known" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Title</Label>
-          <Input value={form.title} onChange={(e) => set("title", e.target.value)} className="h-8 text-sm" placeholder="e.g. Facility Manager" />
+          <Label className="text-xs">Last Name</Label>
+          <Input value={f.last_name} onChange={(e) => updateForm(index, "last_name", e.target.value)} className="h-8 text-sm" placeholder="If known" />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label className="text-xs">Email</Label>
-          <Input value={form.email} onChange={(e) => set("email", e.target.value)} className="h-8 text-sm" type="email" placeholder="email@example.com" />
+          <Input value={f.email} onChange={(e) => updateForm(index, "email", e.target.value)} className="h-8 text-sm" type="email" placeholder="email@example.com" />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Phone</Label>
-          <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} className="h-8 text-sm" placeholder="(555) 555-1234" />
+          <Input value={f.phone} onChange={(e) => updateForm(index, "phone", e.target.value)} className="h-8 text-sm" placeholder="(555) 555-1234" />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
           <Label className="text-xs">Role</Label>
-          <Select value={form.role} onValueChange={(v) => set("role", v)}>
-            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <Select value={f.role || ""} onValueChange={(v) => updateForm(index, "role", v || null)}>
+            <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="primary">Primary</SelectItem>
               <SelectItem value="billing">Billing</SelectItem>
               <SelectItem value="property_manager">Property Manager</SelectItem>
+              <SelectItem value="regional_manager">Regional Manager</SelectItem>
               <SelectItem value="maintenance">Maintenance</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="flex items-end pb-1">
           <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox checked={form.is_primary} onCheckedChange={(v) => set("is_primary", !!v)} />
+            <Checkbox checked={f.is_primary} onCheckedChange={(v) => updateForm(index, "is_primary", !!v)} />
             <span className="text-xs">Primary Contact</span>
           </label>
         </div>
       </div>
-
       <div className="space-y-2 pt-1">
         <Label className="text-xs text-muted-foreground">Receives</Label>
         <div className="flex flex-wrap gap-4">
           <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox checked={form.receives_estimates} onCheckedChange={(v) => set("receives_estimates", !!v)} />
+            <Checkbox checked={f.receives_estimates} onCheckedChange={(v) => updateForm(index, "receives_estimates", !!v)} />
             <span className="text-xs">Estimates</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox checked={form.receives_invoices} onCheckedChange={(v) => set("receives_invoices", !!v)} />
+            <Checkbox checked={f.receives_invoices} onCheckedChange={(v) => updateForm(index, "receives_invoices", !!v)} />
             <span className="text-xs">Invoices</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox checked={form.receives_service_updates} onCheckedChange={(v) => set("receives_service_updates", !!v)} />
+            <Checkbox checked={f.receives_service_updates} onCheckedChange={(v) => updateForm(index, "receives_service_updates", !!v)} />
             <span className="text-xs">Service Updates</span>
           </label>
         </div>
-      </div>
-
-      <div className="flex gap-2 pt-1">
-        <Button size="sm" className="h-7 px-3 text-xs" onClick={handleSave} disabled={saving}>
-          {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
-          {adding ? "Add" : "Save"}
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancel}>Cancel</Button>
       </div>
     </div>
   );
 
   return (
-    <Card className="shadow-sm">
+    <Card className={`shadow-sm ${editing ? (isDirty ? "border-l-4 border-amber-400" : "border-l-4 border-primary") : ""}`}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm font-semibold">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
             Contacts
+            {contacts.length > 0 && !editing && (
+              <span className="text-xs font-normal text-muted-foreground">({contacts.length})</span>
+            )}
           </div>
-          {canEdit && !adding && !editingId && (
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startAdd}>
-              <Plus className="h-3.5 w-3.5" />
+          {canEdit && !editing && (
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startEdit}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {editing && isDirty && (
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="default" className="h-7 px-3 text-xs" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelEdit}>
+                Cancel
+              </Button>
+            </div>
+          )}
+          {editing && !isDirty && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setEditing(false); setForms([]); }}>
+              Done
             </Button>
           )}
         </CardTitle>
@@ -278,86 +400,33 @@ export function ContactsTile({ customerId, canEdit = true }: ContactsTileProps) 
           <div className="flex justify-center py-4">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
-        ) : contacts.length === 0 && !adding ? (
-          <p className="text-xs text-muted-foreground text-center py-3">No contacts yet</p>
+        ) : editing ? (
+          <div className="space-y-2 bg-muted/50 rounded-md p-2">
+            {forms.map((f, i) => renderEditForm(f, i))}
+            <Button variant="outline" size="sm" className="w-full h-8 text-xs" onClick={addContact}>
+              <Plus className="h-3 w-3 mr-1" /> Add Contact
+            </Button>
+          </div>
         ) : (
-          <>
-            {contacts.map((c) =>
-              editingId === c.id ? (
-                <div key={c.id}>{renderForm()}</div>
-              ) : (
-                <div
-                  key={c.id}
-                  className="flex items-start gap-3 py-2 px-2 rounded-md hover:bg-muted/50 group"
-                >
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium">{c.name}</span>
-                      {c.is_primary && (
-                        <Star className="h-3 w-3 text-amber-500 fill-amber-500" />
-                      )}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${ROLE_COLORS[c.role] || ROLE_COLORS.other}`}>
-                        {ROLE_LABELS[c.role] || c.role}
-                      </span>
-                    </div>
-                    {c.title && (
-                      <p className="text-xs text-muted-foreground">{c.title}</p>
-                    )}
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                      {c.email && (
-                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <Mail className="h-3 w-3" />
-                          {c.email}
-                        </span>
-                      )}
-                      {c.phone && (
-                        <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                          <Phone className="h-3 w-3" />
-                          {c.phone}
-                        </a>
-                      )}
-                    </div>
-                    {(c.receives_estimates || c.receives_invoices || c.receives_service_updates) && (
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        {c.receives_estimates && <Badge variant="outline" className="text-[9px] h-4 px-1">Estimates</Badge>}
-                        {c.receives_invoices && <Badge variant="outline" className="text-[9px] h-4 px-1">Invoices</Badge>}
-                        {c.receives_service_updates && <Badge variant="outline" className="text-[9px] h-4 px-1">Updates</Badge>}
-                      </div>
-                    )}
-                  </div>
-                  {canEdit && (
-                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEdit(c)}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete contact?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Remove {c.name} from this customer&apos;s contacts. This cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  )}
-                </div>
-              )
-            )}
-          </>
+          renderView()
         )}
-        {adding && renderForm()}
       </CardContent>
+
+      {/* Discard confirmation */}
+      <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes to contacts. Discard them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDiscardAndClose}>Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

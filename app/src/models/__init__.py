@@ -17,7 +17,7 @@ from src.models.visit_service import VisitService
 from src.models.chemical_reading import ChemicalReading
 from src.models.geocode_cache import GeocodeCache
 from src.models.route import Route, RouteStop, TempTechAssignment
-from src.models.invoice import Invoice, InvoiceLineItem
+from src.models.invoice import Invoice, InvoiceLineItem, InvoiceRevision
 from src.models.payment import Payment
 from src.models.org_cost_settings import OrgCostSettings
 from src.models.property_difficulty import PropertyDifficulty
@@ -71,6 +71,8 @@ from src.models.property_access_code import PropertyAccessCode
 from src.models.internal_message import InternalThread, InternalMessage
 from src.models.customer_contact import CustomerContact
 from src.models.agent_correction import AgentCorrection
+from src.models.thread_read import ThreadRead
+from src.models.job_invoice import JobInvoice
 
 __all__ = [
     "Base",
@@ -91,6 +93,7 @@ __all__ = [
     "TempTechAssignment",
     "Invoice",
     "InvoiceLineItem",
+    "InvoiceRevision",
     "Payment",
     "OrgCostSettings",
     "PropertyDifficulty",

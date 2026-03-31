@@ -141,7 +141,9 @@ class CommandExecutor:
         job_status_ctx = f"\nJob status: {action.status}"
         if action.job_path == "customer":
             job_status_ctx += f" (customer-facing job, path: {action.job_path})"
-        if action.invoice_id:
+        from src.services.job_invoice_service import get_invoices_for_job
+        linked_invoices = await get_invoices_for_job(self.db, action.id)
+        if linked_invoices:
             job_status_ctx += " — has linked estimate/invoice"
         else:
             job_status_ctx += " — NO estimate sent yet"

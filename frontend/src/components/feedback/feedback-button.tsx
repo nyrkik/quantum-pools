@@ -70,8 +70,7 @@ export function FeedbackButton() {
         formData.append("screenshots", file);
       }
 
-      const backendOrigin = getBackendOrigin();
-      const res = await fetch(`${backendOrigin}/api/v1/feedback`, {
+      const res = await fetch(`/api/v1/feedback`, {
         method: "POST",
         body: formData,
         credentials: "include",

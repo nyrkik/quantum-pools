@@ -492,7 +492,8 @@ JSON only, no markdown."""}],
                 )
                 self.db.add(line)
 
-            action.invoice_id = invoice.id
+            from src.services.job_invoice_service import link_job_invoice
+            await link_job_invoice(self.db, action.id, invoice.id)
 
         await self.db.commit()
         await self.db.refresh(action)
@@ -543,7 +544,8 @@ JSON only, no markdown."""}],
         if notes is not None:
             action.notes = notes.strip() or None
         if invoice_id is not None:
-            action.invoice_id = invoice_id
+            from src.services.job_invoice_service import link_job_invoice
+            await link_job_invoice(self.db, action.id, invoice_id)
 
         await self.db.commit()
 

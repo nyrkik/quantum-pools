@@ -16,11 +16,13 @@ router = APIRouter(prefix="/customers/{customer_id}/contacts", tags=["customer-c
 
 
 def _serialize(c: CustomerContact) -> dict:
+    display_name = " ".join(filter(None, [c.first_name, c.last_name])) or None
     return {
         "id": c.id,
         "customer_id": c.customer_id,
-        "name": c.name,
-        "title": c.title,
+        "first_name": c.first_name,
+        "last_name": c.last_name,
+        "display_name": display_name,
         "email": c.email,
         "phone": c.phone,
         "role": c.role,
@@ -56,7 +58,7 @@ async def list_contacts(
             CustomerContact.customer_id == customer_id,
             CustomerContact.organization_id == ctx.organization_id,
         )
-        .order_by(CustomerContact.is_primary.desc(), CustomerContact.name)
+        .order_by(CustomerContact.is_primary.desc(), CustomerContact.first_name)
     )
     contacts = result.scalars().all()
     return [_serialize(c) for c in contacts]
@@ -79,8 +81,8 @@ async def create_contact(
         id=str(uuid.uuid4()),
         customer_id=customer_id,
         organization_id=ctx.organization_id,
-        name=body.name,
-        title=body.title,
+        first_name=body.first_name,
+        last_name=body.last_name,
         email=body.email,
         phone=body.phone,
         role=body.role,

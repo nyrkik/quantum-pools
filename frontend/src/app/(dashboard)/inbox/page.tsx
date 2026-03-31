@@ -156,117 +156,50 @@ export default function InboxPage() {
           </Button>
         ) : undefined
       }
-      tabs={STATUS_FILTERS.map((f) => ({ key: f, label: f.charAt(0).toUpperCase() + f.slice(1) }))}
-      activeTab={filter}
-      onTabChange={(key) => handleFilterChange(key as typeof STATUS_FILTERS[number])}
-      context={
-        <div className="space-y-4">
-          {/* Stats tile */}
-          {stats && (
-            <button
-              type="button"
-              onClick={() => handleFilterChange("clients")}
-              className={`w-full text-left rounded-lg border p-3 shadow-sm transition-colors ${
-                stats.pending > 0
-                  ? "border-amber-300 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-950/50"
-                  : "bg-background hover:bg-muted/50"
-              }`}
-            >
-              <div className="flex items-center gap-4 text-sm">
-                <div className="flex items-center gap-1.5">
-                  <Mail className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">{stats.total}</span>
-                  <span className="text-muted-foreground">threads</span>
-                </div>
-                {stats.pending > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="h-4 w-4 text-amber-600" />
-                    <span className="font-medium text-amber-600">{stats.pending} pending</span>
-                    {stats.stale_pending > 0 && (
-                      <span className="text-xs text-red-600">({stats.stale_pending} stale)</span>
-                    )}
-                  </div>
-                )}
-                {stats.open_actions > 0 && (
-                  <a
-                    href="/jobs"
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1.5 hover:underline"
-                  >
-                    <MessageSquare className="h-4 w-4 text-blue-600" />
-                    <span className="text-blue-600">{stats.open_actions} open jobs</span>
-                  </a>
-                )}
-              </div>
-            </button>
-          )}
-
-          {/* Needs Attention */}
-          {filter === "clients" && pendingThreads.length > 0 && (
-            <Card className="shadow-sm border-amber-200 dark:border-amber-800">
-              <CardHeader className="py-2 px-4">
-                <CardTitle className="text-sm flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                  Needs Attention
-                  <Badge variant="outline" className="border-amber-400 text-amber-600 ml-1 text-[10px] px-1.5">
-                    {pendingThreads.length}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-3 pt-0">
-                <div className="space-y-1">
-                  {pendingThreads.slice(0, 5).map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setSelectedThreadId(t.id)}
-                      className="w-full text-left flex items-center gap-3 py-1.5 px-2 rounded hover:bg-amber-50 dark:hover:bg-amber-950/30 text-sm transition-colors"
-                    >
-                      <span className="font-medium truncate flex-shrink-0 w-32">
-                        {t.customer_name || t.contact_email.split("@")[0]}
-                      </span>
-                      <span className="text-muted-foreground truncate flex-1">
-                        {t.last_snippet || t.subject || "No subject"}
-                      </span>
-                      <span className="text-xs text-muted-foreground flex-shrink-0">
-                        {formatTime(t.last_message_at)}
-                      </span>
-                    </button>
-                  ))}
-                  {pendingThreads.length > 5 && (
-                    <p className="text-xs text-muted-foreground pl-2">+ {pendingThreads.length - 5} more</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Assign filter + Search */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              variant={assignFilter === "mine" ? "default" : "outline"}
-              size="sm"
-              onClick={() => { setAssignFilter(assignFilter === "mine" ? "all" : "mine"); setPage(0); }}
-            >
-              <User className="h-3.5 w-3.5 mr-1" />
-              Mine
-            </Button>
-            <div className="flex items-center gap-1 ml-auto">
-              <Input
-                placeholder="Search..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-                className="h-8 w-48 text-sm"
-              />
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSearch}>
-                <Search className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      }
     >
+      {/* Filters: tabs + assign + search */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          {STATUS_FILTERS.map((f) => (
+            <Button
+              key={f}
+              variant={filter === f ? "default" : "outline"}
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={() => handleFilterChange(f)}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </Button>
+          ))}
+        </div>
+        <Button
+          variant={assignFilter === "mine" ? "default" : "outline"}
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          onClick={() => { setAssignFilter(assignFilter === "mine" ? "all" : "mine"); setPage(0); }}
+        >
+          <User className="h-3.5 w-3.5 mr-1" />
+          Mine
+        </Button>
+        {stats && stats.stale_pending > 0 && (
+          <span className="text-xs text-red-600 flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            {stats.stale_pending} stale
+          </span>
+        )}
+        <div className="flex items-center gap-1 ml-auto">
+          <Input
+            placeholder="Search..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+            className="h-8 w-48 text-sm"
+          />
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSearch}>
+            <Search className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
       {/* Thread table */}
       <Card className="shadow-sm">

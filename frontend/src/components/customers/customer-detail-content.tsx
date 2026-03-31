@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -82,6 +82,12 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
     first_name: "", last_name: "", company_name: "", phone: "",
     customer_type: "", status: "", notes: "",
   });
+  const originalForm = useRef("");
+
+  const isDirty = useMemo(() => {
+    if (!editing) return false;
+    return JSON.stringify(form) !== originalForm.current;
+  }, [editing, form]);
 
   const isTech = perms.role === "technician";
   const isAdmin = perms.role === "admin" || perms.role === "owner";
@@ -121,7 +127,7 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
 
   const startEdit = () => {
     if (!customer) return;
-    setForm({
+    const initial = {
       first_name: customer.first_name,
       last_name: customer.last_name,
       company_name: customer.company_name || "",
@@ -129,7 +135,9 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
       customer_type: customer.customer_type,
       status: customer.status,
       notes: customer.notes || "",
-    });
+    };
+    setForm(initial);
+    originalForm.current = JSON.stringify(initial);
     setEditing(true);
   };
 
@@ -290,11 +298,17 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={handleSave} disabled={saving}>
-                  {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
-                  Save
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                {isDirty ? (
+                  <>
+                    <Button size="sm" onClick={handleSave} disabled={saving}>
+                      {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Done</Button>
+                )}
               </div>
             </div>
           ) : (

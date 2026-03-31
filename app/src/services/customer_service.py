@@ -17,14 +17,26 @@ class CustomerService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    SORT_COLUMNS = {
+        "name": (Customer.first_name, Customer.last_name),
+        "company": (Customer.company_name,),
+        "rate": (Customer.monthly_rate,),
+        "balance": (Customer.balance,),
+        "status": (Customer.status,),
+    }
+
     async def list(
         self, org_id: str, search: Optional[str] = None, is_active: Optional[bool] = None,
-        status: Optional[List[str]] = None,
+        status: Optional[List[str]] = None, customer_type: Optional[str] = None,
+        sort_by: str = "name", sort_dir: str = "asc",
         skip: int = 0, limit: int = 50,
     ) -> tuple[List[Customer], int]:
         query = select(Customer).where(Customer.organization_id == org_id)
         count_query = select(func.count(Customer.id)).where(Customer.organization_id == org_id)
 
+        if customer_type:
+            query = query.where(Customer.customer_type == customer_type)
+            count_query = count_query.where(Customer.customer_type == customer_type)
         if status:
             query = query.where(Customer.status.in_(status))
             count_query = count_query.where(Customer.status.in_(status))
@@ -33,23 +45,24 @@ class CustomerService:
             count_query = count_query.where(Customer.is_active == is_active)
         if search:
             search_filter = f"%{search}%"
-            query = query.where(
+            search_clause = (
                 (Customer.first_name.ilike(search_filter))
                 | (Customer.last_name.ilike(search_filter))
                 | (Customer.company_name.ilike(search_filter))
                 | (Customer.email.ilike(search_filter))
             )
-            count_query = count_query.where(
-                (Customer.first_name.ilike(search_filter))
-                | (Customer.last_name.ilike(search_filter))
-                | (Customer.company_name.ilike(search_filter))
-                | (Customer.email.ilike(search_filter))
-            )
+            query = query.where(search_clause)
+            count_query = count_query.where(search_clause)
+
+        # Server-side sorting
+        from sqlalchemy import asc, desc
+        order_fn = desc if sort_dir == "desc" else asc
+        sort_cols = self.SORT_COLUMNS.get(sort_by, (Customer.first_name, Customer.last_name))
+        for col in sort_cols:
+            query = query.order_by(order_fn(col))
 
         total = (await self.db.execute(count_query)).scalar() or 0
-        result = await self.db.execute(
-            query.order_by(Customer.last_name, Customer.first_name).offset(skip).limit(limit)
-        )
+        result = await self.db.execute(query.offset(skip).limit(limit))
         return list(result.scalars().all()), total
 
     async def get(self, org_id: str, customer_id: str) -> Customer:

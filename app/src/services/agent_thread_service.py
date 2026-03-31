@@ -138,12 +138,25 @@ class AgentThreadService:
         )
         threads = result.scalars().all()
 
+        # Load per-user read state
+        read_map = {}
+        if current_user_id and threads:
+            from src.models.thread_read import ThreadRead
+            thread_ids = [t.id for t in threads]
+            reads = (await self.db.execute(
+                select(ThreadRead.thread_id, ThreadRead.read_at).where(
+                    ThreadRead.user_id == current_user_id,
+                    ThreadRead.thread_id.in_(thread_ids),
+                )
+            )).all()
+            read_map = {r.thread_id: r.read_at for r in reads}
+
         presenter = ThreadPresenter(self.db)
-        items = await presenter.many(threads)
+        items = await presenter.many(threads, read_map=read_map if current_user_id else None)
 
         return {"items": items, "total": total}
 
-    async def get_thread_stats(self, org_id: str, user_permission_slugs: set[str] | None = None) -> dict:
+    async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_permission_slugs: set[str] | None = None) -> dict:
         """Thread-level stats. If user_permission_slugs provided, counts only visible threads."""
         from sqlalchemy import or_
         thread_org = AgentThread.organization_id == org_id
@@ -182,11 +195,38 @@ class AgentThreadService:
             )
         )).scalar() or 0
 
+        # Per-user unread: threads with last_message_at > user's read_at (or never read)
+        unread = 0
+        if user_id:
+            from src.models.thread_read import ThreadRead
+            from sqlalchemy import outerjoin
+
+            unread_q = (
+                select(func.count(AgentThread.id))
+                .select_from(
+                    AgentThread.__table__.outerjoin(
+                        ThreadRead.__table__,
+                        (ThreadRead.thread_id == AgentThread.id) & (ThreadRead.user_id == user_id),
+                    )
+                )
+                .where(
+                    thread_org,
+                    AgentThread.status != "closed",
+                    or_(
+                        ThreadRead.read_at.is_(None),
+                        AgentThread.last_message_at > ThreadRead.read_at,
+                    ),
+                )
+            )
+            unread_q = _vis_filter(unread_q)
+            unread = (await self.db.execute(unread_q)).scalar() or 0
+
         return {
             "total": total,
             "pending": pending,
             "stale_pending": stale,
             "open_actions": open_actions,
+            "unread": unread,
         }
 
     async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None) -> dict | None:
@@ -495,8 +535,25 @@ class AgentThreadService:
         }
 
     async def mark_thread_read(self, thread_id: str, user_id: str) -> None:
-        """Mark a thread as read by the current user (no-op, thread_reads removed)."""
-        pass
+        """Mark a thread as read by the current user."""
+        from src.models.thread_read import ThreadRead
+        from datetime import datetime, timezone
+
+        result = await self.db.execute(
+            select(ThreadRead).where(
+                ThreadRead.user_id == user_id,
+                ThreadRead.thread_id == thread_id,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.read_at = datetime.now(timezone.utc)
+        else:
+            self.db.add(ThreadRead(
+                user_id=user_id,
+                thread_id=thread_id,
+            ))
+        await self.db.flush()
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""
@@ -817,8 +874,12 @@ Keep the description concise and actionable."""
 
         # Check for existing estimate linked to this thread via a job
         from src.models.invoice import Invoice
+        from src.models.job_invoice import JobInvoice
         existing = (await self.db.execute(
-            select(Invoice).join(AgentAction, AgentAction.invoice_id == Invoice.id).where(
+            select(Invoice)
+            .join(JobInvoice, JobInvoice.invoice_id == Invoice.id)
+            .join(AgentAction, AgentAction.id == JobInvoice.action_id)
+            .where(
                 AgentAction.thread_id == thread_id,
                 Invoice.document_type == "estimate",
             )
@@ -863,7 +924,10 @@ Parts pricing: use realistic market prices for pool equipment and parts.
 Respond with JSON:
 {{"subject": "short estimate title", "line_items": [{{"description": "what", "quantity": 1, "unit_price": 100.00}}]}}
 
-Keep descriptions professional — no addresses, no customer names in line items."""
+Rules:
+- Subject: short description of the work. NEVER include pricing language like "Price TBD", "TBD", "TBA", or dollar amounts in the subject.
+- Descriptions: professional, no addresses, no customer names in line items.
+- Every line item MUST have a real price. If unsure, use a reasonable market estimate. Never use $0 or placeholder pricing."""
 
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
@@ -908,13 +972,13 @@ Keep descriptions professional — no addresses, no customer names in line items
             select(AgentAction).where(AgentAction.thread_id == thread_id, AgentAction.organization_id == org_id)
         )).scalar_one_or_none()
 
+        from src.services.job_invoice_service import link_job_invoice
         if existing_job:
-            existing_job.invoice_id = invoice.id
+            await link_job_invoice(self.db, existing_job.id, invoice.id, linked_by=created_by)
         else:
             job = AgentAction(
                 organization_id=org_id,
                 thread_id=thread_id,
-                invoice_id=invoice.id,
                 customer_id=thread.matched_customer_id,
                 customer_name=thread.customer_name,
                 action_type="bid",
@@ -924,6 +988,8 @@ Keep descriptions professional — no addresses, no customer names in line items
                 created_by=created_by,
             )
             self.db.add(job)
+            await self.db.flush()
+            await link_job_invoice(self.db, job.id, invoice.id, linked_by=created_by)
 
         await self.db.commit()
 

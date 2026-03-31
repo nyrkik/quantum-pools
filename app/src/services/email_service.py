@@ -202,19 +202,28 @@ class EmailService:
         self,
         org_id: str,
         to: str,
-        customer_name: str,
         estimate_number: str,
         subject: str,
-        total: str,
+        total: float,
         view_url: str,
+        property_line: str = "",
+        recipient_first_name: str = "",
+        # Deprecated — kept for backward compat, ignored
+        customer_name: str = "",
     ) -> EmailResult:
         """Send estimate email with formatted template."""
         org = await self._get_org(org_id)
         org_name = org.name if org else "QuantumPools"
         color = getattr(org, "branding_color", None) or "#1a1a2e"
 
+        formatted_total = f"${total:,.2f}"
+        # Strip "Estimate: " prefix from subject for the body text
+        estimate_subject = subject.removeprefix("Estimate: ") if subject.startswith("Estimate: ") else subject
+
         text, html = estimate_email_template(
-            org_name, customer_name, estimate_number, subject, total, view_url,
+            org_name, estimate_number, estimate_subject, formatted_total, view_url,
+            property_line=property_line,
+            recipient_first_name=recipient_first_name,
             branding_color=color,
         )
         msg = EmailMessage(to=to, subject=subject, text_body=text, html_body=html)

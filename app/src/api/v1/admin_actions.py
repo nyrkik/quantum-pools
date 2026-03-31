@@ -95,12 +95,16 @@ async def send_estimate(
     action = action_result.scalar_one_or_none()
     if not action:
         raise HTTPException(status_code=404, detail="Job not found")
-    if not action.invoice_id:
+
+    # Get linked invoice via junction table
+    from src.services.job_invoice_service import get_invoices_for_job
+    linked_invoice_ids = await get_invoices_for_job(db, action.id)
+    if not linked_invoice_ids:
         raise HTTPException(status_code=400, detail="No estimate linked to this job")
 
-    # Get invoice + line items
+    # Get invoice + line items (use first linked invoice)
     invoice_result = await db.execute(
-        select(Invoice).where(Invoice.id == action.invoice_id)
+        select(Invoice).where(Invoice.id == linked_invoice_ids[0])
     )
     invoice = invoice_result.scalar_one_or_none()
     if not invoice:
@@ -178,19 +182,39 @@ async def send_estimate(
         recipients = [body.to_email]
         # Look up contact name by email
         match = next((c for c in estimate_contacts if c.email == body.to_email), None)
-        approval.recipient_name = match.name if match else None
+        approval.recipient_name = " ".join(filter(None, [match.first_name, match.last_name])) if match and (match.first_name or match.last_name) else None
         approval.recipient_email = body.to_email
     elif estimate_contacts:
         recipients = [c.email for c in estimate_contacts]
         # Use first contact's name for pre-fill
-        approval.recipient_name = estimate_contacts[0].name
+        c0 = estimate_contacts[0]
+        approval.recipient_name = " ".join(filter(None, [c0.first_name, c0.last_name])) if (c0.first_name or c0.last_name) else None
         approval.recipient_email = estimate_contacts[0].email
     else:
         recipients = [customer.email]
-        approval.recipient_name = f"{customer.first_name} {customer.last_name}".strip()
+        approval.recipient_name = None  # Don't pre-fill from customer name — may be a company/property
         approval.recipient_email = customer.email
 
-    customer_name = f"{customer.first_name} {customer.last_name}".strip()
+    # Build property line: name for commercial, address for residential
+    property_line = ""
+    from src.models.property import Property
+    prop_result = await db.execute(
+        select(Property).where(Property.customer_id == invoice.customer_id, Property.is_active == True)
+    )
+    prop = prop_result.scalars().first()
+    if prop:
+        if prop.name:
+            property_line = prop.name
+            if prop.address:
+                property_line += f" ({prop.address})"
+        elif prop.address:
+            property_line = prop.address
+
+    # Extract first name from recipient contact for greeting
+    def _first_name_for(email: str) -> str:
+        match = next((c for c in estimate_contacts if c.email == email and c.first_name), None)
+        return match.first_name if match else ""
+
     email_svc = EmailService(db)
 
     sent_to = []
@@ -199,11 +223,12 @@ async def send_estimate(
         result = await email_svc.send_estimate_email(
             org_id=ctx.organization_id,
             to=recipient,
-            customer_name=customer_name,
             estimate_number=invoice.invoice_number,
             subject=f"Estimate: {invoice.subject or 'Service Estimate'}",
             total=float(invoice.total or 0),
             view_url=approve_url,
+            property_line=property_line,
+            recipient_first_name=_first_name_for(recipient),
         )
         if result.success:
             sent_to.append(recipient)
@@ -249,6 +274,52 @@ async def update_agent_action(
     if result is None:
         raise HTTPException(status_code=404, detail="Action not found")
     return result
+
+
+@router.post("/agent-actions/{action_id}/link-invoice")
+async def link_invoice_to_job(
+    action_id: str,
+    body: dict,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Link an invoice/estimate to a job."""
+    from src.services.job_invoice_service import link_job_invoice
+    invoice_id = body.get("invoice_id")
+    if not invoice_id:
+        raise HTTPException(status_code=400, detail="invoice_id required")
+
+    action = (await db.execute(
+        select(AgentAction).where(AgentAction.id == action_id, AgentAction.organization_id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from src.models.invoice import Invoice
+    invoice = (await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.organization_id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    await link_job_invoice(db, action_id, invoice_id, linked_by=user_name)
+    await db.commit()
+    return {"linked": True}
+
+
+@router.delete("/agent-actions/{action_id}/link-invoice/{invoice_id}")
+async def unlink_invoice_from_job(
+    action_id: str,
+    invoice_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unlink an invoice/estimate from a job."""
+    from src.services.job_invoice_service import unlink_job_invoice
+    await unlink_job_invoice(db, action_id, invoice_id)
+    await db.commit()
+    return {"unlinked": True}
 
 
 @router.get("/agent-actions/{action_id}")

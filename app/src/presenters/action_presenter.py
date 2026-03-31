@@ -14,13 +14,31 @@ from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_action_task import AgentActionTask
 from src.models.agent_message import AgentMessage
 from src.models.customer import Customer
+from src.models.job_invoice import JobInvoice
 
 
 class ActionPresenter(Presenter):
     """Present AgentAction (job) data with resolved FKs."""
 
+    async def _load_invoice_ids_batch(self, action_ids: list[str]) -> dict[str, list[str]]:
+        """Batch load invoice IDs for multiple actions."""
+        if not action_ids:
+            return {}
+        result = await self.db.execute(
+            select(JobInvoice.action_id, JobInvoice.invoice_id).where(
+                JobInvoice.action_id.in_(action_ids)
+            )
+        )
+        mapping: dict[str, list[str]] = {}
+        for action_id, invoice_id in result.all():
+            mapping.setdefault(action_id, []).append(invoice_id)
+        return mapping
+
     async def many(self, actions: list[AgentAction], msg_map: dict[str, AgentMessage] | None = None) -> list[dict]:
         """Present a list of actions with batch-loaded customer data."""
+        # Batch load invoice IDs via junction table
+        invoice_ids_map = await self._load_invoice_ids_batch([a.id for a in actions])
+
         # Batch load customers — include message matched_customer_id and thread matched_customer_id
         cust_ids = {a.customer_id for a in actions if a.customer_id}
         if msg_map:
@@ -48,6 +66,7 @@ class ActionPresenter(Presenter):
         results = []
         for action in actions:
             d = self._base(action)
+            d["invoice_ids"] = invoice_ids_map.get(action.id, [])
             msg = msg_map.get(action.agent_message_id) if msg_map and action.agent_message_id else None
 
             # Customer — always from source of truth
@@ -88,6 +107,10 @@ class ActionPresenter(Presenter):
         """Present a single action with full detail."""
         d = self._base(action)
 
+        # Load linked invoice IDs via junction table
+        from src.services.job_invoice_service import get_invoices_for_job
+        d["invoice_ids"] = await get_invoices_for_job(self.db, action.id)
+
         # Customer — from source of truth
         cust_id = action.customer_id
         if include_email and action.agent_message_id:
@@ -104,7 +127,7 @@ class ActionPresenter(Presenter):
                 d["our_response"] = msg.final_response or msg.draft_response
                 d["response_is_draft"] = not msg.final_response and bool(msg.draft_response)
 
-                # Related jobs from same message
+                # Related jobs from same message (email-originated)
                 siblings_result = await self.db.execute(
                     select(AgentAction)
                     .options(selectinload(AgentAction.comments))
@@ -126,6 +149,33 @@ class ActionPresenter(Presenter):
                         ],
                     }
                     for s in siblings_result.scalars().all()
+                ]
+
+        # Load thread conversation for manually-linked threads (no agent_message_id)
+        if include_email and action.thread_id and not action.agent_message_id:
+            from src.models.agent_thread import AgentThread
+            thread = (await self.db.execute(
+                select(AgentThread).where(AgentThread.id == action.thread_id)
+            )).scalar_one_or_none()
+            if thread:
+                d["subject"] = thread.subject
+                # Load all messages in thread
+                thread_msgs = (await self.db.execute(
+                    select(AgentMessage).where(
+                        AgentMessage.thread_id == action.thread_id
+                    ).order_by(AgentMessage.received_at, AgentMessage.created_at)
+                )).scalars().all()
+                from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
+                d["thread_messages"] = [
+                    {
+                        "direction": m.direction,
+                        "from_email": m.from_email,
+                        "to_email": m.to_email,
+                        "subject": m.subject,
+                        "body": strip_email_signature(strip_quoted_reply(m.body)) if m.body else "",
+                        "created_at": self._iso(m.created_at),
+                    }
+                    for m in thread_msgs
                 ]
 
         # Resolve customer from source of truth
@@ -176,7 +226,7 @@ class ActionPresenter(Presenter):
             "status": a.status,
             "job_path": a.job_path if hasattr(a, "job_path") else "internal",
             "notes": a.notes,
-            "invoice_id": a.invoice_id,
+            "invoice_ids": [],  # populated by many() or one()
             "parent_action_id": a.parent_action_id,
             "task_count": a.task_count or 0,
             "tasks_completed": a.tasks_completed or 0,

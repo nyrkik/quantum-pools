@@ -63,6 +63,15 @@ import {
   Ban,
   XCircle,
   Pencil,
+  CheckCircle2,
+  ArrowRightLeft,
+  Loader2,
+  AlertTriangle,
+  Trash2,
+  History,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 interface InvoiceLineItem {
@@ -77,7 +86,7 @@ interface InvoiceLineItem {
 
 interface Invoice {
   id: string;
-  invoice_number: string;
+  invoice_number: string | null;
   customer_id: string;
   customer_name: string;
   subject: string | null;
@@ -95,8 +104,25 @@ interface Invoice {
   balance: number;
   notes: string | null;
   sent_at: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  revision_count: number;
+  revised_at: string | null;
   created_at: string;
   line_items: InvoiceLineItem[];
+}
+
+interface Revision {
+  id: string;
+  revision_number: number;
+  invoice_number: string | null;
+  revised_by: string | null;
+  created_at: string;
+  snapshot: {
+    total: number;
+    subtotal: number;
+    line_items: { description: string; quantity: number; unit_price: number; amount: number }[];
+  };
 }
 
 interface Payment {
@@ -124,6 +150,11 @@ export default function InvoiceDetailPage({
   const [payments, setPayments] = useState<Payment[]>([]);
   const [payDialogOpen, setPayDialogOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("check");
+  const [converting, setConverting] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [revisions, setRevisions] = useState<Revision[]>([]);
+  const [expandedRevision, setExpandedRevision] = useState<string | null>(null);
+  const [approvalToken, setApprovalToken] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -133,6 +164,14 @@ export default function InvoiceDetailPage({
         const payData = await api.get<{ items: Payment[] }>(`/v1/payments?invoice_id=${id}`);
         setPayments(payData.items);
       } catch { /* payments non-critical */ }
+      try {
+        const revData = await api.get<Revision[]>(`/v1/invoices/${id}/revisions`);
+        setRevisions(revData);
+      } catch { /* revisions non-critical */ }
+      try {
+        const approval = await api.get<{ has_approval_record?: boolean; approval_token?: string }>(`/v1/invoices/${id}/approval`);
+        if (approval.has_approval_record) setApprovalToken(approval.approval_token || null);
+      } catch { /* non-critical */ }
     } catch {
       setNotFound(true);
     }
@@ -145,7 +184,7 @@ export default function InvoiceDetailPage({
   const handleSend = async () => {
     try {
       await api.post(`/v1/invoices/${id}/send`);
-      toast.success("Invoice sent");
+      toast.success(`${invoice?.document_type === "estimate" ? "Estimate" : "Invoice"} sent`);
       fetchData();
     } catch {
       toast.error("Failed to send invoice");
@@ -194,6 +233,42 @@ export default function InvoiceDetailPage({
     }
   };
 
+  const handleDelete = async () => {
+    try {
+      await api.delete(`/v1/invoices/${id}`);
+      toast.success("Draft deleted");
+      router.push(invoice?.document_type === "estimate" ? "/invoices?tab=estimates" : "/invoices");
+    } catch {
+      toast.error("Failed to delete");
+    }
+  };
+
+  const handleApprove = async () => {
+    setApproving(true);
+    try {
+      await api.post(`/v1/invoices/${id}/approve`, {});
+      toast.success("Estimate approved");
+      fetchData();
+    } catch {
+      toast.error("Failed to approve estimate");
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleConvert = async () => {
+    setConverting(true);
+    try {
+      await api.post(`/v1/invoices/${id}/convert-to-invoice`, {});
+      toast.success("Converted to invoice");
+      fetchData();
+    } catch {
+      toast.error("Failed to convert to invoice");
+    } finally {
+      setConverting(false);
+    }
+  };
+
   if (notFound) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -209,11 +284,16 @@ export default function InvoiceDetailPage({
     );
   }
 
-  const canEdit = ["draft", "sent"].includes(invoice.status);
-  const canSend = ["draft", "sent"].includes(invoice.status);
-  const canPay = ["sent", "overdue"].includes(invoice.status);
-  const canVoid = ["draft", "sent", "overdue"].includes(invoice.status);
-  const canWriteOff = ["sent", "overdue"].includes(invoice.status);
+  const isEstimate = invoice.document_type === "estimate";
+  const docLabel = isEstimate ? "Estimate" : "Invoice";
+  const canEdit = ["draft", "sent", "revised"].includes(invoice.status) && !(isEstimate && invoice.approved_at);
+  const canSend = ["draft", "sent", "revised"].includes(invoice.status);
+  const canPay = !isEstimate && ["sent", "overdue"].includes(invoice.status);
+  const canDelete = invoice.status === "draft";
+  const canVoid = ["sent", "revised", "overdue"].includes(invoice.status);
+  const canWriteOff = !isEstimate && ["sent", "overdue"].includes(invoice.status);
+  const canApprove = isEstimate && !invoice.approved_at && ["sent", "revised", "viewed"].includes(invoice.status);
+  const canConvert = isEstimate && !!invoice.approved_at;
   const today = new Date().toISOString().split("T")[0];
 
   return (
@@ -227,7 +307,7 @@ export default function InvoiceDetailPage({
           </Button>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
-              {invoice.invoice_number}
+              {invoice.invoice_number || "Draft"}
             </h1>
             <p className="text-muted-foreground">
               <Link
@@ -242,16 +322,57 @@ export default function InvoiceDetailPage({
           <InvoiceStatusBadge status={invoice.status} />
         </div>
         <div className="flex items-center gap-2">
-          {canEdit && (
+          {canEdit && ["sent", "revised"].includes(invoice.status) ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                  Edit
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Edit sent {docLabel.toLowerCase()}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This {docLabel.toLowerCase()} has been sent to the customer. Editing will create a revision and require re-sending the updated version.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => router.push(`/invoices/new?edit=${id}`)}>
+                    Edit Anyway
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : canEdit ? (
             <Button variant="outline" size="sm" onClick={() => router.push(`/invoices/new?edit=${id}`)}>
               <Pencil className="mr-2 h-3.5 w-3.5" />
               Edit
+            </Button>
+          ) : null}
+          {canApprove && (
+            <Button size="sm" onClick={handleApprove} disabled={approving}>
+              {approving ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
+              Approve
+            </Button>
+          )}
+          {canConvert && (
+            <Button size="sm" onClick={handleConvert} disabled={converting}>
+              {converting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ArrowRightLeft className="mr-2 h-3.5 w-3.5" />}
+              Convert to Invoice
             </Button>
           )}
           {canSend && (
             <Button variant="outline" size="sm" onClick={handleSend}>
               <Send className="mr-2 h-4 w-4" />
               {invoice.status === "sent" ? "Resend" : "Send"}
+            </Button>
+          )}
+          {isEstimate && approvalToken && (
+            <Button variant="outline" size="sm" onClick={() => window.open(`/approve/${approvalToken}?view=admin`, "_blank")}>
+              <ExternalLink className="mr-2 h-3.5 w-3.5" />
+              Open
             </Button>
           )}
           {canPay && (
@@ -289,13 +410,13 @@ export default function InvoiceDetailPage({
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent position="popper">
                           <SelectItem value="check">Check</SelectItem>
                           <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="credit_card">
-                            Credit Card
-                          </SelectItem>
+                          <SelectItem value="credit_card">Credit Card</SelectItem>
                           <SelectItem value="ach">ACH</SelectItem>
+                          <SelectItem value="venmo">Venmo</SelectItem>
+                          <SelectItem value="zelle">Zelle</SelectItem>
                           <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
@@ -332,6 +453,28 @@ export default function InvoiceDetailPage({
               </DialogContent>
             </Dialog>
           )}
+          {canDelete && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-destructive">
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete draft?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This draft has never been sent. It will be permanently deleted.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           {(canVoid || canWriteOff) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -345,21 +488,20 @@ export default function InvoiceDetailPage({
                     <AlertDialogTrigger asChild>
                       <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
                         <Ban className="mr-2 h-4 w-4" />
-                        Void Invoice
+                        Void {docLabel}
                       </DropdownMenuItem>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
-                        <AlertDialogTitle>Void Invoice?</AlertDialogTitle>
+                        <AlertDialogTitle>Void {docLabel}?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          This will void invoice {invoice.invoice_number}. This
-                          action cannot be undone.
+                          This will void {docLabel.toLowerCase()} {invoice.invoice_number}. The record will be preserved for audit purposes.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                         <AlertDialogAction onClick={handleVoid}>
-                          Void Invoice
+                          Void {docLabel}
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
@@ -396,6 +538,21 @@ export default function InvoiceDetailPage({
           )}
         </div>
       </div>
+
+      {/* Revised banner */}
+      {invoice.status === "revised" && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 p-3">
+          <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-amber-800 dark:text-amber-200">
+              Revised — must be re-sent
+            </p>
+            <p className="text-amber-700 dark:text-amber-300 text-xs mt-0.5">
+              This {docLabel.toLowerCase()} was edited after being sent. The customer has an outdated version. Click Send to deliver the updated version.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Info Cards */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -435,6 +592,34 @@ export default function InvoiceDetailPage({
                 {new Date(invoice.sent_at).toLocaleString()}
               </div>
             )}
+            {invoice.revision_count > 0 && (
+              <div>
+                <span className="text-muted-foreground">Revised: </span>
+                {invoice.revision_count} time{invoice.revision_count > 1 ? "s" : ""}
+                {invoice.revised_at && ` — ${new Date(invoice.revised_at).toLocaleString()}`}
+              </div>
+            )}
+            {isEstimate && invoice.approved_at && (
+              <div className="border-t pt-2 mt-2">
+                <div className="flex items-center gap-1.5 text-green-600 font-medium">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Approved
+                </div>
+                <div className="mt-1">
+                  <span className="text-muted-foreground">By: </span>
+                  {invoice.approved_by}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">On: </span>
+                  {new Date(invoice.approved_at).toLocaleString()}
+                </div>
+              </div>
+            )}
+            {isEstimate && !invoice.approved_at && invoice.status !== "void" && (
+              <div className="border-t pt-2 mt-2">
+                <span className="text-xs text-amber-600 font-medium">Pending Approval</span>
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -464,18 +649,22 @@ export default function InvoiceDetailPage({
               <span>Total</span>
               <span>${invoice.total.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Paid</span>
-              <span>${invoice.amount_paid.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between font-bold border-t pt-2">
-              <span>Balance Due</span>
-              <span
-                className={invoice.balance > 0 ? "text-red-600" : "text-green-600"}
-              >
-                ${invoice.balance.toFixed(2)}
-              </span>
-            </div>
+            {!isEstimate && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Paid</span>
+                  <span>${invoice.amount_paid.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-bold border-t pt-2">
+                  <span>Balance Due</span>
+                  <span
+                    className={invoice.balance > 0 ? "text-red-600" : "text-green-600"}
+                  >
+                    ${invoice.balance.toFixed(2)}
+                  </span>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -544,8 +733,70 @@ export default function InvoiceDetailPage({
         </Card>
       )}
 
-      {/* Payment History */}
-      <Card>
+      {/* Revision History */}
+      {revisions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <History className="h-4 w-4" />
+              Revision History ({revisions.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {revisions.map((rev) => (
+              <div key={rev.id} className="border rounded-md">
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+                  onClick={() => setExpandedRevision(expandedRevision === rev.id ? null : rev.id)}
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">{rev.invoice_number}</Badge>
+                    <span className="text-muted-foreground">
+                      ${rev.snapshot.total.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                    <span>{rev.revised_by}</span>
+                    <span>{new Date(rev.created_at).toLocaleDateString()}</span>
+                    {expandedRevision === rev.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </div>
+                </button>
+                {expandedRevision === rev.id && (
+                  <div className="border-t px-3 py-2 bg-muted/30">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Description</TableHead>
+                          <TableHead className="text-xs text-right">Qty</TableHead>
+                          <TableHead className="text-xs text-right">Price</TableHead>
+                          <TableHead className="text-xs text-right">Amount</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rev.snapshot.line_items.map((li, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-sm">{li.description}</TableCell>
+                            <TableCell className="text-sm text-right">{li.quantity}</TableCell>
+                            <TableCell className="text-sm text-right">${li.unit_price.toFixed(2)}</TableCell>
+                            <TableCell className="text-sm text-right">${li.amount.toFixed(2)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    <div className="flex justify-between text-sm font-medium mt-2 pt-2 border-t">
+                      <span>Total at revision</span>
+                      <span>${rev.snapshot.total.toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Payment History — invoices only */}
+      {!isEstimate && <Card>
         <CardHeader>
           <CardTitle className="text-base">
             Payment History ({payments.length})
@@ -601,7 +852,8 @@ export default function InvoiceDetailPage({
             </TableBody>
           </Table>
         </CardContent>
-      </Card>
+      </Card>}
+
     </div>
   );
 }

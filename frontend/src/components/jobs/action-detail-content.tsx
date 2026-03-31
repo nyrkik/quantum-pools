@@ -34,6 +34,9 @@ import {
   Package,
   Lightbulb,
   Pencil,
+  Link2,
+  X,
+  Search,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCompose } from "@/components/email/compose-provider";
@@ -382,7 +385,7 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
           )}
         </div>
         <div className="flex gap-1.5">
-          {isCustomerJob && detail.status === "open" && detail.invoice_id && (
+          {isCustomerJob && detail.status === "open" && detail.invoice_ids && detail.invoice_ids.length > 0 && (
             <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={handleSendEstimate} disabled={sending}>
               {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
               Send Estimate
@@ -638,21 +641,8 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
               <Play className="h-3.5 w-3.5 mr-2 text-green-600" /> Start Visit
             </Button>
           )}
-          {/* Billing */}
-          {detail.invoice_id ? (
-            <div className="flex gap-1.5">
-              <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/${detail.invoice_id}`)}>
-                <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> View Estimate
-              </Button>
-              <Button variant="ghost" size="sm" className="justify-start text-xs" onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}>
-                New Estimate
-              </Button>
-            </div>
-          ) : (
-            <Button variant="outline" size="sm" className="justify-start" onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}>
-              <DollarSign className="h-3.5 w-3.5 mr-2 text-emerald-600" /> Create Estimate
-            </Button>
-          )}
+          {/* Linked Documents */}
+          <LinkedDocuments actionId={actionId} invoiceIds={detail.invoice_ids || []} onUpdate={onUpdate} />
         </div>
       )}
 
@@ -702,6 +692,22 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
 
       {/* 5. Timeline — unified: original request, replies, comments, related jobs */}
       <CollapsibleSection title="Timeline" icon={MessageSquare} defaultOpen={true}>
+        {/* Thread conversation (manually linked thread) */}
+        {detail.thread_messages && detail.thread_messages.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {detail.thread_messages.map((m, i) => (
+              <ExpandableCard
+                key={i}
+                label={m.direction === "inbound" ? `From: ${m.from_email}` : `To: ${m.to_email}`}
+                variant={m.direction === "outbound" ? "green" : undefined}
+                title={i === 0 ? m.subject : undefined}
+              >
+                {m.body}
+              </ExpandableCard>
+            ))}
+          </div>
+        )}
+
         {/* Original request (email, phone, etc.) */}
         {detail.subject && (
           <div className="space-y-2 mb-3">
@@ -770,6 +776,17 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
                     actionId={actionId}
                     onSent={() => { loadDetail(); onUpdate(); }}
                   />
+                );
+              }
+              const isActivity = c.text.startsWith("[ACTIVITY]");
+              if (isActivity) {
+                const activityText = c.text.replace("[ACTIVITY]\n", "");
+                return (
+                  <div key={c.id} className="flex items-center gap-2 py-1 px-2">
+                    <div className="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0" />
+                    <span className="text-xs text-muted-foreground">{activityText}</span>
+                    <span className="text-[10px] text-muted-foreground/50 ml-auto shrink-0">{formatTime(c.created_at)}</span>
+                  </div>
                 );
               }
               const isBot = c.author === "DeepBlue";
@@ -863,6 +880,162 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
         </div>
       </CollapsibleSection>
 
+    </div>
+  );
+}
+
+
+// --- Linked Documents Section ---
+interface LinkedDoc {
+  id: string;
+  invoice_number: string | null;
+  document_type: string;
+  status: string;
+  subject: string | null;
+  total: number;
+  customer_name: string | null;
+}
+
+function LinkedDocuments({ actionId, invoiceIds, onUpdate }: { actionId: string; invoiceIds: string[]; onUpdate: () => void }) {
+  const router = useRouter();
+  const [docs, setDocs] = useState<LinkedDoc[]>([]);
+  const [linking, setLinking] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<LinkedDoc[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  // Load linked document details
+  useEffect(() => {
+    if (invoiceIds.length === 0) { setDocs([]); return; }
+    Promise.all(
+      invoiceIds.map((id) =>
+        api.get<LinkedDoc>(`/v1/invoices/${id}`).catch(() => null)
+      )
+    ).then((results) => setDocs(results.filter(Boolean) as LinkedDoc[]));
+  }, [invoiceIds]);
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const data = await api.get<{ items: LinkedDoc[] }>(
+        `/v1/invoices?search=${encodeURIComponent(searchQuery)}&limit=10`
+      );
+      // Filter out already linked
+      setSearchResults(data.items.filter((i) => !invoiceIds.includes(i.id)));
+    } catch {
+      toast.error("Search failed");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleLink = async (invoiceId: string) => {
+    try {
+      await api.post(`/v1/admin/agent-actions/${actionId}/link-invoice`, { invoice_id: invoiceId });
+      toast.success("Document linked");
+      setLinking(false);
+      setSearchQuery("");
+      setSearchResults([]);
+      onUpdate();
+    } catch {
+      toast.error("Failed to link");
+    }
+  };
+
+  const handleUnlink = async (invoiceId: string) => {
+    try {
+      await api.delete(`/v1/admin/agent-actions/${actionId}/link-invoice/${invoiceId}`);
+      toast.success("Document unlinked");
+      onUpdate();
+    } catch {
+      toast.error("Failed to unlink");
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">Documents</span>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={() => setLinking(!linking)}>
+            <Link2 className="h-3 w-3 mr-1" /> Link
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={() => router.push(`/invoices/new?job=${actionId}&type=estimate`)}>
+            <DollarSign className="h-3 w-3 mr-1" /> New
+          </Button>
+        </div>
+      </div>
+
+      {/* Linked docs */}
+      {docs.map((doc) => (
+        <div key={doc.id} className="flex items-center justify-between py-1.5 px-2 rounded-md bg-muted/50 group">
+          <button
+            className="flex items-center gap-2 text-sm hover:underline text-left"
+            onClick={() => router.push(`/invoices/${doc.id}`)}
+          >
+            <DollarSign className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="font-medium">{doc.invoice_number || "Draft"}</span>
+            <span className="text-muted-foreground text-xs">
+              {doc.document_type === "estimate" ? "Est" : "Inv"} · ${doc.total.toFixed(2)}
+            </span>
+            <Badge variant="outline" className="text-[9px] h-4 px-1">
+              {doc.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+            </Badge>
+          </button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+            onClick={() => handleUnlink(doc.id)}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      ))}
+
+      {docs.length === 0 && !linking && (
+        <p className="text-xs text-muted-foreground py-1">No documents linked</p>
+      )}
+
+      {/* Link search */}
+      {linking && (
+        <div className="space-y-2 p-2 border rounded-md bg-background">
+          <div className="flex gap-1">
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+              placeholder="Search by number, subject, or client..."
+              className="h-7 text-xs"
+              autoFocus
+            />
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleSearch} disabled={searching}>
+              {searching ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+            </Button>
+          </div>
+          {searchResults.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {searchResults.map((r) => (
+                <button
+                  key={r.id}
+                  className="w-full flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted text-left text-xs"
+                  onClick={() => handleLink(r.id)}
+                >
+                  <span>
+                    <span className="font-medium">{r.invoice_number || "Draft"}</span>
+                    <span className="text-muted-foreground ml-2">{r.subject || "—"}</span>
+                  </span>
+                  <span className="text-muted-foreground">${r.total.toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <Button variant="ghost" size="sm" className="h-6 text-[10px] w-full" onClick={() => { setLinking(false); setSearchResults([]); setSearchQuery(""); }}>
+            Cancel
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

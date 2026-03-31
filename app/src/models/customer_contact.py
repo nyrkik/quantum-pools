@@ -18,11 +18,11 @@ class CustomerContact(Base):
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    title: Mapped[str | None] = mapped_column(String(100))
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(50))
-    role: Mapped[str] = mapped_column(String(30), default="primary")  # primary, billing, property_manager, maintenance, other
+    role: Mapped[str | None] = mapped_column(String(30), nullable=True)  # billing, property_manager, regional_manager, maintenance, other
 
     receives_estimates: Mapped[bool] = mapped_column(Boolean, default=False)
     receives_invoices: Mapped[bool] = mapped_column(Boolean, default=False)

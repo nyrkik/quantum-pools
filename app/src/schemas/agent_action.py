@@ -29,7 +29,7 @@ class UpdateActionBody(BaseModel):
     description: Optional[str] = None
     due_date: Optional[str] = None
     notes: Optional[str] = None
-    invoice_id: Optional[str] = None
+    invoice_id: Optional[str] = None  # Links job to invoice via junction table
 
 
 class AddCommentBody(BaseModel):

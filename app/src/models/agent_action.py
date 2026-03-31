@@ -14,7 +14,7 @@ class AgentAction(Base):
     organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     agent_message_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_messages.id"), nullable=True, index=True)
     thread_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_threads.id"), index=True)
-    invoice_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("invoices.id"), index=True)
+    # invoice_id removed — use job_invoices junction table via JobInvoice model
     customer_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("customers.id"), nullable=True, index=True)
     # For standalone actions (not from email)
     customer_name: Mapped[str | None] = mapped_column(String(200))

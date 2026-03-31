@@ -42,6 +42,8 @@ class InvoicePresenter(Presenter):
             "notes": inv.notes,
             "approved_at": self._iso(inv.approved_at) if hasattr(inv, "approved_at") else None,
             "approved_by": inv.approved_by if hasattr(inv, "approved_by") else None,
+            "revision_count": inv.revision_count if hasattr(inv, "revision_count") else 0,
+            "revised_at": self._iso(inv.revised_at) if hasattr(inv, "revised_at") else None,
             "sent_at": self._iso(inv.sent_at) if hasattr(inv, "sent_at") else None,
             "viewed_at": self._iso(inv.viewed_at) if hasattr(inv, "viewed_at") else None,
             "created_at": self._iso(inv.created_at),

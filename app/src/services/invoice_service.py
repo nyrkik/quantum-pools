@@ -10,7 +10,23 @@ from sqlalchemy.orm import selectinload
 
 from src.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from src.models.customer import Customer
+from src.models.agent_action import AgentAction, AgentActionComment
 from src.core.exceptions import NotFoundError, ValidationError
+from src.services.job_invoice_service import get_first_job_for_invoice, unlink_all_for_invoice
+
+
+async def log_job_activity(db: AsyncSession, invoice_id: str, message: str):
+    """Add a system activity entry to the job linked to this invoice."""
+    action = await get_first_job_for_invoice(db, invoice_id)
+    if not action:
+        return
+    db.add(AgentActionComment(
+        id=str(uuid.uuid4()),
+        organization_id=action.organization_id,
+        action_id=action.id,
+        author="System",
+        text=f"[ACTIVITY]\n{message}",
+    ))
 
 
 class InvoiceService:
@@ -78,6 +94,47 @@ class InvoiceService:
             except (ValueError, IndexError):
                 pass
         return f"{yy}{max_seq + 1:03d}"
+
+    async def _create_revision_snapshot(self, invoice: Invoice, revised_by: Optional[str] = None) -> None:
+        """Store a frozen snapshot of the invoice before revision."""
+        import json
+        from src.models.invoice import InvoiceRevision
+
+        revision_number = (invoice.revision_count or 0) + 1
+        snapshot = {
+            "invoice_number": invoice.invoice_number,
+            "customer_id": invoice.customer_id,
+            "subject": invoice.subject,
+            "status": invoice.status,
+            "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
+            "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+            "subtotal": float(invoice.subtotal or 0),
+            "discount": float(invoice.discount or 0),
+            "tax_rate": float(invoice.tax_rate or 0),
+            "tax_amount": float(invoice.tax_amount or 0),
+            "total": float(invoice.total or 0),
+            "notes": invoice.notes,
+            "line_items": [
+                {
+                    "description": li.description,
+                    "quantity": float(li.quantity),
+                    "unit_price": float(li.unit_price),
+                    "amount": float(li.amount),
+                    "is_taxed": li.is_taxed,
+                }
+                for li in (invoice.line_items or [])
+            ],
+        }
+
+        revision = InvoiceRevision(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice.id,
+            revision_number=revision_number,
+            invoice_number_at_revision=invoice.invoice_number,
+            snapshot_json=json.dumps(snapshot),
+            revised_by=revised_by,
+        )
+        self.db.add(revision)
 
     def _recalculate_totals(self, invoice: Invoice, line_items: list[InvoiceLineItem]) -> None:
         """Recalculate subtotal, tax, total, and balance from line items."""
@@ -182,17 +239,11 @@ class InvoiceService:
         if not cust_result.scalar_one_or_none():
             raise NotFoundError("Customer")
 
-        doc_type = kwargs.get("document_type", "invoice")
-        if doc_type == "estimate":
-            invoice_number = await self.next_estimate_number(org_id)
-        else:
-            invoice_number = await self.next_invoice_number(org_id)
-
         invoice = Invoice(
             id=str(uuid.uuid4()),
             organization_id=org_id,
             customer_id=customer_id,
-            invoice_number=invoice_number,
+            invoice_number=None,  # Assigned on send
             **kwargs,
         )
         self.db.add(invoice)
@@ -231,11 +282,21 @@ class InvoiceService:
         # Reload with relationships
         return await self.get(org_id, invoice.id)
 
-    async def update(self, org_id: str, invoice_id: str, line_items_data: Optional[List[dict]] = None, **kwargs) -> Invoice:
+    async def update(self, org_id: str, invoice_id: str, line_items_data: Optional[List[dict]] = None, revised_by: Optional[str] = None, **kwargs) -> Invoice:
         invoice = await self.get(org_id, invoice_id)
 
-        if invoice.status not in (InvoiceStatus.draft.value, InvoiceStatus.sent.value):
+        # Block editing approved estimates — void and create new instead
+        if invoice.approved_at and invoice.document_type == "estimate":
+            raise ValidationError("Approved estimates cannot be edited. Void this estimate and create a new one.")
+
+        editable = (InvoiceStatus.draft.value, InvoiceStatus.sent.value, InvoiceStatus.revised.value)
+        if invoice.status not in editable:
             raise ValidationError(f"Cannot edit invoice in '{invoice.status}' status")
+
+        # If invoice was already sent/revised, create a revision snapshot before editing
+        was_sent = invoice.status in (InvoiceStatus.sent.value, InvoiceStatus.revised.value)
+        if was_sent:
+            await self._create_revision_snapshot(invoice, revised_by)
 
         for key, value in kwargs.items():
             if value is not None:
@@ -276,40 +337,77 @@ class InvoiceService:
         else:
             self._recalculate_totals(invoice, list(invoice.line_items))
 
+        # After edit: if it was sent, mark as revised with suffix
+        if was_sent:
+            from datetime import datetime, timezone
+            invoice.revision_count = (invoice.revision_count or 0) + 1
+            invoice.revised_at = datetime.now(timezone.utc)
+            invoice.status = InvoiceStatus.revised.value
+            # Add revision suffix: INV-26001 → INV-26001-R1 (strip prior -R suffix first)
+            base_number = invoice.invoice_number.split("-R")[0] if "-R" in invoice.invoice_number else invoice.invoice_number
+            invoice.invoice_number = f"{base_number}-R{invoice.revision_count}"
+
         await self.db.flush()
         return await self.get(org_id, invoice.id)
 
-    async def send(self, org_id: str, invoice_id: str) -> Invoice:
-        """Mark invoice as sent."""
+    async def send(self, org_id: str, invoice_id: str, sent_by: str | None = None) -> Invoice:
+        """Mark invoice as sent. Assigns document number on first send."""
         invoice = await self.get(org_id, invoice_id)
         if invoice.status == InvoiceStatus.void.value:
             raise ValidationError("Cannot send a voided invoice")
         if invoice.status == InvoiceStatus.paid.value:
             raise ValidationError("Invoice is already paid")
 
+        # Assign number on first send (drafts have no number)
+        if not invoice.invoice_number:
+            if invoice.document_type == "estimate":
+                invoice.invoice_number = await self.next_estimate_number(org_id)
+            else:
+                invoice.invoice_number = await self.next_invoice_number(org_id)
+
         from datetime import datetime, timezone
         invoice.status = InvoiceStatus.sent.value
         invoice.sent_at = datetime.now(timezone.utc)
+        if sent_by:
+            invoice.sent_by = sent_by
         await self.db.flush()
         return invoice
 
-    async def void(self, org_id: str, invoice_id: str) -> Invoice:
-        """Void an invoice."""
+    async def void(self, org_id: str, invoice_id: str, voided_by: str | None = None) -> Invoice:
+        """Void a sent invoice/estimate. Preserves record for audit."""
+        from datetime import datetime, timezone
         invoice = await self.get(org_id, invoice_id)
+        if invoice.status == InvoiceStatus.draft.value:
+            raise ValidationError("Drafts should be deleted, not voided")
         if invoice.status == InvoiceStatus.paid.value:
             raise ValidationError("Cannot void a paid invoice")
         invoice.status = InvoiceStatus.void.value
         invoice.balance = 0.0
+        invoice.voided_by = voided_by
+        invoice.voided_at = datetime.now(timezone.utc)
         await self.db.flush()
         return invoice
 
-    async def write_off(self, org_id: str, invoice_id: str) -> Invoice:
+    async def delete(self, org_id: str, invoice_id: str) -> None:
+        """Hard delete a draft. Only drafts (never sent) can be deleted."""
+        invoice = await self.get(org_id, invoice_id)
+        if invoice.status != InvoiceStatus.draft.value:
+            raise ValidationError("Only drafts can be deleted. Use void for sent documents.")
+        # Unlink any jobs referencing this draft
+        await unlink_all_for_invoice(self.db, invoice_id)
+        await self.db.delete(invoice)
+        await self.db.flush()
+
+    async def write_off(self, org_id: str, invoice_id: str, written_off_by: str | None = None) -> Invoice:
         """Write off an invoice."""
+        from datetime import datetime, timezone
         invoice = await self.get(org_id, invoice_id)
         if invoice.status == InvoiceStatus.void.value:
             raise ValidationError("Cannot write off a voided invoice")
         invoice.status = InvoiceStatus.written_off.value
         invoice.balance = 0.0
+        invoice.written_off_by = written_off_by
+        invoice.written_off_at = datetime.now(timezone.utc)
         await self.db.flush()
         return invoice
 

@@ -189,10 +189,10 @@ export default function MessagesPage() {
                 onClick={() => setSelectedThreadId(t.id)}
               >
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-sm font-medium truncate">{t.participants.join(", ") || "Message"}</span>
+                  <span className="text-sm font-medium truncate">{t.subject || t.participants.join(", ") || "Message"}</span>
                   <span className="text-[10px] text-muted-foreground shrink-0 ml-2">{formatTime(t.last_message_at)}</span>
                 </div>
-                {t.subject && <p className="text-xs text-muted-foreground truncate">{t.subject}</p>}
+                {t.subject && <p className="text-xs text-muted-foreground truncate">{t.participants.join(", ")}</p>}
                 <p className="text-xs text-muted-foreground truncate mt-0.5">{t.last_message || ""}</p>
                 <div className="flex items-center gap-1.5 mt-1">
                   {t.priority === "urgent" && <Badge variant="outline" className="text-[9px] px-1 border-amber-400 text-amber-600">Urgent</Badge>}
@@ -223,7 +223,8 @@ export default function MessagesPage() {
             <div className="p-3 border-b shrink-0">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold">{detail.participants.join(", ")}</p>
+                  <p className="text-sm font-semibold">{detail.subject || detail.participants.join(", ")}</p>
+                  {detail.subject && <p className="text-xs text-muted-foreground">{detail.participants.join(", ")}</p>}
                   {detail.subject && <p className="text-xs text-muted-foreground">{detail.subject}</p>}
                   {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
                 </div>

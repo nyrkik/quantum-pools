@@ -343,6 +343,11 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             due_date = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
             action_confidence = action.get("confidence", "high")
             is_suggested = action_confidence in ("medium", "low")
+            # Resolve customer_id: thread match > classification result
+            cust_id = (thread_obj.matched_customer_id if thread_obj else None) or result.get("_matched_customer_id")
+            cust_name = (thread_obj.customer_name if thread_obj else None) or result.get("customer_name")
+            prop_addr = (thread_obj.property_address if thread_obj else None) or result.get("_property_address")
+
             db.add(AgentAction(
                 organization_id=organization_id,
                 agent_message_id=agent_msg.id,
@@ -354,6 +359,9 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 is_suggested=is_suggested,
                 suggestion_confidence=action_confidence if is_suggested else None,
                 created_by="DeepBlue",
+                customer_id=cust_id,
+                customer_name=cust_name,
+                property_address=prop_addr,
             ))
 
         await db.commit()

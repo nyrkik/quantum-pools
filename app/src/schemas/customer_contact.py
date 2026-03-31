@@ -5,11 +5,11 @@ from pydantic import BaseModel
 
 
 class ContactCreate(BaseModel):
-    name: str
-    title: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    role: str = "primary"
+    role: Optional[str] = None
     receives_estimates: bool = False
     receives_invoices: bool = False
     receives_service_updates: bool = False
@@ -18,8 +18,8 @@ class ContactCreate(BaseModel):
 
 
 class ContactUpdate(BaseModel):
-    name: Optional[str] = None
-    title: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     role: Optional[str] = None

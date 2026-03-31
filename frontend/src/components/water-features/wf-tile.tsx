@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -200,11 +200,15 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
     }
   };
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const originalForm = useRef(JSON.stringify(wf));
+
+  const isDirty = useMemo(() => {
+    if (!editing) return false;
+    return JSON.stringify(form) !== originalForm.current;
+  }, [editing, form]);
 
   const set = (field: string, value: unknown) => {
     setForm((f) => ({ ...f, [field]: value }));
-    setDirty(true);
   };
 
   const handleSave = async () => {
@@ -250,7 +254,7 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
         notes: form.notes || null,
       });
       toast.success("Saved");
-      setDirty(false);
+      originalForm.current = JSON.stringify(form);
       setEditing(false);
       onUpdated();
     } catch {
@@ -262,7 +266,6 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
 
   const handleCancel = () => {
     setForm({ ...wf });
-    setDirty(false);
     setEditing(false);
   };
 
@@ -288,13 +291,13 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
             {form.name || form.water_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
           </span>
           <div className="ml-auto flex items-center gap-1.5">
-            {dirty && (
+            {isDirty && (
               <Button variant="default" size="sm" className="h-7 px-2.5 text-xs" onClick={handleSave} disabled={saving}>
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
               </Button>
             )}
-            {dirty && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setForm({ ...wf }); setDirty(false); }}>
+            {isDirty && (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={handleCancel}>
                 Cancel
               </Button>
             )}
@@ -637,7 +640,7 @@ export function WfTile({ wf, propertyId, perms, techAssignment, suggestedRate, m
       customer={customerContext || { preferred_day: null }}
       lastReading={lastReading}
       perms={perms}
-      onEdit={perms.canEditCustomers ? () => setEditing(true) : undefined}
+      onEdit={perms.canEditCustomers ? () => { setForm({ ...wf }); originalForm.current = JSON.stringify(wf); setEditing(true); } : undefined}
     />
   );
 }

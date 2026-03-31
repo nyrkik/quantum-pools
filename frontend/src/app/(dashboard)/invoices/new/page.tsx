@@ -23,6 +23,8 @@ interface InvoiceResponse {
   id: string;
   customer_id: string;
   document_type: string;
+  invoice_number: string | null;
+  status: string;
   subject: string | null;
   issue_date: string;
   due_date: string | null;
@@ -71,6 +73,7 @@ function NewInvoiceForm() {
   const [draftLoading, setDraftLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(false);
+  const [isDraftEdit, setIsDraftEdit] = useState(false);
 
   const isEdit = !!editId;
   const label = docType === "estimate" ? "Estimate" : "Invoice";
@@ -86,6 +89,7 @@ function NewInvoiceForm() {
       setIssueDate(inv.issue_date || today());
       setDueDate(inv.due_date || "");
       if (inv.document_type) setDocType(inv.document_type as "estimate" | "invoice");
+      setIsDraftEdit(!inv.invoice_number || inv.status === "draft");
       setTaxRate(inv.tax_rate || 0);
       setDiscount(inv.discount || 0);
       setNotes(inv.notes || "");
@@ -370,60 +374,53 @@ function NewInvoiceForm() {
             Cancel
           </Button>
           <div className="flex flex-wrap gap-2">
-            {docType === "estimate" && !isEdit && (
-              <Button variant="outline" onClick={async () => {
-                const validItems = lineItems.filter((li) => li.description.trim());
-                if (!customerId) { toast.error("Select a client"); return; }
-                setSaving(true);
-                try {
-                  const result = await api.post<{ id: string }>("/v1/invoices", {
-                    customer_id: customerId, document_type: "estimate", subject: subject || undefined,
-                    issue_date: issueDate, due_date: dueDate, status: "draft",
-                    tax_rate: taxRate, discount, notes: notes || undefined,
-                    line_items: validItems.map((li, i) => ({ description: li.description, quantity: li.quantity, unit_price: li.unit_price, is_taxed: li.is_taxed, sort_order: i })),
-                  });
-                  if (jobId) await api.put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: result.id }).catch(() => {});
-                  toast.success("Draft saved");
-                  router.push(jobId ? "/jobs" : "/invoices");
-                } catch { toast.error("Failed to save draft"); }
-                finally { setSaving(false); }
-              }} disabled={saving || !customerId}>
-                Save Draft
-              </Button>
-            )}
-            <Button variant="outline" onClick={handleSubmit} disabled={saving || !customerId}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {isEdit ? "Save Changes" : `Create ${label}`}
-            </Button>
-            {docType === "estimate" && !isEdit && jobId && (
-              <Button onClick={async () => {
-                if (!customerId) { toast.error("Select a client"); return; }
-                const validItems = lineItems.filter((li) => li.description.trim());
-                if (validItems.length === 0) { toast.error("Add at least one line item"); return; }
-                setSaving(true);
-                try {
-                  // Create the estimate
-                  const result = await api.post<{ id: string }>("/v1/invoices", {
-                    customer_id: customerId, document_type: "estimate", subject: subject || undefined,
-                    issue_date: issueDate, due_date: dueDate,
-                    tax_rate: taxRate, discount, notes: notes || undefined,
-                    line_items: validItems.map((li, i) => ({ description: li.description, quantity: li.quantity, unit_price: li.unit_price, is_taxed: li.is_taxed, sort_order: i })),
-                  });
-                  // Link to job
-                  await api.put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: result.id }).catch(() => {});
-                  // Send to customer
-                  await api.post(`/v1/admin/agent-actions/${jobId}/send-estimate`, { to_email: sendTo || undefined });
-                  toast.success("Estimate created & sent to customer");
-                  router.push("/jobs");
-                } catch {
-                  toast.error("Failed to create & send");
-                } finally {
-                  setSaving(false);
-                }
-              }} disabled={saving || !customerId}>
+            {isEdit && !isDraftEdit ? (
+              <Button onClick={handleSubmit} disabled={saving || !customerId}>
                 {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                Create & Send
+                Save Changes
               </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={handleSubmit} disabled={saving || !customerId}>
+                  {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Save Draft
+                </Button>
+                <Button onClick={async () => {
+                  if (!customerId) { toast.error("Select a client"); return; }
+                  const validItems = lineItems.filter((li) => li.description.trim());
+                  if (validItems.length === 0) { toast.error("Add at least one line item"); return; }
+                  setSaving(true);
+                  try {
+                    let invoiceId: string;
+                    const payload = {
+                      customer_id: customerId, document_type: docType, subject: subject || undefined,
+                      issue_date: issueDate, due_date: dueDate || undefined,
+                      tax_rate: taxRate, discount, notes: notes || undefined,
+                      line_items: validItems.map((li, i) => ({ description: li.description, quantity: li.quantity, unit_price: li.unit_price, is_taxed: li.is_taxed, sort_order: i })),
+                    };
+                    if (isDraftEdit && editId) {
+                      // Save existing draft then send
+                      await api.put(`/v1/invoices/${editId}`, payload);
+                      invoiceId = editId;
+                    } else {
+                      // Create new then send
+                      const result = await api.post<{ id: string }>("/v1/invoices", payload);
+                      invoiceId = result.id;
+                      if (jobId) await api.put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: invoiceId }).catch(() => {});
+                    }
+                    await api.post(`/v1/invoices/${invoiceId}/send`);
+                    toast.success(`${label} sent`);
+                    router.push(jobId ? "/jobs" : `/invoices/${invoiceId}`);
+                  } catch {
+                    toast.error(`Failed to send ${label.toLowerCase()}`);
+                  } finally {
+                    setSaving(false);
+                  }
+                }} disabled={saving || !customerId}>
+                  {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Send {label}
+                </Button>
+              </>
             )}
           </div>
         </div>

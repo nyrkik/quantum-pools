@@ -20,13 +20,20 @@ async def list_customers(
     search: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     status: Optional[List[str]] = Query(None),
+    customer_type: Optional[str] = Query(None),
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=200),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
     svc = CustomerService(db)
-    customers, total = await svc.list(ctx.organization_id, search=search, is_active=is_active, status=status, skip=skip, limit=limit)
+    customers, total = await svc.list(
+        ctx.organization_id, search=search, is_active=is_active,
+        status=status, customer_type=customer_type,
+        sort_by=sort_by, sort_dir=sort_dir, skip=skip, limit=limit,
+    )
     results = []
     for c in customers:
         resp = CustomerResponse.model_validate(c)

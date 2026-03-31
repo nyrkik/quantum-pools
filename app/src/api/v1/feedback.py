@@ -215,9 +215,10 @@ JSON only."""
                         })
                 messages = [{"role": "user", "content": content}]
 
+            model_name = await get_model("fast")
             client = anthropic.Anthropic()
             response = client.messages.create(
-                model=get_model("fast"),
+                model=model_name,
                 max_tokens=300,
                 messages=messages,
             )

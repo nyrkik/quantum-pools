@@ -12,6 +12,7 @@ from src.core.database import Base
 class InvoiceStatus(str, enum.Enum):
     draft = "draft"
     sent = "sent"
+    revised = "revised"
     viewed = "viewed"
     paid = "paid"
     overdue = "overdue"
@@ -32,7 +33,7 @@ class Invoice(Base):
 
     # Document type and details
     document_type: Mapped[str] = mapped_column(String(20), default="invoice")  # estimate, invoice
-    invoice_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(30), nullable=True, unique=True)
     subject: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default=InvoiceStatus.draft.value, index=True)
 
@@ -72,6 +73,20 @@ class Invoice(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approved_by: Mapped[str | None] = mapped_column(String(200))
     approval_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("estimate_approvals.id"))
+
+    # Revision tracking
+    revision_count: Mapped[int] = mapped_column(Integer, default=0)
+    revised_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Audit trail — who did what
+    created_by: Mapped[str | None] = mapped_column(String(200))
+    sent_by: Mapped[str | None] = mapped_column(String(200))
+    voided_by: Mapped[str | None] = mapped_column(String(200))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    written_off_by: Mapped[str | None] = mapped_column(String(200))
+    written_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    converted_by: Mapped[str | None] = mapped_column(String(200))
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Tracking
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -115,3 +130,21 @@ class InvoiceLineItem(Base):
     # Relationships
     invoice = relationship("Invoice", back_populates="line_items", lazy="noload")
     service = relationship("Service", lazy="noload")
+
+
+class InvoiceRevision(Base):
+    """Frozen snapshot of an invoice before each revision."""
+    __tablename__ = "invoice_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    invoice_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    invoice_number_at_revision: Mapped[str] = mapped_column(String(30), nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    revised_by: Mapped[str | None] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    invoice = relationship("Invoice", lazy="noload")

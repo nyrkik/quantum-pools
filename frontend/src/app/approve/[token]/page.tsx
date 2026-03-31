@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, CheckCircle2, FileText } from "lucide-react";
-import { getBackendOrigin } from "@/lib/api";
 
 interface EstimateData {
   estimate_number: string;
@@ -26,10 +25,21 @@ interface EstimateData {
   };
   status: string;
   approved_at: string | null;
+  approval_evidence: {
+    signed_by: string | null;
+    signature: string | null;
+    sent_to_email: string | null;
+    ip_address: string | null;
+    method: string | null;
+    timestamp: string | null;
+  } | null;
+  revision_count: number;
+  revised_at: string | null;
 }
 
 export default function ApprovePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
+  const isAdminView = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "admin";
   const [data, setData] = useState<EstimateData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,13 +48,8 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
   const [consent, setConsent] = useState(false);
   const [signature, setSignature] = useState("");
   const [approveError, setApproveError] = useState("");
-  const backendOrigin = getBackendOrigin();
-
-  const getApiBase = () =>
-    typeof window !== "undefined" && window.location.hostname.endsWith("quantumpoolspro.com") ? "" : backendOrigin;
-
   useEffect(() => {
-    fetch(`${getApiBase()}/api/v1/public/estimate/${token}`)
+    fetch(`/api/v1/public/estimate/${token}`)
       .then(async (res) => {
         if (!res.ok) throw new Error();
         return res.json();
@@ -64,7 +69,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
     setApproving(true);
     setApproveError("");
     try {
-      const res = await fetch(`${getApiBase()}/api/v1/public/estimate/${token}/approve`, {
+      const res = await fetch(`/api/v1/public/estimate/${token}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -131,6 +136,17 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
               <p className="text-sm text-slate-500">Prepared for {data.customer_name}</p>
             )}
 
+            {data.revision_count > 0 && (
+              <div className="flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 p-3">
+                <svg className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                </svg>
+                <p className="text-xs text-amber-700">
+                  This estimate has been updated{data.revised_at ? ` on ${new Date(data.revised_at).toLocaleDateString()}` : ""}. Please review the current details below before approving.
+                </p>
+              </div>
+            )}
+
             {/* Line items */}
             <div className="space-y-2">
               {/* Desktop table layout */}
@@ -169,10 +185,47 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
 
             {/* Approval section */}
             {approved ? (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center space-y-2">
-                <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto" />
-                <p className="text-sm font-medium text-green-800">Estimate Approved</p>
-                <p className="text-xs text-green-600">Thank you! We&apos;ll be in touch to schedule the work.</p>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
+                <div className="text-center space-y-2">
+                  <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto" />
+                  <p className="text-sm font-medium text-green-800">Estimate Approved</p>
+                  <p className="text-xs text-green-600">Thank you! We&apos;ll be in touch to schedule the work.</p>
+                </div>
+                {data.approval_evidence && (
+                  <div className="border-t border-green-200 pt-3 mt-3 space-y-1.5">
+                    <p className="text-[10px] uppercase tracking-wide text-green-700 font-semibold">Approval Verification</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-green-800">
+                      {data.approval_evidence.signature && (
+                        <>
+                          <span className="text-green-600">Signed by</span>
+                          <span className="italic">{data.approval_evidence.signature}</span>
+                        </>
+                      )}
+                      {data.approval_evidence.sent_to_email && (
+                        <>
+                          <span className="text-green-600">Sent to</span>
+                          <span>{data.approval_evidence.sent_to_email}</span>
+                        </>
+                      )}
+                      {data.approval_evidence.timestamp && (
+                        <>
+                          <span className="text-green-600">Date & time</span>
+                          <span>{new Date(data.approval_evidence.timestamp).toLocaleString()}</span>
+                        </>
+                      )}
+                      {data.approval_evidence.ip_address && (
+                        <>
+                          <span className="text-green-600">IP address</span>
+                          <span>{data.approval_evidence.ip_address}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : isAdminView ? (
+              <div className="bg-slate-50 border rounded-lg p-4 text-center">
+                <p className="text-sm text-slate-500">Awaiting customer approval</p>
               </div>
             ) : (
               <div className="space-y-4 border-t pt-4">

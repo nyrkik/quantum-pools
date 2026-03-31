@@ -93,17 +93,20 @@ Thank you for your business.
 
 def estimate_email_template(
     org_name: str,
-    customer_name: str,
     estimate_number: str,
-    subject: str,
+    estimate_subject: str,
     total: str,
     view_url: str,
+    property_line: str = "",
+    recipient_first_name: str = "",
     branding_color: str = "#1a1a2e",
 ) -> tuple[str, str]:
     """Estimate email template."""
-    text = f"""Hi {customer_name},
+    greeting = f"Hello {recipient_first_name}," if recipient_first_name else "Hello,"
+    location = f" at {property_line}" if property_line else ""
+    text = f"""{greeting}
 
-{subject}
+Please find attached an estimate to address {estimate_subject.lower()}{location}.
 
 Estimate #{estimate_number}
 Total: {total}
@@ -114,8 +117,9 @@ If you have questions, reply to this email.
 
 — {org_name}"""
 
-    content = f"""<p style="color: #4a5568; line-height: 1.6;">Hi {customer_name},</p>
-<p style="color: #4a5568; line-height: 1.6;">{subject}</p>
+    location_html = f" at <strong>{property_line}</strong>" if property_line else ""
+    content = f"""<p style="color: #4a5568; line-height: 1.6;">{greeting}</p>
+<p style="color: #4a5568; line-height: 1.6;">Please find attached an estimate to address {estimate_subject.lower()}{location_html}.</p>
 <div style="background: #f7fafc; border-radius: 8px; padding: 20px; margin: 20px 0;">
   <table style="width: 100%; border-collapse: collapse;">
     <tr><td style="color: #718096; padding: 4px 0;">Estimate</td><td style="text-align: right; font-weight: 600;">#{estimate_number}</td></tr>

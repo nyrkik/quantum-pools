@@ -5,7 +5,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Loader2, CheckCircle2, FileText } from "lucide-react";
 import { getBackendOrigin } from "@/lib/api";
 
@@ -18,6 +17,13 @@ interface EstimateData {
   org_color: string | null;
   line_items: { description: string; quantity: number; unit_price: number; total: number }[];
   total: number;
+  terms: {
+    payment_terms_days: number;
+    estimate_validity_days: number;
+    late_fee_pct: number;
+    warranty_days: number;
+    custom_terms: string | null;
+  };
   status: string;
   approved_at: string | null;
 }
@@ -29,21 +35,16 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [approved, setApproved] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
-  const [typedAuth, setTypedAuth] = useState("");
-  const [verificationStep, setVerificationStep] = useState(false);
-  const [verificationCode, setVerificationCode] = useState("");
-  const [sendingCode, setSendingCode] = useState(false);
-  const [codeError, setCodeError] = useState("");
+  const [signature, setSignature] = useState("");
+  const [approveError, setApproveError] = useState("");
   const backendOrigin = getBackendOrigin();
 
+  const getApiBase = () =>
+    typeof window !== "undefined" && window.location.hostname.endsWith("quantumpoolspro.com") ? "" : backendOrigin;
+
   useEffect(() => {
-    // Use relative URL for public pages — works through tunnel and direct access
-    const apiBase = typeof window !== "undefined" && window.location.hostname.endsWith("quantumpoolspro.com")
-      ? "" : backendOrigin;
-    fetch(`${apiBase}/api/v1/public/estimate/${token}`)
+    fetch(`${getApiBase()}/api/v1/public/estimate/${token}`)
       .then(async (res) => {
         if (!res.ok) throw new Error();
         return res.json();
@@ -51,48 +52,24 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
       .then((d) => {
         setData(d);
         if (d.status === "approved") setApproved(true);
-        if (d.customer_name) setName(d.customer_name);
-        if (d.customer_email) setEmail(d.customer_email);
+        if (d.recipient_name) setSignature(d.recipient_name);
       })
       .catch(() => setError("This estimate is no longer available."))
       .finally(() => setLoading(false));
-  }, [token, backendOrigin]);
-
-  const getApiBase = () =>
-    typeof window !== "undefined" && window.location.hostname.endsWith("quantumpoolspro.com") ? "" : backendOrigin;
-
-  const handleSendCode = async () => {
-    if (!email.trim()) return;
-    setSendingCode(true);
-    setCodeError("");
-    try {
-      const res = await fetch(`${getApiBase()}/api/v1/public/estimate/${token}/send-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      if (!res.ok) throw new Error();
-      setVerificationStep(true);
-    } catch {
-      setCodeError("Failed to send verification code. Check email and try again.");
-    } finally {
-      setSendingCode(false);
-    }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const handleApprove = async () => {
-    if (!name.trim() || !verificationCode.trim()) return;
+    if (!signature.trim() || !consent) return;
     setApproving(true);
-    setCodeError("");
+    setApproveError("");
     try {
       const res = await fetch(`${getApiBase()}/api/v1/public/estimate/${token}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim() || null,
-          signature: typedAuth.trim(),
-          verification_code: verificationCode.trim(),
+          name: signature.trim(),
+          signature: signature.trim(),
           user_agent: navigator.userAgent,
         }),
       });
@@ -102,12 +79,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
       }
       setApproved(true);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to submit approval.";
-      if (msg.toLowerCase().includes("code")) {
-        setCodeError(msg);
-      } else {
-        setCodeError(msg);
-      }
+      setApproveError(e instanceof Error ? e.message : "Failed to submit approval.");
     } finally {
       setApproving(false);
     }
@@ -169,7 +141,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
               </div>
               {data.line_items.map((li, i) => (
                 <div key={i} className="grid grid-cols-[1fr_60px_80px_80px] gap-2 text-sm py-1.5">
-                  <span>{li.description}</span>
+                  <span className="break-words">{li.description}</span>
                   <span className="text-center text-slate-500">{li.quantity}</span>
                   <span className="text-right text-slate-500">${li.unit_price.toFixed(2)}</span>
                   <span className="text-right font-medium">${li.total.toFixed(2)}</span>
@@ -188,39 +160,40 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center space-y-2">
                 <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto" />
                 <p className="text-sm font-medium text-green-800">Estimate Approved</p>
-                <p className="text-xs text-green-600">Thank you! We'll be in touch to schedule the work.</p>
+                <p className="text-xs text-green-600">Thank you! We&apos;ll be in touch to schedule the work.</p>
               </div>
             ) : (
               <div className="space-y-4 border-t pt-4">
-                <p className="text-sm font-medium text-slate-700">Authorization</p>
+                {/* Terms */}
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Terms & Conditions</p>
+                  {data.terms?.custom_terms ? (
+                    <div className="text-[11px] text-slate-500 leading-relaxed max-h-40 overflow-y-auto pr-1 whitespace-pre-line">
+                      {data.terms.custom_terms}
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-slate-500 leading-relaxed space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      <p>1. <strong>Scope of Work.</strong> This estimate covers only the services and materials described above. Any additional work discovered during service will require separate written approval before proceeding.</p>
+                      <p>2. <strong>Pricing.</strong> Prices are valid for {data.terms?.estimate_validity_days ?? 30} days from the date of this estimate. Material costs are subject to change based on supplier pricing at time of service.</p>
+                      <p>3. <strong>Payment.</strong> Payment is due net {data.terms?.payment_terms_days ?? 30} from date of invoice unless other arrangements have been made in writing. A late fee of {data.terms?.late_fee_pct ?? 1.5}% per month may apply to overdue balances.</p>
+                      <p>4. <strong>Warranty.</strong> Labor is warranted for {data.terms?.warranty_days ?? 30} days from completion. Manufacturer warranties apply to all parts and equipment installed. No warranty is provided on customer-supplied materials.</p>
+                      <p>5. <strong>Access.</strong> Customer agrees to provide reasonable access to the service area. {data.org_name} is not responsible for delays caused by access issues.</p>
+                      <p>6. <strong>Cancellation.</strong> Cancellation after approval may be subject to a restocking fee for any materials already ordered.</p>
+                      <p>7. <strong>Liability.</strong> {data.org_name} carries general liability and workers&apos; compensation insurance. Liability is limited to the total value of this estimate.</p>
+                    </div>
+                  )}
+                </div>
 
+                {/* Signature */}
                 <div className="space-y-2">
                   <div className="space-y-1">
-                    <Label className="text-xs">Your Name *</Label>
+                    <Label className="text-xs">Sign here</Label>
                     <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Full name"
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Email *</Label>
-                    <Input
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="your@email.com"
-                      className="h-9"
-                      type="email"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Type your name to sign *</Label>
-                    <Input
-                      value={typedAuth}
-                      onChange={(e) => setTypedAuth(e.target.value)}
-                      placeholder="Type your full name"
-                      className="h-9 italic"
+                      value={signature}
+                      onChange={(e) => setSignature(e.target.value)}
+                      placeholder="Please enter your first and last name"
+                      className="h-10 text-base italic"
+                      autoFocus
                     />
                   </div>
                 </div>
@@ -234,61 +207,25 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                       className="mt-0.5 h-4 w-4 rounded border-slate-300"
                     />
                     <span className="text-xs text-slate-600 leading-relaxed">
-                      I, <strong>{name || "___"}</strong>, authorize the work described in this estimate totaling{" "}
-                      <strong>${data.total.toFixed(2)}</strong> and agree to the terms presented. I understand this constitutes
-                      a binding authorization to proceed with the described services.
+                      I, <strong>{signature || "___"}</strong>, authorize the work described in this estimate totaling{" "}
+                      <strong>${data.total.toFixed(2)}</strong> and agree to the terms and conditions above. I understand this
+                      constitutes a binding authorization to proceed with the described services.
                     </span>
                   </label>
                 </div>
 
-                {!verificationStep ? (
-                  <>
-                    <Button
-                      className="w-full"
-                      style={{ backgroundColor: brandColor }}
-                      disabled={!name.trim() || !email.trim() || !typedAuth.trim() || !consent || sendingCode || typedAuth.toLowerCase() !== name.toLowerCase()}
-                      onClick={handleSendCode}
-                    >
-                      {sendingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                      Send Verification Code
-                    </Button>
+                <Button
+                  className="w-full"
+                  style={{ backgroundColor: brandColor }}
+                  disabled={!signature.trim() || !consent || approving}
+                  onClick={handleApprove}
+                >
+                  {approving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Approve & Authorize
+                </Button>
 
-                    {typedAuth && name && typedAuth.toLowerCase() !== name.toLowerCase() && (
-                      <p className="text-xs text-red-500 text-center">Typed name must match your name above</p>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-3 border-t pt-3">
-                    <p className="text-sm text-slate-600">A 6-digit code was sent to <strong>{email}</strong>. Enter it below to complete your approval.</p>
-                    <Input
-                      value={verificationCode}
-                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder="Enter 6-digit code"
-                      className="h-11 text-center text-lg tracking-widest font-mono"
-                      maxLength={6}
-                      autoFocus
-                    />
-                    <Button
-                      className="w-full"
-                      style={{ backgroundColor: brandColor }}
-                      disabled={verificationCode.length !== 6 || approving}
-                      onClick={handleApprove}
-                    >
-                      {approving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                      Approve & Authorize
-                    </Button>
-                    <button
-                      className="w-full text-xs text-slate-500 hover:text-slate-700"
-                      onClick={handleSendCode}
-                      disabled={sendingCode}
-                    >
-                      {sendingCode ? "Sending..." : "Resend code"}
-                    </button>
-                  </div>
-                )}
-
-                {codeError && (
-                  <p className="text-xs text-red-500 text-center">{codeError}</p>
+                {approveError && (
+                  <p className="text-xs text-red-500 text-center">{approveError}</p>
                 )}
               </div>
             )}

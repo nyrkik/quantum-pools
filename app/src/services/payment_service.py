@@ -87,3 +87,36 @@ class PaymentService:
         await self.db.flush()
         await self.db.refresh(payment)
         return payment
+
+    async def void(self, org_id: str, payment_id: str) -> Payment:
+        """Void a payment — reverses invoice balance and customer balance."""
+        result = await self.db.execute(
+            select(Payment)
+            .where(Payment.id == payment_id, Payment.organization_id == org_id)
+            .options(selectinload(Payment.customer), selectinload(Payment.invoice))
+        )
+        payment = result.scalar_one_or_none()
+        if not payment:
+            raise NotFoundError("Payment")
+        if payment.status == PaymentStatus.refunded.value:
+            raise ValidationError("Payment is already voided")
+
+        payment.status = PaymentStatus.refunded.value
+
+        # Reverse invoice balance
+        if payment.invoice_id:
+            invoice = payment.invoice
+            if invoice:
+                invoice.amount_paid = round((invoice.amount_paid or 0) - payment.amount, 2)
+                invoice.balance = round((invoice.total or 0) - invoice.amount_paid, 2)
+                if invoice.status == "paid" and invoice.balance > 0:
+                    invoice.status = "sent"
+
+        # Reverse customer balance
+        customer = payment.customer
+        if customer:
+            customer.balance = round(customer.balance + payment.amount, 2)
+
+        await self.db.flush()
+        await self.db.refresh(payment)
+        return payment

@@ -27,6 +27,7 @@ class BrandingUpdate(BaseModel):
     primary_color: Optional[str] = None
     tagline: Optional[str] = None
     organization_name: Optional[str] = None
+    email_signature: Optional[str] = None
 
 
 @router.get("")
@@ -43,6 +44,7 @@ async def get_branding(
         "logo_url": org.logo_url,
         "primary_color": org.primary_color,
         "tagline": org.tagline,
+        "email_signature": org.agent_signature,
     }
 
 
@@ -70,6 +72,8 @@ async def update_branding(
         if not name:
             raise HTTPException(status_code=400, detail="Organization name is required")
         org.name = name
+    if body.email_signature is not None:
+        org.agent_signature = body.email_signature.strip() or None
 
     await db.commit()
     return {
@@ -77,6 +81,7 @@ async def update_branding(
         "logo_url": org.logo_url,
         "primary_color": org.primary_color,
         "tagline": org.tagline,
+        "email_signature": org.agent_signature,
     }
 
 

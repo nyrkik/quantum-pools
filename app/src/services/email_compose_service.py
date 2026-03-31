@@ -72,22 +72,6 @@ class EmailComposeService:
         sender_user_id: str | None = None,
     ) -> dict:
         """Send email, create AgentMessage + AgentThread records."""
-        org = await self._get_org(org_id)
-        org_name = org.name if org else "QuantumPools"
-
-        # Build signature: first name only + org name
-        sig_parts = []
-        if sender_name:
-            first_name = sender_name.split()[0] if sender_name else ""
-            sig_parts.append(first_name)
-            sig_parts.append(org_name)
-        if org and org.agent_signature:
-            sig_parts.append(org.agent_signature)
-
-        full_body = body
-        if sig_parts:
-            full_body = f"{body}\n\n--\n" + "\n".join(sig_parts)
-
         # Determine FROM address: use thread's delivered_to if replying in a thread
         from_address_override = None
         if job_id:
@@ -104,17 +88,14 @@ class EmailComposeService:
                 if row and row[0]:
                     from_address_override = row[0]
 
-        # Send with sender's name as from_name
+        # Send via single outbound path — signature handled there
         email_svc = EmailService(self.db)
-        from_name = f"{sender_name} at {org_name}" if sender_name else org_name
-        msg = EmailMessage(
-            to=to,
-            subject=subject,
-            text_body=full_body,
-            from_name=from_name,
-            from_email=from_address_override,
+        result = await email_svc.send_agent_reply(
+            org_id, to, subject, body,
+            from_address=from_address_override,
+            sender_name=sender_name,
+            is_new=True,
         )
-        result = await email_svc.send_email(org_id, msg)
 
         if not result.success:
             return {"success": False, "error": result.error}
@@ -183,15 +164,6 @@ class EmailComposeService:
         )
         self.db.add(message)
 
-        # Update thread
-        thread.message_count = (thread.message_count or 0) + 1
-        thread.last_message_at = now
-        thread.last_direction = "outbound"
-        from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
-        thread.last_snippet = strip_email_signature(strip_quoted_reply(body))[:200]
-        thread.status = "handled"
-        thread.has_pending = False
-
         # Mark all pending inbound messages as handled (prevents refresh_thread from flipping back)
         pending_msgs = await self.db.execute(
             select(AgentMessage).where(
@@ -202,8 +174,6 @@ class EmailComposeService:
         )
         for pm in pending_msgs.scalars().all():
             pm.status = "handled"
-        if not thread.category:
-            thread.category = "outbound"
 
         # If linked to a job, mark draft as sent + post confirmation
         if job_id:
@@ -227,19 +197,11 @@ class EmailComposeService:
             )
             self.db.add(confirm_comment)
 
-        # Mark thread as read for sender (so outbound doesn't show as unread)
-        if sender_user_id:
-            from sqlalchemy import text as sql_text
-            await self.db.execute(
-                sql_text("""
-                    INSERT INTO thread_reads (user_id, thread_id, last_read_at)
-                    VALUES (:uid, :tid, now())
-                    ON CONFLICT (user_id, thread_id) DO UPDATE SET last_read_at = now()
-                """),
-                {"uid": sender_user_id, "tid": thread.id},
-            )
-
         await self.db.commit()
+
+        # Recalculate thread status via centralized function
+        from src.services.customer_agent import update_thread_status
+        await update_thread_status(thread.id)
 
         return {
             "success": True,

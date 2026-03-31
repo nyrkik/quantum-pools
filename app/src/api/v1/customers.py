@@ -135,11 +135,36 @@ async def update_customer(
     db: AsyncSession = Depends(get_db),
 ):
     svc = CustomerService(db)
-    customer = await svc.update(ctx.organization_id, customer_id, **body.model_dump(exclude_unset=True))
+    update_data = body.model_dump(exclude_unset=True)
+    rate_changed = "monthly_rate" in update_data
+    customer = await svc.update(ctx.organization_id, customer_id, **update_data)
+
     # Re-run inspection match when status changes (active/inactive affects matching)
     if body.status is not None or body.is_active is not None:
         background_tasks.add_task(_inspection_auto_match, ctx.organization_id)
+
+    # Reallocate WF rates when customer monthly_rate changes
+    if rate_changed:
+        background_tasks.add_task(_sync_customer_rates, ctx.organization_id, customer_id)
+
     return CustomerResponse.model_validate(customer)
+
+
+async def _sync_customer_rates(organization_id: str, customer_id: str):
+    """Reallocate WF rates across all properties when customer monthly_rate changes."""
+    try:
+        async with get_db_context() as db:
+            from src.models.property import Property
+            from src.services.water_feature_service import WaterFeatureService
+            props = (await db.execute(
+                select(Property).where(Property.customer_id == customer_id, Property.is_active == True)
+            )).scalars().all()
+            wf_svc = WaterFeatureService(db)
+            for p in props:
+                await wf_svc._reallocate_customer_rate(p.id, organization_id)
+            await db.commit()
+    except Exception:
+        pass
 
 
 async def _inspection_auto_match(organization_id: str):
@@ -170,12 +195,13 @@ async def get_customer_alerts(
     org_id = ctx.organization_id
     now = datetime.now(timezone.utc)
 
-    # Overdue invoices
+    # Overdue invoices (exclude estimates)
     overdue_result = await db.execute(
         select(func.count(Invoice.id), func.coalesce(func.sum(Invoice.balance), 0))
         .where(
             Invoice.organization_id == org_id,
             Invoice.customer_id == customer_id,
+            Invoice.document_type != "estimate",
             Invoice.status == "overdue",
         )
     )

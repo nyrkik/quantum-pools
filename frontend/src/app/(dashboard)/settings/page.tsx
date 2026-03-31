@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, getBackendOrigin } from "@/lib/api";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 
 // --- Types ---
 
@@ -37,22 +38,171 @@ interface ServiceTier {
   is_active: boolean;
 }
 
-type SettingsTab = "general" | "tiers";
+type SettingsTab = "general" | "billing" | "tiers";
+
+interface BillingTerms {
+  payment_terms_days: number;
+  estimate_validity_days: number;
+  late_fee_pct: number;
+  warranty_days: number;
+  estimate_terms: string | null;
+}
+
+function BillingTermsSection() {
+  const [terms, setTerms] = useState<BillingTerms | null>(null);
+  const [form, setForm] = useState<BillingTerms>({ payment_terms_days: 30, estimate_validity_days: 30, late_fee_pct: 1.5, warranty_days: 30, estimate_terms: null });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<BillingTerms>("/v1/charge-settings/billing-terms");
+      setTerms(data);
+      setForm(data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const isDirty = terms && (
+    form.payment_terms_days !== terms.payment_terms_days ||
+    form.estimate_validity_days !== terms.estimate_validity_days ||
+    form.late_fee_pct !== terms.late_fee_pct ||
+    form.warranty_days !== terms.warranty_days ||
+    (form.estimate_terms || "") !== (terms.estimate_terms || "")
+  );
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put("/v1/charge-settings/billing-terms", form);
+      toast.success("Billing terms updated");
+      load();
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="space-y-4">
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Payment & Estimate Terms</CardTitle>
+          <CardDescription>These values appear on estimates sent to customers.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Payment Terms</Label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm text-muted-foreground">Net</span>
+                <Input
+                  type="number"
+                  value={form.payment_terms_days}
+                  onChange={(e) => setForm({ ...form, payment_terms_days: parseInt(e.target.value) || 0 })}
+                  className="w-20 h-8 text-sm"
+                  min={0}
+                />
+                <span className="text-sm text-muted-foreground">days</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Estimate Valid</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  value={form.estimate_validity_days}
+                  onChange={(e) => setForm({ ...form, estimate_validity_days: parseInt(e.target.value) || 0 })}
+                  className="w-20 h-8 text-sm"
+                  min={1}
+                />
+                <span className="text-sm text-muted-foreground">days</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Late Fee</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={form.late_fee_pct}
+                  onChange={(e) => setForm({ ...form, late_fee_pct: parseFloat(e.target.value) || 0 })}
+                  className="w-20 h-8 text-sm"
+                  min={0}
+                />
+                <span className="text-sm text-muted-foreground">% / month</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Labor Warranty</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  value={form.warranty_days}
+                  onChange={(e) => setForm({ ...form, warranty_days: parseInt(e.target.value) || 0 })}
+                  className="w-20 h-8 text-sm"
+                  min={0}
+                />
+                <span className="text-sm text-muted-foreground">days</span>
+              </div>
+            </div>
+          </div>
+
+          {isDirty && (
+            <Button onClick={handleSave} disabled={saving} size="sm">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Save
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Custom Estimate Terms</CardTitle>
+          <CardDescription>Override the default terms & conditions shown on estimates. Leave blank to use standard terms.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            value={form.estimate_terms || ""}
+            onChange={(e) => setForm({ ...form, estimate_terms: e.target.value || null })}
+            rows={8}
+            placeholder="Enter custom terms & conditions..."
+            className="text-sm"
+          />
+          <p className="text-[10px] text-muted-foreground">If blank, standard terms are displayed covering scope, pricing, payment, warranty, access, cancellation, and liability.</p>
+
+          {isDirty && (
+            <Button onClick={handleSave} disabled={saving} size="sm">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Save
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 function BrandingSection() {
   const { refreshUser } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [branding, setBranding] = useState<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null } | null>(null);
-  const [form, setForm] = useState({ name: "", primary_color: "", tagline: "" });
+  const [branding, setBranding] = useState<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null; email_signature: string | null } | null>(null);
+  const [form, setForm] = useState({ name: "", primary_color: "", tagline: "", email_signature: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.get<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null }>("/v1/branding");
+      const data = await api.get<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null; email_signature: string | null }>("/v1/branding");
       setBranding(data);
-      setForm({ name: data.name || "", primary_color: data.primary_color || "", tagline: data.tagline || "" });
+      setForm({ name: data.name || "", primary_color: data.primary_color || "", tagline: data.tagline || "", email_signature: data.email_signature || "" });
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
@@ -62,7 +212,8 @@ function BrandingSection() {
   const isDirty = branding && (
     form.name !== (branding.name || "") ||
     form.primary_color !== (branding.primary_color || "") ||
-    form.tagline !== (branding.tagline || "")
+    form.tagline !== (branding.tagline || "") ||
+    form.email_signature !== (branding.email_signature || "")
   );
 
   const handleSave = async () => {
@@ -72,6 +223,7 @@ function BrandingSection() {
         organization_name: form.name,
         primary_color: form.primary_color || null,
         tagline: form.tagline || null,
+        email_signature: form.email_signature || null,
       });
       toast.success("Branding updated");
       load();
@@ -180,6 +332,19 @@ function BrandingSection() {
           <p className="text-[10px] text-muted-foreground">Displayed under your logo in the sidebar.</p>
         </div>
 
+        {/* Email Signature */}
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">Email Signature</Label>
+          <Textarea
+            value={form.email_signature}
+            onChange={(e) => setForm({ ...form, email_signature: e.target.value })}
+            rows={4}
+            placeholder={"Company Name\nemail@company.com\ncompany.com"}
+            className="text-sm font-mono"
+          />
+          <p className="text-[10px] text-muted-foreground">Appended to all outbound emails. Plain text.</p>
+        </div>
+
         {/* Save */}
         {isDirty && (
           <Button onClick={handleSave} disabled={saving}>
@@ -230,6 +395,7 @@ export default function SettingsPage() {
 
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "general", label: "General" },
+    { key: "billing", label: "Billing" },
     { key: "tiers", label: "Service Tiers" },
   ];
 
@@ -292,6 +458,9 @@ export default function SettingsPage() {
           {canEdit && <BrandingSection />}
         </div>
       )}
+
+      {/* Billing */}
+      {tab === "billing" && canEdit && <BillingTermsSection />}
 
       {/* Service Tiers */}
       {tab === "tiers" && (

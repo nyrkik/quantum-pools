@@ -43,6 +43,7 @@ from src.api.v1.inbound_email import router as inbound_email_router
 from src.api.v1.public import router as public_router
 from src.api.v1.feedback import router as feedback_router
 from src.api.v1.messages import router as messages_router
+from src.api.v1.customer_contacts import router as customer_contacts_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -87,3 +88,4 @@ api_router.include_router(inbound_email_router)
 api_router.include_router(public_router)
 api_router.include_router(feedback_router)
 api_router.include_router(messages_router)
+api_router.include_router(customer_contacts_router)

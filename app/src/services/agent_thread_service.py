@@ -32,6 +32,19 @@ from src.presenters.thread_presenter import ThreadPresenter
 
 
 class AgentThreadService:
+    async def _find_assignee_user(self, org_id: str, assigned_to_name: str) -> str | None:
+        """Find user_id from assigned_to name string."""
+        from src.models.organization_user import OrganizationUser
+        from src.models.user import User
+        first_name = assigned_to_name.split()[0]
+        result = await self.db.execute(
+            select(OrganizationUser.user_id)
+            .join(User, User.id == OrganizationUser.user_id)
+            .where(OrganizationUser.organization_id == org_id, User.first_name == first_name)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -125,18 +138,8 @@ class AgentThreadService:
         )
         threads = result.scalars().all()
 
-        # Look up read status for current user
-        read_map: dict[str, datetime] = {}
-        if current_user_id and threads:
-            from sqlalchemy import text
-            read_result = await self.db.execute(
-                text("SELECT thread_id, last_read_at FROM thread_reads WHERE user_id = :uid AND thread_id = ANY(:tids)"),
-                {"uid": current_user_id, "tids": [t.id for t in threads]},
-            )
-            read_map = {row[0]: row[1] for row in read_result.all()}
-
         presenter = ThreadPresenter(self.db)
-        items = await presenter.many(threads, read_map=read_map)
+        items = await presenter.many(threads)
 
         return {"items": items, "total": total}
 
@@ -293,7 +296,10 @@ class AgentThreadService:
         from_addr = (thread_obj.delivered_to if thread_obj and thread_obj.delivered_to else None)
 
         email_svc = EmailService(self.db)
-        send_result = await email_svc.send_agent_reply(org_id, msg.from_email, msg.subject or "", final_text, from_address=from_addr)
+        send_result = await email_svc.send_agent_reply(
+            org_id, msg.from_email, msg.subject or "", final_text,
+            from_address=from_addr, sender_name=user_name,
+        )
         if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send email"}
 
@@ -392,7 +398,6 @@ class AgentThreadService:
             .values(thread_id=None)
         )
         # Delete thread reads
-        await self.db.execute(text("DELETE FROM thread_reads WHERE thread_id = :tid"), {"tid": thread_id})
         # Delete thread
         await self.db.execute(
             delete(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
@@ -458,17 +463,8 @@ class AgentThreadService:
         }
 
     async def mark_thread_read(self, thread_id: str, user_id: str) -> None:
-        """Mark a thread as read by the current user."""
-        from sqlalchemy import text
-        await self.db.execute(
-            text("""
-                INSERT INTO thread_reads (user_id, thread_id, last_read_at)
-                VALUES (:uid, :tid, now())
-                ON CONFLICT (user_id, thread_id) DO UPDATE SET last_read_at = now()
-            """),
-            {"uid": user_id, "tid": thread_id},
-        )
-        await self.db.commit()
+        """Mark a thread as read by the current user (no-op, thread_reads removed)."""
+        pass
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""
@@ -484,7 +480,10 @@ class AgentThreadService:
 
         from_addr = thread.delivered_to if thread.delivered_to else None
         email_svc = EmailService(self.db)
-        send_result = await email_svc.send_agent_reply(org_id, thread.contact_email, thread.subject or "", text, from_address=from_addr)
+        send_result = await email_svc.send_agent_reply(
+            org_id, thread.contact_email, thread.subject or "", text,
+            from_address=from_addr, sender_name=user_name,
+        )
         if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send"}
 
@@ -567,6 +566,19 @@ Rules:
                                     a.status = "done"
                                     a.completed_at = now
                                     closed_actions.append({"description": a.description})
+                                    # Notify assignee
+                                    if a.assigned_to:
+                                        from src.models.notification import Notification
+                                        target = await self._find_assignee_user(org_id, a.assigned_to)
+                                        if target:
+                                            self.db.add(Notification(
+                                                organization_id=org_id,
+                                                user_id=target,
+                                                type="job_completed",
+                                                title=f"Job auto-completed: {(a.description or '')[:50]}",
+                                                body="Closed after follow-up email resolved the issue",
+                                                link=f"/jobs?action={a.id}",
+                                            ))
                     await self.db.commit()
         except Exception as e:
             logger.error(f"Thread follow-up job eval failed: {e}")

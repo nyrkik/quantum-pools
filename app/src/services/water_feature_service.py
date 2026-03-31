@@ -64,13 +64,45 @@ class WaterFeatureService:
         # The customer rate is the contract — adding a WF splits it, not adds to it
         new_bow_rate = kwargs.pop("monthly_rate", None)
 
+        wf_id = str(uuid.uuid4())
         wf = WaterFeature(
-            id=str(uuid.uuid4()),
+            id=wf_id,
             organization_id=org_id,
             property_id=property_id,
             **kwargs,
         )
         self.db.add(wf)
+        await self.db.flush()
+
+        # Auto-create related records
+        from src.models.chemical_cost_profile import ChemicalCostProfile
+        self.db.add(ChemicalCostProfile(
+            id=str(uuid.uuid4()),
+            water_feature_id=wf_id,
+            organization_id=org_id,
+        ))
+
+        if kwargs.get("water_type", "pool") == "pool":
+            from src.models.satellite_analysis import SatelliteAnalysis
+            self.db.add(SatelliteAnalysis(
+                id=str(uuid.uuid4()),
+                property_id=property_id,
+                organization_id=org_id,
+                body_of_water_id=wf_id,
+            ))
+
+        # Link unlinked PropertyDifficulty to this WF
+        from src.models.property_difficulty import PropertyDifficulty
+        diff_result = await self.db.execute(
+            select(PropertyDifficulty).where(
+                PropertyDifficulty.property_id == property_id,
+                PropertyDifficulty.water_feature_id.is_(None),
+            )
+        )
+        diff = diff_result.scalar_one_or_none()
+        if diff:
+            diff.water_feature_id = wf_id
+
         await self.db.flush()
         await self.db.refresh(wf)
 

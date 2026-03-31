@@ -93,10 +93,14 @@ class VisitService:
 
     async def complete(self, org_id: str, visit_id: str, **kwargs) -> Visit:
         visit = await self.get(org_id, visit_id)
+        now = datetime.now(timezone.utc)
         visit.status = VisitStatus.completed.value
-        visit.actual_departure = datetime.now(timezone.utc)
+        visit.actual_departure = now
         if not visit.actual_arrival:
-            visit.actual_arrival = visit.actual_departure
+            visit.actual_arrival = now
+        if visit.started_at:
+            delta = now - visit.started_at
+            visit.duration_minutes = int(delta.total_seconds() / 60)
         for key, value in kwargs.items():
             if value is not None:
                 setattr(visit, key, value)

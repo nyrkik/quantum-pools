@@ -17,13 +17,67 @@ class InvoiceService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _next_invoice_number(self, org_id: str) -> str:
-        """Generate next sequential invoice number like QP-0001."""
+    async def _next_seq(self, org_id: str, pattern: str) -> int:
+        """Find the highest sequence number matching pattern and return next."""
+        import re
         result = await self.db.execute(
-            select(func.count(Invoice.id)).where(Invoice.organization_id == org_id)
+            select(Invoice.invoice_number)
+            .where(
+                Invoice.organization_id == org_id,
+                Invoice.invoice_number.like(pattern),
+            )
         )
-        count = (result.scalar() or 0) + 1
-        return f"QP-{count:04d}"
+        max_seq = 0
+        for (num,) in result.all():
+            digits = re.findall(r'\d+', num)
+            if digits:
+                seq = int(digits[-1]) if len(digits) == 1 else int(digits[-1])
+                # For invoices like "26001" extract seq after YY prefix
+                # For estimates like "EST-26001" extract seq after YY prefix
+                raw = num.replace("EST-", "")
+                if raw.isdigit() and len(raw) >= 3:
+                    s = int(raw[2:])  # strip YY, get sequence
+                    max_seq = max(max_seq, s)
+        return max_seq + 1
+
+    async def next_estimate_number(self, org_id: str) -> str:
+        """EST-26001, EST-26002, ..."""
+        from datetime import date as date_type
+        yy = date_type.today().year % 100
+        result = await self.db.execute(
+            select(Invoice.invoice_number)
+            .where(
+                Invoice.organization_id == org_id,
+                Invoice.invoice_number.like(f"EST-{yy}%"),
+            )
+        )
+        max_seq = 0
+        for (num,) in result.all():
+            try:
+                raw = num.replace("EST-", "")
+                max_seq = max(max_seq, int(raw[2:]))
+            except (ValueError, IndexError):
+                pass
+        return f"EST-{yy}{max_seq + 1:03d}"
+
+    async def next_invoice_number(self, org_id: str) -> str:
+        """26001, 26002, ..."""
+        from datetime import date as date_type
+        yy = date_type.today().year % 100
+        result = await self.db.execute(
+            select(Invoice.invoice_number)
+            .where(
+                Invoice.organization_id == org_id,
+                Invoice.invoice_number.op("~")(f"^{yy}\\d+$"),
+            )
+        )
+        max_seq = 0
+        for (num,) in result.all():
+            try:
+                max_seq = max(max_seq, int(num[2:]))
+            except (ValueError, IndexError):
+                pass
+        return f"{yy}{max_seq + 1:03d}"
 
     def _recalculate_totals(self, invoice: Invoice, line_items: list[InvoiceLineItem]) -> None:
         """Recalculate subtotal, tax, total, and balance from line items."""
@@ -47,6 +101,7 @@ class InvoiceService:
         search: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        document_type: Optional[str] = None,
     ) -> tuple[List[Invoice], int]:
         query = (
             select(Invoice)
@@ -54,6 +109,10 @@ class InvoiceService:
             .options(selectinload(Invoice.customer))
         )
         count_query = select(func.count(Invoice.id)).where(Invoice.organization_id == org_id)
+
+        if document_type:
+            query = query.where(Invoice.document_type == document_type)
+            count_query = count_query.where(Invoice.document_type == document_type)
 
         if status:
             query = query.where(Invoice.status == status)
@@ -123,7 +182,11 @@ class InvoiceService:
         if not cust_result.scalar_one_or_none():
             raise NotFoundError("Customer")
 
-        invoice_number = await self._next_invoice_number(org_id)
+        doc_type = kwargs.get("document_type", "invoice")
+        if doc_type == "estimate":
+            invoice_number = await self.next_estimate_number(org_id)
+        else:
+            invoice_number = await self.next_invoice_number(org_id)
 
         invoice = Invoice(
             id=str(uuid.uuid4()),
@@ -138,10 +201,20 @@ class InvoiceService:
         items = []
         for i, item_data in enumerate(line_items_data):
             amount = round(item_data.get("quantity", 1.0) * item_data.get("unit_price", 0.0), 2)
+            # Validate service_id belongs to org if provided
+            sid = item_data.get("service_id")
+            if sid:
+                from src.models.service import Service
+                svc_check = await self.db.execute(
+                    select(Service).where(Service.id == sid, Service.organization_id == org_id)
+                )
+                if not svc_check.scalar_one_or_none():
+                    sid = None
+
             item = InvoiceLineItem(
                 id=str(uuid.uuid4()),
                 invoice_id=invoice.id,
-                service_id=item_data.get("service_id"),
+                service_id=sid,
                 description=item_data["description"],
                 quantity=item_data.get("quantity", 1.0),
                 unit_price=item_data.get("unit_price", 0.0),
@@ -177,10 +250,18 @@ class InvoiceService:
             items = []
             for i, item_data in enumerate(line_items_data):
                 amount = round(item_data.get("quantity", 1.0) * item_data.get("unit_price", 0.0), 2)
+                sid = item_data.get("service_id")
+                if sid:
+                    from src.models.service import Service
+                    svc_check = await self.db.execute(
+                        select(Service).where(Service.id == sid, Service.organization_id == invoice.organization_id)
+                    )
+                    if not svc_check.scalar_one_or_none():
+                        sid = None
                 item = InvoiceLineItem(
                     id=str(uuid.uuid4()),
                     invoice_id=invoice.id,
-                    service_id=item_data.get("service_id"),
+                    service_id=sid,
                     description=item_data["description"],
                     quantity=item_data.get("quantity", 1.0),
                     unit_price=item_data.get("unit_price", 0.0),
@@ -260,10 +341,16 @@ class InvoiceService:
         today = date_type.today()
         first_of_month = today.replace(day=1)
 
+        # Exclude estimates from all financial stats
+        invoices_only = and_(
+            Invoice.organization_id == org_id,
+            Invoice.document_type != "estimate",
+        )
+
         # Outstanding (sent/viewed/overdue)
         outstanding_result = await self.db.execute(
             select(func.coalesce(func.sum(Invoice.balance), 0.0)).where(
-                Invoice.organization_id == org_id,
+                invoices_only,
                 Invoice.status.in_([
                     InvoiceStatus.sent.value,
                     InvoiceStatus.viewed.value,
@@ -276,7 +363,7 @@ class InvoiceService:
         # Overdue
         overdue_result = await self.db.execute(
             select(func.coalesce(func.sum(Invoice.balance), 0.0)).where(
-                Invoice.organization_id == org_id,
+                invoices_only,
                 Invoice.status == InvoiceStatus.overdue.value,
             )
         )
@@ -285,7 +372,7 @@ class InvoiceService:
         # Monthly revenue (paid this month)
         revenue_result = await self.db.execute(
             select(func.coalesce(func.sum(Invoice.total), 0.0)).where(
-                Invoice.organization_id == org_id,
+                invoices_only,
                 Invoice.status == InvoiceStatus.paid.value,
                 Invoice.paid_date >= first_of_month,
             )
@@ -294,13 +381,13 @@ class InvoiceService:
 
         # Counts
         count_result = await self.db.execute(
-            select(func.count(Invoice.id)).where(Invoice.organization_id == org_id)
+            select(func.count(Invoice.id)).where(invoices_only)
         )
         invoice_count = count_result.scalar() or 0
 
         paid_result = await self.db.execute(
             select(func.count(Invoice.id)).where(
-                Invoice.organization_id == org_id,
+                invoices_only,
                 Invoice.status == InvoiceStatus.paid.value,
             )
         )
@@ -308,7 +395,7 @@ class InvoiceService:
 
         overdue_count_result = await self.db.execute(
             select(func.count(Invoice.id)).where(
-                Invoice.organization_id == org_id,
+                invoices_only,
                 Invoice.status == InvoiceStatus.overdue.value,
             )
         )
@@ -344,6 +431,7 @@ class InvoiceService:
                 ), 0.0).label("open"),
             ).where(
                 Invoice.organization_id == org_id,
+                Invoice.document_type != "estimate",
                 extract("year", Invoice.issue_date) == year,
                 Invoice.status != InvoiceStatus.void.value,
             ).group_by(extract("month", Invoice.issue_date))

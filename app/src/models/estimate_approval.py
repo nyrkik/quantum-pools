@@ -20,6 +20,10 @@ class EstimateApproval(Base):
     approved_by_name: Mapped[str] = mapped_column(String(200))
     approved_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
 
+    # Who we sent to (pre-fill signature if known)
+    recipient_name: Mapped[str | None] = mapped_column(String(200))
+    recipient_email: Mapped[str | None] = mapped_column(String(255))
+
     # Client verification (for self-service)
     client_ip: Mapped[str | None] = mapped_column(String(50))
     client_email: Mapped[str | None] = mapped_column(String(255))

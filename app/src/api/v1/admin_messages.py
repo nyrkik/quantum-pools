@@ -228,18 +228,27 @@ async def approve_agent_message(
     if not response_text:
         raise HTTPException(status_code=400, detail="No response text provided")
 
+    sender_name = f"{ctx.user.first_name} {ctx.user.last_name}"
     email_svc = EmailService(db)
-    send_result = await email_svc.send_agent_reply(ctx.organization_id, msg.from_email, msg.subject or "", response_text)
+    send_result = await email_svc.send_agent_reply(
+        ctx.organization_id, msg.from_email, msg.subject or "", response_text,
+        sender_name=sender_name,
+    )
     if not send_result.success:
         raise HTTPException(status_code=500, detail="Failed to send email")
 
     now = datetime.now(timezone.utc)
     msg.status = "sent"
     msg.final_response = response_text
-    msg.approved_by = f"{ctx.user.first_name} {ctx.user.last_name}"
+    msg.approved_by = sender_name
     msg.approved_at = now
     msg.sent_at = now
     await db.commit()
+
+    # Recalculate thread status
+    if msg.thread_id:
+        from src.services.customer_agent import update_thread_status
+        await update_thread_status(msg.thread_id)
 
     # Save discovered contact info to customer record
     from src.services.customer_agent import save_discovered_contact
@@ -419,15 +428,43 @@ async def send_followup(
     if not response_text:
         raise HTTPException(status_code=400, detail="No response text provided")
 
+    sender_name = f"{ctx.user.first_name} {ctx.user.last_name}"
     email_svc = EmailService(db)
-    send_result = await email_svc.send_agent_reply(ctx.organization_id, msg.from_email, msg.subject or "", response_text)
+    from_addr = msg.delivered_to if hasattr(msg, "delivered_to") and msg.delivered_to else None
+    send_result = await email_svc.send_agent_reply(
+        ctx.organization_id, msg.from_email, msg.subject or "", response_text,
+        from_address=from_addr, sender_name=sender_name,
+    )
     if not send_result.success:
         raise HTTPException(status_code=500, detail="Failed to send email")
 
-    # Log as a note on the message
-    msg.notes = (msg.notes or "") + f"\nFollow-up sent by {ctx.user.first_name} {ctx.user.last_name} at {datetime.now(timezone.utc).isoformat()}"
-    msg.notes = msg.notes.strip()
+    # Create outbound message record so the reply appears in the thread
+    now = datetime.now(timezone.utc)
+    subject = msg.subject or ""
+    if subject and not subject.startswith("Re:"):
+        subject = f"Re: {subject}"
+    outbound = AgentMessage(
+        organization_id=ctx.organization_id,
+        direction="outbound",
+        from_email=from_addr or msg.to_email or "",
+        to_email=msg.from_email,
+        subject=subject,
+        body=response_text,
+        status="sent",
+        thread_id=msg.thread_id,
+        matched_customer_id=msg.matched_customer_id,
+        customer_name=msg.customer_name,
+        sent_at=now,
+        received_at=now,
+    )
+    db.add(outbound)
+
     await db.commit()
+
+    # Recalculate thread status via centralized function
+    if msg.thread_id:
+        from src.services.customer_agent import update_thread_status
+        await update_thread_status(msg.thread_id)
 
     # Evaluate if open actions should be closed based on the follow-up content
     import anthropic, os, json as json_mod

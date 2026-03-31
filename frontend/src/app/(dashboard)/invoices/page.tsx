@@ -105,9 +105,11 @@ import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
 
 const OPEN_STATUSES = "draft,sent,viewed,overdue";
 
+type DocView = "invoices" | "estimates";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
 
 export default function InvoicesPage() {
+  const [docView, setDocView] = useState<DocView>("invoices");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<InvoiceStats | null>(null);
@@ -131,43 +133,53 @@ export default function InvoicesPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
+      params.set("document_type", docView === "estimates" ? "estimate" : "invoice");
       if (search) params.set("search", search);
-      // Chart segment overrides tab filter when a month is selected
-      const effectiveFilter = selectedMonth !== null ? chartSegment : activeTab;
-      if (effectiveFilter === "open") {
-        // Backend only supports single status, so fetch all and filter client-side
-      } else if (effectiveFilter === "paid") {
-        params.set("status", "paid");
-      } else if (effectiveFilter !== "all") {
-        params.set("status", effectiveFilter);
+
+      if (docView === "invoices") {
+        // Chart segment overrides tab filter when a month is selected
+        const effectiveFilter = selectedMonth !== null ? chartSegment : activeTab;
+        if (effectiveFilter === "open") {
+          // Backend only supports single status, so fetch all and filter client-side
+        } else if (effectiveFilter === "paid") {
+          params.set("status", "paid");
+        } else if (effectiveFilter !== "all") {
+          params.set("status", effectiveFilter);
+        }
+        if (selectedMonth !== null) {
+          const y = chartYear;
+          const m = selectedMonth;
+          const from = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+          const lastDay = new Date(y, m + 1, 0).getDate();
+          const to = `${y}-${String(m + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+          params.set("date_from", from);
+          params.set("date_to", to);
+        }
       }
-      if (selectedMonth !== null) {
-        const y = chartYear;
-        const m = selectedMonth;
-        const from = `${y}-${String(m + 1).padStart(2, "0")}-01`;
-        const lastDay = new Date(y, m + 1, 0).getDate();
-        const to = `${y}-${String(m + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-        params.set("date_from", from);
-        params.set("date_to", to);
-      }
+
       params.set("limit", "100");
       const data = await api.get<{ items: Invoice[]; total: number }>(
         `/v1/invoices?${params}`
       );
       let items = data.items;
-      if (effectiveFilter === "open") {
-        items = items.filter((inv) =>
-          OPEN_STATUSES.split(",").includes(inv.status)
-        );
+      if (docView === "invoices") {
+        const effectiveFilter = selectedMonth !== null ? chartSegment : activeTab;
+        if (effectiveFilter === "open") {
+          items = items.filter((inv) =>
+            OPEN_STATUSES.split(",").includes(inv.status)
+          );
+        }
+        setTotal(effectiveFilter === "open" ? items.length : data.total);
+      } else {
+        setTotal(data.total);
       }
       setInvoices(items);
-      setTotal(effectiveFilter === "open" ? items.length : data.total);
     } catch {
-      toast.error("Failed to load invoices");
+      toast.error("Failed to load");
     } finally {
       setLoading(false);
     }
-  }, [search, activeTab, selectedMonth, chartYear, chartSegment]);
+  }, [search, activeTab, selectedMonth, chartYear, chartSegment, docView]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -306,14 +318,28 @@ export default function InvoicesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
-          <p className="text-muted-foreground">{total} total invoices</p>
+          <div className="flex items-center gap-1 mb-1">
+            {(["invoices", "estimates"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => { setDocView(v); setSearch(""); setSelectedMonth(null); setChartSegment("all"); setActiveTab("open"); }}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  docView === v
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {v === "invoices" ? "Invoices" : "Estimates"}
+              </button>
+            ))}
+          </div>
+          <p className="text-muted-foreground text-sm">{total} {docView === "estimates" ? "estimates" : "invoices"}</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Create Invoice
+              {docView === "estimates" ? "Create Estimate" : "Create Invoice"}
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -535,8 +561,8 @@ export default function InvoicesPage() {
         </Dialog>
       </div>
 
-      {/* Chart + Summary — PSS-inspired layout */}
-      <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+      {/* Chart + Summary — invoices only */}
+      {docView === "invoices" && <div className="grid gap-4 md:grid-cols-[280px_1fr]">
         {/* Summary Card */}
         {stats && (
           <Card>
@@ -713,10 +739,10 @@ export default function InvoicesPage() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
-      </div>
+      </div>}
 
       {/* Month filter indicator */}
-      {selectedMonth !== null && (
+      {docView === "invoices" && selectedMonth !== null && (
         <div className="flex items-center gap-2 text-sm">
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -743,30 +769,34 @@ export default function InvoicesPage() {
 
       {/* Tab Filters + Search */}
       <div className="flex items-center justify-between">
-        <div className="flex border-b">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {tab.label}
-              {tab.count !== undefined && (
-                <span className="ml-1.5 text-xs text-muted-foreground">
-                  ({tab.count})
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+        {docView === "invoices" ? (
+          <div className="flex border-b">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.key
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.label}
+                {tab.count !== undefined && (
+                  <span className="ml-1.5 text-xs text-muted-foreground">
+                    ({tab.count})
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div />
+        )}
         <div className="flex items-center gap-2">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search invoices..."
+            placeholder={docView === "estimates" ? "Search estimates..." : "Search invoices..."}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-64"
@@ -774,34 +804,34 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      {/* Invoices Table */}
+      {/* Table */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Status</TableHead>
-              <TableHead>Issue Date</TableHead>
-              <TableHead>Invoice #</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>{docView === "estimates" ? "Estimate #" : "Invoice #"}</TableHead>
               <TableHead>Client</TableHead>
               <TableHead>Subject</TableHead>
               <TableHead className="text-right">Total</TableHead>
-              <TableHead className="text-right">Balance</TableHead>
+              {docView === "invoices" && <TableHead className="text-right">Balance</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={docView === "invoices" ? 7 : 6} className="text-center py-8">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : invoices.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={docView === "invoices" ? 7 : 6}
                   className="text-center py-8 text-muted-foreground"
                 >
-                  No invoices found
+                  No {docView === "estimates" ? "estimates" : "invoices"} found
                 </TableCell>
               </TableRow>
             ) : (
@@ -826,11 +856,13 @@ export default function InvoicesPage() {
                   <TableCell className="text-right">
                     ${inv.total.toFixed(2)}
                   </TableCell>
-                  <TableCell
-                    className={`text-right ${inv.balance > 0 ? "text-red-600 font-medium" : ""}`}
-                  >
-                    ${inv.balance.toFixed(2)}
-                  </TableCell>
+                  {docView === "invoices" && (
+                    <TableCell
+                      className={`text-right ${inv.balance > 0 ? "text-red-600 font-medium" : ""}`}
+                    >
+                      ${inv.balance.toFixed(2)}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}

@@ -18,23 +18,46 @@ from src.models.equipment_item import EquipmentItem
 class PropertyPresenter(Presenter):
     """Present Property data with resolved WF and equipment."""
 
+    async def _load_equipment_for_wfs(self, wf_ids: list[str]) -> dict[str, list]:
+        """Batch load equipment for multiple WFs in a single query."""
+        if not wf_ids:
+            return {}
+        eq_result = await self.db.execute(
+            select(EquipmentItem)
+            .options(selectinload(EquipmentItem.catalog_equipment))
+            .where(EquipmentItem.water_feature_id.in_(wf_ids), EquipmentItem.is_active == True)
+        )
+        items = eq_result.scalars().all()
+        by_wf: dict[str, list] = {}
+        for ei in items:
+            by_wf.setdefault(ei.water_feature_id, []).append(ei)
+        return by_wf
+
     async def one(self, prop: Property, water_features: list[WaterFeature] | None = None) -> dict:
         d = self._base(prop)
         wfs = water_features or []
-        d["water_features"] = [await self._wf_summary(wf) for wf in wfs]
+        eq_map = await self._load_equipment_for_wfs([wf.id for wf in wfs])
+        d["water_features"] = [self._wf_summary(wf, eq_map.get(wf.id, [])) for wf in wfs]
         return d
 
     async def many(self, properties: list[Property], wf_map: dict[str, list[WaterFeature]] | None = None) -> list[dict]:
+        all_wfs = []
+        if wf_map:
+            for wfs in wf_map.values():
+                all_wfs.extend(wfs)
+        eq_map = await self._load_equipment_for_wfs([wf.id for wf in all_wfs])
+
         results = []
         for p in properties:
             d = self._base(p)
             wfs = wf_map.get(p.id, []) if wf_map else []
-            d["water_features"] = [await self._wf_summary(wf) for wf in wfs]
+            d["water_features"] = [self._wf_summary(wf, eq_map.get(wf.id, [])) for wf in wfs]
             results.append(d)
         return results
 
-    async def _wf_summary(self, wf: WaterFeature) -> dict:
-        """Full WF summary with equipment from equipment_items table."""
+    @staticmethod
+    def _wf_summary(wf: WaterFeature, items: list) -> dict:
+        """Full WF summary with pre-loaded equipment."""
         d = {
             "id": wf.id,
             "name": wf.name,
@@ -53,13 +76,6 @@ class PropertyPresenter(Presenter):
             "monthly_rate": wf.monthly_rate,
         }
 
-        # Equipment from structured table (source of truth)
-        eq_result = await self.db.execute(
-            select(EquipmentItem)
-            .options(selectinload(EquipmentItem.catalog_equipment))
-            .where(EquipmentItem.water_feature_id == wf.id, EquipmentItem.is_active == True)
-        )
-        items = eq_result.scalars().all()
         d["equipment"] = [EquipmentPresenter._serialize(ei) for ei in items]
 
         # Backward compat: populate legacy flat fields from equipment_items

@@ -113,7 +113,7 @@ async def send_estimate(
     )
     items = items_result.scalars().all()
 
-    # Get customer email
+    # Get customer + estimate contacts
     if not invoice.customer_id:
         raise HTTPException(status_code=400, detail="No customer linked")
 
@@ -121,8 +121,23 @@ async def send_estimate(
         select(Customer).where(Customer.id == invoice.customer_id)
     )
     customer = cust_result.scalar_one_or_none()
-    if not customer or not customer.email:
-        raise HTTPException(status_code=400, detail="Customer has no email address")
+    if not customer:
+        raise HTTPException(status_code=400, detail="Customer not found")
+
+    # Find estimate recipients from contacts
+    from src.models.customer_contact import CustomerContact
+    contacts_result = await db.execute(
+        select(CustomerContact).where(
+            CustomerContact.customer_id == invoice.customer_id,
+            CustomerContact.receives_estimates == True,
+            CustomerContact.email.isnot(None),
+        )
+    )
+    estimate_contacts = contacts_result.scalars().all()
+
+    # Fallback to customer.email if no contacts configured
+    if not body.to_email and not estimate_contacts and not customer.email:
+        raise HTTPException(status_code=400, detail="No email address for this customer")
 
     # Create or reuse approval record with token
     existing_approval = await db.execute(
@@ -158,24 +173,45 @@ async def send_estimate(
     base_url = getattr(settings, "FRONTEND_URL", None) or "https://app.quantumpoolspro.com"
     approve_url = f"{base_url}/approve/{approval.approval_token}"
 
-    # Send email — use override if provided
-    recipient_email = body.to_email or customer.email
-    if not recipient_email:
-        raise HTTPException(status_code=400, detail="No email address for recipient")
+    # Determine recipients and store primary recipient name for signature pre-fill
+    if body.to_email:
+        recipients = [body.to_email]
+        # Look up contact name by email
+        match = next((c for c in estimate_contacts if c.email == body.to_email), None)
+        approval.recipient_name = match.name if match else None
+        approval.recipient_email = body.to_email
+    elif estimate_contacts:
+        recipients = [c.email for c in estimate_contacts]
+        # Use first contact's name for pre-fill
+        approval.recipient_name = estimate_contacts[0].name
+        approval.recipient_email = estimate_contacts[0].email
+    else:
+        recipients = [customer.email]
+        approval.recipient_name = f"{customer.first_name} {customer.last_name}".strip()
+        approval.recipient_email = customer.email
+
     customer_name = f"{customer.first_name} {customer.last_name}".strip()
     email_svc = EmailService(db)
-    result = await email_svc.send_estimate_email(
-        org_id=ctx.organization_id,
-        to=recipient_email,
-        customer_name=customer_name,
-        estimate_number=invoice.invoice_number,
-        subject=f"Estimate: {invoice.subject or 'Service Estimate'}",
-        total=float(invoice.total or 0),
-        view_url=approve_url,
-    )
 
-    if not result.success:
-        raise HTTPException(status_code=500, detail=f"Failed to send: {result.error}")
+    sent_to = []
+    errors = []
+    for recipient in recipients:
+        result = await email_svc.send_estimate_email(
+            org_id=ctx.organization_id,
+            to=recipient,
+            customer_name=customer_name,
+            estimate_number=invoice.invoice_number,
+            subject=f"Estimate: {invoice.subject or 'Service Estimate'}",
+            total=float(invoice.total or 0),
+            view_url=approve_url,
+        )
+        if result.success:
+            sent_to.append(recipient)
+        else:
+            errors.append(f"{recipient}: {result.error}")
+
+    if not sent_to:
+        raise HTTPException(status_code=500, detail=f"Failed to send: {'; '.join(errors)}")
 
     # Update statuses
     from datetime import datetime, timezone
@@ -185,7 +221,7 @@ async def send_estimate(
     action.status = "pending_approval"
     await db.commit()
 
-    return {"sent": True, "to": recipient_email, "approval_token": approval.approval_token}
+    return {"sent": True, "to": sent_to, "approval_token": approval.approval_token}
 
 
 @router.put("/agent-actions/{action_id}")

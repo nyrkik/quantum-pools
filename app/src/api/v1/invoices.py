@@ -26,6 +26,7 @@ def _invoice_to_response(invoice) -> dict:
 async def list_invoices(
     status: Optional[str] = Query(None),
     customer_id: Optional[str] = Query(None),
+    document_type: Optional[str] = Query(None),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     search: Optional[str] = Query(None),
@@ -38,7 +39,7 @@ async def list_invoices(
     invoices, total = await svc.list(
         ctx.organization_id, status=status, customer_id=customer_id,
         date_from=date_from, date_to=date_to, search=search,
-        skip=skip, limit=limit,
+        skip=skip, limit=limit, document_type=document_type,
     )
     results = [_invoice_to_response(inv) for inv in invoices]
     return {"items": results, "total": total}
@@ -287,13 +288,17 @@ async def convert_to_invoice(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Convert an estimate to an invoice."""
+    """Convert an estimate to an invoice. Assigns a new INV-YYYY-NNNN number."""
     svc = InvoiceService(db)
     invoice = await svc.get(ctx.organization_id, invoice_id)
     if invoice.document_type != "estimate":
         from src.core.exceptions import ValidationError
         raise ValidationError("Only estimates can be converted to invoices")
+    if not invoice.approved_at:
+        from src.core.exceptions import ValidationError
+        raise ValidationError("Estimate must be approved before converting to invoice")
     invoice.document_type = "invoice"
+    invoice.invoice_number = await svc.next_invoice_number(ctx.organization_id)
     await db.commit()
     await db.refresh(invoice)
     return _invoice_to_response(invoice)

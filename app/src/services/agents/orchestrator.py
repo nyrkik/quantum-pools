@@ -224,16 +224,9 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 customer_name=thread.customer_name if thread else None,
             )
             db.add(agent_msg)
-            if thread:
-                thread_obj = (await db.execute(
-                    select(AgentThread).where(AgentThread.id == thread.id)
-                )).scalar_one_or_none()
-                if thread_obj:
-                    thread_obj.message_count = (thread_obj.message_count or 0) + 1
-                    thread_obj.last_message_at = datetime.now(timezone.utc)
-                    thread_obj.last_direction = "inbound"
-                    thread_obj.last_snippet = (clean_body or "")[:200]
             await db.commit()
+        if thread:
+            await update_thread_status(thread.id)
         return
 
     # Classify and draft
@@ -707,15 +700,6 @@ async def _process_sent_emails(org_id: str) -> int:
                 )
                 db.add(outbound)
 
-                # Update thread — mark as handled since we replied
-                thread.message_count = (thread.message_count or 0) + 1
-                thread.last_message_at = sent_at
-                thread.last_direction = "outbound"
-                sent_clean = strip_email_signature(strip_quoted_reply(body or ""))
-                thread.last_snippet = sent_clean[:200]
-                thread.status = "handled"
-                thread.has_pending = False
-
                 # Link to open jobs on this thread
                 if thread.id:
                     open_actions = (await db.execute(
@@ -735,6 +719,9 @@ async def _process_sent_emails(org_id: str) -> int:
                         db.add(comment)
 
                 await db.commit()
+
+            # Recalculate thread status via centralized function
+            await update_thread_status(thread.id)
 
             mark_sent_processed(uid)
             logger.info(f"Tracked sent email from {sender_name} to {recipient}: {subject[:50]}")

@@ -42,6 +42,12 @@ class AgentActionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _next_estimate_number(self, org_id: str) -> str:
+        """Generate next EST-YYYY-NNNN number."""
+        from src.services.invoice_service import InvoiceService
+        svc = InvoiceService(self.db)
+        return await svc.next_estimate_number(org_id)
+
     async def _update_task_counts(self, action_id: str):
         """Recalculate denormalized task counts on the job."""
         total = (await self.db.execute(
@@ -399,11 +405,25 @@ JSON only, no markdown."""}],
         assigned_to: str | None = None,
         due_date: str | None = None,
         customer_name: str | None = None,
+        customer_id: str | None = None,
         property_address: str | None = None,
         job_path: str = "internal",
         line_items: list | None = None,
     ) -> dict:
         """Create a new action/job. For customer path, auto-creates a draft estimate."""
+        from src.models.customer import Customer
+
+        # Resolve customer_id from name if not provided
+        if not customer_id and customer_name:
+            cust_result = await self.db.execute(
+                select(Customer).where(Customer.organization_id == org_id).limit(50)
+            )
+            for c in cust_result.scalars().all():
+                full = f"{c.first_name} {c.last_name}".strip()
+                if customer_name.lower() in full.lower() or full.lower() in customer_name.lower():
+                    customer_id = c.id
+                    break
+
         due = datetime.fromisoformat(due_date) if due_date else None
         action = AgentAction(
             organization_id=org_id,
@@ -412,6 +432,7 @@ JSON only, no markdown."""}],
             description=description,
             assigned_to=assigned_to,
             due_date=due,
+            customer_id=customer_id,
             customer_name=customer_name,
             property_address=property_address,
             created_by=created_by,
@@ -425,7 +446,6 @@ JSON only, no markdown."""}],
         if job_path == "customer" and line_items:
             import uuid as _uuid
             from src.models.invoice import Invoice, InvoiceLineItem
-            from src.models.customer import Customer
 
             customer_id = action.customer_id
             if not customer_id and customer_name:
@@ -446,7 +466,7 @@ JSON only, no markdown."""}],
                 id=str(_uuid.uuid4()),
                 organization_id=org_id,
                 customer_id=customer_id,
-                invoice_number=f"EST-{str(_uuid.uuid4())[:8].upper()}",
+                invoice_number=await self._next_estimate_number(org_id),
                 document_type="estimate",
                 subject=description,
                 status="draft",
@@ -543,6 +563,20 @@ JSON only, no markdown."""}],
                 ))
                 await self.db.commit()
 
+        # Notify assignee when job is completed
+        if status == "done" and was_not_done and action.assigned_to:
+            target = await self._find_org_user(org_id, action.assigned_to.split()[0], exclude_user_id=user_id)
+            if target:
+                self.db.add(Notification(
+                    organization_id=org_id,
+                    user_id=target.user_id,
+                    type="job_completed",
+                    title=f"Job completed: {(action.description or '')[:50]}",
+                    body=f"Marked done by {user_first_name}",
+                    link=f"/jobs?action={action.id}",
+                ))
+                await self.db.commit()
+
         # If just marked done, check for equipment changes
         if status == "done" and was_not_done:
             try:
@@ -561,12 +595,16 @@ JSON only, no markdown."""}],
                     follow_due = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
                     suggested = AgentAction(
                         organization_id=org_id,
-                        agent_message_id=rec["agent_message_id"],
+                        agent_message_id=rec.get("agent_message_id"),
+                        thread_id=action.thread_id,
                         action_type=rec["action_type"],
                         description=rec["description"],
                         due_date=follow_due,
                         status="suggested",
                         created_by="DeepBlue",
+                        customer_id=action.customer_id,
+                        customer_name=action.customer_name,
+                        property_address=action.property_address,
                     )
                     self.db.add(suggested)
                     await self.db.commit()

@@ -36,6 +36,7 @@ import { InspectionsTile } from "@/components/customers/tiles/inspections-tile";
 import { CommunicationsTile } from "@/components/customers/tiles/communications-tile";
 import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
 import { VisitsTile } from "@/components/customers/tiles/visits-tile";
+import { ContactsTile } from "@/components/customers/tiles/contacts-tile";
 import type { Customer, Property } from "@/components/customers/customer-types";
 
 type RoleKey = "tech" | "manager" | "admin";
@@ -192,6 +193,14 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
         id: "communications",
         component: <CommunicationsTile customerId={id} customerEmail={customer.email} customerName={displayName} />,
         order: { tech: 4, manager: 4, admin: 4 },
+        column: "right",
+      });
+    }
+    if (perms.canEditCustomers) {
+      all.push({
+        id: "contacts",
+        component: <ContactsTile customerId={id} canEdit={perms.canEditCustomers} />,
+        order: { tech: 99, manager: 5, admin: 5 },
         column: "right",
       });
     }

@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, DateTime, ForeignKey
+from sqlalchemy import String, Float, Integer, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -33,6 +33,13 @@ class OrgCostSettings(Base):
 
     # Parts markup
     default_parts_markup_pct: Mapped[float] = mapped_column(Float, default=25.0)
+
+    # Estimate & invoice terms
+    payment_terms_days: Mapped[int] = mapped_column(Integer, default=30)
+    estimate_validity_days: Mapped[int] = mapped_column(Integer, default=30)
+    late_fee_pct: Mapped[float] = mapped_column(Float, default=1.5)
+    warranty_days: Mapped[int] = mapped_column(Integer, default=30)
+    estimate_terms: Mapped[str | None] = mapped_column(Text)  # custom terms override; null = use defaults
 
     # Billing frequency discounts
     semi_annual_discount_type: Mapped[str] = mapped_column(String(10), default="percent")

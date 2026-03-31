@@ -235,14 +235,50 @@ class EmailService:
     async def send_agent_reply(
         self, org_id: str, to: str, subject: str, body_text: str,
         from_address: str | None = None,
+        sender_name: str | None = None,
+        is_new: bool = False,
     ) -> EmailResult:
-        """Send an agent email reply (plain text, Re: prefix handled by caller).
+        """SINGLE EXIT POINT for all outbound customer-facing email.
 
-        If from_address is provided, it overrides the org's default sender address.
-        This is used when replying from the same address that originally received the email.
+        Every email to a customer — replies, followups, compose, agent drafts —
+        must go through this method. It handles:
+        - Signature: sender first name + org name + org signature block
+        - Subject: adds Re: prefix unless is_new=True
+        - From address: override for multi-address orgs
+
+        Args:
+            org_id: Organization ID
+            to: Recipient email
+            subject: Email subject (Re: prefix added automatically for replies)
+            body_text: Email body (plain text, no signature — we append it)
+            from_address: Override FROM email address
+            sender_name: Human sender name (e.g. "Brian Parrotte") — first name used in signature
+            is_new: If True, don't prepend Re: to subject
         """
-        re_subject = f"Re: {subject}" if subject and not subject.startswith("Re:") else subject
-        msg = EmailMessage(to=to, subject=re_subject, text_body=body_text, from_email=from_address)
+        org = await self._get_org(org_id)
+        org_name = org.name if org else ""
+        org_sig = getattr(org, "agent_signature", None) if org else None
+
+        # Build signature block
+        sig_parts = []
+        if sender_name:
+            first_name = sender_name.split()[0]
+            sig_parts.append(first_name)
+        if org_name:
+            sig_parts.append(org_name)
+        if org_sig:
+            sig_parts.append(org_sig)
+
+        full_body = body_text
+        if sig_parts:
+            full_body = f"{body_text}\n\n--\n" + "\n".join(sig_parts)
+
+        final_subject = subject or ""
+        if not is_new and final_subject and not final_subject.startswith("Re:"):
+            final_subject = f"Re: {final_subject}"
+
+        from_name = f"{sender_name} at {org_name}" if sender_name and org_name else org_name or None
+        msg = EmailMessage(to=to, subject=final_subject, text_body=full_body, from_email=from_address, from_name=from_name)
         return await self.send_email(org_id, msg)
 
 

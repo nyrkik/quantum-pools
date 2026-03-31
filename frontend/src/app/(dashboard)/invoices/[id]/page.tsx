@@ -62,6 +62,7 @@ import {
   MoreHorizontal,
   Ban,
   XCircle,
+  Pencil,
 } from "lucide-react";
 
 interface InvoiceLineItem {
@@ -80,9 +81,10 @@ interface Invoice {
   customer_id: string;
   customer_name: string;
   subject: string | null;
+  document_type: string;
   status: string;
   issue_date: string;
-  due_date: string;
+  due_date: string | null;
   paid_date: string | null;
   subtotal: number;
   discount: number;
@@ -118,20 +120,21 @@ export default function InvoiceDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [payDialogOpen, setPayDialogOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("check");
 
   const fetchData = useCallback(async () => {
     try {
-      const [inv, payData] = await Promise.all([
-        api.get<Invoice>(`/v1/invoices/${id}`),
-        api.get<{ items: Payment[] }>(`/v1/payments?invoice_id=${id}`),
-      ]);
+      const inv = await api.get<Invoice>(`/v1/invoices/${id}`);
       setInvoice(inv);
-      setPayments(payData.items);
+      try {
+        const payData = await api.get<{ items: Payment[] }>(`/v1/payments?invoice_id=${id}`);
+        setPayments(payData.items);
+      } catch { /* payments non-critical */ }
     } catch {
-      toast.error("Failed to load invoice");
+      setNotFound(true);
     }
   }, [id]);
 
@@ -191,12 +194,22 @@ export default function InvoiceDetailPage({
     }
   };
 
+  if (notFound) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <p className="text-muted-foreground">Invoice not found</p>
+        <Button variant="outline" size="sm" onClick={() => router.push("/invoices")}>Back to Invoices</Button>
+      </div>
+    );
+  }
+
   if (!invoice) {
     return (
       <div className="flex items-center justify-center py-20">Loading...</div>
     );
   }
 
+  const canEdit = ["draft", "sent"].includes(invoice.status);
   const canSend = ["draft", "sent"].includes(invoice.status);
   const canPay = ["sent", "overdue"].includes(invoice.status);
   const canVoid = ["draft", "sent", "overdue"].includes(invoice.status);
@@ -208,7 +221,7 @@ export default function InvoiceDetailPage({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <Button variant="ghost" size="sm" onClick={() => router.push(invoice.document_type === "estimate" ? "/invoices?tab=estimates" : "/invoices")}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
@@ -229,6 +242,12 @@ export default function InvoiceDetailPage({
           <InvoiceStatusBadge status={invoice.status} />
         </div>
         <div className="flex items-center gap-2">
+          {canEdit && (
+            <Button variant="outline" size="sm" onClick={() => router.push(`/invoices/new?edit=${id}`)}>
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Edit
+            </Button>
+          )}
           {canSend && (
             <Button variant="outline" size="sm" onClick={handleSend}>
               <Send className="mr-2 h-4 w-4" />

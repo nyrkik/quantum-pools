@@ -46,12 +46,13 @@ interface BillingTerms {
   estimate_validity_days: number;
   late_fee_pct: number;
   warranty_days: number;
+  billable_labor_rate: number;
   estimate_terms: string | null;
 }
 
 function BillingTermsSection() {
   const [terms, setTerms] = useState<BillingTerms | null>(null);
-  const [form, setForm] = useState<BillingTerms>({ payment_terms_days: 30, estimate_validity_days: 30, late_fee_pct: 1.5, warranty_days: 30, estimate_terms: null });
+  const [form, setForm] = useState<BillingTerms>({ payment_terms_days: 30, estimate_validity_days: 30, late_fee_pct: 1.5, warranty_days: 30, billable_labor_rate: 125, estimate_terms: null });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -71,6 +72,7 @@ function BillingTermsSection() {
     form.estimate_validity_days !== terms.estimate_validity_days ||
     form.late_fee_pct !== terms.late_fee_pct ||
     form.warranty_days !== terms.warranty_days ||
+    form.billable_labor_rate !== terms.billable_labor_rate ||
     (form.estimate_terms || "") !== (terms.estimate_terms || "")
   );
 
@@ -150,6 +152,21 @@ function BillingTermsSection() {
                   min={0}
                 />
                 <span className="text-sm text-muted-foreground">days</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Billable Labor Rate</Label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  value={form.billable_labor_rate}
+                  onChange={(e) => setForm({ ...form, billable_labor_rate: parseFloat(e.target.value) || 0 })}
+                  className="w-20 h-8 text-sm"
+                  min={0}
+                  step="5"
+                />
+                <span className="text-sm text-muted-foreground">/ hour</span>
               </div>
             </div>
           </div>

@@ -842,6 +842,14 @@ Keep the description concise and actionable."""
             who = "Client" if m.direction == "inbound" else "Us"
             convo += f"\n[{who}]: {(m.body or '')[:300]}"
 
+        # Get org billing rate
+        from src.models.org_cost_settings import OrgCostSettings
+        settings_result = await self.db.execute(
+            select(OrgCostSettings).where(OrgCostSettings.organization_id == org_id)
+        )
+        settings = settings_result.scalar_one_or_none()
+        labor_rate = settings.billable_labor_rate if settings and hasattr(settings, "billable_labor_rate") else 125.0
+
         prompt = f"""You are a pool service estimator. Read this conversation and create estimate line items.
 
 Conversation with {thread.customer_name or thread.contact_email}:
@@ -849,7 +857,8 @@ Subject: {thread.subject}
 {convo}
 
 Create line items for an estimate. Include labor, parts, and materials as separate line items.
-Use realistic pool service pricing.
+Labor rate: ${labor_rate:.2f}/hour. Use this exact rate for all labor line items.
+Parts pricing: use realistic market prices for pool equipment and parts.
 
 Respond with JSON:
 {{"subject": "short estimate title", "line_items": [{{"description": "what", "quantity": 1, "unit_price": 100.00}}]}}

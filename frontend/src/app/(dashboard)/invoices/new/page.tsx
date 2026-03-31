@@ -22,9 +22,10 @@ function plus30() {
 interface InvoiceResponse {
   id: string;
   customer_id: string;
+  document_type: string;
   subject: string | null;
   issue_date: string;
-  due_date: string;
+  due_date: string | null;
   tax_rate: number;
   discount: number;
   notes: string | null;
@@ -82,8 +83,9 @@ function NewInvoiceForm() {
       const inv = await api.get<InvoiceResponse>(`/v1/invoices/${editId}`);
       setCustomerId(inv.customer_id);
       setSubject(inv.subject || "");
-      setIssueDate(inv.issue_date);
-      setDueDate(inv.due_date);
+      setIssueDate(inv.issue_date || today());
+      setDueDate(inv.due_date || "");
+      if (inv.document_type) setDocType(inv.document_type as "estimate" | "invoice");
       setTaxRate(inv.tax_rate || 0);
       setDiscount(inv.discount || 0);
       setNotes(inv.notes || "");
@@ -168,7 +170,7 @@ function NewInvoiceForm() {
         document_type: docType,
         subject: subject || undefined,
         issue_date: issueDate,
-        due_date: dueDate,
+        due_date: dueDate || null,
         tax_rate: taxRate,
         discount,
         notes: notes || undefined,

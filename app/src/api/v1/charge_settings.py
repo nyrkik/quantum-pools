@@ -26,6 +26,7 @@ class BillingTermsUpdate(BaseModel):
     estimate_validity_days: Optional[int] = None
     late_fee_pct: Optional[float] = None
     warranty_days: Optional[int] = None
+    billable_labor_rate: Optional[float] = None
     estimate_terms: Optional[str] = None
 
 
@@ -68,6 +69,7 @@ async def get_billing_terms(
         "estimate_validity_days": settings.estimate_validity_days if settings else 30,
         "late_fee_pct": settings.late_fee_pct if settings else 1.5,
         "warranty_days": settings.warranty_days if settings else 30,
+        "billable_labor_rate": settings.billable_labor_rate if settings and hasattr(settings, "billable_labor_rate") else 125.0,
         "estimate_terms": settings.estimate_terms if settings else None,
     }
 
@@ -98,5 +100,6 @@ async def update_billing_terms(
         "estimate_validity_days": settings.estimate_validity_days,
         "late_fee_pct": settings.late_fee_pct,
         "warranty_days": settings.warranty_days,
+        "billable_labor_rate": settings.billable_labor_rate if hasattr(settings, "billable_labor_rate") else 125.0,
         "estimate_terms": settings.estimate_terms,
     }

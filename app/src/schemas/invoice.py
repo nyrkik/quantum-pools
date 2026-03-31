@@ -34,7 +34,7 @@ class InvoiceCreate(BaseModel):
     document_type: str = "invoice"  # estimate, invoice
     subject: Optional[str] = None
     issue_date: date
-    due_date: date
+    due_date: Optional[date] = None
     discount: float = 0.0
     tax_rate: float = 0.0
     is_recurring: bool = False

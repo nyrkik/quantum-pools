@@ -105,7 +105,8 @@ type DocView = "invoices" | "estimates";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
 
 export default function InvoicesPage() {
-  const [docView, setDocView] = useState<DocView>("invoices");
+  const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const [docView, setDocView] = useState<DocView>(urlParams?.get("tab") === "estimates" ? "estimates" : "invoices");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<InvoiceStats | null>(null);

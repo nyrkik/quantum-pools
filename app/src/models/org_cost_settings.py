@@ -16,6 +16,7 @@ class OrgCostSettings(Base):
     )
 
     burdened_labor_rate: Mapped[float] = mapped_column(Float, default=35.0)
+    billable_labor_rate: Mapped[float] = mapped_column(Float, default=125.0)
     vehicle_cost_per_mile: Mapped[float] = mapped_column(Float, default=0.655)
     chemical_cost_per_gallon: Mapped[float] = mapped_column(Float, default=3.50)
     monthly_overhead: Mapped[float] = mapped_column(Float, default=2000.0)

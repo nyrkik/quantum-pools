@@ -3,6 +3,7 @@
 from sqlalchemy import select, func
 from src.presenters.base import Presenter
 from src.models.internal_message import InternalThread, InternalMessage
+from src.models.message_attachment import MessageAttachment
 from src.models.user import User
 
 
@@ -18,6 +19,19 @@ class MessagePresenter(Presenter):
         user_names = await self._load_user_names(all_user_ids)
         customers = await self._load_customers({t.customer_id for t in threads if t.customer_id})
 
+        # Batch load read states
+        from src.models.thread_read import ThreadRead
+        thread_ids = [t.id for t in threads]
+        read_map: dict[str, "datetime"] = {}
+        if thread_ids:
+            reads = (await self.db.execute(
+                select(ThreadRead.thread_id, ThreadRead.read_at).where(
+                    ThreadRead.user_id == user_id,
+                    ThreadRead.thread_id.in_(thread_ids),
+                )
+            )).all()
+            read_map = {r.thread_id: r.read_at for r in reads}
+
         results = []
         for t in threads:
             # Get last message preview
@@ -30,6 +44,14 @@ class MessagePresenter(Presenter):
             other_names = [user_names.get(uid, "Unknown") for uid in other_ids]
             cust = customers.get(t.customer_id) if t.customer_id else None
 
+            # Unread: last message not from me AND (never read OR read before last message)
+            if t.last_message_by == user_id:
+                is_unread = False
+            elif t.id in read_map:
+                is_unread = t.last_message_at > read_map[t.id] if t.last_message_at else False
+            else:
+                is_unread = t.last_message_by is not None
+
             results.append({
                 "id": t.id,
                 "participants": other_names,
@@ -39,13 +61,11 @@ class MessagePresenter(Presenter):
                 "customer_id": t.customer_id,
                 "action_id": t.action_id,
                 "priority": t.priority,
-                "status": t.status,
+                "is_unread": is_unread,
                 "message_count": t.message_count,
                 "last_message": last_msg.text[:100] if last_msg else None,
                 "last_message_by": user_names.get(t.last_message_by, "") if t.last_message_by else None,
                 "last_message_at": self._iso(t.last_message_at),
-                "acknowledged_at": self._iso(t.acknowledged_at),
-                "completed_at": self._iso(t.completed_at),
                 "converted_to_action_id": t.converted_to_action_id,
                 "created_at": self._iso(t.created_at),
             })
@@ -66,6 +86,10 @@ class MessagePresenter(Presenter):
         customers = await self._load_customers({thread.customer_id} if thread.customer_id else set())
         cust = customers.get(thread.customer_id) if thread.customer_id else None
 
+        # Load attachments for all messages in one query
+        msg_ids = [m.id for m in messages]
+        attachments_by_msg = await self._load_attachments("internal_message", msg_ids)
+
         return {
             "id": thread.id,
             "participant_ids": thread.participant_ids,
@@ -75,9 +99,6 @@ class MessagePresenter(Presenter):
             "customer_id": thread.customer_id,
             "action_id": thread.action_id,
             "priority": thread.priority,
-            "status": thread.status,
-            "acknowledged_at": self._iso(thread.acknowledged_at),
-            "completed_at": self._iso(thread.completed_at),
             "converted_to_action_id": thread.converted_to_action_id,
             "created_at": self._iso(thread.created_at),
             "messages": [
@@ -86,6 +107,7 @@ class MessagePresenter(Presenter):
                     "from_user_id": m.from_user_id,
                     "from_name": user_names.get(m.from_user_id, "Unknown"),
                     "text": m.text,
+                    "attachments": self._format_attachments(attachments_by_msg.get(m.id, [])),
                     "created_at": self._iso(m.created_at),
                 }
                 for m in messages
@@ -99,3 +121,30 @@ class MessagePresenter(Presenter):
             select(User).where(User.id.in_(list(ids)))
         )
         return {u.id: f"{u.first_name} {u.last_name}".strip() for u in result.scalars().all()}
+
+    async def _load_attachments(self, source_type: str, source_ids: list[str]) -> dict[str, list]:
+        if not source_ids:
+            return {}
+        result = await self.db.execute(
+            select(MessageAttachment).where(
+                MessageAttachment.source_type == source_type,
+                MessageAttachment.source_id.in_(source_ids),
+            )
+        )
+        by_msg: dict[str, list] = {}
+        for a in result.scalars().all():
+            by_msg.setdefault(a.source_id, []).append(a)
+        return by_msg
+
+    @staticmethod
+    def _format_attachments(attachments: list) -> list[dict]:
+        return [
+            {
+                "id": a.id,
+                "filename": a.filename,
+                "url": f"/uploads/attachments/{a.organization_id}/{a.stored_filename}",
+                "mime_type": a.mime_type,
+                "file_size": a.file_size,
+            }
+            for a in attachments
+        ]

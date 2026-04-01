@@ -58,6 +58,7 @@ async def create_agent_action(
         agent_message_id=body.agent_message_id,
         assigned_to=body.assigned_to,
         due_date=body.due_date,
+        customer_id=body.customer_id,
         customer_name=body.customer_name,
         property_address=body.property_address,
         job_path=body.job_path,

@@ -806,36 +806,40 @@ JSON only, no markdown."""}],
                 for c in action.comments:
                     all_actions_text += f"\n  {c.author}: {c.text}"
 
-        prompt = f"""Generate invoice line items for a pool service company based on this context.
+        # Get org billing rate
+        from src.models.org_cost_settings import OrgCostSettings
+        settings_result = await self.db.execute(
+            select(OrgCostSettings).where(OrgCostSettings.organization_id == org_id)
+        )
+        settings = settings_result.scalar_one_or_none()
+        labor_rate = settings.billable_labor_rate if settings and hasattr(settings, "billable_labor_rate") else 125.0
+
+        prompt = f"""You are a pool service estimator. Generate estimate/invoice line items from this job context.
 
 Customer: {customer_name}
 {f"Original email subject: {msg.subject}" if msg else f"Job: {action.action_type} — {action.description}"}
 
 Action item: {action.action_type} — {action.description}
 
-All action items and comments for this event:{all_actions_text}
+All action items and comments:{all_actions_text}
 
-Based on the work described, generate invoice line items. Extract specific services, parts, and costs from the comments and descriptions.
+Labor rate: ${labor_rate:.2f}/hour. Use this exact rate for all labor line items.
 
-Respond with JSON:
+Respond with JSON only:
 {{
-  "subject": "Brief invoice subject (e.g., 'Pool Valve Repair - Pinebrook Village')",
+  "subject": "Short title (e.g., 'Pool Valve Repair - Pinebrook Village')",
   "line_items": [
-    {{
-      "description": "what was done or provided",
-      "quantity": 1,
-      "unit_price": 0.00
-    }}
+    {{"description": "what was done or provided", "quantity": 1, "unit_price": 100.00}}
   ],
-  "notes": "any notes for the invoice"
+  "notes": ""
 }}
 
 Rules:
-- Extract actual dollar amounts mentioned in comments if available
-- If no price was mentioned, use unit_price: 0 and note "Price TBD" in description
-- Separate labor from parts/materials if both mentioned
-- Keep descriptions clear and professional
-- Include a subject line suitable for the invoice header"""
+- Every line item MUST have a real price. Extract from comments if mentioned, otherwise use realistic market prices. NEVER use $0 or "Price TBD".
+- Separate labor from parts/materials if both are mentioned.
+- Descriptions: professional, specific to the work. No addresses, no customer names, no internal status info.
+- Subject: short description of the work. No pricing language, no "TBD", no dollar amounts.
+- Notes: ONLY include notes if there is genuinely useful information for the customer (e.g., warranty terms, scheduling constraints). If there is nothing useful, use an empty string. NEVER include internal status, placeholder text, "awaiting assessment", "customer name pending", or any speculative language. When in doubt, leave notes empty."""
 
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)

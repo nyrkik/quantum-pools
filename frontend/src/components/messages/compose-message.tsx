@@ -11,6 +11,7 @@ import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody, Over
 import { toast } from "sonner";
 import { Loader2, X } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
+import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 
 interface ComposeMessageProps {
   open: boolean;
@@ -29,6 +30,7 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
   const [sending, setSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
 
   const reset = () => {
     setSelectedUsers([]);
@@ -36,6 +38,7 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
     setSubject("");
     setPriority("normal");
     setSearchQuery("");
+    setAttachments([]);
   };
 
   const addUser = (userId: string, name: string) => {
@@ -67,6 +70,7 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
         priority,
         customer_id: defaultCustomerId || null,
         action_id: defaultActionId || null,
+        attachment_ids: attachments.length ? attachments.map((a) => a.id) : undefined,
       });
       toast.success("Message sent");
       reset();
@@ -158,6 +162,12 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
               Urgent
             </button>
           </div>
+
+          <AttachmentPicker
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            sourceType="internal_message"
+          />
         </OverlayBody>
         <OverlayFooter>
           <Button className="flex-1" onClick={handleSend} disabled={selectedUsers.length === 0 || !message.trim() || sending}>

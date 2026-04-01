@@ -73,6 +73,7 @@ from src.models.customer_contact import CustomerContact
 from src.models.agent_correction import AgentCorrection
 from src.models.thread_read import ThreadRead
 from src.models.job_invoice import JobInvoice
+from src.models.message_attachment import MessageAttachment
 
 __all__ = [
     "Base",

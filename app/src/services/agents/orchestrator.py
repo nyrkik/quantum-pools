@@ -200,12 +200,30 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 thread_context += "\nDo NOT create duplicate action items. Only add new actions if this email introduces genuinely new work."
                 existing_action_descriptions = await _get_thread_open_actions(thread.id)
 
+    # --- Pre-check: is this sender a known customer? ---
+    # If yes, NEVER auto-ignore — always require human review.
+    sender_is_customer = bool(thread and thread.matched_customer_id)
+    if not sender_is_customer:
+        # Quick check: does this email match a customer directly?
+        pre_match = await match_customer(from_email, subject, body[:500], from_header)
+        if pre_match and pre_match.get("customer_id"):
+            sender_is_customer = True
+            # Update thread with customer info now so it's available downstream
+            if thread:
+                async with get_db_context() as db:
+                    t = (await db.execute(select(AgentThread).where(AgentThread.id == thread.id))).scalar_one_or_none()
+                    if t and not t.matched_customer_id:
+                        t.matched_customer_id = pre_match["customer_id"]
+                        t.customer_name = pre_match.get("customer_name")
+                        t.property_address = pre_match.get("property_address")
+                        await db.commit()
+
     # --- AI triage: does this email need a response? ---
     from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
     clean_body = strip_email_signature(strip_quoted_reply(body)) if body else ""
 
     needs_response = await _ai_triage(clean_body, subject, from_email)
-    if not needs_response:
+    if not needs_response and not sender_is_customer:
         logger.info(f"AI triage: no response needed — {subject[:50]}")
         async with get_db_context() as db:
             agent_msg = AgentMessage(
@@ -228,34 +246,43 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         if thread:
             await update_thread_status(thread.id)
         return
+    elif not needs_response and sender_is_customer:
+        logger.info(f"AI triage said no response, but sender is a customer — proceeding with classification: {subject[:50]}")
 
     # Classify and draft
     result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
 
     category = result.get("category", "general")
     if category in ("spam", "auto_reply", "no_response", "thank_you"):
-        logger.info(f"Skipping {category}: {subject}")
-        async with get_db_context() as db:
-            agent_msg = AgentMessage(
-                organization_id=organization_id,
-                email_uid=uid,
-                direction="inbound",
-                from_email=from_email,
-                to_email=to_header,
-                subject=subject,
-                body=body[:5000],
-                category=category,
-                urgency="low",
-                status="ignored",
-                customer_name=result.get("customer_name"),
-                received_at=email_date,
-                thread_id=thread.id,
-                delivered_to=delivered_to_addr,
-            )
-            db.add(agent_msg)
-            await db.commit()
-        await update_thread_status(thread.id)
-        return
+        if sender_is_customer and category not in ("spam", "auto_reply"):
+            # Customer emails are NEVER auto-ignored — override to pending
+            logger.info(f"Customer email classified as {category}, overriding to pending: {subject[:50]}")
+            category = "general"
+            result["category"] = "general"
+            result["needs_approval"] = True
+        else:
+            logger.info(f"Skipping {category}: {subject}")
+            async with get_db_context() as db:
+                agent_msg = AgentMessage(
+                    organization_id=organization_id,
+                    email_uid=uid,
+                    direction="inbound",
+                    from_email=from_email,
+                    to_email=to_header,
+                    subject=subject,
+                    body=body[:5000],
+                    category=category,
+                    urgency="low",
+                    status="ignored",
+                    customer_name=result.get("customer_name"),
+                    received_at=email_date,
+                    thread_id=thread.id,
+                    delivered_to=delivered_to_addr,
+                )
+                db.add(agent_msg)
+                await db.commit()
+            await update_thread_status(thread.id)
+            return
 
     # Save to DB
     async with get_db_context() as db:
@@ -401,6 +428,89 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
 
     # Update thread status
     await update_thread_status(thread.id)
+
+    # Post-processing: verify customer match integrity
+    await _verify_customer_match(organization_id, from_email, thread.id)
+
+
+async def _verify_customer_match(org_id: str, from_email: str, thread_id: str):
+    """Post-processing check: if sender should match a customer but didn't, alert admins."""
+    try:
+        from sqlalchemy import func
+        from src.models.customer_contact import CustomerContact
+        from src.models.notification import Notification
+        from src.models.organization_user import OrganizationUser
+
+        async with get_db_context() as db:
+            thread = (await db.execute(
+                select(AgentThread).where(AgentThread.id == thread_id)
+            )).scalar_one_or_none()
+            if not thread or thread.matched_customer_id:
+                return  # Already matched, nothing to check
+
+            # Check if this email exists in customers table
+            cust = (await db.execute(
+                select(Customer).where(
+                    func.lower(Customer.email) == from_email.lower(),
+                    Customer.is_active == True,
+                )
+            )).scalar_one_or_none()
+
+            # Check customer contacts too
+            if not cust:
+                contact = (await db.execute(
+                    select(CustomerContact).where(
+                        func.lower(CustomerContact.email) == from_email.lower(),
+                    )
+                )).scalar_one_or_none()
+                if contact:
+                    cust = (await db.execute(
+                        select(Customer).where(Customer.id == contact.customer_id, Customer.is_active == True)
+                    )).scalar_one_or_none()
+
+            if not cust:
+                return  # Not a known customer email, nothing to alert about
+
+            # Customer exists but wasn't matched — this is a problem. Fix it and alert.
+            logger.warning(f"Customer match missed: {from_email} should be {cust.display_name} ({cust.id})")
+
+            # Auto-fix the thread
+            thread.matched_customer_id = cust.id
+            thread.customer_name = cust.display_name
+
+            # Also fix the latest message
+            latest_msg = (await db.execute(
+                select(AgentMessage).where(
+                    AgentMessage.thread_id == thread_id,
+                    AgentMessage.direction == "inbound",
+                ).order_by(AgentMessage.received_at.desc()).limit(1)
+            )).scalar_one_or_none()
+            if latest_msg and not latest_msg.matched_customer_id:
+                latest_msg.matched_customer_id = cust.id
+                latest_msg.customer_name = cust.display_name
+                latest_msg.match_method = "post_verify"
+
+            # Alert admins
+            admins = (await db.execute(
+                select(OrganizationUser).where(
+                    OrganizationUser.organization_id == org_id,
+                    OrganizationUser.role.in_(("owner", "admin")),
+                )
+            )).scalars().all()
+            for ou in admins:
+                db.add(Notification(
+                    organization_id=org_id,
+                    user_id=ou.user_id,
+                    type="system_alert",
+                    title=f"Customer match recovered: {cust.display_name}",
+                    body=f"Email from {from_email} wasn't automatically matched. Auto-fixed.",
+                    link="/inbox",
+                ))
+
+            await db.commit()
+
+    except Exception as e:
+        logger.error(f"Customer match verification failed: {e}")
 
 
 async def handle_sms_reply(from_number: str, body: str):

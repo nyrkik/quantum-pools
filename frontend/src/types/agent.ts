@@ -123,6 +123,7 @@ export interface TimelineMessage {
   received_at: string | null;
   sent_at: string | null;
   approved_by: string | null;
+  attachments?: { id: string; filename: string; url: string; mime_type: string; file_size: number }[];
 }
 
 export interface ThreadDetail {

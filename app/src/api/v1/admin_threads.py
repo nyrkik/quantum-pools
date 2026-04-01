@@ -106,6 +106,7 @@ async def approve_thread(
         thread_id=thread_id,
         response_text=body.response_text,
         user_name=f"{ctx.user.first_name} {ctx.user.last_name}",
+        attachment_ids=body.attachment_ids,
     )
     if "error" in result:
         code = {"no_pending": 400, "no_text": 400, "send_failed": 500}[result["error"]]
@@ -214,6 +215,7 @@ async def send_thread_followup(
         thread_id=thread_id,
         text=body.response_text or "",
         user_name=f"{ctx.user.first_name} {ctx.user.last_name}",
+        attachment_ids=body.attachment_ids,
     )
     if "error" in result:
         code = {"not_found": 404, "no_text": 400, "send_failed": 500}[result["error"]]

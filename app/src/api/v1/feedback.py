@@ -36,6 +36,8 @@ class FeedbackUpdate(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     resolution_notes: Optional[str] = None
+    notify_user: Optional[bool] = None  # True = notify, False = dismiss without notifying, None = no action
+    user_message: Optional[str] = None
 
 
 @router.post("", status_code=201)
@@ -66,11 +68,21 @@ async def create_feedback(
             (save_dir / filename).write_bytes(data)
             screenshot_urls.append(f"/uploads/feedback/{feedback_id}/{filename}")
 
+    # Assign sequential feedback number
+    from sqlalchemy import func as sqlfunc
+    max_num = (await db.execute(
+        select(sqlfunc.max(FeedbackItem.feedback_number)).where(
+            FeedbackItem.organization_id == ctx.organization_id,
+        )
+    )).scalar() or 0
+    fb_number = max_num + 1
+
     item = FeedbackItem(
         id=feedback_id,
         organization_id=ctx.organization_id,
         user_id=ctx.user.id,
         user_name=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),
+        feedback_number=fb_number,
         feedback_type=feedback_type,
         title=title,
         description=description,
@@ -80,13 +92,51 @@ async def create_feedback(
         status="new",
     )
     db.add(item)
+
+    # Notify devs
+    from src.models.organization_user import OrganizationUser
+    from src.models.notification import Notification
+    devs = (await db.execute(
+        select(OrganizationUser).where(
+            OrganizationUser.organization_id == ctx.organization_id,
+            OrganizationUser.is_developer == True,
+            OrganizationUser.user_id != ctx.user.id,
+        )
+    )).scalars().all()
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    for ou in devs:
+        db.add(Notification(
+            organization_id=ctx.organization_id,
+            user_id=ou.user_id,
+            type="feedback_submitted",
+            title=f"FB-{fb_number:03d} from {user_name}: {title[:70]}",
+            body=f"[{feedback_type}] {description[:120] if description else ''}\nResolution notes required when closing.",
+            link="/feedback",
+        ))
+
     await db.commit()
     await db.refresh(item)
 
     # AI triage in background
     asyncio.create_task(_ai_triage(feedback_id, ctx.organization_id))
 
-    return {"id": item.id, "status": "new"}
+    return {"id": item.id, "feedback_number": fb_number, "status": "new"}
+
+
+@router.get("/stats")
+async def feedback_stats(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Open feedback count for sidebar badge."""
+    from sqlalchemy import func as sqlfunc
+    count = (await db.execute(
+        select(sqlfunc.count(FeedbackItem.id)).where(
+            FeedbackItem.organization_id == ctx.organization_id,
+            FeedbackItem.status.in_(("new", "triaged", "in_progress")),
+        )
+    )).scalar() or 0
+    return {"open": count}
 
 
 @router.get("")
@@ -149,6 +199,8 @@ async def update_feedback(
     if body.status is not None:
         item.status = body.status
         if body.status == "resolved":
+            if not body.resolution_notes and not item.resolution_notes:
+                raise HTTPException(status_code=400, detail="Resolution notes required when resolving feedback")
             from datetime import datetime, timezone
             item.resolved_at = datetime.now(timezone.utc)
             item.resolved_by = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
@@ -156,6 +208,21 @@ async def update_feedback(
         item.priority = body.priority
     if body.resolution_notes is not None:
         item.resolution_notes = body.resolution_notes
+
+    # Handle notify decision (only when explicitly set, and only once)
+    if body.notify_user is not None and not item.user_notified:
+        if body.notify_user and item.user_id:
+            from src.models.notification import Notification
+            fb_label = f"FB-{item.feedback_number:03d}" if item.feedback_number else "Your feedback"
+            db.add(Notification(
+                organization_id=item.organization_id,
+                user_id=item.user_id,
+                type="feedback_resolved",
+                title=f"{fb_label} resolved: {item.title[:80]}",
+                body=f"Your {item.feedback_type} report has been addressed.",
+                link="/feedback",
+            ))
+        item.user_notified = True
 
     await db.commit()
     return _to_dict(item)
@@ -262,6 +329,7 @@ JSON only."""
 def _to_dict(f: FeedbackItem) -> dict:
     return {
         "id": f.id,
+        "feedback_number": f.feedback_number,
         "user_name": f.user_name,
         "feedback_type": f.feedback_type,
         "title": f.title,
@@ -275,5 +343,6 @@ def _to_dict(f: FeedbackItem) -> dict:
         "resolved_by": f.resolved_by,
         "resolved_at": f.resolved_at.isoformat() if f.resolved_at else None,
         "resolution_notes": f.resolution_notes,
+        "user_notified": f.user_notified,
         "created_at": f.created_at.isoformat() if f.created_at else None,
     }

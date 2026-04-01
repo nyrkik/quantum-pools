@@ -8,7 +8,7 @@ import { X } from "lucide-react";
 interface ClientPropertySearchProps {
   customerName: string;
   propertyAddress: string;
-  onChange: (name: string, address: string) => void;
+  onChange: (name: string, address: string, customerId?: string) => void;
 }
 
 export function ClientPropertySearch({
@@ -19,6 +19,7 @@ export function ClientPropertySearch({
   const [query, setQuery] = useState(customerName);
   const [results, setResults] = useState<
     {
+      customer_id: string;
       customer_name: string;
       property_address: string;
       property_name: string | null;
@@ -35,6 +36,7 @@ export function ClientPropertySearch({
       try {
         const data = await api.get<
           {
+            customer_id: string;
             customer_name: string;
             property_address: string;
             property_name: string | null;
@@ -89,7 +91,7 @@ export function ClientPropertySearch({
                   className="w-full px-3 py-2 text-left hover:bg-muted/50 text-sm"
                   onClick={() => {
                     setQuery(r.customer_name);
-                    onChange(r.customer_name, r.property_address);
+                    onChange(r.customer_name, r.property_address, r.customer_id);
                     setShowResults(false);
                     setManualAddress(false);
                   }}

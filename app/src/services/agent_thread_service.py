@@ -12,10 +12,13 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from pathlib import Path
+
 from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_message import AgentMessage
 from src.models.agent_thread import AgentThread
 from src.models.customer import Customer
+from src.models.message_attachment import MessageAttachment
 from src.models.notification import Notification
 from src.models.property import Property
 from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
@@ -31,7 +34,31 @@ from src.presenters.action_presenter import ActionPresenter
 from src.presenters.thread_presenter import ThreadPresenter
 
 
+UPLOAD_ROOT = Path(os.environ.get("UPLOAD_DIR", "./uploads"))
+
+
 class AgentThreadService:
+    async def _load_email_attachments(self, org_id: str, attachment_ids: list[str]) -> tuple[list[dict], list[MessageAttachment]]:
+        """Load attachment files from disk for email sending. Returns (email_dicts, db_rows)."""
+        rows = (await self.db.execute(
+            select(MessageAttachment).where(
+                MessageAttachment.id.in_(attachment_ids[:5]),
+                MessageAttachment.organization_id == org_id,
+                MessageAttachment.source_type == "agent_message",
+                MessageAttachment.source_id.is_(None),
+            )
+        )).scalars().all()
+        email_atts = []
+        for a in rows:
+            fpath = UPLOAD_ROOT / "attachments" / a.organization_id / a.stored_filename
+            if fpath.exists():
+                email_atts.append({
+                    "filename": a.filename,
+                    "content_bytes": fpath.read_bytes(),
+                    "mime_type": a.mime_type,
+                })
+        return email_atts, list(rows)
+
     async def _find_assignee_user(self, org_id: str, assigned_to_name: str) -> str | None:
         """Find user_id from assigned_to name string."""
         from src.models.organization_user import OrganizationUser
@@ -71,6 +98,7 @@ class AgentThreadService:
         )
         return [
             {
+                "customer_id": cust.id,
                 "customer_name": cust.display_name,
                 "property_address": prop.full_address,
                 "property_name": prop.name,
@@ -252,6 +280,25 @@ class AgentThreadService:
         )
         messages = msgs_result.scalars().all()
 
+        # Load attachments for all messages in one query
+        msg_ids = [m.id for m in messages]
+        atts_by_msg: dict[str, list] = {}
+        if msg_ids:
+            att_result = await self.db.execute(
+                select(MessageAttachment).where(
+                    MessageAttachment.source_type == "agent_message",
+                    MessageAttachment.source_id.in_(msg_ids),
+                )
+            )
+            for a in att_result.scalars().all():
+                atts_by_msg.setdefault(a.source_id, []).append({
+                    "id": a.id,
+                    "filename": a.filename,
+                    "url": f"/uploads/attachments/{a.organization_id}/{a.stored_filename}",
+                    "mime_type": a.mime_type,
+                    "file_size": a.file_size,
+                })
+
         # Build conversation timeline
         timeline = []
         for m in messages:
@@ -270,6 +317,7 @@ class AgentThreadService:
                 "received_at": m.received_at.isoformat() if m.received_at else None,
                 "sent_at": m.sent_at.isoformat() if m.sent_at else None,
                 "approved_by": m.approved_by,
+                "attachments": atts_by_msg.get(m.id, []),
             })
             # If inbound message was sent and has final_response, add outbound bubble
             # (for historical messages before we started creating outbound rows)
@@ -312,7 +360,7 @@ class AgentThreadService:
         d["actions"] = actions
         return d
 
-    async def approve_thread(self, org_id: str, thread_id: str, response_text: str | None, user_name: str) -> dict:
+    async def approve_thread(self, org_id: str, thread_id: str, response_text: str | None, user_name: str, attachment_ids: list[str] | None = None) -> dict:
         """Approve the latest pending message in a thread — send email and update status."""
         from src.services.customer_agent import update_thread_status, save_discovered_contact
         from src.services.email_service import EmailService
@@ -335,10 +383,16 @@ class AgentThreadService:
         thread_obj = (await self.db.execute(select(AgentThread).where(AgentThread.id == thread_id))).scalar_one_or_none()
         from_addr = (thread_obj.delivered_to if thread_obj and thread_obj.delivered_to else None)
 
+        # Load attachments for email
+        email_atts, att_rows = None, []
+        if attachment_ids:
+            email_atts, att_rows = await self._load_email_attachments(org_id, attachment_ids)
+
         email_svc = EmailService(self.db)
         send_result = await email_svc.send_agent_reply(
             org_id, msg.from_email, msg.subject or "", final_text,
             from_address=from_addr, sender_name=user_name,
+            attachments=email_atts or None,
         )
         if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send email"}
@@ -366,6 +420,11 @@ class AgentThreadService:
             received_at=now,
         )
         self.db.add(outbound)
+        await self.db.flush()
+
+        # Claim attachments against outbound message
+        for a in att_rows:
+            a.source_id = outbound.id
 
         # Record correction for agent learning
         from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
@@ -555,7 +614,7 @@ class AgentThreadService:
             ))
         await self.db.flush()
 
-    async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str) -> dict:
+    async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str, attachment_ids: list[str] | None = None) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""
         from src.services.customer_agent import update_thread_status
         from src.services.email_service import EmailService
@@ -567,11 +626,17 @@ class AgentThreadService:
         if not text:
             return {"error": "no_text", "detail": "No response text"}
 
+        # Load attachments for email
+        email_atts, att_rows = None, []
+        if attachment_ids:
+            email_atts, att_rows = await self._load_email_attachments(org_id, attachment_ids)
+
         from_addr = thread.delivered_to if thread.delivered_to else None
         email_svc = EmailService(self.db)
         send_result = await email_svc.send_agent_reply(
             org_id, thread.contact_email, thread.subject or "", text,
             from_address=from_addr, sender_name=user_name,
+            attachments=email_atts or None,
         )
         if not send_result.success:
             return {"error": "send_failed", "detail": "Failed to send"}
@@ -592,6 +657,12 @@ class AgentThreadService:
             received_at=now,
         )
         self.db.add(outbound)
+        await self.db.flush()
+
+        # Claim attachments against outbound message
+        for a in att_rows:
+            a.source_id = outbound.id
+
         await self.db.commit()
         await update_thread_status(thread_id)
 
@@ -967,12 +1038,36 @@ Rules:
             status="draft",
         )
 
-        # Create or link job
-        existing_job = (await self.db.execute(
-            select(AgentAction).where(AgentAction.thread_id == thread_id, AgentAction.organization_id == org_id)
-        )).scalar_one_or_none()
-
+        # Find best job to link: thread match first, then customer match
         from src.services.job_invoice_service import link_job_invoice
+
+        existing_job = None
+        # 1. Try thread-linked jobs
+        thread_jobs = (await self.db.execute(
+            select(AgentAction).where(
+                AgentAction.thread_id == thread_id,
+                AgentAction.organization_id == org_id,
+                AgentAction.status.in_(("open", "in_progress", "pending_approval")),
+            )
+        )).scalars().all()
+        if thread_jobs:
+            # Prefer repair/site_visit over follow_up/bid
+            preferred = [j for j in thread_jobs if j.action_type in ("repair", "site_visit")]
+            existing_job = preferred[0] if preferred else thread_jobs[0]
+
+        # 2. Fall back to customer-matched open jobs (for manually-created jobs)
+        if not existing_job and thread.matched_customer_id:
+            cust_jobs = (await self.db.execute(
+                select(AgentAction).where(
+                    AgentAction.organization_id == org_id,
+                    AgentAction.customer_id == thread.matched_customer_id,
+                    AgentAction.status.in_(("open", "in_progress", "pending_approval")),
+                ).order_by(desc(AgentAction.created_at))
+            )).scalars().all()
+            if cust_jobs:
+                preferred = [j for j in cust_jobs if j.action_type in ("repair", "site_visit")]
+                existing_job = preferred[0] if preferred else cust_jobs[0]
+
         if existing_job:
             await link_job_invoice(self.db, existing_job.id, invoice.id, linked_by=created_by)
         else:

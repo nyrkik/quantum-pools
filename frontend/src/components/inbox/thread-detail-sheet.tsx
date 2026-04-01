@@ -40,6 +40,8 @@ import { formatTime } from "@/lib/format";
 import type { ThreadDetail } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "./inbox-badges";
 import { CollapsibleBody } from "./collapsible-body";
+import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
+import { AttachmentDisplay } from "@/components/ui/attachment-display";
 
 function isStale(receivedAt: string | null) {
   if (!receivedAt) return false;
@@ -73,6 +75,8 @@ export function ThreadDetailSheet({
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [followUpRevise, setFollowUpRevise] = useState("");
   const [followUpRevising, setFollowUpRevising] = useState(false);
+  const [approveAttachments, setApproveAttachments] = useState<UploadedAttachment[]>([]);
+  const [followUpAttachments, setFollowUpAttachments] = useState<UploadedAttachment[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
   const [draftingEstimate, setDraftingEstimate] = useState(false);
@@ -110,8 +114,10 @@ export function ThreadDetailSheet({
     try {
       await api.post(`/v1/admin/agent-threads/${threadId}/approve`, {
         response_text: responseText || undefined,
+        attachment_ids: approveAttachments.length ? approveAttachments.map((a) => a.id) : undefined,
       });
       toast.success("Reply sent");
+      setApproveAttachments([]);
       onAction();
       onClose();
     } catch {
@@ -178,11 +184,15 @@ export function ThreadDetailSheet({
     if (!followUpText.trim()) return;
     setSendingFollowUp(true);
     try {
-      await api.post(`/v1/admin/agent-threads/${threadId}/send-followup`, { response_text: followUpText });
+      await api.post(`/v1/admin/agent-threads/${threadId}/send-followup`, {
+        response_text: followUpText,
+        attachment_ids: followUpAttachments.length ? followUpAttachments.map((a) => a.id) : undefined,
+      });
       toast.success("Follow-up sent");
       setFollowUp(null);
       setFollowUpText("");
       setFollowUpRevise("");
+      setFollowUpAttachments([]);
       onAction();
       loadThread();
     } catch {
@@ -412,6 +422,9 @@ export function ThreadDetailSheet({
                   <p className="text-xs font-medium text-muted-foreground">{msg.subject}</p>
                 )}
                 <CollapsibleBody text={msg.body || "No content"} />
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <AttachmentDisplay attachments={msg.attachments} />
+                )}
               </div>
             </div>
           );
@@ -465,6 +478,12 @@ export function ThreadDetailSheet({
                 {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
               </Button>
             </div>
+
+            <AttachmentPicker
+              attachments={approveAttachments}
+              onAttachmentsChange={setApproveAttachments}
+              sourceType="agent_message"
+            />
 
             <div className="flex gap-2">
               {editing && (
@@ -540,6 +559,11 @@ export function ThreadDetailSheet({
                 {followUpRevising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
               </Button>
             </div>
+            <AttachmentPicker
+              attachments={followUpAttachments}
+              onAttachmentsChange={setFollowUpAttachments}
+              sourceType="agent_message"
+            />
             <Button onClick={handleSendFollowUp} disabled={sendingFollowUp || !followUpText.trim()} className="w-full">
               {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
               Send Follow-up

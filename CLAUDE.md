@@ -146,13 +146,30 @@ QuantumPools/
 └── CLAUDE.md
 ```
 
+## Mandatory Processes
+
+### Feedback Resolution
+When fixing a user-submitted feedback item (FB-XXX), you MUST update the record:
+```sql
+UPDATE feedback_items SET status = 'resolved', resolved_by = 'Claude',
+  resolved_at = NOW(), resolution_notes = 'What was done' WHERE feedback_number = X;
+```
+This is non-negotiable — every fix needs a written summary for audit trail.
+
+### Deployment
+After ANY code change, deploy via `/srv/quantumpools/scripts/deploy.sh`. Never restart individual services manually. The script builds frontend, restarts all 3 services (backend, frontend, agent poller), and verifies health.
+
+### Email Code Changes
+After touching any email-sending path, send a test email to brian.parrotte@pm.me and verify: (1) email arrives, (2) no 500 in logs, (3) AgentMessage record exists, (4) thread shows in inbox.
+
 ## Dev Environment Notes
 
 - **Python venv**: `/home/brian/00_MyProjects/QuantumPools/venv` (NOT inside `app/`)
 - **Alembic**: Run from `app/` dir using full path: `/home/brian/00_MyProjects/QuantumPools/venv/bin/alembic`
 - **Backend**: systemd `quantumpools-backend.service` (uvicorn on 7061)
 - **Frontend**: systemd `quantumpools-frontend.service` (next start production on 7060)
-- **Restart**: `sudo systemctl restart quantumpools-backend` / `quantumpools-frontend`
+- **Deploy**: `/srv/quantumpools/scripts/deploy.sh` — builds frontend, restarts ALL 3 services, verifies health. Always use this, never restart individual services.
+- **Restart** (legacy, do not use): `sudo systemctl restart quantumpools-backend` / `quantumpools-frontend`
 - **Logs**: `sudo journalctl -u quantumpools-backend -f`
 - **DB defaults are in Python only**: SQLAlchemy model defaults (e.g. `Boolean default=False`, `Integer default=30`) do NOT exist at the PostgreSQL column level. Raw SQL inserts must explicitly provide ALL not-null columns.
 - **Org scoping**: Frontend does not send `X-Organization-Id` header. Backend `get_current_org_user` picks the first org for the user via `.limit(1)`. All users currently belong to a single org ("Pool Co").

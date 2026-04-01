@@ -298,9 +298,13 @@ class InvoiceService:
         if was_sent:
             await self._create_revision_snapshot(invoice, revised_by)
 
+        # Nullable fields that can be explicitly cleared with null
+        clearable = {"notes", "subject", "due_date"}
         for key, value in kwargs.items():
             if value is not None:
                 setattr(invoice, key, value)
+            elif key in clearable:
+                setattr(invoice, key, None)
 
         if line_items_data is not None:
             # Delete existing line items
@@ -337,15 +341,20 @@ class InvoiceService:
         else:
             self._recalculate_totals(invoice, list(invoice.line_items))
 
-        # After edit: if it was sent, mark as revised with suffix
+        # After edit: track revision for audit trail
         if was_sent:
             from datetime import datetime, timezone
             invoice.revision_count = (invoice.revision_count or 0) + 1
             invoice.revised_at = datetime.now(timezone.utc)
-            invoice.status = InvoiceStatus.revised.value
-            # Add revision suffix: INV-26001 → INV-26001-R1 (strip prior -R suffix first)
-            base_number = invoice.invoice_number.split("-R")[0] if "-R" in invoice.invoice_number else invoice.invoice_number
-            invoice.invoice_number = f"{base_number}-R{invoice.revision_count}"
+            if invoice.document_type == "estimate":
+                # Estimates: customer sees live data via approval link, no resend needed.
+                # Keep status as-is, keep same number. Revision snapshot is the audit trail.
+                pass
+            else:
+                # Invoices: no live approval link, mark as revised so user knows to resend
+                invoice.status = InvoiceStatus.revised.value
+                base_number = invoice.invoice_number.split("-R")[0] if "-R" in invoice.invoice_number else invoice.invoice_number
+                invoice.invoice_number = f"{base_number}-R{invoice.revision_count}"
 
         await self.db.flush()
         return await self.get(org_id, invoice.id)

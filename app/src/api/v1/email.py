@@ -18,6 +18,7 @@ class ComposeRequest(BaseModel):
     body: str
     customer_id: Optional[str] = None
     job_id: Optional[str] = None
+    attachment_ids: Optional[list[str]] = None
 
 
 class DraftRequest(BaseModel):
@@ -44,6 +45,7 @@ async def compose_email(
         sender_name=f"{ctx.user.first_name} {ctx.user.last_name}",
         sender_user_id=ctx.user.id,
         job_id=req.job_id,
+        attachment_ids=req.attachment_ids,
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail={"error": "send_failed", "message": result.get("error", "Failed to send email")})

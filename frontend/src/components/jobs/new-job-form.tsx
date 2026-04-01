@@ -38,6 +38,7 @@ export function NewJobForm({ open, onCreated, onClose }: NewJobFormProps) {
     description: "",
     assigned_to: "",
     due_days: "",
+    customer_id: "",
     customer_name: "",
     property_address: "",
   });
@@ -72,6 +73,7 @@ export function NewJobForm({ open, onCreated, onClose }: NewJobFormProps) {
       description: newAction.description,
       assigned_to: newAction.assigned_to || undefined,
       due_date: dueDate,
+      customer_id: newAction.customer_id || undefined,
       customer_name: newAction.customer_name || undefined,
       property_address: newAction.property_address || undefined,
       job_path: jobPath,
@@ -146,7 +148,7 @@ export function NewJobForm({ open, onCreated, onClose }: NewJobFormProps) {
           <ClientPropertySearch
             customerName={newAction.customer_name}
             propertyAddress={newAction.property_address}
-            onChange={(name, addr) => setNewAction({ ...newAction, customer_name: name, property_address: addr })}
+            onChange={(name, addr, custId) => setNewAction({ ...newAction, customer_name: name, property_address: addr, customer_id: custId || "" })}
           />
 
           <div className="flex flex-wrap gap-2 items-end">

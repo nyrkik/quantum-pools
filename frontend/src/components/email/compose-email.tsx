@@ -19,6 +19,7 @@ import {
   User,
   Search,
 } from "lucide-react";
+import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 
 // --- Types ---
 
@@ -77,6 +78,9 @@ export function ComposeEmail() {
   const [showContext, setShowContext] = useState(false);
   const [contextLoading, setContextLoading] = useState(false);
 
+  // Attachments
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+
   // Sending
   const [sending, setSending] = useState(false);
 
@@ -92,6 +96,7 @@ export function ComposeEmail() {
       setShowAiAssist(false);
       setContext(null);
       setShowContext(false);
+      setAttachments([]);
 
       if (options.customerId) {
         loadContext(options.customerId);
@@ -203,6 +208,7 @@ export function ComposeEmail() {
         body: body.trim(),
         customer_id: customerId,
         job_id: options.jobId || undefined,
+        attachment_ids: attachments.length ? attachments.map((a) => a.id) : undefined,
       });
 
       // Log AI draft correction if the user edited the draft
@@ -498,6 +504,15 @@ export function ComposeEmail() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Attachments */}
+      <div className="px-3 pb-1">
+        <AttachmentPicker
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          sourceType="agent_message"
+        />
       </div>
 
       {/* Footer */}

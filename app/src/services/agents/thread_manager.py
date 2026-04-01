@@ -1,6 +1,7 @@
 """Thread lifecycle management."""
 
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 from src.core.database import get_db_context
@@ -56,6 +57,40 @@ async def get_or_create_thread(
             select(AgentThread).where(AgentThread.thread_key == thread_key).limit(1)
         )
         thread = result.scalar_one_or_none()
+
+        # Fallback 1: check if sender is another email for a known customer
+        # who has a thread with matching subject
+        if not thread and customer_id:
+            norm_subj = _normalize_subject(subject).lower()
+            from datetime import timedelta
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+
+            cust_threads_result = await db.execute(
+                select(AgentThread).where(
+                    AgentThread.matched_customer_id == customer_id,
+                    AgentThread.organization_id == organization_id,
+                    AgentThread.last_message_at >= recent_cutoff,
+                ).order_by(AgentThread.last_message_at.desc()).limit(10)
+            )
+            cust_threads = cust_threads_result.scalars().all()
+
+            # Try subject match first
+            if norm_subj:
+                for ct in cust_threads:
+                    ct_subj = _normalize_subject(ct.subject or "").lower()
+                    if ct_subj and (norm_subj in ct_subj or ct_subj in norm_subj):
+                        thread = ct
+                        logger.info(f"Thread matched via customer+subject: {contact_email} → thread {ct.id} ({ct.contact_email})")
+                        break
+
+            # Fallback 2: if customer has exactly one active thread (last 7 days),
+            # assume this email belongs to it — avoids orphan threads for alt emails
+            if not thread and len(cust_threads) == 1:
+                week_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+                ct = cust_threads[0]
+                if ct.last_message_at and ct.last_message_at >= week_cutoff and ct.status in ("pending", "handled"):
+                    thread = ct
+                    logger.info(f"Thread matched via single active thread: {contact_email} → thread {ct.id} ({ct.contact_email})")
 
         if not thread:
             thread = AgentThread(

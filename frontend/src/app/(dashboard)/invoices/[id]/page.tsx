@@ -322,7 +322,7 @@ export default function InvoiceDetailPage({
           <InvoiceStatusBadge status={invoice.status} />
         </div>
         <div className="flex items-center gap-2">
-          {canEdit && ["sent", "revised"].includes(invoice.status) ? (
+          {canEdit && !isEstimate && ["sent", "revised"].includes(invoice.status) ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -540,7 +540,7 @@ export default function InvoiceDetailPage({
       </div>
 
       {/* Revised banner */}
-      {invoice.status === "revised" && (
+      {invoice.status === "revised" && !isEstimate && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 p-3">
           <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm">

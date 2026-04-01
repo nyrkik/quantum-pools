@@ -31,12 +31,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Check, Loader2, Eye } from "lucide-react";
+import { Check, Loader2, Eye, Send } from "lucide-react";
 import { PageLayout } from "@/components/layout/page-layout";
 import { getBackendOrigin } from "@/lib/api";
 
 interface FeedbackItem {
   id: string;
+  feedback_number: number | null;
   user_name: string;
   feedback_type: string;
   title: string;
@@ -50,6 +51,7 @@ interface FeedbackItem {
   resolved_by: string | null;
   resolved_at: string | null;
   resolution_notes: string | null;
+  user_notified: boolean;
   created_at: string | null;
 }
 
@@ -82,6 +84,7 @@ export default function FeedbackPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selected, setSelected] = useState<FeedbackItem | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState("");
+  const [userMessage, setUserMessage] = useState("");
   const [resolving, setResolving] = useState(false);
 
   const fetchItems = useCallback(async () => {
@@ -178,6 +181,7 @@ export default function FeedbackPage() {
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-100 dark:bg-slate-800">
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-20">ID</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide">Status</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide">Priority</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide">Type</TableHead>
@@ -191,13 +195,13 @@ export default function FeedbackPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={9} className="text-center py-8">
                   <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   No feedback found
                 </TableCell>
               </TableRow>
@@ -208,6 +212,9 @@ export default function FeedbackPage() {
                   className={`hover:bg-blue-50 dark:hover:bg-blue-950 cursor-pointer ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}
                   onClick={() => { setSelected(item); setResolutionNotes(item.resolution_notes || ""); }}
                 >
+                  <TableCell className="text-xs font-mono text-muted-foreground">
+                    {item.feedback_number ? `FB-${String(item.feedback_number).padStart(3, "0")}` : "—"}
+                  </TableCell>
                   <TableCell>
                     <Badge className={STATUS_COLORS[item.status] || ""} variant={item.status === "closed" ? "secondary" : "default"}>
                       {item.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -230,9 +237,32 @@ export default function FeedbackPage() {
                     {item.created_at ? new Date(item.created_at).toLocaleDateString() : "—"}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setSelected(item); setResolutionNotes(item.resolution_notes || ""); }}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setSelected(item); setResolutionNotes(item.resolution_notes || ""); }}>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                      {item.status === "resolved" && !item.user_notified && (
+                        <>
+                          <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={async () => {
+                            try {
+                              await api.put(`/v1/feedback/${item.id}`, { notify_user: false });
+                              fetchItems();
+                            } catch { toast.error("Failed"); }
+                          }}>
+                            No
+                          </Button>
+                          <Button size="sm" className="h-6 text-[10px] px-2" onClick={async () => {
+                            try {
+                              await api.put(`/v1/feedback/${item.id}`, { notify_user: true });
+                              toast.success("Notified");
+                              fetchItems();
+                            } catch { toast.error("Failed"); }
+                          }}>
+                            Notify
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -245,7 +275,7 @@ export default function FeedbackPage() {
       <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{selected?.title}</DialogTitle>
+            <DialogTitle>{selected?.feedback_number ? `FB-${String(selected.feedback_number).padStart(3, "0")}: ` : ""}{selected?.title}</DialogTitle>
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
@@ -314,7 +344,7 @@ export default function FeedbackPage() {
                 </div>
               )}
 
-              {/* Actions */}
+              {/* Status controls — for non-resolved items */}
               {selected.status !== "resolved" && selected.status !== "closed" && (
                 <div className="border-t pt-3 space-y-3">
                   <div className="flex items-center gap-2">
@@ -325,19 +355,9 @@ export default function FeedbackPage() {
                       </Button>
                     ))}
                   </div>
-                  <Textarea
-                    value={resolutionNotes}
-                    onChange={(e) => setResolutionNotes(e.target.value)}
-                    placeholder="Resolution notes (optional)"
-                    rows={2}
-                    className="text-sm"
-                  />
-                  <Button onClick={handleResolve} disabled={resolving} className="w-full">
-                    {resolving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
-                    Resolve
-                  </Button>
                 </div>
               )}
+
             </div>
           )}
         </DialogContent>

@@ -6,6 +6,7 @@ from typing import Optional
 
 class ApproveBody(BaseModel):
     response_text: Optional[str] = None
+    attachment_ids: Optional[list[str]] = None
 
 
 class ReviseDraftBody(BaseModel):

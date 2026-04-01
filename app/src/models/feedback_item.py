@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, JSON, ForeignKey
+from sqlalchemy import String, Boolean, Integer, DateTime, Text, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -18,6 +18,7 @@ class FeedbackItem(Base):
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     user_name: Mapped[str | None] = mapped_column(String(200))
+    feedback_number: Mapped[int | None] = mapped_column(Integer, index=True)  # FB-001, FB-002, etc.
 
     feedback_type: Mapped[str] = mapped_column(String(20), nullable=False)  # bug, feature, question, ux_issue
     title: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -36,6 +37,7 @@ class FeedbackItem(Base):
     resolved_by: Mapped[str | None] = mapped_column(String(200))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution_notes: Mapped[str | None] = mapped_column(Text)
+    user_notified: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.api.deps import get_current_org_user, OrgUserContext
 from src.models.internal_message import InternalThread, InternalMessage
+from src.models.message_attachment import MessageAttachment
 from src.models.notification import Notification
 from src.models.user import User
 from src.presenters.message_presenter import MessagePresenter
@@ -29,10 +30,12 @@ class SendMessageBody(BaseModel):
     property_id: Optional[str] = None
     action_id: Optional[str] = None
     thread_id: Optional[str] = None  # reply to existing thread
+    attachment_ids: Optional[list[str]] = None
 
 
 class ReplyBody(BaseModel):
     message: str
+    attachment_ids: Optional[list[str]] = None
 
 
 @router.post("", status_code=201)
@@ -88,12 +91,25 @@ async def send_message(
     )
     db.add(msg)
 
+    # Claim attachments
+    if body.attachment_ids:
+        att_ids = body.attachment_ids[:5]  # max 5
+        atts = (await db.execute(
+            select(MessageAttachment).where(
+                MessageAttachment.id.in_(att_ids),
+                MessageAttachment.organization_id == org_id,
+                MessageAttachment.source_type == "internal_message",
+                MessageAttachment.source_id.is_(None),
+            )
+        )).scalars().all()
+        for att in atts:
+            att.source_id = msg.id
+
     # Update thread
     thread.message_count = (thread.message_count or 0) + 1
     thread.last_message_at = now
     thread.last_message_by = from_user_id
-    if thread.status in ("acknowledged", "completed"):
-        thread.status = "active"  # Reopen on new message
+    thread.status = "active"
 
     # Notify recipient(s)
     from_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
@@ -117,7 +133,6 @@ async def send_message(
 @router.get("")
 async def list_threads(
     view: str = Query("mine"),  # mine or team (admin only)
-    status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
@@ -144,9 +159,6 @@ async def list_threads(
         # Default — only threads where user is a participant
         q = q.where(cast(InternalThread.participant_ids, String).contains(ctx.user.id))
 
-    if status:
-        q = q.where(InternalThread.status == status)
-
     result = await db.execute(q)
     threads = result.scalars().all()
 
@@ -161,17 +173,27 @@ async def message_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Unread message count for badge."""
-    from sqlalchemy import cast, String, func
+    from sqlalchemy import cast, String, func, or_
+    from src.models.thread_read import ThreadRead
 
-    # Threads where user is participant, status=active, last_message_by != user
-    count = (await db.execute(
-        select(func.count(InternalThread.id)).where(
+    # Threads where user is participant and either:
+    # - no read record exists, OR
+    # - last_message_at > read_at
+    # Exclude threads where the user sent the last message (those are always "read")
+    q = (
+        select(func.count(InternalThread.id))
+        .outerjoin(ThreadRead, (ThreadRead.thread_id == InternalThread.id) & (ThreadRead.user_id == ctx.user.id))
+        .where(
             InternalThread.organization_id == ctx.organization_id,
             cast(InternalThread.participant_ids, String).contains(ctx.user.id),
-            InternalThread.status == "active",
             InternalThread.last_message_by != ctx.user.id,
+            or_(
+                ThreadRead.read_at.is_(None),
+                InternalThread.last_message_at > ThreadRead.read_at,
+            ),
         )
-    )).scalar() or 0
+    )
+    count = (await db.execute(q)).scalar() or 0
 
     return {"unread": count}
 
@@ -192,6 +214,17 @@ async def get_thread(
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
 
+    # Mark as read
+    from src.models.thread_read import ThreadRead
+    existing_read = (await db.execute(
+        select(ThreadRead).where(ThreadRead.user_id == ctx.user.id, ThreadRead.thread_id == thread_id)
+    )).scalar_one_or_none()
+    if existing_read:
+        existing_read.read_at = datetime.now(timezone.utc)
+    else:
+        db.add(ThreadRead(user_id=ctx.user.id, thread_id=thread_id))
+    await db.flush()
+
     presenter = MessagePresenter(db)
     return await presenter.thread_detail(thread, ctx.user.id)
 
@@ -209,83 +242,11 @@ async def reply_to_thread(
             to_user_id="",  # not used for replies
             message=body.message,
             thread_id=thread_id,
+            attachment_ids=body.attachment_ids,
         ),
         ctx=ctx,
         db=db,
     )
-
-
-@router.put("/{thread_id}/acknowledge")
-async def acknowledge_thread(
-    thread_id: str,
-    ctx: OrgUserContext = Depends(get_current_org_user),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(InternalThread).where(
-            InternalThread.id == thread_id,
-            InternalThread.organization_id == ctx.organization_id,
-        )
-    )
-    thread = result.scalar_one_or_none()
-    if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    now = datetime.now(timezone.utc)
-    thread.status = "acknowledged"
-    thread.acknowledged_at = now
-    thread.acknowledged_by = ctx.user.id
-
-    # Notify sender
-    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
-    if thread.created_by_user_id and thread.created_by_user_id != ctx.user.id:
-        db.add(Notification(
-            organization_id=ctx.organization_id,
-            user_id=thread.created_by_user_id,
-            type="message_acknowledged",
-            title=f"{user_name} acknowledged your message",
-            body=(thread.subject or "")[:100],
-            link=f"/messages?thread={thread_id}",
-        ))
-
-    await db.commit()
-    return {"status": "acknowledged"}
-
-
-@router.put("/{thread_id}/complete")
-async def complete_thread(
-    thread_id: str,
-    ctx: OrgUserContext = Depends(get_current_org_user),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(InternalThread).where(
-            InternalThread.id == thread_id,
-            InternalThread.organization_id == ctx.organization_id,
-        )
-    )
-    thread = result.scalar_one_or_none()
-    if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    now = datetime.now(timezone.utc)
-    thread.status = "completed"
-    thread.completed_at = now
-    thread.completed_by = ctx.user.id
-
-    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
-    if thread.created_by_user_id and thread.created_by_user_id != ctx.user.id:
-        db.add(Notification(
-            organization_id=ctx.organization_id,
-            user_id=thread.created_by_user_id,
-            type="message_completed",
-            title=f"{user_name} completed: {(thread.subject or 'message')[:50]}",
-            body="",
-            link=f"/messages?thread={thread_id}",
-        ))
-
-    await db.commit()
-    return {"status": "completed"}
 
 
 @router.post("/{thread_id}/convert-to-job")
@@ -332,8 +293,6 @@ async def convert_to_job(
     await db.flush()
 
     thread.converted_to_action_id = action.id
-    thread.status = "completed"
-    thread.completed_at = datetime.now(timezone.utc)
 
     await db.commit()
     return {"action_id": action.id, "converted": True}

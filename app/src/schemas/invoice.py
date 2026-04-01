@@ -40,6 +40,7 @@ class InvoiceCreate(BaseModel):
     is_recurring: bool = False
     notes: Optional[str] = None
     line_items: list[InvoiceLineItemCreate] = []
+    job_id: Optional[str] = None  # link to job on creation
 
 
 class InvoiceUpdate(BaseModel):

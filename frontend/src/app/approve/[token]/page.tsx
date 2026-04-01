@@ -136,16 +136,8 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
               <p className="text-sm text-slate-500">Prepared for {data.customer_name}</p>
             )}
 
-            {data.revision_count > 0 && (
-              <div className="flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 p-3">
-                <svg className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-                </svg>
-                <p className="text-xs text-amber-700">
-                  This estimate has been updated{data.revised_at ? ` on ${new Date(data.revised_at).toLocaleDateString()}` : ""}. Please review the current details below before approving.
-                </p>
-              </div>
-            )}
+            {/* Revision banner removed — customer always sees the latest version.
+                Internal revision tracking is in the admin view only. */}
 
             {/* Line items */}
             <div className="space-y-2">
@@ -223,10 +215,6 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                   </div>
                 )}
               </div>
-            ) : isAdminView ? (
-              <div className="bg-slate-50 border rounded-lg p-4 text-center">
-                <p className="text-sm text-slate-500">Awaiting customer approval</p>
-              </div>
             ) : (
               <div className="space-y-4 border-t pt-4">
                 {/* Terms */}
@@ -249,6 +237,12 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                   )}
                 </div>
 
+                {isAdminView ? (
+                  <div className="bg-slate-50 border rounded-lg p-4 text-center">
+                    <p className="text-sm text-slate-500">Awaiting customer approval</p>
+                  </div>
+                ) : (
+                  <>
                 {/* Signature */}
                 <div className="space-y-2">
                   <div className="space-y-1">
@@ -291,6 +285,8 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
 
                 {approveError && (
                   <p className="text-xs text-red-500 text-center">{approveError}</p>
+                )}
+                  </>
                 )}
               </div>
             )}

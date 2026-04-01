@@ -67,7 +67,68 @@ async def create_invoice(
         notes=body.notes,
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),
     )
+    # Link to job if provided
+    if body.job_id:
+        from src.services.job_invoice_service import link_job_invoice
+        user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+        await link_job_invoice(db, body.job_id, invoice.id, linked_by=user_name)
+        await db.commit()
     return _invoice_to_response(invoice)
+
+
+@router.get("/suggest-jobs")
+async def suggest_jobs(
+    customer_id: str = Query(...),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return open/in-progress jobs for a customer, for linking to an estimate.
+
+    Matches jobs by direct customer_id OR via thread's matched_customer_id.
+    """
+    from sqlalchemy import select, desc, or_
+    from src.models.agent_action import AgentAction
+    from src.models.agent_thread import AgentThread
+
+    org_id = ctx.organization_id
+    active_statuses = ("open", "in_progress", "pending_approval")
+
+    # Direct customer_id match
+    q1 = select(AgentAction).where(
+        AgentAction.organization_id == org_id,
+        AgentAction.customer_id == customer_id,
+        AgentAction.status.in_(active_statuses),
+    )
+    # Thread-based customer match (jobs without direct customer_id)
+    q2 = (
+        select(AgentAction)
+        .join(AgentThread, AgentAction.thread_id == AgentThread.id)
+        .where(
+            AgentAction.organization_id == org_id,
+            AgentAction.customer_id.is_(None),
+            AgentThread.matched_customer_id == customer_id,
+            AgentAction.status.in_(active_statuses),
+        )
+    )
+    from sqlalchemy import union_all
+    combined = union_all(q1, q2).subquery()
+    result = await db.execute(
+        select(AgentAction)
+        .join(combined, AgentAction.id == combined.c.id)
+        .order_by(desc(AgentAction.created_at))
+        .limit(10)
+    )
+    jobs = result.scalars().all()
+    return [
+        {
+            "id": j.id,
+            "description": j.description,
+            "action_type": j.action_type,
+            "status": j.status,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+        }
+        for j in jobs
+    ]
 
 
 @router.get("/monthly", response_model=list)

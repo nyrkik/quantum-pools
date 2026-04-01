@@ -16,6 +16,7 @@ class CreateActionBody(BaseModel):
     description: str
     assigned_to: Optional[str] = None
     due_date: Optional[str] = None
+    customer_id: Optional[str] = None
     customer_name: Optional[str] = None
     property_address: Optional[str] = None
     job_path: str = "internal"  # "internal" or "customer"

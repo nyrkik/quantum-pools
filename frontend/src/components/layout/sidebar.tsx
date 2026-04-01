@@ -61,7 +61,7 @@ const navItems = [
   { href: "/inspections", label: "Inspections", icon: Shield, check: "canViewInspection" as keyof Permissions },
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
-  { href: "/feedback", label: "Feedback", icon: MessageCircleQuestion, check: "canViewSettings" as keyof Permissions },
+  { href: "/feedback", label: "Feedback", icon: MessageCircleQuestion, check: "canViewSettings" as keyof Permissions, badge: "feedback" as const },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
 ];
 
@@ -79,6 +79,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const dev = useDevMode();
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [openFeedback, setOpenFeedback] = useState(0);
 
   const fetchCounts = useCallback(() => {
     if (perms.canViewInbox) {
@@ -89,7 +90,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     api.get<{ unread: number }>("/v1/messages/stats")
       .then((s) => setUnreadMessages(s.unread ?? 0))
       .catch(() => {});
-  }, [perms.canViewInbox]);
+    if (dev) {
+      api.get<{ open: number }>("/v1/feedback/stats")
+        .then((s) => setOpenFeedback(s.open ?? 0))
+        .catch(() => {});
+    }
+  }, [perms.canViewInbox, dev]);
 
   useEffect(() => {
     fetchCounts();
@@ -146,6 +152,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               {"badge" in item && item.badge === "messages" && unreadMessages > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-[10px] font-semibold text-white">
                   {unreadMessages}
+                </span>
+              )}
+              {"badge" in item && item.badge === "feedback" && openFeedback > 0 && (
+                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white">
+                  {openFeedback}
                 </span>
               )}
             </Link>

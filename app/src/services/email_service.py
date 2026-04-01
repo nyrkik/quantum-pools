@@ -246,6 +246,7 @@ class EmailService:
         from_address: str | None = None,
         sender_name: str | None = None,
         is_new: bool = False,
+        attachments: list[dict] | None = None,
     ) -> EmailResult:
         """SINGLE EXIT POINT for all outbound customer-facing email.
 
@@ -287,7 +288,7 @@ class EmailService:
             final_subject = f"Re: {final_subject}"
 
         from_name = f"{sender_name} at {org_name}" if sender_name and org_name else org_name or None
-        msg = EmailMessage(to=to, subject=final_subject, text_body=full_body, from_email=from_address, from_name=from_name)
+        msg = EmailMessage(to=to, subject=final_subject, text_body=full_body, from_email=from_address, from_name=from_name, attachments=attachments)
         return await self.send_email(org_id, msg)
 
 

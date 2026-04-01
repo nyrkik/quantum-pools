@@ -641,9 +641,12 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
               <Play className="h-3.5 w-3.5 mr-2 text-green-600" /> Start Visit
             </Button>
           )}
-          {/* Linked Documents */}
-          <LinkedDocuments actionId={actionId} invoiceIds={detail.invoice_ids || []} onUpdate={onUpdate} />
         </div>
+      )}
+
+      {/* Linked Documents — always visible regardless of job status */}
+      {!followUp && (
+        <LinkedDocuments actionId={actionId} invoiceIds={detail.invoice_ids || []} onUpdate={onUpdate} />
       )}
 
       {/* Follow-up draft editor (replaces action buttons when active) */}

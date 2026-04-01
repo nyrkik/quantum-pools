@@ -13,8 +13,6 @@ import { toast } from "sonner";
 import {
   MessageSquare,
   Plus,
-  Check,
-  CheckCheck,
   Send,
   Loader2,
   ArrowRightToLine,
@@ -22,6 +20,8 @@ import {
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { ComposeMessage } from "@/components/messages/compose-message";
 import { PageLayout } from "@/components/layout/page-layout";
+import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
+import { AttachmentDisplay, type AttachmentInfo } from "@/components/ui/attachment-display";
 
 interface ThreadSummary {
   id: string;
@@ -29,13 +29,11 @@ interface ThreadSummary {
   subject: string | null;
   customer_name: string | null;
   priority: string;
-  status: string;
+  is_unread: boolean;
   message_count: number;
   last_message: string | null;
   last_message_by: string | null;
   last_message_at: string | null;
-  acknowledged_at: string | null;
-  completed_at: string | null;
   converted_to_action_id: string | null;
 }
 
@@ -44,6 +42,7 @@ interface ThreadMessage {
   from_user_id: string;
   from_name: string;
   text: string;
+  attachments?: AttachmentInfo[];
   created_at: string;
 }
 
@@ -54,16 +53,9 @@ interface ThreadDetail {
   customer_name: string | null;
   action_id: string | null;
   priority: string;
-  status: string;
   messages: ThreadMessage[];
   converted_to_action_id: string | null;
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "",
-  acknowledged: "text-blue-600",
-  completed: "text-green-600",
-};
 
 export default function MessagesPage() {
   const { user } = useAuth();
@@ -77,6 +69,7 @@ export default function MessagesPage() {
   const [detail, setDetail] = useState<ThreadDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [reply, setReply] = useState("");
+  const [replyAttachments, setReplyAttachments] = useState<UploadedAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const replyRef = useRef<HTMLInputElement>(null);
@@ -108,22 +101,16 @@ export default function MessagesPage() {
     if (!reply.trim() || !selectedThreadId) return;
     setSending(true);
     try {
-      await api.post(`/v1/messages/${selectedThreadId}/reply`, { message: reply.trim() });
+      await api.post(`/v1/messages/${selectedThreadId}/reply`, {
+        message: reply.trim(),
+        attachment_ids: replyAttachments.length ? replyAttachments.map((a) => a.id) : undefined,
+      });
       setReply("");
+      setReplyAttachments([]);
       loadDetail(selectedThreadId);
       loadThreads();
     } catch { toast.error("Failed to send"); }
     finally { setSending(false); }
-  };
-
-  const handleAction = async (action: string) => {
-    if (!selectedThreadId) return;
-    try {
-      await api.put(`/v1/messages/${selectedThreadId}/${action}`);
-      toast.success(action === "acknowledge" ? "Acknowledged" : "Completed");
-      loadDetail(selectedThreadId);
-      loadThreads();
-    } catch { toast.error("Failed"); }
   };
 
   const handleConvert = async () => {
@@ -185,11 +172,14 @@ export default function MessagesPage() {
             {threads.map((t) => (
               <div
                 key={t.id}
-                className={`px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors ${selectedThreadId === t.id ? "bg-muted/50" : ""} ${t.status === "active" && t.last_message_by !== user?.id ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
+                className={`px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors ${selectedThreadId === t.id ? "bg-muted/50" : ""} ${t.is_unread ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
                 onClick={() => setSelectedThreadId(t.id)}
               >
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-sm font-medium truncate">{t.subject || t.participants.join(", ") || "Message"}</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {t.is_unread && <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />}
+                    <span className={`text-sm truncate ${t.is_unread ? "font-semibold" : "font-medium"}`}>{t.subject || t.participants.join(", ") || "Message"}</span>
+                  </div>
                   <span className="text-[10px] text-muted-foreground shrink-0 ml-2">{formatTime(t.last_message_at)}</span>
                 </div>
                 {t.subject && <p className="text-xs text-muted-foreground truncate">{t.participants.join(", ")}</p>}
@@ -197,8 +187,6 @@ export default function MessagesPage() {
                 <div className="flex items-center gap-1.5 mt-1">
                   {t.priority === "urgent" && <Badge variant="outline" className="text-[9px] px-1 border-amber-400 text-amber-600">Urgent</Badge>}
                   {t.customer_name && <Badge variant="secondary" className="text-[9px] px-1">{t.customer_name}</Badge>}
-                  {t.status === "acknowledged" && <Check className="h-3 w-3 text-blue-500" />}
-                  {t.status === "completed" && <CheckCheck className="h-3 w-3 text-green-500" />}
                 </div>
               </div>
             ))}
@@ -229,16 +217,6 @@ export default function MessagesPage() {
                   {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
                 </div>
                 <div className="flex gap-1.5">
-                  {detail.status === "active" && (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAction("acknowledge")}>
-                      <Check className="h-3 w-3 mr-1" /> Ack
-                    </Button>
-                  )}
-                  {(detail.status === "active" || detail.status === "acknowledged") && (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleAction("complete")}>
-                      <CheckCheck className="h-3 w-3 mr-1" /> Done
-                    </Button>
-                  )}
                   {!detail.converted_to_action_id && (
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleConvert}>
                       <ArrowRightToLine className="h-3 w-3 mr-1" /> Job
@@ -257,6 +235,9 @@ export default function MessagesPage() {
                     <div className={`max-w-[80%] rounded-lg px-3 py-2 ${isMe ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                       {!isMe && <p className="text-[10px] font-medium mb-0.5 opacity-70">{m.from_name}</p>}
                       <p className="text-sm whitespace-pre-wrap">{m.text}</p>
+                      {m.attachments && m.attachments.length > 0 && (
+                        <AttachmentDisplay attachments={m.attachments} />
+                      )}
                       <p className={`text-[10px] mt-1 ${isMe ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{formatTime(m.created_at)}</p>
                     </div>
                   </div>
@@ -265,8 +246,13 @@ export default function MessagesPage() {
             </div>
 
             {/* Reply */}
-            {detail.status !== "completed" && (
-              <div className="p-3 border-t shrink-0">
+            {(
+              <div className="p-3 border-t shrink-0 space-y-2">
+                <AttachmentPicker
+                  attachments={replyAttachments}
+                  onAttachmentsChange={setReplyAttachments}
+                  sourceType="internal_message"
+                />
                 <div className="flex gap-2">
                   <Input
                     ref={replyRef}

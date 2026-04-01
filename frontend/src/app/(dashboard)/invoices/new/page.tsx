@@ -7,9 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Info } from "lucide-react";
+import { ArrowLeft, Loader2, Info, Link2, X } from "lucide-react";
 import { LineItemsEditor, type LineItem } from "@/components/invoices/line-items-editor";
 import { InvoiceSummary } from "@/components/invoices/invoice-summary";
+
+interface SuggestedJob {
+  id: string;
+  description: string;
+  action_type: string;
+  status: string;
+  created_at: string | null;
+}
 
 function today() {
   return new Date().toISOString().split("T")[0];
@@ -74,6 +82,8 @@ function NewInvoiceForm() {
   const [saving, setSaving] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(false);
   const [isDraftEdit, setIsDraftEdit] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(jobId);
+  const [suggestedJobs, setSuggestedJobs] = useState<SuggestedJob[]>([]);
 
   const isEdit = !!editId;
   const label = docType === "estimate" ? "Estimate" : "Invoice";
@@ -156,6 +166,17 @@ function NewInvoiceForm() {
       .catch(() => {});
   }, [customerId]);
 
+  // Suggest open jobs when customer selected (estimates only, no pre-set job)
+  useEffect(() => {
+    if (!customerId || jobId || docType !== "estimate") {
+      setSuggestedJobs([]);
+      return;
+    }
+    api.get<SuggestedJob[]>(`/v1/invoices/suggest-jobs?customer_id=${customerId}`)
+      .then((jobs) => setSuggestedJobs(jobs))
+      .catch(() => setSuggestedJobs([]));
+  }, [customerId, docType, jobId]);
+
   const handleSubmit = async () => {
     if (!customerId) {
       toast.error("Select a client");
@@ -177,7 +198,7 @@ function NewInvoiceForm() {
         due_date: dueDate || null,
         tax_rate: taxRate,
         discount,
-        notes: notes || undefined,
+        notes: notes || null,
         line_items: validItems.map((li, i) => ({
           description: li.description,
           quantity: li.quantity,
@@ -194,16 +215,13 @@ function NewInvoiceForm() {
         invoiceId = editId;
         toast.success(`${label} updated`);
       } else {
-        const result = await api.post<{ id: string }>("/v1/invoices", payload);
+        const effectiveJobId = selectedJobId || jobId;
+        const result = await api.post<{ id: string }>("/v1/invoices", {
+          ...payload,
+          job_id: effectiveJobId || undefined,
+        });
         invoiceId = result.id;
         toast.success(`${label} created`);
-
-        // Link to job if applicable
-        if (jobId && invoiceId) {
-          await api
-            .put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: invoiceId } as Record<string, string>)
-            .catch(() => {});
-        }
       }
 
       router.push(`/invoices/${invoiceId}`);
@@ -329,6 +347,46 @@ function NewInvoiceForm() {
           </Card>
         )}
 
+        {/* Job link suggestion — for estimates when open jobs exist */}
+        {suggestedJobs.length > 0 && !selectedJobId && (
+          <Card className="shadow-sm border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20">
+            <CardContent className="py-3 space-y-2">
+              <div className="flex items-center gap-1.5">
+                <Link2 className="h-3.5 w-3.5 text-blue-600" />
+                <span className="text-xs font-medium text-blue-700 dark:text-blue-400">Link to open job?</span>
+              </div>
+              <div className="space-y-1">
+                {suggestedJobs.map((j) => (
+                  <button
+                    key={j.id}
+                    type="button"
+                    className="w-full text-left px-2.5 py-1.5 rounded-md bg-background hover:bg-muted/80 border text-sm transition-colors flex items-center justify-between"
+                    onClick={() => setSelectedJobId(j.id)}
+                  >
+                    <span className="truncate">{j.description}</span>
+                    <Badge variant="outline" className="text-[9px] ml-2 shrink-0">
+                      {j.action_type.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Selected job indicator */}
+        {selectedJobId && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-sm">
+            <Link2 className="h-3.5 w-3.5 text-green-600" />
+            <span className="text-green-700 dark:text-green-400 font-medium">Linked to job</span>
+            {!jobId && (
+              <button type="button" onClick={() => setSelectedJobId(null)} className="ml-auto text-muted-foreground hover:text-destructive">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* 2. Line Items */}
         <Card className="shadow-sm">
           <CardHeader className="pb-3">
@@ -404,9 +462,12 @@ function NewInvoiceForm() {
                       invoiceId = editId;
                     } else {
                       // Create new then send
-                      const result = await api.post<{ id: string }>("/v1/invoices", payload);
+                      const effectiveJobId = selectedJobId || jobId;
+                      const result = await api.post<{ id: string }>("/v1/invoices", {
+                        ...payload,
+                        job_id: effectiveJobId || undefined,
+                      });
                       invoiceId = result.id;
-                      if (jobId) await api.put(`/v1/admin/agent-actions/${jobId}`, { invoice_id: invoiceId }).catch(() => {});
                     }
                     await api.post(`/v1/invoices/${invoiceId}/send`);
                     toast.success(`${label} sent`);

@@ -244,7 +244,7 @@ export default function InboxPage() {
                   </TableCell>
                   <TableCell className="max-w-[200px]">
                     <div className="flex items-center gap-1.5">
-                      <span className={`truncate ${t.is_unread ? "font-semibold" : t.has_pending ? "font-medium" : ""}`}>
+                      <span className={`truncate ${t.is_unread ? "font-semibold" : ""}`}>
                         {t.customer_name || t.contact_email.split("@")[0]}
                       </span>
                       {t.visibility_permission && (

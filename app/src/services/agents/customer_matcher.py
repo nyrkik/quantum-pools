@@ -42,6 +42,23 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
         if customer:
             match_method = "email"
 
+        # 1b. Check customer contacts (alternate emails)
+        if not customer:
+            from src.models.customer_contact import CustomerContact
+            cc_result = await db.execute(
+                select(CustomerContact).where(
+                    func.lower(CustomerContact.email) == from_email.lower(),
+                ).limit(1)
+            )
+            contact = cc_result.scalar_one_or_none()
+            if contact:
+                cust_result = await db.execute(
+                    select(Customer).where(Customer.id == contact.customer_id, Customer.is_active == True)
+                )
+                customer = cust_result.scalar_one_or_none()
+                if customer:
+                    match_method = "contact_email"
+
         # 2. Check previous messages — if we've matched this email before, reuse it
         if not customer:
             prev = await db.execute(

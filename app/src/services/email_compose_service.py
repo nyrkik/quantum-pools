@@ -70,35 +70,31 @@ class EmailComposeService:
         sender_name: str | None = None,
         job_id: str | None = None,
         sender_user_id: str | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> dict:
-        """Send email, create AgentMessage + AgentThread records."""
-        # Determine FROM address: use thread's delivered_to if replying in a thread
+        """Send email, create AgentMessage + AgentThread records.
+
+        Order: create all records first (status=queued), commit, then send.
+        If send fails, records exist with queued status — no phantom emails.
+        If send succeeds, update to sent — no lost tracking records.
+        """
+        # Resolve FROM address
         from_address_override = None
+        action = None
         if job_id:
             from src.models.agent_action import AgentAction
-            action_result = await self.db.execute(
+            action = (await self.db.execute(
                 select(AgentAction).where(AgentAction.id == job_id, AgentAction.organization_id == org_id)
-            )
-            action = action_result.scalar_one_or_none()
+            )).scalar_one_or_none()
             if action and action.thread_id:
-                thread_result = await self.db.execute(
+                row = (await self.db.execute(
                     select(AgentThread.delivered_to).where(AgentThread.id == action.thread_id)
-                )
-                row = thread_result.first()
+                )).first()
                 if row and row[0]:
                     from_address_override = row[0]
 
-        # Send via single outbound path — signature handled there
-        email_svc = EmailService(self.db)
-        result = await email_svc.send_agent_reply(
-            org_id, to, subject, body,
-            from_address=from_address_override,
-            sender_name=sender_name,
-            is_new=True,
-        )
-
-        if not result.success:
-            return {"success": False, "error": result.error}
+        from_email = (from_address_override
+                      or os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"))
 
         # Resolve customer info
         customer_name = None
@@ -115,25 +111,13 @@ class EmailComposeService:
                 if prop:
                     property_address = prop.address
 
-        from_email = (org.agent_from_email if org and org.agent_from_email
-                      else os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"))
-
-        # Use existing thread if sending from a job that has one
+        # Find or create thread
         thread = None
-        if job_id:
-            from src.models.agent_action import AgentAction
-            action_result = await self.db.execute(
-                select(AgentAction).where(AgentAction.id == job_id, AgentAction.organization_id == org_id)
-            )
-            action = action_result.scalar_one_or_none()
-            if action and action.thread_id:
-                from src.models.agent_thread import AgentThread
-                thread_result = await self.db.execute(
-                    select(AgentThread).where(AgentThread.id == action.thread_id)
-                )
-                thread = thread_result.scalar_one_or_none()
+        if action and action.thread_id:
+            thread = (await self.db.execute(
+                select(AgentThread).where(AgentThread.id == action.thread_id)
+            )).scalar_one_or_none()
 
-        # Fall back to find-or-create by subject + email
         if not thread:
             thread = await self._get_or_create_thread(
                 org_id=org_id,
@@ -144,7 +128,7 @@ class EmailComposeService:
                 property_address=property_address,
             )
 
-        # Create message record
+        # ── Step 1: Create all records with status=queued ──
         now = datetime.now(timezone.utc)
         message = AgentMessage(
             id=str(uuid.uuid4()),
@@ -153,9 +137,8 @@ class EmailComposeService:
             from_email=from_email,
             to_email=to,
             subject=subject,
-            body=full_body,
-            status="sent",
-            sent_at=now,
+            body=body,
+            status="queued",
             received_at=now,
             matched_customer_id=customer_id,
             customer_name=customer_name,
@@ -164,7 +147,7 @@ class EmailComposeService:
         )
         self.db.add(message)
 
-        # Mark all pending inbound messages as handled (prevents refresh_thread from flipping back)
+        # Mark pending inbound messages as handled
         pending_msgs = await self.db.execute(
             select(AgentMessage).where(
                 AgentMessage.thread_id == thread.id,
@@ -175,10 +158,9 @@ class EmailComposeService:
         for pm in pending_msgs.scalars().all():
             pm.status = "handled"
 
-        # If linked to a job, mark draft as sent + post confirmation
+        # Job bookkeeping
         if job_id:
             from src.models.agent_action import AgentActionComment
-            # Replace draft email comments with the actual sent version
             draft_comments = await self.db.execute(
                 select(AgentActionComment).where(
                     AgentActionComment.action_id == job_id,
@@ -197,11 +179,60 @@ class EmailComposeService:
             )
             self.db.add(confirm_comment)
 
+        # Commit records before sending — nothing is lost if send fails
         await self.db.commit()
 
-        # Recalculate thread status via centralized function
+        # ── Step 2: Load attachments and send email ──
+        email_atts = None
+        att_rows = []
+        if attachment_ids:
+            from src.models.message_attachment import MessageAttachment
+            from pathlib import Path
+            upload_root = Path(os.environ.get("UPLOAD_DIR", "./uploads"))
+            rows = (await self.db.execute(
+                select(MessageAttachment).where(
+                    MessageAttachment.id.in_(attachment_ids[:5]),
+                    MessageAttachment.organization_id == org_id,
+                    MessageAttachment.source_type == "agent_message",
+                    MessageAttachment.source_id.is_(None),
+                )
+            )).scalars().all()
+            email_atts = []
+            for a in rows:
+                fpath = upload_root / "attachments" / a.organization_id / a.stored_filename
+                if fpath.exists():
+                    email_atts.append({
+                        "filename": a.filename,
+                        "content_bytes": fpath.read_bytes(),
+                        "mime_type": a.mime_type,
+                    })
+                a.source_id = message.id
+            att_rows = list(rows)
+            await self.db.commit()
+
+        email_svc = EmailService(self.db)
+        result = await email_svc.send_agent_reply(
+            org_id, to, subject, body,
+            from_address=from_address_override,
+            sender_name=sender_name,
+            is_new=True,
+            attachments=email_atts or None,
+        )
+
+        # ── Step 3: Update status based on result ──
+        if result.success:
+            message.status = "sent"
+            message.sent_at = datetime.now(timezone.utc)
+        else:
+            message.status = "failed"
+        await self.db.commit()
+
+        # Recalculate thread status
         from src.services.customer_agent import update_thread_status
         await update_thread_status(thread.id)
+
+        if not result.success:
+            return {"success": False, "error": result.error}
 
         return {
             "success": True,

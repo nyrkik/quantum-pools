@@ -16,8 +16,6 @@ JOB_MENTION = "job_mention"
 # Internal Messaging
 INTERNAL_MESSAGE = "internal_message"
 INTERNAL_MESSAGE_URGENT = "internal_message_urgent"
-MESSAGE_ACKNOWLEDGED = "message_acknowledged"
-MESSAGE_COMPLETED = "message_completed"
 
 # System
 FEEDBACK_SUBMITTED = "feedback_submitted"

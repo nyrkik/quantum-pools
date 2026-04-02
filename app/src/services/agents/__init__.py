@@ -1,9 +1,12 @@
 """AI Customer Support Agent — modular agent package.
 
-Re-exports key functions so existing imports from customer_agent continue to work.
+Re-exports key functions for convenient top-level access.
 """
 
 from .orchestrator import process_incoming_email, run_poll_cycle, handle_sms_reply, save_discovered_contact
+from .triage_agent import ai_triage
+from .sent_tracker import process_sent_emails
+from .customer_matcher import verify_customer_match
 from .thread_manager import get_or_create_thread, update_thread_status
 from .job_manager import evaluate_next_action
 from .communicator import send_email_response, send_sms, send_approval_request, notify_others

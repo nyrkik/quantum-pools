@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import anthropic
 from sqlalchemy import desc, func, or_, select
@@ -84,271 +84,91 @@ class AgentActionService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
-    async def _detect_equipment_changes(self, org_id: str, action: AgentAction):
-        """When a job is marked done, use AI to detect if equipment was installed/replaced and update records."""
-        # Only process jobs that have a customer
-        customer_id = action.customer_id
-        if not customer_id:
-            return
+    async def _create_invoice_from_estimate(self, org_id: str, action_id: str) -> dict | None:
+        """If the job has an approved estimate, create a draft invoice from it."""
+        from src.models.invoice import Invoice
+        from src.models.job_invoice import JobInvoice
+        from src.services.invoice_service import InvoiceService
+        from sqlalchemy.orm import selectinload
 
-        # Build job context — description + comments + email body
-        job_text = action.description or ""
-        comments = (await self.db.execute(
-            select(AgentActionComment).where(AgentActionComment.action_id == action.id).order_by(AgentActionComment.created_at)
-        )).scalars().all()
-        for c in comments:
-            if not c.text.startswith("[DRAFT_EMAIL]") and not c.text.startswith("[SENT_EMAIL]"):
-                job_text += f"\n{c.text}"
+        # Find linked invoices/estimates for this job
+        result = await self.db.execute(
+            select(Invoice)
+            .join(JobInvoice, JobInvoice.invoice_id == Invoice.id)
+            .where(JobInvoice.action_id == action_id)
+            .options(selectinload(Invoice.line_items))
+        )
+        linked = result.scalars().all()
+        if not linked:
+            return None
 
-        if action.agent_message_id:
-            msg = (await self.db.execute(
-                select(AgentMessage).where(AgentMessage.id == action.agent_message_id)
-            )).scalar_one_or_none()
-            if msg:
-                job_text += f"\nEmail: {msg.body or ''}"
-                if msg.final_response:
-                    job_text += f"\nOur reply: {msg.final_response}"
+        # Find an approved estimate that hasn't been converted yet
+        estimate = None
+        for inv in linked:
+            if inv.document_type == "estimate" and inv.approved_at and inv.status != "void":
+                estimate = inv
+                break
+        if not estimate:
+            return None
 
-        if len(job_text.strip()) < 20:
-            return
+        # Check no invoice already exists for this job
+        for inv in linked:
+            if inv.document_type == "invoice":
+                return None
 
-        # Get current equipment for context
-        props = (await self.db.execute(
-            select(Property).where(Property.customer_id == customer_id, Property.is_active == True)
-        )).scalars().all()
+        # Create draft invoice copying estimate line items
+        svc = InvoiceService(self.db)
+        line_items_data = []
+        if estimate.line_items:
+            for li in estimate.line_items:
+                line_items_data.append({
+                    "description": li.description,
+                    "quantity": float(li.quantity),
+                    "unit_price": float(li.unit_price),
+                    "is_taxed": li.is_taxed if hasattr(li, "is_taxed") else False,
+                })
 
-        current_equip = []
-        for p in props:
-            wfs = (await self.db.execute(
-                select(WaterFeature).where(WaterFeature.property_id == p.id, WaterFeature.is_active == True)
-            )).scalars().all()
-            for wf in wfs:
-                from src.models.equipment_item import EquipmentItem
-                items = (await self.db.execute(
-                    select(EquipmentItem).where(EquipmentItem.water_feature_id == wf.id, EquipmentItem.is_active == True)
-                )).scalars().all()
-                for ei in items:
-                    current_equip.append({
-                        "id": ei.id,
-                        "wf_id": wf.id,
-                        "wf_name": wf.name or wf.water_type,
-                        "type": ei.equipment_type,
-                        "name": ei.normalized_name or f"{ei.brand or ''} {ei.model or ''}".strip(),
-                    })
+        invoice = await svc.create(
+            org_id=org_id,
+            customer_id=estimate.customer_id,
+            line_items_data=line_items_data,
+            document_type="invoice",
+            subject=estimate.subject,
+            issue_date=date.today(),
+            tax_rate=float(estimate.tax_rate or 0),
+            discount=float(estimate.discount or 0),
+            notes=estimate.notes,
+            case_id=estimate.case_id,
+        )
 
-        # Ask AI if equipment changed
-        import anthropic
-        import json
-        from src.core.ai_models import get_model
-
-        equip_list = "\n".join(f"- {e['type']}: {e['name']} (on {e['wf_name']})" for e in current_equip) if current_equip else "No equipment on file"
-
-        try:
-            client = anthropic.Anthropic()
-            response = client.messages.create(
-                model=get_model("fast"),
-                max_tokens=500,
-                messages=[{"role": "user", "content": f"""Analyze this completed pool service job. Was any equipment installed, replaced, or removed?
-
-JOB DETAILS:
-{job_text[:1500]}
-
-CURRENT EQUIPMENT ON FILE:
-{equip_list}
-
-If equipment was changed, return JSON:
-{{"changes": [{{"action": "install"|"replace"|"remove", "equipment_type": "pump"|"filter"|"heater"|"chlorinator"|"automation"|"booster_pump"|"chemical_feeder", "old_name": "name of replaced item or null", "new_name": "full name of new equipment e.g. Waterway Crystal Water DE Filter", "new_brand": "manufacturer", "new_model": "model number if known"}}]}}
-
-If NO equipment changes, return: {{"changes": []}}
-
-JSON only, no markdown."""}],
-            )
-            text = response.content[0].text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            result = json.loads(text)
-        except Exception as e:
-            logger.warning(f"AI equipment detection failed: {e}")
-            return
-
-        changes = result.get("changes", [])
-        if not changes:
-            return
-
-        logger.info(f"Equipment changes detected for job {action.id}: {changes}")
-
-        from src.models.equipment_item import EquipmentItem
-        from src.services.parts.equipment_catalog_service import EquipmentCatalogService
-        import uuid as _uuid
-
-        catalog_svc = EquipmentCatalogService(self.db)
-
-        for change in changes:
-            eq_type = change.get("equipment_type", "equipment")
-            new_name = change.get("new_name", "")
-            action_type = change.get("action", "install")
-
-            if action_type == "remove":
-                # Deactivate matching equipment
-                old_name = change.get("old_name", "")
-                if old_name:
-                    for e in current_equip:
-                        if old_name.lower() in e["name"].lower() or e["name"].lower() in old_name.lower():
-                            old_item = (await self.db.execute(
-                                select(EquipmentItem).where(EquipmentItem.id == e["id"])
-                            )).scalar_one_or_none()
-                            if old_item:
-                                old_item.is_active = False
-                continue
-
-            if not new_name:
-                continue
-
-            # Resolve new equipment against catalog
-            catalog_result = await catalog_svc.resolve(new_name, eq_type)
-            catalog_id = catalog_result.get("entry", {}).get("id") if catalog_result.get("entry") else None
-
-            # Find which WF to add to — match by old equipment or use first WF
-            target_wf_id = None
-            old_name = change.get("old_name")
-            if old_name and action_type == "replace":
-                for e in current_equip:
-                    if e["type"] == eq_type and (old_name.lower() in e["name"].lower() or e["name"].lower() in old_name.lower()):
-                        target_wf_id = e["wf_id"]
-                        # Deactivate old
-                        old_item = (await self.db.execute(
-                            select(EquipmentItem).where(EquipmentItem.id == e["id"])
-                        )).scalar_one_or_none()
-                        if old_item:
-                            old_item.is_active = False
-                        break
-
-            if not target_wf_id and props:
-                # Default to first WF on first property
-                first_wf = (await self.db.execute(
-                    select(WaterFeature).where(
-                        WaterFeature.property_id == props[0].id, WaterFeature.is_active == True
-                    ).limit(1)
-                )).scalar_one_or_none()
-                if first_wf:
-                    target_wf_id = first_wf.id
-
-            if not target_wf_id:
-                continue
-
-            # Create new equipment item
-            new_item = EquipmentItem(
-                id=str(_uuid.uuid4()),
-                organization_id=org_id,
-                water_feature_id=target_wf_id,
-                equipment_type=eq_type,
-                brand=change.get("new_brand"),
-                model=change.get("new_model"),
-                normalized_name=new_name,
-                catalog_equipment_id=catalog_id,
-            )
-            self.db.add(new_item)
-            logger.info(f"Added equipment: {new_name} ({eq_type}) to WF {target_wf_id}")
-
+        # Link the new invoice to this job
+        from src.services.job_invoice_service import link_job_invoice
+        await link_job_invoice(self.db, action_id, invoice.id, linked_by="auto")
         await self.db.commit()
 
+        return {
+            "id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "total": float(invoice.total or 0),
+            "status": invoice.status,
+            "estimate_number": estimate.invoice_number,
+        }
+
+    async def _detect_equipment_changes(self, org_id: str, action: AgentAction):
+        """Delegated to equipment_agent.detect_equipment_changes."""
+        from src.services.agents.equipment_agent import detect_equipment_changes
+        await detect_equipment_changes(self.db, org_id, action)
+
     async def _build_customer_context(self, org_id: str, action: AgentAction) -> tuple[str | None, str]:
-        """Build customer context string for AI calls. Returns (customer_id, context_text)."""
-        customer_context = ""
-        customer_id = None
-
-        if action.property_address:
-            customer_context += f"\nJob address: {action.property_address}"
-        if action.customer_name:
-            customer_context += f"\nJob contact: {action.customer_name}"
-
-        # Try to find customer from linked message
-        if action.agent_message_id:
-            msg_check = await self.db.execute(
-                select(AgentMessage).where(
-                    AgentMessage.id == action.agent_message_id,
-                    AgentMessage.organization_id == org_id,
-                )
-            )
-            parent_msg = msg_check.scalar_one_or_none()
-            if parent_msg and parent_msg.matched_customer_id:
-                customer_id = parent_msg.matched_customer_id
-
-        # For standalone actions, find customer by name
-        if not customer_id and action.customer_name:
-            cust_match = await self.db.execute(
-                select(Customer).where(
-                    Customer.organization_id == org_id,
-                    Customer.is_active == True,
-                    or_(
-                        Customer.display_name_col.ilike(f"%{action.customer_name}%"),
-                        Customer.first_name.ilike(f"%{action.customer_name}%"),
-                        Customer.last_name.ilike(f"%{action.customer_name}%"),
-                        Customer.company_name.ilike(f"%{action.customer_name}%"),
-                    )
-                ).limit(1)
-            )
-            matched = cust_match.scalar_one_or_none()
-            if matched:
-                customer_id = matched.id
-
-        if customer_id:
-            cust = (await self.db.execute(
-                select(Customer).where(Customer.id == customer_id)
-            )).scalar_one_or_none()
-            if cust:
-                customer_context += f"\nCustomer: {cust.display_name}"
-                if cust.email:
-                    customer_context += f"\nEmail: {cust.email}"
-                if cust.phone:
-                    customer_context += f"\nPhone: {cust.phone}"
-                if cust.preferred_day:
-                    customer_context += f"\nService days: {cust.preferred_day}"
-                if cust.monthly_rate:
-                    customer_context += f"\nRate: ${cust.monthly_rate:.2f}/mo"
-
-                props = (await self.db.execute(
-                    select(Property).where(
-                        Property.customer_id == customer_id,
-                        Property.is_active == True,
-                    )
-                )).scalars().all()
-                for p in props:
-                    customer_context += f"\nProperty: {p.full_address}"
-                    if p.gate_code:
-                        customer_context += f" (Gate: {p.gate_code})"
-                    if p.access_instructions:
-                        customer_context += f" Access: {p.access_instructions}"
-                    if p.dog_on_property:
-                        customer_context += " DOG"
-                    wfs = (await self.db.execute(
-                        select(WaterFeature).where(
-                            WaterFeature.property_id == p.id,
-                            WaterFeature.is_active == True,
-                        )
-                    )).scalars().all()
-                    for wf in wfs:
-                        parts = [wf.name or wf.water_type]
-                        if wf.pool_gallons:
-                            parts.append(f"{wf.pool_gallons:,} gal")
-                        customer_context += f"\n  {', '.join(parts)}"
-
-                        # Include equipment from catalog
-                        from src.models.equipment_item import EquipmentItem
-                        from sqlalchemy.orm import selectinload as _sil
-                        equip_result = await self.db.execute(
-                            select(EquipmentItem).options(_sil(EquipmentItem.catalog_equipment)).where(
-                                EquipmentItem.water_feature_id == wf.id,
-                                EquipmentItem.is_active == True,
-                            )
-                        )
-                        for ei in equip_result.scalars().all():
-                            name = (ei.catalog_equipment.canonical_name if ei.catalog_equipment else
-                                    ei.normalized_name or f"{ei.brand or ''} {ei.model or ''}".strip())
-                            if name:
-                                customer_context += f"\n    {ei.equipment_type}: {name}"
-
-        return customer_id, customer_context
+        """Delegated to customer_context_service.build_customer_context."""
+        from src.services.customer_context_service import build_customer_context
+        return await build_customer_context(
+            self.db, org_id,
+            customer_id=action.customer_id,
+            customer_name=action.customer_name,
+            agent_message_id=action.agent_message_id,
+            property_address=action.property_address,
+        )
 
     # ---- Main CRUD ----
 
@@ -425,9 +245,28 @@ JSON only, no markdown."""}],
                     break
 
         due = datetime.fromisoformat(due_date) if due_date else None
+
+        # Find or create a case for this job
+        case_id = None
+        try:
+            from src.services.service_case_service import ServiceCaseService
+            case_svc = ServiceCaseService(self.db)
+            case = await case_svc.find_or_create_case(
+                org_id=org_id,
+                customer_id=customer_id,
+                thread_id=None,
+                subject=description,
+                source="manual",
+                created_by=created_by,
+            )
+            case_id = case.id
+        except Exception as e:
+            logger.warning(f"Case creation failed for manual job: {e}")
+
         action = AgentAction(
             organization_id=org_id,
             agent_message_id=agent_message_id or None,
+            case_id=case_id,
             action_type=action_type,
             description=description,
             assigned_to=assigned_to,
@@ -466,6 +305,7 @@ JSON only, no markdown."""}],
                 id=str(_uuid.uuid4()),
                 organization_id=org_id,
                 customer_id=customer_id,
+                case_id=case_id,
                 invoice_number=await self._next_estimate_number(org_id),
                 document_type="estimate",
                 subject=description,
@@ -512,6 +352,7 @@ JSON only, no markdown."""}],
         due_date: str | None = None,
         notes: str | None = None,
         invoice_id: str | None = None,
+        thread_id: str | None = None,
     ) -> dict | None:
         """Update action status, assignment, description. Handles notifications and follow-up suggestions."""
         result = await self.db.execute(
@@ -546,6 +387,8 @@ JSON only, no markdown."""}],
         if invoice_id is not None:
             from src.services.job_invoice_service import link_job_invoice
             await link_job_invoice(self.db, action.id, invoice_id)
+        if thread_id is not None:
+            action.thread_id = thread_id if thread_id else None
 
         await self.db.commit()
 
@@ -586,10 +429,18 @@ JSON only, no markdown."""}],
             except Exception as e:
                 logger.warning(f"Equipment change detection failed for {action_id}: {e}")
 
+        # If just marked done, auto-create draft invoice from approved estimate
+        created_invoice = None
+        if status == "done" and was_not_done:
+            try:
+                created_invoice = await self._create_invoice_from_estimate(org_id, action_id)
+            except Exception as e:
+                logger.warning(f"Auto-invoice from estimate failed for {action_id}: {e}")
+
         # If just marked done, evaluate if a follow-up action is needed
         suggestion = None
         if status == "done" and was_not_done:
-            from src.services.customer_agent import evaluate_next_action
+            from src.services.agents.job_manager import evaluate_next_action
             try:
                 rec = await evaluate_next_action(action_id)
                 if rec:
@@ -599,6 +450,8 @@ JSON only, no markdown."""}],
                         organization_id=org_id,
                         agent_message_id=rec.get("agent_message_id"),
                         thread_id=action.thread_id,
+                        case_id=action.case_id,
+                        parent_action_id=action.id,
                         action_type=rec["action_type"],
                         description=rec["description"],
                         due_date=follow_due,
@@ -623,6 +476,8 @@ JSON only, no markdown."""}],
         result_dict = await presenter.one(action, include_comments=False, include_email=False)
         if suggestion:
             result_dict["suggestion"] = suggestion
+        if created_invoice:
+            result_dict["created_invoice"] = created_invoice
         return result_dict
 
     async def get_action_detail(self, org_id: str, action_id: str) -> dict | None:

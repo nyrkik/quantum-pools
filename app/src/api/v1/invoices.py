@@ -3,7 +3,7 @@
 from typing import Optional
 from datetime import date
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -163,6 +163,83 @@ async def get_invoice(
     svc = InvoiceService(db)
     invoice = await svc.get(ctx.organization_id, invoice_id)
     return _invoice_to_response(invoice)
+
+
+@router.get("/{invoice_id}/pdf")
+async def get_invoice_pdf(
+    invoice_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate and return a PDF for an invoice or estimate."""
+    from sqlalchemy import select
+    from src.models.organization import Organization
+    from src.services.pdf_service import generate_invoice_pdf
+
+    svc = InvoiceService(db)
+    invoice = await svc.get(ctx.organization_id, invoice_id)
+
+    # Load org for branding
+    org_result = await db.execute(select(Organization).where(Organization.id == ctx.organization_id))
+    org = org_result.scalar_one()
+    org_data = {
+        "name": org.name,
+        "phone": org.phone,
+        "email": org.email,
+        "address": org.address,
+        "city": org.city,
+        "state": org.state,
+        "zip_code": org.zip_code,
+        "primary_color": org.primary_color,
+    }
+
+    customer = invoice.customer
+    customer_data = {
+        "display_name": customer.display_name if customer else None,
+        "company_name": customer.company_name if customer else None,
+        "email": customer.email if customer else None,
+        "billing_address": customer.billing_address if customer else None,
+    }
+
+    line_items_data = [
+        {
+            "description": li.description,
+            "quantity": float(li.quantity),
+            "unit_price": float(li.unit_price),
+            "amount": float(li.amount or li.quantity * li.unit_price),
+            "is_taxed": li.is_taxed if hasattr(li, "is_taxed") else False,
+        }
+        for li in (invoice.line_items or [])
+    ]
+
+    invoice_data = {
+        "invoice_number": invoice.invoice_number,
+        "document_type": invoice.document_type,
+        "subject": invoice.subject,
+        "status": invoice.status,
+        "issue_date": invoice.issue_date,
+        "due_date": invoice.due_date,
+        "subtotal": float(invoice.subtotal or 0),
+        "discount": float(invoice.discount or 0),
+        "tax_rate": float(invoice.tax_rate or 0),
+        "tax_amount": float(invoice.tax_amount or 0),
+        "total": float(invoice.total or 0),
+        "amount_paid": float(invoice.amount_paid or 0),
+        "balance": float(invoice.balance or 0),
+        "notes": invoice.notes,
+    }
+
+    pdf_bytes = generate_invoice_pdf(org_data, invoice_data, customer_data, line_items_data)
+
+    doc_type = invoice.document_type or "invoice"
+    number = invoice.invoice_number or "draft"
+    filename = f"{doc_type}_{number}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.put("/{invoice_id}", )

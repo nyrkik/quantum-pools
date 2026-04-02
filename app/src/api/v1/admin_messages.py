@@ -261,11 +261,11 @@ async def approve_agent_message(
 
     # Recalculate thread status
     if msg.thread_id:
-        from src.services.customer_agent import update_thread_status
+        from src.services.agents.thread_manager import update_thread_status
         await update_thread_status(msg.thread_id)
 
     # Save discovered contact info to customer record
-    from src.services.customer_agent import save_discovered_contact
+    from src.services.agents.orchestrator import save_discovered_contact
     await save_discovered_contact(message_id)
 
     return {"sent": True, "to": msg.from_email}
@@ -488,7 +488,7 @@ async def send_followup(
 
     # Recalculate thread status via centralized function
     if msg.thread_id:
-        from src.services.customer_agent import update_thread_status
+        from src.services.agents.thread_manager import update_thread_status
         await update_thread_status(msg.thread_id)
 
     # Evaluate if open actions should be closed based on the follow-up content

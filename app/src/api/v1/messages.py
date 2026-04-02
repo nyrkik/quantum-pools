@@ -280,9 +280,30 @@ async def convert_to_job(
     description = thread.subject or msgs[0].text[:100] if msgs else "Converted from message"
 
     user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+
+    # Find or create a case
+    case_id = thread.case_id
+    if not case_id:
+        try:
+            from src.services.service_case_service import ServiceCaseService
+            case_svc = ServiceCaseService(db)
+            case = await case_svc.find_or_create_case(
+                org_id=ctx.organization_id,
+                customer_id=thread.customer_id,
+                thread_id=None,
+                subject=description,
+                source="internal_message",
+                created_by=user_name,
+            )
+            case_id = case.id
+            thread.case_id = case_id
+        except Exception:
+            pass
+
     action = AgentAction(
         id=str(uuid.uuid4()),
         organization_id=ctx.organization_id,
+        case_id=case_id,
         action_type="follow_up",
         description=description,
         customer_id=thread.customer_id,

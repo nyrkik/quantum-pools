@@ -271,6 +271,7 @@ async def update_agent_action(
         due_date=body.due_date,
         notes=body.notes,
         invoice_id=body.invoice_id,
+        thread_id=body.thread_id,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Action not found")

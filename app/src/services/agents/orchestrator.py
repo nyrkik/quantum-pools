@@ -222,7 +222,8 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
     from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
     clean_body = strip_email_signature(strip_quoted_reply(body)) if body else ""
 
-    needs_response = await _ai_triage(clean_body, subject, from_email)
+    from .triage_agent import ai_triage
+    needs_response = await ai_triage(clean_body, subject, from_email)
     if not needs_response and not sender_is_customer:
         logger.info(f"AI triage: no response needed — {subject[:50]}")
         async with get_db_context() as db:
@@ -295,6 +296,9 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 thread_obj.customer_name = result["customer_name"]
             if result.get("_property_address") and not thread_obj.property_address:
                 thread_obj.property_address = result["_property_address"]
+
+        # Inherit case_id from thread if it already has one (don't create cases from emails)
+        case_id = thread_obj.case_id if thread_obj else None
 
         agent_msg = AgentMessage(
             organization_id=organization_id,
@@ -375,10 +379,30 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             cust_name = (thread_obj.customer_name if thread_obj else None) or result.get("customer_name")
             prop_addr = (thread_obj.property_address if thread_obj else None) or result.get("_property_address")
 
+            # Create case on first job for this thread (not on email arrival)
+            if not case_id:
+                try:
+                    from src.services.service_case_service import ServiceCaseService
+                    case_svc = ServiceCaseService(db)
+                    case = await case_svc.find_or_create_case(
+                        org_id=organization_id,
+                        customer_id=cust_id,
+                        thread_id=thread.id,
+                        subject=subject,
+                        source="email",
+                        created_by="DeepBlue",
+                    )
+                    case_id = case.id
+                    if thread_obj and not thread_obj.case_id:
+                        thread_obj.case_id = case_id
+                except Exception as e:
+                    logger.warning(f"Case creation failed for job: {e}")
+
             db.add(AgentAction(
                 organization_id=organization_id,
                 agent_message_id=agent_msg.id,
                 thread_id=thread.id,
+                case_id=case_id,
                 action_type=action.get("action_type", "other"),
                 description=action["description"],
                 due_date=due_date,
@@ -430,87 +454,11 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
     await update_thread_status(thread.id)
 
     # Post-processing: verify customer match integrity
-    await _verify_customer_match(organization_id, from_email, thread.id)
+    from .customer_matcher import verify_customer_match
+    await verify_customer_match(organization_id, from_email, thread.id)
 
 
-async def _verify_customer_match(org_id: str, from_email: str, thread_id: str):
-    """Post-processing check: if sender should match a customer but didn't, alert admins."""
-    try:
-        from sqlalchemy import func
-        from src.models.customer_contact import CustomerContact
-        from src.models.notification import Notification
-        from src.models.organization_user import OrganizationUser
-
-        async with get_db_context() as db:
-            thread = (await db.execute(
-                select(AgentThread).where(AgentThread.id == thread_id)
-            )).scalar_one_or_none()
-            if not thread or thread.matched_customer_id:
-                return  # Already matched, nothing to check
-
-            # Check if this email exists in customers table
-            cust = (await db.execute(
-                select(Customer).where(
-                    func.lower(Customer.email) == from_email.lower(),
-                    Customer.is_active == True,
-                )
-            )).scalar_one_or_none()
-
-            # Check customer contacts too
-            if not cust:
-                contact = (await db.execute(
-                    select(CustomerContact).where(
-                        func.lower(CustomerContact.email) == from_email.lower(),
-                    )
-                )).scalar_one_or_none()
-                if contact:
-                    cust = (await db.execute(
-                        select(Customer).where(Customer.id == contact.customer_id, Customer.is_active == True)
-                    )).scalar_one_or_none()
-
-            if not cust:
-                return  # Not a known customer email, nothing to alert about
-
-            # Customer exists but wasn't matched — this is a problem. Fix it and alert.
-            logger.warning(f"Customer match missed: {from_email} should be {cust.display_name} ({cust.id})")
-
-            # Auto-fix the thread
-            thread.matched_customer_id = cust.id
-            thread.customer_name = cust.display_name
-
-            # Also fix the latest message
-            latest_msg = (await db.execute(
-                select(AgentMessage).where(
-                    AgentMessage.thread_id == thread_id,
-                    AgentMessage.direction == "inbound",
-                ).order_by(AgentMessage.received_at.desc()).limit(1)
-            )).scalar_one_or_none()
-            if latest_msg and not latest_msg.matched_customer_id:
-                latest_msg.matched_customer_id = cust.id
-                latest_msg.customer_name = cust.display_name
-                latest_msg.match_method = "post_verify"
-
-            # Alert admins
-            admins = (await db.execute(
-                select(OrganizationUser).where(
-                    OrganizationUser.organization_id == org_id,
-                    OrganizationUser.role.in_(("owner", "admin")),
-                )
-            )).scalars().all()
-            for ou in admins:
-                db.add(Notification(
-                    organization_id=org_id,
-                    user_id=ou.user_id,
-                    type="system_alert",
-                    title=f"Customer match recovered: {cust.display_name}",
-                    body=f"Email from {from_email} wasn't automatically matched. Auto-fixed.",
-                    link="/inbox",
-                ))
-
-            await db.commit()
-
-    except Exception as e:
-        logger.error(f"Customer match verification failed: {e}")
+    # Extracted to customer_matcher.py — kept as import target for backward compat
 
 
 async def handle_sms_reply(from_number: str, body: str):
@@ -587,40 +535,9 @@ async def handle_sms_reply(from_number: str, body: str):
 
 
 async def save_discovered_contact(agent_msg_id: str):
-    """When a message is confirmed (approved/sent), save the sender's email to the matched customer if missing."""
-    async with get_db_context() as db:
-        result = await db.execute(
-            select(AgentMessage).where(AgentMessage.id == agent_msg_id)
-        )
-        msg = result.scalar_one_or_none()
-        if not msg or not msg.matched_customer_id:
-            return
-
-        cust_result = await db.execute(
-            select(Customer).where(Customer.id == msg.matched_customer_id)
-        )
-        customer = cust_result.scalar_one_or_none()
-        if not customer:
-            return
-
-        updated = False
-        # Save email if customer doesn't have one
-        if not customer.email and msg.from_email:
-            customer.email = msg.from_email
-            updated = True
-            logger.info(f"Saved email {msg.from_email} to customer {customer.display_name}")
-
-        # If customer has a different email, and this is a confirmed match,
-        # log it but don't overwrite (might be a property manager emailing on behalf)
-        if customer.email and customer.email.lower() != msg.from_email.lower():
-            if not msg.notes:
-                msg.notes = ""
-            if msg.from_email not in (msg.notes or ""):
-                msg.notes = (msg.notes + f"\nAlternate email: {msg.from_email}").strip()
-                updated = True
-
-        if updated:
-            await db.commit()
+    """Delegated to customer_matcher.save_discovered_contact."""
+    from .customer_matcher import save_discovered_contact as _save
+    await _save(agent_msg_id)
 
 
 async def _get_default_org_id() -> str:
@@ -639,217 +556,8 @@ async def _get_default_org_id() -> str:
         return org.id if org else ""
 
 
-async def _ai_triage(body: str, subject: str, from_email: str) -> bool:
-    """Quick AI check: does this email need a response from us?
-
-    Returns True if we should respond, False if it's informational/gratitude/FYI.
-    Uses Haiku for speed — ~200ms per call.
-    """
-    if not body.strip():
-        return False
-
-    try:
-        import anthropic
-        from src.core.ai_models import get_model
-        from src.core.config import get_settings
-        settings = get_settings()
-        if not settings.anthropic_api_key:
-            return True  # Default to needing response if no AI
-
-        model = await get_model("fast")
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-
-        prompt = f"""You are triaging incoming emails for a pool service company.
-
-From: {from_email}
-Subject: {subject}
-Body: {body[:500]}
-
-Does this email require a response from us? Answer ONLY "yes" or "no".
-
-Answer "no" if it's:
-- A thank you, acknowledgment, or confirmation ("thanks", "got it", "sounds good")
-- A status update that's just informational ("we expect to finish by May")
-- An automated notification (order shipped, payment received)
-- A marketing email or newsletter
-- A forwarded message that's just FYI
-- A one-word or very short affirmative ("ok", "yes", "perfect")
-
-Answer "yes" if it's:
-- Asking a question
-- Requesting service, a quote, or scheduling
-- Reporting a problem or complaint
-- Asking for information we need to provide
-- Requesting a callback or meeting"""
-
-        response = await client.messages.create(
-            model=model,
-            max_tokens=5,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        answer = response.content[0].text.strip().lower()
-        return answer.startswith("yes")
-
-    except Exception as e:
-        logger.warning(f"AI triage failed: {e}")
-        return True  # Default to needing response on error
-
-
-async def _process_sent_emails(org_id: str) -> int:
-    """Track outbound emails sent via Gmail (not through the app).
-
-    When someone replies from Gmail or an alias, the sent email
-    appears in [Gmail]/Sent Mail. We match it to an existing thread
-    and record it as an outbound message, marking the thread as handled.
-    """
-    from .mail_agent import fetch_sent_emails, mark_sent_processed, extract_text_body
-    from .thread_manager import get_or_create_thread
-    from src.models.agent_message import AgentMessage
-    from src.models.agent_action import AgentAction, AgentActionComment
-    from src.core.database import get_db_context
-    import uuid as uuid_mod
-    from email.utils import parsedate_to_datetime
-
-    sent = fetch_sent_emails()
-    if not sent:
-        return 0
-
-    count = 0
-    for uid, msg in sent:
-        try:
-            from_email = msg.get("From", "")
-            to_email = msg.get("To", "")
-            subject = msg.get("Subject", "")
-
-            # Only track emails FROM org addresses
-            if not any(addr in from_email.lower() for addr in ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]):
-                mark_sent_processed(uid)
-                continue
-
-            # Skip emails sent to org addresses (internal)
-            if not to_email or all(addr in to_email.lower() for addr in ["sapphire-pools.com", "quantumpoolspro.com"]):
-                mark_sent_processed(uid)
-                continue
-
-            # Skip system emails (invites, password resets, etc.)
-            subject_lower = (subject or "").lower()
-            if any(skip in subject_lower for skip in ["invited to", "set up your", "password reset", "verify your", "welcome to"]):
-                mark_sent_processed(uid)
-                continue
-
-            # Extract recipient email
-            import re
-            to_match = re.search(r'[\w.+-]+@[\w.-]+', to_email)
-            if not to_match:
-                mark_sent_processed(uid)
-                continue
-            recipient = to_match.group().lower()
-
-            # Extract sender name
-            from_match = re.match(r'"?([^"<]+)"?\s*<', from_email)
-            sender_name = from_match.group(1).strip() if from_match else "Team"
-
-            body = extract_text_body(msg)
-            date_header = msg.get("Date")
-            sent_at = parsedate_to_datetime(date_header) if date_header else datetime.now(timezone.utc)
-
-            # Decode MIME-encoded subject
-            from email.header import decode_header
-            decoded_parts = decode_header(subject)
-            clean_subject = ""
-            for part, charset in decoded_parts:
-                if isinstance(part, bytes):
-                    clean_subject += part.decode(charset or "utf-8", errors="replace")
-                else:
-                    clean_subject += part
-            subject = clean_subject.strip()
-
-            # Find existing thread only — do NOT create new threads for sent emails
-            from src.models.agent_thread import AgentThread
-            async with get_db_context() as db:
-                # Try to match by recipient + similar subject
-                thread_result = await db.execute(
-                    select(AgentThread).where(
-                        AgentThread.organization_id == org_id,
-                        AgentThread.contact_email == recipient,
-                    ).order_by(AgentThread.last_message_at.desc()).limit(5)
-                )
-                thread = None
-                for t in thread_result.scalars().all():
-                    # Match by subject (strip Re:/Fwd: prefixes)
-                    t_subj = re.sub(r'^(?:Re|Fwd|Fw):\s*', '', t.subject or '', flags=re.IGNORECASE).strip().lower()
-                    s_subj = re.sub(r'^(?:Re|Fwd|Fw):\s*', '', subject, flags=re.IGNORECASE).strip().lower()
-                    if t_subj == s_subj or t_subj in s_subj or s_subj in t_subj:
-                        thread = t
-                        break
-
-                if not thread:
-                    # No matching thread — skip this sent email, don't create orphan threads
-                    mark_sent_processed(uid)
-                    continue
-
-                # Check if we already recorded this — match by thread + direction + time window
-                from datetime import timedelta
-                time_window = sent_at - timedelta(minutes=5)
-                existing = await db.execute(
-                    select(AgentMessage).where(
-                        AgentMessage.thread_id == thread.id,
-                        AgentMessage.direction == "outbound",
-                        AgentMessage.received_at >= time_window,
-                    ).limit(1)
-                )
-                if existing.scalar_one_or_none():
-                    mark_sent_processed(uid)
-                    continue
-
-                # Record the outbound message
-                outbound = AgentMessage(
-                    id=str(uuid_mod.uuid4()),
-                    organization_id=org_id,
-                    direction="outbound",
-                    from_email=from_email,
-                    to_email=to_email,
-                    subject=subject,
-                    body=body,
-                    status="sent",
-                    sent_at=sent_at,
-                    received_at=sent_at,
-                    thread_id=thread.id,
-                )
-                db.add(outbound)
-
-                # Link to open jobs on this thread
-                if thread.id:
-                    open_actions = (await db.execute(
-                        select(AgentAction).where(
-                            AgentAction.thread_id == thread.id,
-                            AgentAction.organization_id == org_id,
-                            AgentAction.status.in_(("open", "in_progress")),
-                        )
-                    )).scalars().all()
-                    for action in open_actions:
-                        comment = AgentActionComment(
-                            organization_id=org_id,
-                            action_id=action.id,
-                            author=sender_name or "Team",
-                            text=f"Email sent to {recipient}: {subject}",
-                        )
-                        db.add(comment)
-
-                await db.commit()
-
-            # Recalculate thread status via centralized function
-            await update_thread_status(thread.id)
-
-            mark_sent_processed(uid)
-            logger.info(f"Tracked sent email from {sender_name} to {recipient}: {subject[:50]}")
-            count += 1
-
-        except Exception as e:
-            logger.error(f"Error tracking sent email {uid}: {e}", exc_info=True)
-            mark_sent_processed(uid)  # Don't retry
-
-    return count
+    # _ai_triage extracted to triage_agent.py
+    # _process_sent_emails extracted to sent_tracker.py
 
 
 async def run_poll_cycle():
@@ -871,7 +579,8 @@ async def run_poll_cycle():
 
     # Also track outbound emails sent via Gmail
     try:
-        sent_count = await _process_sent_emails(org_id)
+        from .sent_tracker import process_sent_emails
+        sent_count = await process_sent_emails(org_id)
         if sent_count:
             logger.info(f"Tracked {sent_count} sent emails")
     except Exception as e:

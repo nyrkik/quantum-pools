@@ -74,6 +74,7 @@ from src.models.agent_correction import AgentCorrection
 from src.models.thread_read import ThreadRead
 from src.models.job_invoice import JobInvoice
 from src.models.message_attachment import MessageAttachment
+from src.models.service_case import ServiceCase
 
 __all__ = [
     "Base",

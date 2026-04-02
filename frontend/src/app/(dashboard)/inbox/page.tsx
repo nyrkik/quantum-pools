@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,7 @@ type AssignFilter = "all" | "mine";
 // --- Main Page ---
 
 export default function InboxPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const { openCompose } = useCompose();
   const perms = usePermissions();
@@ -265,10 +267,19 @@ export default function InboxPage() {
                       <p className="text-[10px] text-muted-foreground truncate">Contact: {t.contact_name}</p>
                     )}
                   </TableCell>
-                  <TableCell className="truncate max-w-[250px] text-sm">
-                    <span className={t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}>
+                  <TableCell className="max-w-[250px] text-sm">
+                    <span className={`truncate ${t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}`}>
                       {t.subject || t.last_snippet || "No subject"}
                     </span>
+                    {t.case_id && (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] px-1 ml-1.5 border-blue-300 text-blue-600 cursor-pointer hover:bg-blue-50"
+                        onClick={(e) => { e.stopPropagation(); router.push(`/cases/${t.case_id}`); }}
+                      >
+                        Case
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-center">
                     {t.message_count > 1 && (

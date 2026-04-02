@@ -30,6 +30,8 @@ class AgentThread(Base):
     has_pending: Mapped[bool] = mapped_column(Boolean, default=True)
     has_open_actions: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
+
     # Inbox routing / visibility
     visibility_permission: Mapped[str | None] = mapped_column(String(80), nullable=True)  # permission slug required to view (null = everyone)
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
@@ -47,4 +49,5 @@ class AgentThread(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    case = relationship("ServiceCase", back_populates="threads")
     messages = relationship("AgentMessage", back_populates="thread", order_by="AgentMessage.received_at")

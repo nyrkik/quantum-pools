@@ -26,6 +26,7 @@ class InvoicePresenter(Presenter):
             "customer_id": inv.customer_id,
             "customer_name": inv.customer.display_name if inv.customer else None,
             "invoice_number": inv.invoice_number,
+            "case_id": inv.case_id if hasattr(inv, "case_id") else None,
             "document_type": inv.document_type if hasattr(inv, "document_type") else "invoice",
             "subject": inv.subject,
             "status": inv.status,

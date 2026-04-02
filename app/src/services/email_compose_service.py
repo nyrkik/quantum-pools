@@ -32,24 +32,7 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
-def _normalize_subject(subject: str) -> str:
-    """Strip Re:/Fwd: prefixes for thread matching."""
-    s = subject.strip()
-    while True:
-        lower = s.lower()
-        if lower.startswith("re:"):
-            s = s[3:].strip()
-        elif lower.startswith("fwd:"):
-            s = s[4:].strip()
-        elif lower.startswith("fw:"):
-            s = s[3:].strip()
-        else:
-            break
-    return s
-
-
-def _make_thread_key(contact_email: str, subject: str) -> str:
-    return f"{_normalize_subject(subject)}|{contact_email}".lower()
+from src.utils.thread_utils import normalize_subject as _normalize_subject, make_thread_key as _make_thread_key
 
 
 class EmailComposeService:
@@ -228,7 +211,7 @@ class EmailComposeService:
         await self.db.commit()
 
         # Recalculate thread status
-        from src.services.customer_agent import update_thread_status
+        from src.services.agents.thread_manager import update_thread_status
         await update_thread_status(thread.id)
 
         if not result.success:

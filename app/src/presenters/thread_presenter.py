@@ -87,4 +87,5 @@ class ThreadPresenter(Presenter):
             "assigned_at": self._iso(t.assigned_at),
             "visibility_permission": t.visibility_permission,
             "delivered_to": t.delivered_to,
+            "case_id": t.case_id if hasattr(t, "case_id") else None,
         }

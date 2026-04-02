@@ -13,7 +13,7 @@ async def twilio_sms_webhook(request: Request):
     body = form.get("Body", "")
 
     if from_number and body:
-        from src.services.customer_agent import handle_sms_reply
+        from src.services.agents.orchestrator import handle_sms_reply
         import asyncio
         asyncio.create_task(handle_sms_reply(from_number, body))
 

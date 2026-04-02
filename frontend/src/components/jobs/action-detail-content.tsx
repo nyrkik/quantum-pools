@@ -291,6 +291,7 @@ function EditableTypeBadge({ type, actionId, onUpdate }: { type: string; actionI
 function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
   detail: ActionDetail; actionId: string; onUpdate: () => void; loadDetail: () => void; onClose: () => void;
 }) {
+  const statusRouter = useRouter();
   const isSuggested = detail.is_suggested === true;
 
   const [sending, setSending] = useState(false);
@@ -322,10 +323,17 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
 
   const handleStatusChange = async (status: string) => {
     try {
-      await api.put(`/v1/admin/agent-actions/${actionId}`, { status });
+      const result = await api.put<Record<string, unknown>>(`/v1/admin/agent-actions/${actionId}`, { status });
       toast.success(status === "done" ? "Job marked done" : `Status: ${status}`);
       loadDetail();
       onUpdate();
+      if (status === "done" && result?.created_invoice) {
+        const inv = result.created_invoice as { id: string; estimate_number: string; total: number };
+        toast.success(`Draft invoice created from ${inv.estimate_number}`, {
+          action: { label: "View", onClick: () => statusRouter.push(`/invoices/${inv.id}`) },
+          duration: 8000,
+        });
+      }
     } catch { toast.error("Failed to update status"); }
   };
 
@@ -408,6 +416,15 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
       <div className="flex items-center justify-between mt-1">
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           {detail.customer_name && <span>{detail.customer_name}</span>}
+          {detail.case_id && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1 border-blue-300 text-blue-600 cursor-pointer hover:bg-blue-50"
+              onClick={() => statusRouter.push(`/cases/${detail.case_id}`)}
+            >
+              View Case
+            </Badge>
+          )}
           {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
           <DueDateEditor actionId={actionId} currentDate={detail.due_date} onUpdate={() => { loadDetail(); onUpdate(); }} />
         </div>
@@ -646,7 +663,7 @@ export function ActionDetailContent({ actionId, onClose, onUpdate }: ActionDetai
 
       {/* Linked Documents — always visible regardless of job status */}
       {!followUp && (
-        <LinkedDocuments actionId={actionId} invoiceIds={detail.invoice_ids || []} onUpdate={onUpdate} />
+        <LinkedDocuments actionId={actionId} invoiceIds={detail.invoice_ids || []} threadId={detail.thread_id} onUpdate={() => { loadDetail(); onUpdate(); }} />
       )}
 
       {/* Follow-up draft editor (replaces action buttons when active) */}
@@ -899,13 +916,17 @@ interface LinkedDoc {
   customer_name: string | null;
 }
 
-function LinkedDocuments({ actionId, invoiceIds, onUpdate }: { actionId: string; invoiceIds: string[]; onUpdate: () => void }) {
+function LinkedDocuments({ actionId, invoiceIds, threadId, onUpdate }: { actionId: string; invoiceIds: string[]; threadId?: string | null; onUpdate: () => void }) {
   const router = useRouter();
   const [docs, setDocs] = useState<LinkedDoc[]>([]);
   const [linking, setLinking] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<LinkedDoc[]>([]);
   const [searching, setSearching] = useState(false);
+  const [linkingThread, setLinkingThread] = useState(false);
+  const [threadQuery, setThreadQuery] = useState("");
+  const [threadResults, setThreadResults] = useState<{ id: string; subject: string; customer_name: string | null; last_snippet: string | null }[]>([]);
+  const [searchingThreads, setSearchingThreads] = useState(false);
 
   // Load linked document details
   useEffect(() => {
@@ -950,6 +971,44 @@ function LinkedDocuments({ actionId, invoiceIds, onUpdate }: { actionId: string;
     try {
       await api.delete(`/v1/admin/agent-actions/${actionId}/link-invoice/${invoiceId}`);
       toast.success("Document unlinked");
+      onUpdate();
+    } catch {
+      toast.error("Failed to unlink");
+    }
+  };
+
+  const handleThreadSearch = async () => {
+    if (!threadQuery.trim()) return;
+    setSearchingThreads(true);
+    try {
+      const data = await api.get<{ items: { id: string; subject: string; customer_name: string | null; last_snippet: string | null }[] }>(
+        `/v1/admin/agent-threads?search=${encodeURIComponent(threadQuery)}&limit=10`
+      );
+      setThreadResults(data.items || []);
+    } catch {
+      toast.error("Search failed");
+    } finally {
+      setSearchingThreads(false);
+    }
+  };
+
+  const handleLinkThread = async (tid: string) => {
+    try {
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { thread_id: tid });
+      toast.success("Email linked");
+      setLinkingThread(false);
+      setThreadQuery("");
+      setThreadResults([]);
+      onUpdate();
+    } catch {
+      toast.error("Failed to link");
+    }
+  };
+
+  const handleUnlinkThread = async () => {
+    try {
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { thread_id: "" });
+      toast.success("Email unlinked");
       onUpdate();
     } catch {
       toast.error("Failed to unlink");
@@ -1035,6 +1094,74 @@ function LinkedDocuments({ actionId, invoiceIds, onUpdate }: { actionId: string;
             </div>
           )}
           <Button variant="ghost" size="sm" className="h-6 text-[10px] w-full" onClick={() => { setLinking(false); setSearchResults([]); setSearchQuery(""); }}>
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {/* Linked email thread */}
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-xs font-medium text-muted-foreground">Email</span>
+        {!threadId && (
+          <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={() => setLinkingThread(!linkingThread)}>
+            <Link2 className="h-3 w-3 mr-1" /> Link
+          </Button>
+        )}
+      </div>
+      {threadId && (
+        <div className="flex items-center justify-between py-1.5 px-2 rounded-md bg-muted/50 group">
+          <button
+            className="flex items-center gap-2 text-sm hover:underline text-left"
+            onClick={() => router.push(`/inbox?thread=${threadId}`)}
+          >
+            <Mail className="h-3.5 w-3.5 text-blue-600" />
+            <span className="text-xs">View linked email</span>
+          </button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+            onClick={handleUnlinkThread}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+      {!threadId && !linkingThread && (
+        <p className="text-xs text-muted-foreground py-1">No email linked</p>
+      )}
+      {linkingThread && (
+        <div className="space-y-2 p-2 border rounded-md bg-background">
+          <div className="flex gap-1">
+            <Input
+              value={threadQuery}
+              onChange={(e) => setThreadQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleThreadSearch(); }}
+              placeholder="Search emails by subject or client..."
+              className="h-7 text-xs"
+              autoFocus
+            />
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleThreadSearch} disabled={searchingThreads}>
+              {searchingThreads ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+            </Button>
+          </div>
+          {threadResults.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {threadResults.map((r) => (
+                <button
+                  key={r.id}
+                  className="w-full flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted text-left text-xs"
+                  onClick={() => handleLinkThread(r.id)}
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium truncate block">{r.subject || "No subject"}</span>
+                    <span className="text-muted-foreground truncate block">{r.customer_name || r.last_snippet || ""}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          <Button variant="ghost" size="sm" className="h-6 text-[10px] w-full" onClick={() => { setLinkingThread(false); setThreadResults([]); setThreadQuery(""); }}>
             Cancel
           </Button>
         </div>

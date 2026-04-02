@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +23,8 @@ import {
   Loader2,
   Bot,
   CheckCircle2,
-  Plus,
   ClipboardList,
+  FolderOpen,
   Lightbulb,
   Check,
   X,
@@ -40,6 +40,7 @@ import type { AgentAction, AgentStats } from "@/types/agent";
 // ─── Main Page ──────────────────────────────────────────────────────
 
 export default function JobsPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const searchParams = useSearchParams();
   const myName = user?.first_name || "";
@@ -155,9 +156,9 @@ export default function JobsPage() {
       title="Jobs"
       icon={<ClipboardList className="h-5 w-5 text-primary" />}
       action={
-        <Button onClick={() => setNewActionOpen(!newActionOpen)}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Job
+        <Button onClick={() => router.push("/cases")}>
+          <FolderOpen className="h-4 w-4 mr-2" />
+          Cases
         </Button>
       }
       context={

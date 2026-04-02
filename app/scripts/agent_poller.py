@@ -148,7 +148,7 @@ async def check_message_escalations():
 
 
 async def main():
-    from src.services.customer_agent import run_poll_cycle
+    from src.services.agents.orchestrator import run_poll_cycle
 
     logger.info("Customer Agent Poller started")
     cycle = 0

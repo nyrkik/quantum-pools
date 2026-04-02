@@ -45,6 +45,7 @@ from src.api.v1.feedback import router as feedback_router
 from src.api.v1.messages import router as messages_router
 from src.api.v1.customer_contacts import router as customer_contacts_router
 from src.api.v1.attachments import router as attachments_router
+from src.api.v1.cases import router as cases_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -91,3 +92,4 @@ api_router.include_router(feedback_router)
 api_router.include_router(messages_router)
 api_router.include_router(customer_contacts_router)
 api_router.include_router(attachments_router)
+api_router.include_router(cases_router)

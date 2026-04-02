@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody, OverlayFooter } from "@/components/ui/overlay";
 import { toast } from "sonner";
-import { MessageCircleQuestion, Camera, Loader2, X } from "lucide-react";
+import { MessageCircleQuestion, Paperclip, Loader2, X } from "lucide-react";
 import { getBackendOrigin } from "@/lib/api";
 import { resizeImage } from "@/lib/image-utils";
 
@@ -151,14 +151,13 @@ export function FeedbackButton() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => fileRef.current?.click()}>
-                      <Camera className="h-3 w-3" /> Add Screenshot
+                      <Paperclip className="h-3 w-3" /> Attach File
                     </Button>
                     <input
                       ref={fileRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
                       multiple
-                      capture="environment"
                       className="hidden"
                       onChange={handleScreenshot}
                     />

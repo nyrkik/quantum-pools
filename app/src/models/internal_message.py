@@ -31,6 +31,10 @@ class InternalThread(Base):
         String(36), ForeignKey("agent_actions.id", ondelete="SET NULL")
     )
 
+    case_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True
+    )
+
     # Thread metadata
     subject: Mapped[str | None] = mapped_column(String(200))
     priority: Mapped[str] = mapped_column(String(10), default="normal")  # normal, urgent
@@ -55,6 +59,7 @@ class InternalThread(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    case = relationship("ServiceCase", back_populates="internal_threads")
     messages = relationship("InternalMessage", back_populates="thread", order_by="InternalMessage.created_at", lazy="noload")
     customer = relationship("Customer", lazy="noload")
 

@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, CheckCircle2, FileText } from "lucide-react";
+import { Loader2, CheckCircle2, FileText, Download } from "lucide-react";
 
 interface EstimateData {
   estimate_number: string;
@@ -172,6 +172,22 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                 <span className="text-lg font-bold" style={{ color: brandColor }}>
                   ${data.total.toFixed(2)}
                 </span>
+              </div>
+              <div className="pt-2 flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs gap-1.5"
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = `/api/v1/public/estimate/${token}/pdf`;
+                    a.download = `estimate_${data.estimate_number || "draft"}.pdf`;
+                    a.click();
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download PDF
+                </Button>
               </div>
             </div>
 

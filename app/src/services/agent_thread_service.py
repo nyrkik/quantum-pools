@@ -362,7 +362,8 @@ class AgentThreadService:
 
     async def approve_thread(self, org_id: str, thread_id: str, response_text: str | None, user_name: str, attachment_ids: list[str] | None = None) -> dict:
         """Approve the latest pending message in a thread — send email and update status."""
-        from src.services.customer_agent import update_thread_status, save_discovered_contact
+        from src.services.agents.thread_manager import update_thread_status
+        from src.services.agents.orchestrator import save_discovered_contact
         from src.services.email_service import EmailService
 
         result = await self.db.execute(
@@ -455,7 +456,7 @@ class AgentThreadService:
 
     async def dismiss_thread(self, org_id: str, thread_id: str, user_name: str) -> dict:
         """Dismiss all pending messages in a thread."""
-        from src.services.customer_agent import update_thread_status
+        from src.services.agents.thread_manager import update_thread_status
 
         result = await self.db.execute(
             select(AgentMessage).where(
@@ -616,7 +617,7 @@ class AgentThreadService:
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str, attachment_ids: list[str] | None = None) -> dict:
         """Send a follow-up in a thread and evaluate if open jobs should close."""
-        from src.services.customer_agent import update_thread_status
+        from src.services.agents.thread_manager import update_thread_status
         from src.services.email_service import EmailService
 
         thread = (await self.db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id))).scalar_one_or_none()
@@ -918,9 +919,29 @@ Keep the description concise and actionable."""
             # Fallback to thread subject
             data = {"action_type": "follow_up", "description": (thread.subject or "Follow up")[:60]}
 
+        # Find or create case for this thread
+        case_id = thread.case_id
+        if not case_id:
+            try:
+                from src.services.service_case_service import ServiceCaseService
+                case_svc = ServiceCaseService(self.db)
+                case = await case_svc.find_or_create_case(
+                    org_id=org_id,
+                    customer_id=thread.matched_customer_id,
+                    thread_id=thread_id,
+                    subject=thread.subject or "",
+                    source="email",
+                    created_by=created_by,
+                )
+                case_id = case.id
+                thread.case_id = case_id
+            except Exception as e:
+                logger.warning(f"Case creation failed in create_job_from_thread: {e}")
+
         action = AgentAction(
             organization_id=org_id,
             thread_id=thread_id,
+            case_id=case_id,
             customer_id=thread.matched_customer_id,
             customer_name=thread.customer_name,
             action_type=data.get("action_type", "follow_up"),
@@ -933,7 +954,7 @@ Keep the description concise and actionable."""
         await self.db.commit()
         await self.db.refresh(action)
 
-        return {"action_id": action.id, "description": action.description, "action_type": action.action_type}
+        return {"action_id": action.id, "description": action.description, "action_type": action.action_type, "case_id": case_id}
 
     async def draft_estimate_from_thread(self, org_id: str, thread_id: str, created_by: str) -> dict:
         """AI reads conversation and drafts an estimate with line items."""

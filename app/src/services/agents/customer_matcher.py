@@ -6,6 +6,7 @@ import logging
 from sqlalchemy import select, desc, func
 from src.core.database import get_db_context
 from src.models.agent_message import AgentMessage
+from src.models.agent_thread import AgentThread
 from src.models.customer import Customer
 from src.models.property import Property
 from src.models.water_feature import WaterFeature
@@ -31,16 +32,20 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
     async with get_db_context() as db:
         customer = None
 
-        # 1. Direct email match
+        # 1. Direct email match (handles comma-separated email fields)
         result = await db.execute(
             select(Customer).where(
-                func.lower(Customer.email) == from_email.lower(),
                 Customer.is_active == True,
-            ).limit(1)
+                func.lower(Customer.email).contains(from_email.lower()),
+            ).limit(5)
         )
-        customer = result.scalar_one_or_none()
-        if customer:
-            match_method = "email"
+        email_matches = result.scalars().all()
+        for c in email_matches:
+            stored_emails = [e.strip().lower() for e in (c.email or "").split(",")]
+            if from_email.lower() in stored_emails:
+                customer = c
+                match_method = "email"
+                break
 
         # 1b. Check customer contacts (alternate emails)
         if not customer:
@@ -134,20 +139,48 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
                         customer = matches[0]
                         match_method = "sender_name"
 
-        # 5. Search subject/body for known company names
+        # 5. Search subject/body for customer display names and company names (scored)
         if not customer:
-            text_to_search = f"{subject} {body[:1000]}".lower()
+            subject_lower = subject.lower()
+            body_lower = body[:1000].lower()
             result = await db.execute(
-                select(Customer).where(
-                    Customer.is_active == True,
-                    Customer.company_name.isnot(None),
-                )
+                select(Customer).where(Customer.is_active == True)
             )
-            for c in result.scalars().all():
-                if c.company_name and len(c.company_name) > 3 and c.company_name.lower() in text_to_search:
-                    customer = c
-                    match_method = "company_name"
-                    break
+            all_customers = result.scalars().all()
+            candidates = []
+            for c in all_customers:
+                best_score = 0
+                best_method = None
+                # Check display_name (e.g. "Bridges at Woodcreek Oaks")
+                display = c.display_name
+                if display and len(display) >= 5:
+                    dn_lower = display.lower()
+                    if dn_lower in subject_lower:
+                        score = len(display) * 3  # subject match worth 3x
+                        if score > best_score:
+                            best_score, best_method = score, "display_name_subject"
+                    elif dn_lower in body_lower:
+                        score = len(display) * 2
+                        if score > best_score:
+                            best_score, best_method = score, "display_name_body"
+                # Check company_name (min 6 chars to avoid "BLVD", "PMI", "AIR" false positives)
+                comp = c.company_name
+                if comp and len(comp) >= 6:
+                    cn_lower = comp.lower()
+                    if cn_lower in subject_lower:
+                        score = len(comp) * 3
+                        if score > best_score:
+                            best_score, best_method = score, "company_name_subject"
+                    elif cn_lower in body_lower:
+                        score = len(comp) * 2
+                        if score > best_score:
+                            best_score, best_method = score, "company_name_body"
+                if best_score > 0:
+                    candidates.append((best_score, best_method, c))
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                _, method_detail, customer = candidates[0]
+                match_method = method_detail
 
         # 6. Search subject/body for customer last names (only if unique match)
         if not customer:
@@ -274,3 +307,112 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
             "property_address": properties[0].full_address if properties else None,
         }
         return ctx
+
+
+async def verify_customer_match(org_id: str, from_email: str, thread_id: str):
+    """Post-processing check: if sender should match a customer but didn't, auto-fix and alert admins."""
+    try:
+        from sqlalchemy import func
+        from src.models.customer_contact import CustomerContact
+        from src.models.notification import Notification
+        from src.models.organization_user import OrganizationUser
+
+        async with get_db_context() as db:
+            thread = (await db.execute(
+                select(AgentThread).where(AgentThread.id == thread_id)
+            )).scalar_one_or_none()
+            if not thread or thread.matched_customer_id:
+                return
+
+            # Check if this email exists in customers table
+            cust = (await db.execute(
+                select(Customer).where(
+                    func.lower(Customer.email).contains(from_email.lower()),
+                    Customer.is_active == True,
+                )
+            )).scalar_one_or_none()
+
+            if not cust:
+                contact = (await db.execute(
+                    select(CustomerContact).where(
+                        func.lower(CustomerContact.email) == from_email.lower(),
+                    )
+                )).scalar_one_or_none()
+                if contact:
+                    cust = (await db.execute(
+                        select(Customer).where(Customer.id == contact.customer_id, Customer.is_active == True)
+                    )).scalar_one_or_none()
+
+            if not cust:
+                return
+
+            logger.warning(f"Customer match missed: {from_email} should be {cust.display_name} ({cust.id})")
+
+            thread.matched_customer_id = cust.id
+            thread.customer_name = cust.display_name
+
+            latest_msg = (await db.execute(
+                select(AgentMessage).where(
+                    AgentMessage.thread_id == thread_id,
+                    AgentMessage.direction == "inbound",
+                ).order_by(desc(AgentMessage.received_at)).limit(1)
+            )).scalar_one_or_none()
+            if latest_msg and not latest_msg.matched_customer_id:
+                latest_msg.matched_customer_id = cust.id
+                latest_msg.customer_name = cust.display_name
+                latest_msg.match_method = "post_verify"
+
+            admins = (await db.execute(
+                select(OrganizationUser).where(
+                    OrganizationUser.organization_id == org_id,
+                    OrganizationUser.role.in_(("owner", "admin")),
+                )
+            )).scalars().all()
+            for ou in admins:
+                db.add(Notification(
+                    organization_id=org_id,
+                    user_id=ou.user_id,
+                    type="system_alert",
+                    title=f"Customer match recovered: {cust.display_name}",
+                    body=f"Email from {from_email} wasn't automatically matched. Auto-fixed.",
+                    link="/inbox",
+                ))
+
+            await db.commit()
+
+    except Exception as e:
+        logger.error(f"Customer match verification failed: {e}")
+
+
+async def save_discovered_contact(agent_msg_id: str):
+    """When a message is confirmed (approved/sent), save the sender's email to the matched customer if missing."""
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(AgentMessage).where(AgentMessage.id == agent_msg_id)
+        )
+        msg = result.scalar_one_or_none()
+        if not msg or not msg.matched_customer_id:
+            return
+
+        cust_result = await db.execute(
+            select(Customer).where(Customer.id == msg.matched_customer_id)
+        )
+        customer = cust_result.scalar_one_or_none()
+        if not customer:
+            return
+
+        updated = False
+        if not customer.email and msg.from_email:
+            customer.email = msg.from_email
+            updated = True
+            logger.info(f"Saved email {msg.from_email} to customer {customer.display_name}")
+
+        if customer.email and customer.email.lower() != msg.from_email.lower():
+            if not msg.notes:
+                msg.notes = ""
+            if msg.from_email not in (msg.notes or ""):
+                msg.notes = (msg.notes + f"\nAlternate email: {msg.from_email}").strip()
+                updated = True
+
+        if updated:
+            await db.commit()

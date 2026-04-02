@@ -12,6 +12,7 @@ class LineItemBody(BaseModel):
 
 class CreateActionBody(BaseModel):
     agent_message_id: Optional[str] = None
+    case_id: Optional[str] = None
     action_type: str
     description: str
     assigned_to: Optional[str] = None
@@ -31,6 +32,7 @@ class UpdateActionBody(BaseModel):
     due_date: Optional[str] = None
     notes: Optional[str] = None
     invoice_id: Optional[str] = None  # Links job to invoice via junction table
+    thread_id: Optional[str] = None  # Links job to email thread
 
 
 class AddCommentBody(BaseModel):

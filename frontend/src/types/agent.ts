@@ -6,6 +6,7 @@ export interface AgentAction {
   id: string;
   agent_message_id: string;
   thread_id?: string | null;
+  case_id?: string | null;
   action_type: string;
   description: string;
   assigned_to: string | null;
@@ -92,6 +93,7 @@ export interface Thread {
   contact_name: string | null;
   customer_address: string | null;
   matched_customer_id: string | null;
+  case_id: string | null;
   status: string;
   urgency: string | null;
   category: string | null;
@@ -132,6 +134,7 @@ export interface ThreadDetail {
   subject: string | null;
   customer_name: string | null;
   matched_customer_id: string | null;
+  case_id: string | null;
   status: string;
   urgency: string | null;
   category: string | null;
@@ -146,6 +149,76 @@ export interface ThreadDetail {
   routing_rule_id: string | null;
   timeline: TimelineMessage[];
   actions: unknown[];
+}
+
+export interface ServiceCase {
+  id: string;
+  case_number: string;
+  title: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  status: string;
+  priority: string;
+  assigned_to_name: string | null;
+  source: string;
+  job_count: number;
+  open_job_count: number;
+  thread_count: number;
+  invoice_count: number;
+  total_invoiced: number;
+  total_paid: number;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+}
+
+export interface CaseJob {
+  id: string;
+  description: string;
+  action_type: string;
+  status: string;
+  assigned_to: string | null;
+  due_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface CaseThread {
+  id: string;
+  subject: string | null;
+  contact_email: string;
+  status: string;
+  message_count: number;
+  last_snippet: string | null;
+  last_message_at: string | null;
+}
+
+export interface CaseInvoice {
+  id: string;
+  invoice_number: string | null;
+  document_type: string;
+  subject: string | null;
+  status: string;
+  total: number;
+  balance: number;
+  created_at: string;
+}
+
+export interface CaseTimelineEntry {
+  id: string;
+  type: "email" | "comment" | "invoice_event" | "job_event" | "system";
+  timestamp: string;
+  title: string;
+  body: string | null;
+  actor: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface CaseDetail extends ServiceCase {
+  jobs: CaseJob[];
+  threads: CaseThread[];
+  invoices: CaseInvoice[];
+  timeline: CaseTimelineEntry[];
 }
 
 export interface AgentMessage {

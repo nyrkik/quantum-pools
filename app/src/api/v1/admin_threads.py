@@ -6,6 +6,7 @@ Access: owner, admin, manager (visibility filtering replaces hard role gating).
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -285,6 +286,38 @@ async def update_thread_visibility(
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["detail"])
     return result
+
+
+@router.post("/agent-threads/{thread_id}/create-case")
+async def create_case_from_thread(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a case from a thread (without a job). For tracking situations that don't need field work."""
+    from src.models.agent_thread import AgentThread
+    from src.services.service_case_service import ServiceCaseService
+
+    thread = (await db.execute(
+        select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread.case_id:
+        return {"case_id": thread.case_id, "already_exists": True}
+
+    svc = ServiceCaseService(db)
+    case = await svc.find_or_create_case(
+        org_id=ctx.organization_id,
+        customer_id=thread.matched_customer_id,
+        thread_id=thread_id,
+        subject=thread.subject or "",
+        source="email",
+        created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
+    )
+    thread.case_id = case.id
+    await db.commit()
+    return {"case_id": case.id, "case_number": case.case_number}
 
 
 @router.post("/agent-threads/{thread_id}/create-job")

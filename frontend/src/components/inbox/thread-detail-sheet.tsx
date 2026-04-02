@@ -34,6 +34,7 @@ import {
   User,
   ClipboardList,
   FileText,
+  FolderOpen,
 } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { formatTime } from "@/lib/format";
@@ -275,14 +276,36 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleCreateCase = async () => {
+    setCreatingJob(true);
+    try {
+      const result = await api.post<{ case_id: string; case_number?: string; already_exists?: boolean }>(`/v1/admin/agent-threads/${threadId}/create-case`, {});
+      if (result.already_exists) {
+        toast.info("Case already exists for this thread");
+        router.push(`/cases/${result.case_id}`);
+      } else {
+        toast.success(`Case created: ${result.case_number}`);
+        onAction();
+        router.push(`/cases/${result.case_id}`);
+      }
+    } catch {
+      toast.error("Failed to create case");
+    } finally {
+      setCreatingJob(false);
+    }
+  };
+
   const handleCreateJob = async () => {
     setCreatingJob(true);
     try {
-      const result = await api.post<{ action_id: string; description: string }>(`/v1/admin/agent-threads/${threadId}/create-job`, {});
+      const result = await api.post<{ action_id: string; description: string; case_id?: string }>(`/v1/admin/agent-threads/${threadId}/create-job`, {});
       toast.success(`Job created: ${result.description}`);
       onAction();
-      onClose();
-      router.push(`/jobs?action=${result.action_id}`);
+      if (result.case_id) {
+        router.push(`/cases/${result.case_id}`);
+      } else {
+        router.push(`/jobs?action=${result.action_id}`);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("already exists")) {
@@ -571,17 +594,31 @@ export function ThreadDetailSheet({
           </div>
         )}
 
-        {/* Quick actions: Create Job, Draft Estimate */}
+        {/* Quick actions: Create Case / Create Job, Draft Estimate */}
         <div className="flex gap-2 flex-wrap">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCreateJob}
-              disabled={creatingJob}
-            >
-              {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
-              Create Job
-            </Button>
+            {thread.case_id ? (
+              <>
+                <Button variant="outline" size="sm" onClick={() => router.push(`/cases/${thread.case_id}`)}>
+                  <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+                  View Case
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
+                  {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
+                  Add Job
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={handleCreateCase} disabled={creatingJob}>
+                  {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FolderOpen className="h-3.5 w-3.5 mr-1.5" />}
+                  Create Case
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
+                  {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
+                  Create Job
+                </Button>
+              </>
+            )}
             {thread.matched_customer_id && (
               <Button
                 variant="outline"

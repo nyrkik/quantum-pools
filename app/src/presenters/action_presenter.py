@@ -227,6 +227,7 @@ class ActionPresenter(Presenter):
             "job_path": a.job_path if hasattr(a, "job_path") else "internal",
             "notes": a.notes,
             "invoice_ids": [],  # populated by many() or one()
+            "case_id": a.case_id if hasattr(a, "case_id") else None,
             "parent_action_id": a.parent_action_id,
             "task_count": a.task_count or 0,
             "tasks_completed": a.tasks_completed or 0,

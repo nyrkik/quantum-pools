@@ -70,6 +70,7 @@ import {
   Trash2,
   History,
   ExternalLink,
+  Download,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -86,6 +87,7 @@ interface InvoiceLineItem {
 
 interface Invoice {
   id: string;
+  case_id: string | null;
   invoice_number: string | null;
   customer_id: string;
   customer_name: string;
@@ -243,6 +245,24 @@ export default function InvoiceDetailPage({
     }
   };
 
+  const handleDownloadPdf = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/invoices/${id}/pdf`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to generate PDF");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${invoice?.document_type || "invoice"}_${invoice?.invoice_number || "draft"}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Failed to download PDF");
+    }
+  };
+
   const handleApprove = async () => {
     setApproving(true);
     try {
@@ -318,6 +338,15 @@ export default function InvoiceDetailPage({
               </Link>
               {invoice.subject && ` — ${invoice.subject}`}
             </p>
+            {invoice.case_id && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 border-blue-300 text-blue-600 cursor-pointer hover:bg-blue-50 mt-1 w-fit"
+                onClick={() => router.push(`/cases/${invoice.case_id}`)}
+              >
+                View Case
+              </Badge>
+            )}
           </div>
           <InvoiceStatusBadge status={invoice.status} />
         </div>
@@ -363,6 +392,10 @@ export default function InvoiceDetailPage({
               Convert to Invoice
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
+            <Download className="mr-2 h-3.5 w-3.5" />
+            PDF
+          </Button>
           {canSend && (
             <Button variant="outline" size="sm" onClick={handleSend}>
               <Send className="mr-2 h-4 w-4" />

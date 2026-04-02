@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { usePermissions } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody, OverlayFooter } from "@/components/ui/overlay";
 import { toast } from "sonner";
@@ -72,7 +73,7 @@ export default function MessagesPage() {
   const [replyAttachments, setReplyAttachments] = useState<UploadedAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
-  const replyRef = useRef<HTMLInputElement>(null);
+  const replyRef = useRef<HTMLTextAreaElement>(null);
 
   const loadThreads = useCallback(() => {
     setLoading(true);
@@ -253,14 +254,15 @@ export default function MessagesPage() {
                   onAttachmentsChange={setReplyAttachments}
                   sourceType="internal_message"
                 />
-                <div className="flex gap-2">
-                  <Input
+                <div className="flex gap-2 items-end">
+                  <Textarea
                     ref={replyRef}
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
                     placeholder="Type a message..."
-                    className="text-sm"
+                    className="text-sm min-h-[2.25rem] max-h-32 resize-none"
+                    rows={1}
                   />
                   <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleReply} disabled={!reply.trim() || sending}>
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

@@ -23,6 +23,7 @@ class AgentAction(Base):
     description: Mapped[str] = mapped_column(Text)
     assigned_to: Mapped[str | None] = mapped_column(String(100))
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
     parent_action_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_actions.id"), index=True)
     job_path: Mapped[str] = mapped_column(String(20), default="internal", server_default="internal")  # internal, customer
     status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, suggested, cancelled, pending_approval, approved
@@ -35,6 +36,7 @@ class AgentAction(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    case = relationship("ServiceCase", back_populates="jobs")
     message = relationship("AgentMessage", backref="actions")
     comments = relationship("AgentActionComment", back_populates="action", order_by="AgentActionComment.created_at")
     tasks = relationship("AgentActionTask", back_populates="action", order_by="AgentActionTask.sort_order")

@@ -63,6 +63,8 @@ class Invoice(Base):
     # Stripe
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255))
 
+    case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
+
     # PDF + payment link
     pdf_url: Mapped[str | None] = mapped_column(String(500))
     payment_token: Mapped[str] = mapped_column(
@@ -101,6 +103,7 @@ class Invoice(Base):
 
     # Relationships
     organization = relationship("Organization", lazy="noload")
+    case = relationship("ServiceCase", back_populates="invoices")
     customer = relationship("Customer", back_populates="invoices", lazy="noload")
     line_items = relationship("InvoiceLineItem", back_populates="invoice", lazy="noload",
                               cascade="all, delete-orphan", order_by="InvoiceLineItem.sort_order")

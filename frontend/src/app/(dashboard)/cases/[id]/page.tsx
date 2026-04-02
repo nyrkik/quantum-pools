@@ -31,6 +31,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
+import { ComposeMessage } from "@/components/messages/compose-message";
 import { useTeamMembers } from "@/hooks/use-team-members";
 import {
   Select,
@@ -163,18 +164,22 @@ function TimelineItem({ entry, jobs, invoices }: { entry: TimelineEntry; jobs: C
   const isInbound = entry.metadata?.direction === "inbound";
   const isJobEvent = entry.type === "job_event";
   const isCompleted = isJobEvent && entry.metadata?.event === "completed";
+  const isCancelled = isJobEvent && entry.metadata?.event === "cancelled";
   const isInvoiceEvent = entry.type === "invoice_event";
+  const isInternal = entry.type === "internal_message";
 
   const iconColor = isEmail
     ? (isOutbound ? "text-green-500" : "text-blue-500")
     : isInvoiceEvent ? "text-emerald-500"
-    : isJobEvent ? (isCompleted ? "text-green-500" : "text-amber-500")
+    : isJobEvent ? (isCompleted ? "text-green-500" : isCancelled ? "text-slate-300" : "text-amber-500")
+    : isInternal ? "text-purple-500"
     : entry.type === "comment" ? "text-slate-400"
     : "text-amber-500";
 
   const Icon = isEmail ? (isOutbound ? Send : Inbox)
     : isInvoiceEvent ? DollarSign
-    : isJobEvent ? (isCompleted ? CheckCircle2 : ClipboardList)
+    : isJobEvent ? (isCompleted ? CheckCircle2 : isCancelled ? X : ClipboardList)
+    : isInternal ? MessageSquare
     : MessageSquare;
 
   // Resolve linked objects for rich expand
@@ -194,7 +199,7 @@ function TimelineItem({ entry, jobs, invoices }: { entry: TimelineEntry; jobs: C
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
-              <p className={`text-sm truncate ${isEmail ? "font-medium" : ""}`}>{entry.title}</p>
+              <p className={`text-sm truncate ${isEmail ? "font-medium" : ""} ${isCancelled ? "line-through text-muted-foreground" : ""}`}>{entry.title}</p>
               {hasExpandable && (
                 expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
               )}
@@ -239,32 +244,60 @@ function TimelineItem({ entry, jobs, invoices }: { entry: TimelineEntry; jobs: C
                 </div>
               )}
 
-              {/* Job detail */}
+              {/* Internal team message */}
+              {isInternal && entry.body && (
+                <div className="text-sm whitespace-pre-wrap rounded-md p-3 bg-purple-50 dark:bg-purple-950/30 border-l-2 border-purple-400">
+                  {entry.body}
+                </div>
+              )}
+
+              {/* Job detail — matches JobCard sidebar expand */}
               {linkedJob && (
-                <div className="rounded-md p-3 bg-muted/50 space-y-2">
-                  <div className="flex items-center gap-2 text-xs">
-                    <ActionStatusIcon status={linkedJob.status} />
-                    <ActionTypeBadge type={linkedJob.action_type} />
-                    {linkedJob.assigned_to && <span className="text-muted-foreground">→ {linkedJob.assigned_to}</span>}
-                    {linkedJob.due_date && (
-                      <span className="text-muted-foreground">{new Date(linkedJob.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                    )}
-                  </div>
-                  {linkedJob.tasks.length > 0 && (
-                    <div className="space-y-0.5">
-                      {linkedJob.tasks.sort((a, b) => a.sort_order - b.sort_order).map((t) => (
-                        <div key={t.id} className="flex items-center gap-1.5 text-xs">
-                          {t.status === "done" ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <Circle className="h-3 w-3 text-muted-foreground" />}
-                          <span className={t.status === "done" ? "line-through text-muted-foreground" : ""}>{t.title}</span>
-                        </div>
-                      ))}
+                <div className={`rounded-md border bg-muted/20 ${linkedJob.status === "done" ? "opacity-60" : ""}`}>
+                  <div className="px-3 py-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ActionStatusIcon status={linkedJob.status} />
+                        <ActionTypeBadge type={linkedJob.action_type} />
+                        {linkedJob.assigned_to && <span className="text-xs text-muted-foreground">→ {linkedJob.assigned_to}</span>}
+                      </div>
+                      {linkedJob.due_date && (
+                        <span className="text-[10px] text-muted-foreground">{new Date(linkedJob.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                      )}
                     </div>
-                  )}
-                  {linkedJob.comments.length > 0 && (
-                    <div className="border-t pt-1.5 space-y-0.5">
-                      {linkedJob.comments.slice(-3).map((c) => (
-                        <p key={c.id} className="text-[11px]"><span className="font-medium">{c.author}:</span> <span className="text-muted-foreground">{c.text.slice(0, 150)}</span></p>
-                      ))}
+                    <p className={`text-sm ${linkedJob.status === "done" ? "line-through text-muted-foreground" : ""}`}>{linkedJob.description}</p>
+                  </div>
+                  {(linkedJob.tasks.length > 0 || linkedJob.comments.length > 0 || linkedJob.notes) && (
+                    <div className="border-t px-3 py-2 space-y-3">
+                      {linkedJob.tasks.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Tasks</p>
+                          {linkedJob.tasks.sort((a, b) => a.sort_order - b.sort_order).map((t) => (
+                            <div key={t.id} className="flex items-center gap-2 text-xs">
+                              {t.status === "done" ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                              ) : (
+                                <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              )}
+                              <span className={t.status === "done" ? "line-through text-muted-foreground" : ""}>{t.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {linkedJob.comments.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Notes</p>
+                          {linkedJob.comments.slice(-5).map((c) => (
+                            <div key={c.id} className="text-xs">
+                              <span className="font-medium">{c.author}:</span>{" "}
+                              <span className="text-muted-foreground">{c.text.slice(0, 200)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {linkedJob.notes && (
+                        <p className="text-xs text-muted-foreground">{linkedJob.notes}</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -448,10 +481,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [titleInput, setTitleInput] = useState("");
   const [addingJob, setAddingJob] = useState(false);
   const [newJobDesc, setNewJobDesc] = useState("");
+  const [newJobAssignee, setNewJobAssignee] = useState("");
+  const [newJobDue, setNewJobDue] = useState("");
+  const [newJobNotes, setNewJobNotes] = useState("");
   const [addingTask, setAddingTask] = useState(false);
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [newTaskAssignee, setNewTaskAssignee] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
+  const [composeOpen, setComposeOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTaskDesc, setEditTaskDesc] = useState("");
   const [editTaskAssignee, setEditTaskAssignee] = useState("");
@@ -475,8 +512,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const handleAddJob = async () => {
     if (!newJobDesc.trim()) return;
     try {
-      await api.post(`/v1/cases/${id}/jobs`, { description: newJobDesc.trim(), action_type: "repair" });
+      await api.post(`/v1/cases/${id}/jobs`, {
+        description: newJobDesc.trim(),
+        action_type: "repair",
+        assigned_to: newJobAssignee || undefined,
+        due_date: newJobDue || undefined,
+      });
       setNewJobDesc("");
+      setNewJobAssignee("");
+      setNewJobDue("");
+      setNewJobNotes("");
       setAddingJob(false);
       load();
     } catch { /* ignore */ }
@@ -621,7 +666,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
         {/* Side panels — right / top on mobile */}
         <div className="lg:w-80 xl:w-96 shrink-0 space-y-4 order-1 lg:order-2">
-          {/* Tasks (lightweight: callback, follow_up, schedule_change, invoice, other) */}
+          {/* Tasks */}
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -673,180 +718,181 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                 </div>
               )}
-              {detail.jobs.filter(j => !JOB_TYPES.has(j.action_type)).length === 0 && !addingTask ? (
-                <p className="text-xs text-muted-foreground">No tasks</p>
-              ) : (
-                detail.jobs.filter(j => !JOB_TYPES.has(j.action_type) && j.status !== "cancelled").map((t) => {
-                  const isOverdue = t.due_date && new Date(t.due_date) < new Date() && t.status !== "done";
-                  const isEditing = editingTaskId === t.id;
-
-                  if (isEditing) {
-                    return (
-                      <div key={t.id} className="space-y-1.5 p-2 border rounded-md bg-background">
-                        <Input
-                          value={editTaskDesc}
-                          onChange={(e) => setEditTaskDesc(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Escape") setEditingTaskId(null); }}
-                          className="h-7 text-xs"
-                          autoFocus
-                        />
-                        <div className="flex gap-1.5">
-                          <Select value={editTaskAssignee} onValueChange={setEditTaskAssignee}>
-                            <SelectTrigger className="h-7 text-xs flex-1">
-                              <SelectValue placeholder="Assign to..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__" className="text-xs text-muted-foreground">Unassigned</SelectItem>
-                              {teamMembers.map((name) => (
-                                <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Input
-                            type="date"
-                            value={editTaskDue}
-                            onChange={(e) => setEditTaskDue(e.target.value)}
-                            className="h-7 text-xs w-[130px]"
-                          />
-                        </div>
-                        <div className="flex justify-between">
-                          <Button variant="ghost" size="sm" className="h-6 text-[10px] text-destructive" onClick={() => { handleDeleteTask(t.id); setEditingTaskId(null); }}>
-                            <Trash2 className="h-3 w-3 mr-1" /> Delete
-                          </Button>
-                          <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setEditingTaskId(null)}>
-                              Cancel
-                            </Button>
-                            <Button size="sm" className="h-6 text-[10px]" onClick={() => handleUpdateTask(t.id, {
-                              description: editTaskDesc.trim() || undefined,
-                              assigned_to: editTaskAssignee === "__none__" ? "" : editTaskAssignee || undefined,
-                              due_date: editTaskDue || undefined,
-                            })}>
-                              Save
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
+              {detail.jobs.filter(j => !JOB_TYPES.has(j.action_type) && j.status !== "cancelled").map((t) => {
+                const isOverdue = t.due_date && new Date(t.due_date) < new Date() && t.status !== "done";
+                const isEditing = editingTaskId === t.id;
+                if (isEditing) {
                   return (
-                    <div key={t.id} className="flex items-start gap-2 py-1.5 group">
-                      <button onClick={() => handleToggleTask(t.id, t.status)} className="shrink-0 mt-0.5">
-                        {t.status === "done" ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
-                        )}
-                      </button>
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => {
-                          setEditingTaskId(t.id);
-                          setEditTaskDesc(t.description);
-                          setEditTaskAssignee(t.assigned_to || "");
-                          setEditTaskDue(t.due_date ? t.due_date.split("T")[0] : "");
-                        }}
-                      >
-                        <span className={`text-xs ${t.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-                          {t.description}
-                        </span>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {t.assigned_to && (
-                            <span className="text-[10px] text-muted-foreground">{t.assigned_to}</span>
-                          )}
-                          {t.due_date && (
-                            <span className={`text-[10px] ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
-                              {new Date(t.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            </span>
-                          )}
+                    <div key={t.id} className="space-y-1.5 p-2 border rounded-md bg-background">
+                      <Input value={editTaskDesc} onChange={(e) => setEditTaskDesc(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setEditingTaskId(null); }} className="h-7 text-xs" autoFocus />
+                      <div className="flex gap-1.5">
+                        <Select value={editTaskAssignee} onValueChange={setEditTaskAssignee}>
+                          <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Assign to..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__" className="text-xs text-muted-foreground">Unassigned</SelectItem>
+                            {teamMembers.map((name) => (<SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                        <Input type="date" value={editTaskDue} onChange={(e) => setEditTaskDue(e.target.value)} className="h-7 text-xs w-[130px]" />
+                      </div>
+                      <div className="flex justify-between">
+                        <Button variant="ghost" size="sm" className="h-6 text-[10px] text-destructive" onClick={() => { handleDeleteTask(t.id); setEditingTaskId(null); }}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setEditingTaskId(null)}>Cancel</Button>
+                          <Button size="sm" className="h-6 text-[10px]" onClick={() => handleUpdateTask(t.id, { description: editTaskDesc.trim() || undefined, assigned_to: editTaskAssignee === "__none__" ? "" : editTaskAssignee || undefined, due_date: editTaskDue || undefined })}>Save</Button>
                         </div>
                       </div>
                     </div>
                   );
-                })
-              )}
+                }
+                return (
+                  <div key={t.id} className="flex items-start gap-2 py-1.5 group">
+                    <button onClick={() => handleToggleTask(t.id, t.status)} className="shrink-0 mt-0.5">
+                      {t.status === "done" ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />}
+                    </button>
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setEditingTaskId(t.id); setEditTaskDesc(t.description); setEditTaskAssignee(t.assigned_to || ""); setEditTaskDue(t.due_date ? t.due_date.split("T")[0] : ""); }}>
+                      <span className={`text-xs ${t.status === "done" ? "line-through text-muted-foreground" : ""}`}>{t.description}</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {t.assigned_to && <span className="text-[10px] text-muted-foreground">{t.assigned_to}</span>}
+                        {t.due_date && <span className={`text-[10px] ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>{new Date(t.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 
-          {/* Jobs (heavyweight: repair, site_visit, bid, equipment) */}
-          {(detail.jobs.some(j => JOB_TYPES.has(j.action_type)) || addingJob) && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                    <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
-                    Jobs ({detail.jobs.filter(j => JOB_TYPES.has(j.action_type)).length})
-                  </CardTitle>
-                  <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={() => setAddingJob(!addingJob)}>
-                    + Add
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {addingJob && (
-                  <div className="flex gap-1.5 items-center">
+          {/* Jobs */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                  <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+                  Jobs
+                </CardTitle>
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={() => setAddingJob(!addingJob)}>
+                  + Add
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {addingJob && (
+                <div className="space-y-1.5 p-2 border rounded-md bg-background">
+                  <Input
+                    value={newJobDesc}
+                    onChange={(e) => setNewJobDesc(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") { setAddingJob(false); setNewJobDesc(""); } }}
+                    placeholder="What needs to be done?"
+                    className="h-7 text-xs"
+                    autoFocus
+                  />
+                  <div className="flex gap-1.5">
+                    <Select value={newJobAssignee} onValueChange={setNewJobAssignee}>
+                      <SelectTrigger className="h-7 text-xs flex-1">
+                        <SelectValue placeholder="Assign to..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {teamMembers.map((name) => (
+                          <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Input
-                      value={newJobDesc}
-                      onChange={(e) => setNewJobDesc(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAddJob(); if (e.key === "Escape") setAddingJob(false); }}
-                      placeholder="Job description..."
-                      className="h-7 text-xs flex-1"
-                      autoFocus
+                      type="date"
+                      value={newJobDue}
+                      onChange={(e) => setNewJobDue(e.target.value)}
+                      className="h-7 text-xs w-[130px]"
                     />
-                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleAddJob}>
-                      <Check className="h-3.5 w-3.5 text-muted-foreground hover:text-green-600" />
+                  </div>
+                  <Input
+                    value={newJobNotes}
+                    onChange={(e) => setNewJobNotes(e.target.value)}
+                    placeholder="Description / notes (optional)"
+                    className="h-7 text-xs"
+                  />
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => { setAddingJob(false); setNewJobDesc(""); setNewJobAssignee(""); setNewJobDue(""); setNewJobNotes(""); }}>
+                      Cancel
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setAddingJob(false); setNewJobDesc(""); }}>
-                      <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                    <Button size="sm" className="h-6 text-[10px]" onClick={handleAddJob} disabled={!newJobDesc.trim()}>
+                      Add Job
                     </Button>
                   </div>
-                )}
-                {detail.jobs.filter(j => JOB_TYPES.has(j.action_type)).map((j) => (
-                  <JobCard key={j.id} job={j} />
-                ))}
-              </CardContent>
-            </Card>
-          )}
+                </div>
+              )}
+              {detail.jobs.filter(j => JOB_TYPES.has(j.action_type)).map((j) => (
+                <JobCard key={j.id} job={j} />
+              ))}
+            </CardContent>
+          </Card>
 
-          {/* Invoices/Estimates */}
-          {detail.invoices.length > 0 && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-2">
+          {/* Messages */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                  Documents ({detail.invoices.length})
+                  <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                  Messages
                 </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {detail.invoices.map((inv) => (
-                  <InvoiceCard key={inv.id} invoice={inv} router={router} />
-                ))}
-              </CardContent>
-            </Card>
-          )}
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={() => setComposeOpen(true)}>
+                  + New
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-1.5">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {((detail as any).internal_threads || []).map((it: any) => (
+                <div key={it.id} className="py-1 px-2 rounded-md bg-muted/30 text-xs">
+                  <p className="font-medium truncate">{it.subject || "Team discussion"}</p>
+                  <span className="text-muted-foreground">{it.message_count} message{it.message_count !== 1 ? "s" : ""}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
 
-          {/* Email Threads (collapsed — messages are in timeline) */}
-          {detail.threads.length > 0 && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                  Email Threads ({detail.threads.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5">
-                {detail.threads.map((t) => (
-                  <div key={t.id} className="py-1 px-2 rounded-md bg-muted/30 text-xs">
-                    <p className="font-medium truncate">{t.subject || "(no subject)"}</p>
-                    <span className="text-muted-foreground">{t.contact_email} — {t.message_count} message{t.message_count !== 1 ? "s" : ""}</span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+          {/* Emails */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                Emails
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5">
+              {detail.threads.map((t) => (
+                <div key={t.id} className="py-1 px-2 rounded-md bg-muted/30 text-xs">
+                  <p className="font-medium truncate">{t.subject || "(no subject)"}</p>
+                  <span className="text-muted-foreground">{t.contact_email} — {t.message_count} message{t.message_count !== 1 ? "s" : ""}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* Documents */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                Documents
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {detail.invoices.map((inv) => (
+                <InvoiceCard key={inv.id} invoice={inv} router={router} />
+              ))}
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      <ComposeMessage
+        open={composeOpen}
+        onClose={() => setComposeOpen(false)}
+        onSent={() => { setComposeOpen(false); load(); }}
+        defaultCaseId={id}
+        defaultCustomerId={detail.customer_id || undefined}
+      />
     </div>
   );
 }

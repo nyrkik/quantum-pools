@@ -37,6 +37,8 @@ import {
   User,
   Lock,
   Settings2,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
 import { PageLayout } from "@/components/layout/page-layout";
@@ -210,10 +212,10 @@ export default function InboxPage() {
             <TableRow className="bg-slate-100 dark:bg-slate-800">
               <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Time</TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wide">From</TableHead>
-              <TableHead className="text-xs font-medium uppercase tracking-wide">Subject</TableHead>
-              <TableHead className="text-xs font-medium uppercase tracking-wide w-16 text-center">Msgs</TableHead>
-              <TableHead className="text-xs font-medium uppercase tracking-wide w-28">Category</TableHead>
-              <TableHead className="text-xs font-medium uppercase tracking-wide w-24">Status</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide hidden sm:table-cell">Subject</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-16 text-center hidden md:table-cell">Msgs</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-28 hidden lg:table-cell">Category</TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wide w-24 hidden sm:table-cell">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -259,6 +261,11 @@ export default function InboxPage() {
                           {t.assigned_to_user_id === user?.id ? "Mine" : t.assigned_to_name}
                         </Badge>
                       )}
+                      {/* Mobile: inline status icons */}
+                      <span className="flex items-center gap-0.5 sm:hidden flex-shrink-0 ml-auto">
+                        <StatusBadge status={t.status} />
+                        <UrgencyBadge urgency={t.urgency} />
+                      </span>
                     </div>
                     {t.customer_address && (
                       <p className="text-[10px] text-muted-foreground truncate">{t.customer_address}</p>
@@ -266,11 +273,29 @@ export default function InboxPage() {
                     {t.contact_name && (
                       <p className="text-[10px] text-muted-foreground truncate">Contact: {t.contact_name}</p>
                     )}
+                    {/* Mobile: subject below name */}
+                    <div className="flex items-center gap-1 sm:hidden mt-0.5">
+                      {t.last_direction === "outbound" ? (
+                        <span className="flex-shrink-0"><ArrowUpRight className="h-3 w-3 text-blue-500" /></span>
+                      ) : (
+                        <span className="flex-shrink-0"><ArrowDownLeft className="h-3 w-3 text-green-600" /></span>
+                      )}
+                      <span className={`text-xs truncate ${t.is_unread ? "font-semibold" : "text-muted-foreground"}`}>
+                        {t.subject || t.last_snippet || "No subject"}
+                      </span>
+                    </div>
                   </TableCell>
-                  <TableCell className="max-w-[250px] text-sm">
-                    <span className={`truncate ${t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}`}>
-                      {t.subject || t.last_snippet || "No subject"}
-                    </span>
+                  <TableCell className="max-w-[250px] text-sm hidden sm:table-cell">
+                    <div className="flex items-center gap-1.5">
+                      {t.last_direction === "outbound" ? (
+                        <span className="flex-shrink-0" title="Last: sent"><ArrowUpRight className="h-3 w-3 text-blue-500" /></span>
+                      ) : (
+                        <span className="flex-shrink-0" title="Last: received"><ArrowDownLeft className="h-3 w-3 text-green-600" /></span>
+                      )}
+                      <span className={`truncate ${t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}`}>
+                        {t.subject || t.last_snippet || "No subject"}
+                      </span>
+                    </div>
                     {t.case_id && (
                       <Badge
                         variant="outline"
@@ -281,17 +306,17 @@ export default function InboxPage() {
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-center">
+                  <TableCell className="text-center hidden md:table-cell">
                     {t.message_count > 1 && (
                       <Badge variant="secondary" className="text-[10px] px-1.5">
                         {t.message_count}
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <CategoryBadge category={t.category} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <div className="flex items-center gap-1">
                       <StatusBadge status={t.status} />
                       <UrgencyBadge urgency={t.urgency} />

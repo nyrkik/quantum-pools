@@ -83,6 +83,7 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
 
         # 3. Domain match (for property managers — same @company.com)
         multi_match_customers = None
+        domain_single_match = None  # Hold single domain match — may be overridden by text search
         if not customer:
             domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
             if domain and domain not in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "protonmail.com", "me.com"):
@@ -94,8 +95,8 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
                 )
                 domain_matches = result.scalars().all()
                 if len(domain_matches) == 1:
-                    customer = domain_matches[0]
-                    match_method = "domain"
+                    # Don't commit yet — hold as fallback, let text search try first
+                    domain_single_match = domain_matches[0]
                 elif len(domain_matches) > 1:
                     # Multiple customers with same domain — store for Claude to disambiguate
                     multi_match_customers = domain_matches
@@ -196,6 +197,11 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
             if len(name_matches) == 1:  # Only use if unambiguous
                 customer = name_matches[0]
                 match_method = "body_name"
+
+        # 7. Fall back to domain single match if nothing better was found
+        if not customer and domain_single_match:
+            customer = domain_single_match
+            match_method = "domain"
 
         if not customer and not multi_match_customers:
             return None

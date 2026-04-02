@@ -74,7 +74,7 @@ async def upload_attachment(
     attachment = MessageAttachment(
         organization_id=ctx.organization_id,
         source_type=source_type,
-        uploaded_by=ctx.user_id,
+        uploaded_by=ctx.user.id,
         filename=file.filename or "file",
         stored_filename=stored_name,
         mime_type=file.content_type,

@@ -67,6 +67,7 @@ class MessagePresenter(Presenter):
                 "last_message_by": user_names.get(t.last_message_by, "") if t.last_message_by else None,
                 "last_message_at": self._iso(t.last_message_at),
                 "converted_to_action_id": t.converted_to_action_id,
+                "case_id": t.case_id if hasattr(t, "case_id") else None,
                 "created_at": self._iso(t.created_at),
             })
         return results
@@ -100,6 +101,7 @@ class MessagePresenter(Presenter):
             "action_id": thread.action_id,
             "priority": thread.priority,
             "converted_to_action_id": thread.converted_to_action_id,
+            "case_id": thread.case_id if hasattr(thread, "case_id") else None,
             "created_at": self._iso(thread.created_at),
             "messages": [
                 {

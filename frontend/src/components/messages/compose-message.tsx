@@ -19,9 +19,10 @@ interface ComposeMessageProps {
   onSent: () => void;
   defaultCustomerId?: string;
   defaultActionId?: string;
+  defaultCaseId?: string;
 }
 
-export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defaultActionId }: ComposeMessageProps) {
+export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defaultActionId, defaultCaseId }: ComposeMessageProps) {
   const team = useTeamMembersFull();
   const [selectedUsers, setSelectedUsers] = useState<{ id: string; name: string }[]>([]);
   const [message, setMessage] = useState("");
@@ -70,6 +71,7 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
         priority,
         customer_id: defaultCustomerId || null,
         action_id: defaultActionId || null,
+        case_id: defaultCaseId || null,
         attachment_ids: attachments.length ? attachments.map((a) => a.id) : undefined,
       });
       toast.success("Message sent");

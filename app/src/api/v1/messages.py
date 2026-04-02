@@ -29,6 +29,7 @@ class SendMessageBody(BaseModel):
     customer_id: Optional[str] = None
     property_id: Optional[str] = None
     action_id: Optional[str] = None
+    case_id: Optional[str] = None
     thread_id: Optional[str] = None  # reply to existing thread
     attachment_ids: Optional[list[str]] = None
 
@@ -78,6 +79,7 @@ async def send_message(
             customer_id=body.customer_id,
             property_id=body.property_id,
             action_id=body.action_id,
+            case_id=body.case_id,
         )
         db.add(thread)
         await db.flush()
@@ -247,6 +249,40 @@ async def reply_to_thread(
         ctx=ctx,
         db=db,
     )
+
+
+@router.post("/{thread_id}/create-case")
+async def create_case_from_message(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a case from an internal message thread."""
+    result = await db.execute(
+        select(InternalThread).where(
+            InternalThread.id == thread_id,
+            InternalThread.organization_id == ctx.organization_id,
+        )
+    )
+    thread = result.scalar_one_or_none()
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread.case_id:
+        return {"case_id": thread.case_id, "already_exists": True}
+
+    from src.services.service_case_service import ServiceCaseService
+    svc = ServiceCaseService(db)
+    case = await svc.find_or_create_case(
+        org_id=ctx.organization_id,
+        customer_id=thread.customer_id,
+        thread_id=None,
+        subject=thread.subject or "Internal Discussion",
+        source="internal_message",
+        created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),
+    )
+    thread.case_id = case.id
+    await db.commit()
+    return {"case_id": case.id, "case_number": case.case_number}
 
 
 @router.post("/{thread_id}/convert-to-job")

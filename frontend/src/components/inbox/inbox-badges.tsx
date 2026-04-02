@@ -1,15 +1,18 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { Circle, CheckCircle2, EyeOff, Archive, AlertTriangle, Minus } from "lucide-react";
 
 export function StatusBadge({ status }: { status: string }) {
   switch (status) {
     case "pending":
-      return <Badge variant="outline" className="border-amber-400 text-amber-600">Pending</Badge>;
+      return <span title="Pending"><Circle className="h-4 w-4 text-amber-500" /></span>;
     case "handled":
-      return <Badge variant="default" className="bg-green-600">Handled</Badge>;
+      return <span title="Handled"><CheckCircle2 className="h-4 w-4 text-green-600" /></span>;
     case "ignored":
-      return <Badge variant="secondary">Ignored</Badge>;
+      return <span title="Ignored"><EyeOff className="h-4 w-4 text-muted-foreground" /></span>;
+    case "archived":
+      return <span title="Archived"><Archive className="h-4 w-4 text-muted-foreground" /></span>;
     default:
       return <Badge variant="secondary">{status}</Badge>;
   }
@@ -19,11 +22,11 @@ export function UrgencyBadge({ urgency }: { urgency: string | null }) {
   if (!urgency) return null;
   switch (urgency) {
     case "high":
-      return <Badge variant="destructive" className="text-[10px] px-1.5">High</Badge>;
+      return <span title="High urgency"><AlertTriangle className="h-4 w-4 text-red-500" /></span>;
     case "medium":
-      return <Badge variant="outline" className="border-amber-400 text-amber-600 text-[10px] px-1.5">Med</Badge>;
+      return <span title="Medium urgency"><AlertTriangle className="h-4 w-4 text-amber-500" /></span>;
     case "low":
-      return <Badge variant="secondary" className="text-[10px] px-1.5">Low</Badge>;
+      return <span title="Low urgency"><Minus className="h-4 w-4 text-muted-foreground" /></span>;
     default:
       return null;
   }
@@ -39,9 +42,15 @@ export function CategoryBadge({ category }: { category: string | null }) {
     service_request: "border-purple-400 text-purple-600",
     general: "",
   };
+  const labels: Record<string, string> = {
+    service_request: "Service",
+    gate_code: "Gate Code",
+    auto_reply: "Auto Reply",
+    no_response: "No Response",
+  };
   return (
     <Badge variant="outline" className={`text-[10px] px-1.5 capitalize ${styles[category] || ""}`}>
-      {category.replace("_", " ")}
+      {labels[category] || category.replace("_", " ")}
     </Badge>
   );
 }

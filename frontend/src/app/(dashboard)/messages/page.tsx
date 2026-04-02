@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { usePermissions } from "@/lib/permissions";
@@ -17,6 +17,7 @@ import {
   Send,
   Loader2,
   ArrowRightToLine,
+  FolderOpen,
 } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { ComposeMessage } from "@/components/messages/compose-message";
@@ -36,6 +37,7 @@ interface ThreadSummary {
   last_message_by: string | null;
   last_message_at: string | null;
   converted_to_action_id: string | null;
+  case_id: string | null;
 }
 
 interface ThreadMessage {
@@ -56,9 +58,11 @@ interface ThreadDetail {
   priority: string;
   messages: ThreadMessage[];
   converted_to_action_id: string | null;
+  case_id: string | null;
 }
 
 export default function MessagesPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const perms = usePermissions();
   const searchParams = useSearchParams();
@@ -218,9 +222,19 @@ export default function MessagesPage() {
                   {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
                 </div>
                 <div className="flex gap-1.5">
-                  {!detail.converted_to_action_id && (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleConvert}>
-                      <ArrowRightToLine className="h-3 w-3 mr-1" /> Job
+                  {detail.case_id ? (
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => router.push(`/cases/${detail.case_id}`)}>
+                      <FolderOpen className="h-3 w-3 mr-1" /> View Case
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={async () => {
+                      try {
+                        const result = await api.post<{ case_id: string; case_number?: string }>(`/v1/messages/${selectedThreadId}/create-case`, {});
+                        toast.success(`Case created: ${result.case_number || ""}`);
+                        router.push(`/cases/${result.case_id}`);
+                      } catch { toast.error("Failed to create case"); }
+                    }}>
+                      <FolderOpen className="h-3 w-3 mr-1" /> Create Case
                     </Button>
                   )}
                 </div>

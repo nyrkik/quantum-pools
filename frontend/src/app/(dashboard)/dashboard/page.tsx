@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import {
   MessageSquare,
   ClipboardList,
+  FolderOpen,
   Mail,
   AlertTriangle,
   Clock,
@@ -24,7 +25,8 @@ import {
   Send,
 } from "lucide-react";
 import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
-import type { AgentAction } from "@/types/agent";
+import type { AgentAction, ServiceCase } from "@/types/agent";
+import { CasesAnnouncement } from "@/components/layout/cases-announcement";
 
 interface DashboardData {
   // My stuff
@@ -39,6 +41,8 @@ interface DashboardData {
   overdueJobs: number;
   pendingEstimates: number;
   draftEstimates: number;
+  // Cases
+  openCases: ServiceCase[];
   // Recent
   recentThreads: { id: string; customer_name: string; subject: string; last_message_at: string; status: string }[];
 }
@@ -57,7 +61,7 @@ export default function DashboardPage() {
           unreadMessages: 0, latestMessages: [], myJobs: [],
           todayVisits: 0, activeVisit: null,
           pendingEmails: 0, staleEmails: 0, overdueJobs: 0, pendingEstimates: 0, draftEstimates: 0,
-          recentThreads: [],
+          openCases: [], recentThreads: [],
         };
 
         const results = await Promise.allSettled([
@@ -77,6 +81,8 @@ export default function DashboardPage() {
           // Estimate counts
           perms.canViewInvoices ? api.get<{ total: number }>("/v1/invoices?status=sent&limit=1") : null,
           perms.canViewInvoices ? api.get<{ total: number }>("/v1/invoices?status=draft&limit=1") : null,
+          // Cases
+          api.get<{ items: ServiceCase[] }>("/v1/cases?limit=5"),
         ]);
 
         // Messages
@@ -104,6 +110,9 @@ export default function DashboardPage() {
         if (results[9]?.status === "fulfilled" && results[9].value) {
           d.draftEstimates = (results[9].value as { total: number }).total;
         }
+        if (results[10]?.status === "fulfilled" && results[10].value) {
+          d.openCases = ((results[10].value as { items: ServiceCase[] }).items || []).filter(c => c.status !== "closed" && c.status !== "cancelled");
+        }
 
         setData(d);
       } catch {
@@ -130,11 +139,12 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      <CasesAnnouncement />
       <div>
         <h1 className="text-xl font-bold">Good {getTimeOfDay()}, {user?.first_name}</h1>
         <p className="text-sm text-muted-foreground">
           {data.todayVisits > 0 ? `${data.todayVisits} visit${data.todayVisits > 1 ? "s" : ""} today` : "No visits scheduled today"}
-          {data.myJobs.length > 0 ? ` · ${data.myJobs.length} open job${data.myJobs.length > 1 ? "s" : ""}` : ""}
+          {data.openCases.length > 0 ? ` · ${data.openCases.length} open case${data.openCases.length > 1 ? "s" : ""}` : ""}
         </p>
       </div>
 
@@ -214,18 +224,15 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* My Jobs */}
+        {/* Open Cases */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ClipboardList className="h-4 w-4 text-purple-500" />
-                <CardTitle className="text-sm font-semibold">My Jobs</CardTitle>
-                {data.myJobs.length > 0 && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 border-purple-400 text-purple-600">{data.myJobs.length}</Badge>
-                )}
+                <FolderOpen className="h-4 w-4 text-blue-500" />
+                <CardTitle className="text-sm font-semibold">Open Cases</CardTitle>
               </div>
-              <Link href="/jobs">
+              <Link href="/cases">
                 <Button variant="ghost" size="sm" className="text-xs h-7">
                   View All <ArrowRight className="h-3 w-3 ml-1" />
                 </Button>
@@ -233,36 +240,28 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {data.myJobs.length === 0 ? (
+            {data.openCases.length === 0 ? (
               <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
                 <CheckCircle2 className="h-4 w-4 text-green-500" />
-                No open jobs
+                No open cases
               </div>
             ) : (
               <div className="space-y-1">
-                {data.myJobs.map((a) => {
-                  const overdue = isOverdue(a.due_date);
-                  return (
-                    <div
-                      key={a.id}
-                      className={`flex items-center gap-3 py-2 -mx-2 px-2 rounded cursor-pointer transition-colors ${overdue ? "bg-red-50 dark:bg-red-950/20" : "hover:bg-muted/50"}`}
-                      onClick={() => router.push(`/jobs?action=${a.id}`)}
-                    >
-                      <Badge variant="outline" className="text-[10px] px-1.5 capitalize shrink-0">
-                        {a.action_type.replace(/_/g, " ")}
-                      </Badge>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm truncate">{a.description}</p>
-                        <p className="text-xs text-muted-foreground">{a.customer_name}</p>
-                      </div>
-                      {a.due_date && (
-                        <span className={`text-[10px] shrink-0 ${overdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
-                          {formatDueDate(a.due_date)}
-                        </span>
-                      )}
+                {data.openCases.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-3 py-2 -mx-2 px-2 rounded cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => router.push(`/cases/${c.id}`)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{c.title}</p>
+                      <p className="text-xs text-muted-foreground">{c.customer_name}</p>
                     </div>
-                  );
-                })}
+                    <div className="text-right shrink-0">
+                      {c.open_job_count > 0 && <span className="text-[10px] text-muted-foreground">{c.open_job_count} job{c.open_job_count > 1 ? "s" : ""}</span>}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>

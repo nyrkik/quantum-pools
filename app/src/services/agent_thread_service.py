@@ -239,7 +239,7 @@ class AgentThreadService:
                 )
                 .where(
                     thread_org,
-                    AgentThread.status != "closed",
+                    AgentThread.status.notin_(("closed", "ignored")),
                     or_(
                         ThreadRead.read_at.is_(None),
                         AgentThread.last_message_at > ThreadRead.read_at,
@@ -899,9 +899,7 @@ Subject: {thread.subject}
 {convo}
 
 Respond with JSON:
-{{"action_type": "repair|follow_up|bid|site_visit|callback|schedule_change|equipment|other", "description": "short one-line summary, max 60 chars — action verb + what. Do NOT include addresses."}}
-
-Keep the description concise and actionable."""
+{{"action_type": "repair|follow_up|bid|site_visit|callback|schedule_change|equipment|other", "description": "MAXIMUM 8 WORDS. Format: verb + what — location. Example: 'Replace pump seal — Sierra Oaks'. NO addresses, emails, phone numbers, or extra details."}}"""
 
         try:
             client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)

@@ -99,13 +99,13 @@ Respond with JSON:
 {{
   "has_next": true/false,
   "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
-  "description": "detailed description including ALL specifics from the conversation — part numbers, model names, prices, client approvals, addresses. Never be vague when details exist in the comments.",
+  "description": "MAXIMUM 8 WORDS. Format: 'verb + what — location'. Example: 'Send invoice — Coventry Park'. NO addresses, emails, phone numbers, or details. The case has all context.",
   "due_days": 3,
   "reasoning": "why this is the logical next step"
 }}
 
 Rules:
-- CRITICAL: The description must include every relevant detail from the comments and conversation. If a filter model (SM7), part number, price ($500), or client name (Ashley) was mentioned, include it. "Replace filter" is BAD. "Order and install SM7 spa filter at Coventry Park (751 Central Park Dr) — approved by Ashley Overton" is GOOD.
+- CRITICAL: Keep description under 8 words. All context (addresses, contacts, part numbers, prices) is already in the case. The description is just a label — "Send invoice — Coventry Park", not a paragraph.
 - Only recommend a next step if it's genuinely needed — don't create busywork
 - If all necessary work is covered by existing open actions, return has_next: false
 - If a follow-up email was already sent to the client about this issue, do NOT suggest calling or emailing them again about the same thing

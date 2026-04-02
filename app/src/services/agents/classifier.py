@@ -55,7 +55,7 @@ When classifying emails, respond with JSON:
   "actions": [
     {
       "action_type": "follow_up|bid|schedule_change|site_visit|callback|repair|equipment|invoice|other",
-      "description": "short one-line summary, max 60 chars — action verb + what + identifier. For commercial: use property/business name (e.g., 'Install spa filter — Coventry Park'). For residential: use street address + last name (e.g., 'Diagnose pump leak — 4428 Walali Way (Lew)'). No emails or phone numbers.",
+      "description": "MAXIMUM 8 WORDS. Format: 'verb + what — location'. Examples: 'Schedule valve seal replacement — Sierra Oaks', 'Diagnose pump leak — 4428 Walali'. NO addresses, emails, phone numbers, contact names, or details. The case has all context already.",
       "due_days": 1,
       "confidence": "high|medium|low"
     }

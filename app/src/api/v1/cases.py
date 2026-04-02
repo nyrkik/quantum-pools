@@ -152,7 +152,33 @@ async def get_case(
         for inv in invoices_result.scalars().all()
     ]
 
-    # Build unified timeline from emails + job comments
+    # Load internal messages
+    internal_result = await db.execute(
+        select(InternalThread)
+        .options(selectinload(InternalThread.messages))
+        .where(InternalThread.case_id == case_id)
+        .order_by(InternalThread.created_at)
+    )
+    internal_threads = internal_result.scalars().all()
+    d["internal_threads"] = [
+        {
+            "id": it.id,
+            "subject": it.subject,
+            "message_count": it.message_count,
+            "messages": [
+                {
+                    "id": m.id,
+                    "from_user_id": m.from_user_id,
+                    "text": m.text,
+                    "created_at": presenter._iso(m.created_at),
+                }
+                for m in sorted(it.messages or [], key=lambda x: x.created_at)
+            ],
+        }
+        for it in internal_threads
+    ]
+
+    # Build unified timeline from emails + job comments + internal messages
     timeline = []
 
     for t in d["threads"]:
@@ -167,24 +193,34 @@ async def get_case(
                 "metadata": {"direction": m["direction"], "status": m["status"], "thread_id": t["id"]},
             })
 
+    JOB_TYPES = {"repair", "site_visit", "bid", "equipment"}
+    from datetime import date as date_type
+    today = date_type.today().isoformat()
     for j in d["jobs"]:
-        # Job created
+        label = "Job" if j["action_type"] in JOB_TYPES else "Task"
+        is_cancelled = j["status"] == "cancelled"
+        created_today = j["created_at"] and j["created_at"][:10] == today
+
+        # Created today + cancelled = remove entirely (mistake, no audit value)
+        if is_cancelled and created_today:
+            continue
+
+        title_prefix = f"{label} cancelled" if is_cancelled else f"{label} created"
         timeline.append({
             "id": f"job-created-{j['id']}",
             "type": "job_event",
             "timestamp": j["created_at"],
-            "title": f"Job created: {j['description'][:80]}",
+            "title": f"{title_prefix}: {j['description'][:80]}",
             "body": None,
             "actor": j.get("assigned_to"),
-            "metadata": {"action_id": j["id"], "event": "created", "action_type": j["action_type"], "status": j["status"]},
+            "metadata": {"action_id": j["id"], "event": "cancelled" if is_cancelled else "created", "action_type": j["action_type"], "status": j["status"]},
         })
-        # Job completed
-        if j.get("completed_at"):
+        if j.get("completed_at") and not is_cancelled:
             timeline.append({
                 "id": f"job-done-{j['id']}",
                 "type": "job_event",
                 "timestamp": j["completed_at"],
-                "title": f"Job completed: {j['description'][:80]}",
+                "title": f"{label} completed: {j['description'][:80]}",
                 "body": None,
                 "actor": j.get("assigned_to"),
                 "metadata": {"action_id": j["id"], "event": "completed"},
@@ -211,6 +247,19 @@ async def get_case(
             "actor": None,
             "metadata": {"invoice_id": inv["id"], "document_type": inv["document_type"], "status": inv["status"]},
         })
+
+    # Internal team messages
+    for it in d.get("internal_threads", []):
+        for m in it["messages"]:
+            timeline.append({
+                "id": m["id"],
+                "type": "internal_message",
+                "timestamp": m["created_at"],
+                "title": f"Team message" + (f" — {it['subject']}" if it.get("subject") else ""),
+                "body": m["text"],
+                "actor": m.get("from_user_id"),
+                "metadata": {"internal_thread_id": it["id"]},
+            })
 
     timeline.sort(key=lambda x: x["timestamp"] or "")
     d["timeline"] = timeline
@@ -322,6 +371,7 @@ class CreateJobInCaseBody(BaseModel):
     description: str
     assigned_to: Optional[str] = None
     due_date: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @router.post("/{case_id}/jobs")
@@ -353,6 +403,7 @@ async def create_job_in_case(
         description=body.description,
         assigned_to=body.assigned_to,
         due_date=due,
+        notes=body.notes,
         status="open",
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),
     )

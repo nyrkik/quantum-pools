@@ -357,7 +357,18 @@ class InspectionService:
         return {"total_unmatched": len(unmatched), "matched": matched, "removed": removed, "details": matches_detail}
 
     async def get_org_properties_emd_status(self, organization_id: str) -> list[dict]:
-        """Get EMD match status for all commercial properties in the org."""
+        """Get EMD match status for all commercial properties in the org.
+
+        Auto-runs matching first, then returns status with reasons for unmatched.
+        """
+        # Auto-run matching before returning status
+        try:
+            await self.auto_match_facilities(organization_id)
+            await self.db.commit()
+        except Exception as e:
+            logger.warning(f"Auto-match during status check failed: {e}")
+            await self.db.rollback()
+
         result = await self.db.execute(
             select(Property, Customer)
             .join(Customer, Customer.id == Property.customer_id)
@@ -366,7 +377,6 @@ class InspectionService:
                 Customer.customer_type == "commercial",
                 Customer.is_active == True,
                 Property.is_active == True,
-                Property.county == "Sacramento",
             )
             .order_by(Customer.first_name)
         )
@@ -397,6 +407,15 @@ class InspectionService:
                 total_violations = stat_row[0] or 0
                 last_date = stat_row[1]
 
+            # Determine reason for unmatched
+            unmatched_reason = None
+            if not facility:
+                county = getattr(prop, "county", None) or ""
+                if county and county.lower() != "sacramento":
+                    unmatched_reason = f"{county} County — not in Sacramento County database"
+                else:
+                    unmatched_reason = "No matching facility found in inspection database"
+
             statuses.append({
                 "property_id": prop.id,
                 "property_address": prop.full_address,
@@ -407,6 +426,7 @@ class InspectionService:
                 "facility_name": facility.name if facility else None,
                 "last_inspection_date": last_date,
                 "total_violations": total_violations,
+                "unmatched_reason": unmatched_reason,
             })
 
         return statuses

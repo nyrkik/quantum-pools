@@ -32,36 +32,36 @@ export function InspectionDashboard({
 }: InspectionDashboardProps) {
   return (
     <div className="shrink-0 space-y-2">
-      {/* Backfill status bar */}
+      {/* Backfill status bar — only show active/error, hide idle */}
       {scraperHealth?.state === "scraping" && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950/30 border border-green-200/50 dark:border-green-800/50 rounded-md text-xs">
+        <div className="flex items-center gap-2 px-3 py-1 bg-green-50 dark:bg-green-950/30 border border-green-200/50 dark:border-green-800/50 rounded-md text-xs">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
           <span className="text-green-700 dark:text-green-400 font-medium">Scraping new inspections</span>
         </div>
       )}
       {scraperHealth?.state === "error" && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-950/30 border border-red-200/50 dark:border-red-800/50 rounded-md text-xs">
+        <div className="flex items-center gap-2 px-3 py-1 bg-red-50 dark:bg-red-950/30 border border-red-200/50 dark:border-red-800/50 rounded-md text-xs">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500" />
           <span className="text-red-700 dark:text-red-400 font-medium">Scraper error</span>
           <span className="text-muted-foreground">{scraperHealth.consecutive_failures} consecutive failures</span>
         </div>
       )}
 
-      {/* 4 Dashboard Tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* 4 Dashboard Tiles — compact */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {/* Tile 1: My Inspections */}
         <Card
           className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "inspections" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
           onClick={() => onTileClick("inspections")}
         >
-          <CardContent className="p-3">
+          <CardContent className="p-2.5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">My Inspections</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">My Inspections</p>
                 {dashboard ? (
                   dashboard.my_inspections_this_week.length > 0 ? (
                     <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-2xl font-bold leading-tight text-primary">{dashboard.my_inspections_this_week.length}</p>
+                      <p className="text-xl font-bold leading-tight text-primary">{dashboard.my_inspections_this_week.length}</p>
                       {dashboard.my_inspections_this_week.some(i => i.closure_required) ? (
                         <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
                       ) : (
@@ -85,14 +85,14 @@ export function InspectionDashboard({
           className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "alerts" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
           onClick={() => onTileClick("alerts")}
         >
-          <CardContent className="p-3">
+          <CardContent className="p-2.5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Alerts</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Alerts</p>
                 {dashboard ? (
                   dashboard.season_alerts.length > 0 ? (
                     <div>
-                      <p className="text-2xl font-bold leading-tight mt-0.5 text-amber-600">{dashboard.season_alerts.length}</p>
+                      <p className="text-xl font-bold leading-tight mt-0.5 text-amber-600">{dashboard.season_alerts.length}</p>
                       <p className="text-[10px] text-muted-foreground">
                         {dashboard.season_alerts.filter(a => a.alert_type === "recent_closure").length > 0
                           ? `${dashboard.season_alerts.filter(a => a.alert_type === "recent_closure").length} closures`
@@ -116,13 +116,13 @@ export function InspectionDashboard({
           className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "leads" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
           onClick={() => onTileClick("leads")}
         >
-          <CardContent className="p-3">
+          <CardContent className="p-2.5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Fresh Leads</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Fresh Leads</p>
                 {dashboard ? (
                   <div>
-                    <p className="text-2xl font-bold leading-tight mt-0.5 text-green-600">{dashboard.fresh_leads.length}</p>
+                    <p className="text-xl font-bold leading-tight mt-0.5 text-green-600">{dashboard.fresh_leads.length}</p>
                     <p className="text-[10px] text-muted-foreground">inspected this week</p>
                   </div>
                 ) : (
@@ -139,13 +139,13 @@ export function InspectionDashboard({
           className={`shadow-sm cursor-pointer transition-colors ${expandedTile === "trending" ? "ring-2 ring-primary" : "hover:bg-accent/50"}`}
           onClick={() => onTileClick("trending")}
         >
-          <CardContent className="p-3">
+          <CardContent className="p-2.5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Trending Worse</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Trending Worse</p>
                 {dashboard ? (
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <p className="text-2xl font-bold leading-tight text-red-600">{dashboard.trending_worse.length}</p>
+                    <p className="text-xl font-bold leading-tight text-red-600">{dashboard.trending_worse.length}</p>
                     <ArrowUpRight className="h-4 w-4 text-red-500" />
                   </div>
                 ) : (

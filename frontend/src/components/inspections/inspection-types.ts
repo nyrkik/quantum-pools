@@ -181,6 +181,19 @@ export interface RedactedDetail {
   unlock_price_cents: number;
 }
 
+export interface PropertyEMDStatus {
+  property_id: string;
+  property_address: string;
+  customer_name: string;
+  customer_id: string;
+  match_status: string;
+  facility_id: string | null;
+  facility_name: string | null;
+  last_inspection_date: string | null;
+  total_violations: number;
+  unmatched_reason: string | null;
+}
+
 export interface ScraperHealth {
   state?: string;
   last_success?: string;

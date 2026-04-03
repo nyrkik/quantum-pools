@@ -112,6 +112,8 @@ async def approve_thread(
     if "error" in result:
         code = {"no_pending": 400, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
+    # Sender's own reply should not show as unread
+    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id)
     return result
 
 
@@ -221,6 +223,8 @@ async def send_thread_followup(
     if "error" in result:
         code = {"not_found": 404, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
+    # Sender's own reply should not show as unread
+    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id)
     return result
 
 

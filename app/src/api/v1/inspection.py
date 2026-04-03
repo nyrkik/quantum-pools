@@ -36,7 +36,7 @@ LOOKUP_PRICE_CENTS = 99
 async def _get_emd_tier(ctx: OrgUserContext, db: AsyncSession) -> str | None:
     """Get the org's EMD subscription tier."""
     svc = FeatureService(db)
-    return await svc.get_org_emd_tier(ctx.organization_id)
+    return await svc.get_org_inspection_tier(ctx.organization_id)
 
 
 async def _has_facility_access(

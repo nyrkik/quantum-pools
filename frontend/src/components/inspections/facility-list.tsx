@@ -169,16 +169,8 @@ export function FacilityList({
           </div>
         </div>
 
-        {/* Facility list -- table-like layout */}
+        {/* Facility list */}
         <div className="flex-1 flex flex-col min-h-0">
-          {/* Column headers */}
-          <div className="grid grid-cols-[auto_auto_auto_1fr] gap-x-2 items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground shrink-0 sticky top-0 z-10">
-            <span className="w-14 text-center">Status</span>
-            <span className="w-[70px] text-center">Last Insp</span>
-            <span className="w-10 text-center">Viol</span>
-            <span>Facility</span>
-          </div>
-
           <div className="flex-1 overflow-y-auto min-h-0">
             {loading ? (
               <div className="flex items-center justify-center py-12">
@@ -195,7 +187,7 @@ export function FacilityList({
                     <button
                       key={rowKey}
                       onClick={() => onSelectFacility(f.id, f.permit_id)}
-                      className={`w-full text-left grid grid-cols-[auto_auto_auto_1fr] gap-x-2 items-center px-3 py-2 text-sm transition-colors border-b border-border/40 ${
+                      className={`w-full text-left px-3 py-2 text-sm transition-colors border-b border-border/40 ${
                         isSelected
                           ? "bg-accent border-l-3 border-l-primary font-medium"
                           : f.is_closed
@@ -203,71 +195,59 @@ export function FacilityList({
                             : "hover:bg-blue-50 dark:hover:bg-blue-950"
                       }`}
                     >
-                      {/* Status: OPEN / CLOSED */}
-                      <div className="w-14 text-center">
-                        {f.is_closed ? (
-                          f.closure_reasons.length > 0 ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span>
-                                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
-                                    CLOSED
-                                  </Badge>
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="right" className="max-w-xs">
-                                <ul className="text-xs space-y-0.5">
-                                  {f.closure_reasons.map((r, i) => (
-                                    <li key={i}>{r}</li>
-                                  ))}
-                                </ul>
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                              CLOSED
-                            </Badge>
-                          )
-                        ) : (
-                          <span className="text-[10px] font-semibold text-green-600">OPEN</span>
+                      {/* Row 1: Name + status */}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-medium truncate">{f.name}</span>
+                        {f.program_identifier && (
+                          <span className="text-[10px] text-muted-foreground shrink-0">{cleanProgramId(f.program_identifier)}</span>
                         )}
-                      </div>
-
-                      {/* Last inspection date */}
-                      <div className="w-[70px] text-center">
-                        <span className="text-[11px] text-muted-foreground">
-                          {f.last_inspection_date ? formatDate(f.last_inspection_date) : "--"}
+                        {f.matched_property_id && (
+                          <Link2 className="h-3 w-3 text-green-500 shrink-0" />
+                        )}
+                        <span className="ml-auto shrink-0">
+                          {f.is_closed ? (
+                            f.closure_reasons.length > 0 ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
+                                      CLOSED
+                                    </Badge>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="right" className="max-w-xs">
+                                  <ul className="text-xs space-y-0.5">
+                                    {f.closure_reasons.map((r, i) => (
+                                      <li key={i}>{r}</li>
+                                    ))}
+                                  </ul>
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">CLOSED</Badge>
+                            )
+                          ) : null}
                         </span>
                       </div>
 
-                      {/* Violation count */}
-                      <div className="w-10 text-center">
-                        {f.total_violations > 0 ? (
-                          <Badge
-                            variant={f.total_violations > 10 ? "destructive" : "secondary"}
-                            className="text-[10px] px-1.5 py-0"
-                          >
-                            {f.total_violations}
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground/40">0</span>
-                        )}
-                      </div>
-
-                      {/* Facility name + water feature + address */}
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium truncate">{f.name}</span>
-                          {f.program_identifier && (
-                            <span className="text-[10px] text-muted-foreground shrink-0">{cleanProgramId(f.program_identifier)}</span>
-                          )}
-                          {f.matched_property_id && (
-                            <Link2 className="h-3 w-3 text-green-500 shrink-0" />
-                          )}
-                        </div>
-                        <div className="text-xs truncate text-muted-foreground">
+                      {/* Row 2: Address + meta */}
+                      <div className="flex items-center gap-2 mt-0.5 min-w-0">
+                        <span className="text-xs truncate text-muted-foreground">
                           {f.street_address}{f.city ? `, ${f.city}` : ""}
-                        </div>
+                        </span>
+                        <span className="ml-auto flex items-center gap-2 shrink-0">
+                          {f.total_violations > 0 && (
+                            <Badge
+                              variant={f.total_violations > 10 ? "destructive" : "secondary"}
+                              className="text-[10px] px-1.5 py-0"
+                            >
+                              {f.total_violations} viol
+                            </Badge>
+                          )}
+                          <span className="text-[10px] text-muted-foreground">
+                            {f.last_inspection_date ? formatDate(f.last_inspection_date) : "—"}
+                          </span>
+                        </span>
                       </div>
                     </button>
                   );

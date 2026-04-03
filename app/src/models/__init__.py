@@ -75,6 +75,7 @@ from src.models.thread_read import ThreadRead
 from src.models.job_invoice import JobInvoice
 from src.models.message_attachment import MessageAttachment
 from src.models.service_case import ServiceCase
+from src.models.email_template import EmailTemplate
 
 __all__ = [
     "Base",
@@ -136,4 +137,5 @@ __all__ = [
     "InternalMessage",
     "CustomerContact",
     "AgentCorrection",
+    "EmailTemplate",
 ]

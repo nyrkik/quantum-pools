@@ -565,6 +565,12 @@ Rules:
             import logging
             logging.getLogger(__name__).error(f"Action evaluation after follow-up failed: {e}")
 
+    # Sender's own reply should not show as unread
+    if msg.thread_id:
+        from src.services.agent_thread_service import AgentThreadService
+        thread_svc = AgentThreadService(db)
+        await thread_svc.mark_thread_read(thread_id=msg.thread_id, user_id=ctx.user.id)
+
     return {
         "sent": True,
         "to": msg.from_email,

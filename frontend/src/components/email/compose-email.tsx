@@ -18,6 +18,7 @@ import {
   ChevronUp,
   User,
   Search,
+  FileText,
 } from "lucide-react";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 
@@ -47,6 +48,14 @@ interface CustomerContext {
   open_invoices: { number: string; total: number; due_date: string; status: string }[];
   open_jobs: { type: string; description: string; status: string }[];
   last_visit: string | null;
+}
+
+interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  category: string;
 }
 
 // --- Component ---
@@ -81,6 +90,10 @@ export function ComposeEmail() {
   // Attachments
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
 
+  // Templates
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+
   // Sending
   const [sending, setSending] = useState(false);
 
@@ -101,6 +114,11 @@ export function ComposeEmail() {
       if (options.customerId) {
         loadContext(options.customerId);
       }
+
+      // Load canned templates
+      api.get<{ items: EmailTemplate[] }>("/v1/email/templates")
+        .then((data) => setTemplates(data.items))
+        .catch(() => setTemplates([]));
     }
   }, [isOpen, options]);
 
@@ -367,6 +385,54 @@ export function ComposeEmail() {
             placeholder="Subject"
           />
         </div>
+
+        {/* Canned template picker */}
+        {templates.length > 0 && (
+          <div className="relative">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs w-full justify-start"
+              onClick={() => setShowTemplates(!showTemplates)}
+            >
+              <FileText className="h-3 w-3" />
+              Use Template
+              {showTemplates ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
+            </Button>
+            {showTemplates && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+                {Object.entries(
+                  templates.reduce<Record<string, EmailTemplate[]>>((acc, t) => {
+                    const cat = t.category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                    (acc[cat] ??= []).push(t);
+                    return acc;
+                  }, {})
+                ).map(([cat, items]) => (
+                  <div key={cat}>
+                    <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground bg-muted/50">
+                      {cat}
+                    </div>
+                    {items.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                        onClick={() => {
+                          setSubject(t.subject);
+                          setBody(t.body);
+                          setShowTemplates(false);
+                        }}
+                      >
+                        <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="truncate">{t.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* AI context card */}
         {customerId && context && (

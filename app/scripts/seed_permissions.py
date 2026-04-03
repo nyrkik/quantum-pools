@@ -168,9 +168,9 @@ PRESET_PERMISSIONS["manager"] = [
     # satellite
     ("satellite.view", "all"),
     ("satellite.analyze", "all"),
-    # emd
-    ("emd.view", "all"),
-    ("emd.manage", "all"),
+    # inspections
+    ("inspection.view", "all"),
+    ("inspection.manage", "all"),
     # chemical_costs
     ("chemical_costs.view", "all"),
     # jobs
@@ -195,7 +195,7 @@ PRESET_PERMISSIONS["technician"] = [
     ("chemicals.create", "own"),
     ("chemicals.edit", "own"),
     ("techs.view", "all"),
-    ("emd.view", "all"),
+    ("inspection.view", "all"),
     ("jobs.view", "own"),
     ("jobs.edit", "own"),
     ("notifications.view", "all"),

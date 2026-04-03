@@ -2,8 +2,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
-import { Shield } from "lucide-react";
+import { Shield, AlertTriangle } from "lucide-react";
 import { PageLayout } from "@/components/layout/page-layout";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth-context";
 import { PropertyMatching } from "@/components/inspections/property-matching";
 import { InspectionDashboard } from "@/components/inspections/inspection-dashboard";
@@ -21,6 +28,7 @@ import type {
   DashboardData,
   DashboardTile,
   ScraperHealth,
+  PropertyEMDStatus,
 } from "@/components/inspections/inspection-types";
 
 export default function InspectionsPage() {
@@ -45,6 +53,8 @@ export default function InspectionsPage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [expandedTile, setExpandedTile] = useState<DashboardTile>(null);
   const [scraperHealth, setScraperHealth] = useState<ScraperHealth | null>(null);
+  const [showMatching, setShowMatching] = useState(false);
+  const [unmatchedCount, setUnmatchedCount] = useState(0);
 
   // Poll scraper health every 60s
   useEffect(() => {
@@ -58,18 +68,29 @@ export default function InspectionsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch active lookups
+  // Fetch active lookups (only for non-full-research)
   useEffect(() => {
+    if (isFullResearch) return;
     api.get<InspectionLookup[]>("/v1/inspections/lookups")
       .then(setLookups)
       .catch(() => setLookups([]));
-  }, []);
+  }, [isFullResearch]);
 
   // Fetch dashboard data
   useEffect(() => {
     api.get<DashboardData>("/v1/inspections/dashboard")
       .then(setDashboard)
       .catch(() => setDashboard(null));
+  }, []);
+
+  // Check unmatched property count for the matching badge
+  useEffect(() => {
+    api.get<PropertyEMDStatus[]>("/v1/inspections/my-properties")
+      .then((props) => {
+        const unmatched = props.filter(p => p.match_status !== "matched").length;
+        setUnmatchedCount(unmatched);
+      })
+      .catch(() => setUnmatchedCount(0));
   }, []);
 
   const fetchFacilities = useCallback(async () => {
@@ -230,8 +251,8 @@ export default function InspectionsPage() {
       icon={<Shield className="h-5 w-5 text-muted-foreground" />}
       subtitle="Health department inspection data"
     >
-    <div className="h-[calc(100vh-8rem)] flex flex-col gap-3 overflow-hidden">
-      {/* Operations Dashboard */}
+    <div className="h-[calc(100vh-8rem)] flex flex-col gap-2 overflow-hidden">
+      {/* Dashboard tiles + scraper status */}
       <InspectionDashboard
         dashboard={dashboard}
         expandedTile={expandedTile}
@@ -240,25 +261,42 @@ export default function InspectionsPage() {
         onItemClick={handleDashboardItemClick}
       />
 
-      {/* Recent Lookups */}
-      <RecentLookups lookups={lookups} onSelectFacility={(id) => selectFacility(id)} />
+      {/* Lookups & cart — only for non-full-research tiers */}
+      {!isFullResearch && (
+        <>
+          <RecentLookups lookups={lookups} onSelectFacility={(id) => selectFacility(id)} />
+          <LookupCart
+            cart={cart}
+            purchasing={purchasing}
+            onClear={() => setCart(new Set())}
+            onPurchase={purchaseCart}
+          />
+        </>
+      )}
 
-      {/* Cart */}
-      <LookupCart
-        cart={cart}
-        purchasing={purchasing}
-        onClear={() => setCart(new Set())}
-        onPurchase={purchaseCart}
-      />
+      {/* Property matching — unmatched badge opens dialog */}
+      {unmatchedCount > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start h-7 gap-1.5 text-xs shrink-0"
+          onClick={() => setShowMatching(true)}
+        >
+          <AlertTriangle className="h-3 w-3 text-amber-500" />
+          {unmatchedCount} unmatched {unmatchedCount === 1 ? "property" : "properties"}
+        </Button>
+      )}
+      <Dialog open={showMatching} onOpenChange={setShowMatching}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Property Matching</DialogTitle>
+          </DialogHeader>
+          <PropertyMatching />
+        </DialogContent>
+      </Dialog>
 
-      {/* My Properties EMD Matching */}
-      <div className="shrink-0 max-h-80 overflow-y-auto">
-        <PropertyMatching />
-      </div>
-
-      {/* Research Section */}
+      {/* Main content: facility list + detail */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
-        {/* Left: Facility list */}
         <FacilityList
           facilities={facilities}
           filteredFacilities={filteredFacilities}
@@ -282,7 +320,6 @@ export default function InspectionsPage() {
           onToggleCart={toggleCart}
         />
 
-        {/* Right: Redacted detail panel */}
         {redactedDetail && !selectedFacility && (
           <RedactedDetailPanel
             detail={redactedDetail}
@@ -293,7 +330,6 @@ export default function InspectionsPage() {
           />
         )}
 
-        {/* Right: Detail panel */}
         {selectedFacility && (
           <FacilityDetail
             facility={selectedFacility}
@@ -307,7 +343,6 @@ export default function InspectionsPage() {
           />
         )}
 
-        {/* Empty state */}
         {!selectedFacility && !redactedDetail && !loading && facilities.length > 0 && (
           <div className="hidden lg:flex lg:col-span-8 items-center justify-center text-muted-foreground text-sm">
             <div className="text-center">

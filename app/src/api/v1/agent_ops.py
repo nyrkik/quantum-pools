@@ -43,6 +43,25 @@ async def run_evals(
     return await run_eval_suite(agent_name, ctx.organization_id)
 
 
+@router.post("/health-check")
+async def run_health_check(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run agent health check for this org and fire notifications if thresholds exceeded.
+
+    Can be called manually or wired to a cron job. Idempotent within a 60-minute
+    dedup window — safe to call repeatedly.
+    """
+    from src.services.agents.health_monitor import check_org_health, fire_alerts
+    result = await check_org_health(db, ctx.organization_id)
+    created = await fire_alerts(db, ctx.organization_id, result["issues"])
+    return {
+        **result,
+        "notifications_created": created,
+    }
+
+
 @router.get("/logs")
 async def get_logs(
     agent: Optional[str] = Query(None),

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Loader2, Database, Clock, FileText, AlertTriangle, Link2, Search, Check, X, Activity, DollarSign, Zap, Bot } from "lucide-react";
+import { Loader2, Database, Clock, FileText, AlertTriangle, Link2, Search, Check, X, Activity, DollarSign, Zap, Bot, Play } from "lucide-react";
 
 interface ScraperRun {
   id: string;
@@ -241,86 +241,33 @@ export default function AdminPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Admin Dashboard</h1>
 
-      {/* Agent Health */}
+      {/* AI Assistant summary — business-facing */}
       {agentMetrics && (
         <Card className="shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2">
               <Bot className="h-4 w-4 text-primary" />
-              <CardTitle className="text-base">Agent Health (24h)</CardTitle>
+              <CardTitle className="text-base">AI Assistant (last 24h)</CardTitle>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Summary tiles */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-muted/50 rounded-md p-3">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                  <Activity className="h-3 w-3" />Calls
+          <CardContent>
+            {agentMetrics.total_calls === 0 ? (
+              <p className="text-sm text-muted-foreground">No AI activity in the last 24 hours.</p>
+            ) : (
+              <div className="flex items-center gap-6 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className={`font-medium ${agentMetrics.success_rate >= 95 ? "text-green-600" : agentMetrics.success_rate >= 90 ? "text-amber-600" : "text-red-600"}`}>
+                    {agentMetrics.success_rate >= 95 ? "Healthy" : agentMetrics.success_rate >= 90 ? "Degraded" : "Issues detected"}
+                  </p>
                 </div>
-                <p className="text-lg font-bold">{agentMetrics.total_calls}</p>
-              </div>
-              <div className={`rounded-md p-3 ${agentMetrics.success_rate < 90 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/50"}`}>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                  <Check className="h-3 w-3" />Success Rate
+                <div>
+                  <p className="text-xs text-muted-foreground">Cost today</p>
+                  <p className="font-medium">${agentMetrics.total_cost_usd.toFixed(2)}</p>
                 </div>
-                <p className={`text-lg font-bold ${agentMetrics.success_rate < 90 ? "text-red-600" : ""}`}>{agentMetrics.success_rate}%</p>
-              </div>
-              <div className="bg-muted/50 rounded-md p-3">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                  <DollarSign className="h-3 w-3" />Cost
-                </div>
-                <p className="text-lg font-bold">${agentMetrics.total_cost_usd.toFixed(2)}</p>
-              </div>
-              <div className="bg-muted/50 rounded-md p-3">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                  <Zap className="h-3 w-3" />Avg Speed
-                </div>
-                <p className="text-lg font-bold">{agentMetrics.avg_duration_ms ? `${(agentMetrics.avg_duration_ms / 1000).toFixed(1)}s` : "—"}</p>
-              </div>
-            </div>
-
-            {/* Per-agent breakdown */}
-            {Object.keys(agentMetrics.by_agent).length > 0 && (
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-100 dark:bg-slate-800">
-                      <TableHead className="text-xs font-medium uppercase tracking-wide">Agent</TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide text-right">Calls</TableHead>
-                      <TableHead className="text-xs font-medium uppercase tracking-wide text-right">Cost</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {Object.entries(agentMetrics.by_agent)
-                      .sort(([, a], [, b]) => b.calls - a.calls)
-                      .map(([name, data]) => (
-                        <TableRow key={name}>
-                          <TableCell className="text-sm font-medium capitalize">{name.replace("_", " ")}</TableCell>
-                          <TableCell className="text-sm text-right">{data.calls}</TableCell>
-                          <TableCell className="text-sm text-right text-muted-foreground">${data.cost.toFixed(4)}</TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-
-            {/* Recent failures */}
-            {agentLogs.filter(l => !l.success).length > 0 && (
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-red-600 mb-2">
-                  <AlertTriangle className="h-3 w-3 inline mr-1" />Recent Failures
-                </p>
-                <div className="space-y-1">
-                  {agentLogs.filter(l => !l.success).slice(0, 5).map((l) => (
-                    <div key={l.id} className="bg-red-50 dark:bg-red-950/20 rounded p-2 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium capitalize">{l.agent_name.replace("_", " ")}</span>
-                        <span className="text-xs text-muted-foreground">{new Date(l.created_at).toLocaleTimeString()}</span>
-                      </div>
-                      <p className="text-xs text-red-600 truncate">{l.error || l.action}</p>
-                    </div>
-                  ))}
+                <div>
+                  <p className="text-xs text-muted-foreground">Activity</p>
+                  <p className="font-medium">{agentMetrics.total_calls} calls</p>
                 </div>
               </div>
             )}

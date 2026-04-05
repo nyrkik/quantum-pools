@@ -178,6 +178,7 @@ Max 5 tool-use rounds per turn prevents runaway loops. Per-turn counter in `Tool
 - `get_organization_info` — org profile (also in baseline context)
 
 ### Lookup (auto-execute)
+- `get_agent_health` — agent metrics, failures, per-agent breakdown (wraps agent-ops observability)
 - `find_customer` — fuzzy search customers (ILIKE + pg_trgm fallback)
 - `find_property` — fuzzy search properties with BOW details
 - `get_equipment` — equipment on a property/BOW
@@ -283,9 +284,22 @@ Covers the long tail of data questions without requiring a new tool for every po
 **Why trigram similarity for search?**
 User typos and variant spellings ("walili" vs "walali") broke exact ILIKE searches. pg_trgm provides typo-tolerant fallback with a 0.3 similarity threshold. Primary search is still exact ILIKE for speed; trigram only runs when exact returns nothing.
 
+## Related systems
+
+### Agent health monitoring
+Not part of DeepBlue per se, but feeds into it via `get_agent_health` tool.
+- `src/services/agents/health_monitor.py` — threshold-based alerting on `agent_logs`
+- `POST /v1/agent-ops/health-check` — manual trigger (cron hook later)
+- Fires `type=agent_health` notifications to owners/admins with 60-minute dedup
+- Thresholds: success rate < 90% (24h), ≥3 failures/hour per agent, ≥10 failures/hour org-wide
+- DeepBlue users can ask "how are the agents doing?" and get the same data conversationally
+- See `memory/plan-agent-anomaly-detection.md` for the future upgrade path to baseline-based detection
+
 ## Future work
 
 - APScheduler job to run retention cleanup daily (currently manual)
+- APScheduler job to run agent health checks every 15 min (currently manual via endpoint)
+- Anomaly detection upgrade for agent health (see memory plan doc)
 - Per-user pins table (`deepblue_user_pins`) if shared chats need personal bookmarks
 - CC capture for inbound emails + multi-sender contact learning (unrelated to DeepBlue but will affect customer matching which DeepBlue relies on)
 - Voice input (Web Speech API)

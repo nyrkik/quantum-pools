@@ -298,6 +298,21 @@ TOOLS = [
         },
     },
     {
+        "name": "get_agent_health",
+        "description": (
+            "Get AI agent health metrics: success rate, total calls, cost, failures, per-agent breakdown. "
+            "Use when the user asks how the agents are doing, if anything is broken, recent failures, or agent costs. "
+            "Returns metrics for the last 24 hours by default."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "description": "Time window in hours (default 24)"},
+                "agent_name": {"type": "string", "description": "Optional: filter to one agent (email_classifier, customer_matcher, deepblue, etc.)"},
+            },
+        },
+    },
+    {
         "name": "get_organization_info",
         "description": (
             "Get the organization's own profile: name, phone, email, addresses (mailing/physical/billing), "
@@ -737,6 +752,46 @@ async def _exec_customer_info(inp: dict, ctx: ToolContext) -> dict:
             {"id": p.id, "name": p.name, "address": p.full_address}
             for p in props
         ],
+    }
+
+
+async def _exec_agent_health(inp: dict, ctx: ToolContext) -> dict:
+    """Get AI agent health metrics + recent failures."""
+    from src.services.agents.observability import get_agent_metrics, AgentLog
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    hours = inp.get("hours", 24)
+    agent_filter = inp.get("agent_name")
+
+    metrics = await get_agent_metrics(ctx.org_id, agent_filter, hours)
+
+    # Recent failures (last 10)
+    cutoff = _dt.now(_tz.utc) - _td(hours=hours)
+    fail_query = select(AgentLog).where(
+        AgentLog.organization_id == ctx.org_id,
+        AgentLog.created_at >= cutoff,
+        AgentLog.success == False,
+    )
+    if agent_filter:
+        fail_query = fail_query.where(AgentLog.agent_name == agent_filter)
+    fail_query = fail_query.order_by(desc(AgentLog.created_at)).limit(10)
+
+    failures = (await ctx.db.execute(fail_query)).scalars().all()
+    recent_failures = [
+        {
+            "agent": f.agent_name,
+            "action": f.action,
+            "error": (f.error or "")[:200],
+            "when": f.created_at.isoformat() if f.created_at else None,
+        }
+        for f in failures
+    ]
+
+    return {
+        "window_hours": hours,
+        "agent_filter": agent_filter,
+        "metrics": metrics,
+        "recent_failures": recent_failures,
     }
 
 
@@ -1484,6 +1539,7 @@ _EXECUTORS = {
     "update_customer_note": _exec_update_note,
     "draft_broadcast_email": _exec_broadcast,
     "get_organization_info": _exec_org_info,
+    "get_agent_health": _exec_agent_health,
     # Fuzzy search
     "find_customer": _exec_find_customer,
     "find_property": _exec_find_property,

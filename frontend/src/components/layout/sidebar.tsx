@@ -67,6 +67,7 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
   { href: "/feedback", label: "Feedback", icon: MessageCircleQuestion, check: "canViewSettings" as keyof Permissions, badge: "feedback" as const },
   { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
+  { href: "/dev", label: "Dev", icon: Code2, check: "__dev__" as const },
 ];
 
 import { getBackendOrigin } from "@/lib/api";
@@ -78,7 +79,7 @@ function getBackendUrl(path: string) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { user, organizationName, branding, logout, refreshUser, roleVersion } = useAuth();
+  const { user, organizationName, branding, logout, refreshUser, roleVersion, isDeveloper } = useAuth();
   const perms = usePermissions();
   const dev = useDevMode();
   const [pendingCount, setPendingCount] = useState(0);
@@ -113,9 +114,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     document.title = total > 0 ? `(${total}) QuantumPools` : "QuantumPools";
   }, [pendingCount, unreadMessages]);
 
-  const visibleNav = navItems.filter(
-    (item) => item.check === null || perms[item.check] === true
-  );
+  const visibleNav = navItems.filter((item) => {
+    if (item.check === null) return true;
+    if (item.check === "__dev__") return isDeveloper;
+    return perms[item.check as keyof Permissions] === true;
+  });
 
   const logoSrc = branding.logoUrl ? getBackendUrl(branding.logoUrl) : "/logo.png";
   const displayName = organizationName || "QuantumPools";

@@ -36,27 +36,36 @@ EVAL_PROMPTS = [
         "prompt": "find replacement parts for a Polaris 280 booster",
         "expected_tools": ["find_replacement_parts"],
     },
-    # Billing (merged tool)
+    # Billing (merged tool) — Sierra Oaks is a property name so find_property is valid first step
     {
         "id": "invoices_for_customer",
         "prompt": "show me open invoices for Sierra Oaks",
-        "expected_tools_any": ["find_customer", "get_billing_documents"],
+        "expected_tools_any": ["find_customer", "find_property", "get_billing_documents"],
     },
     {
         "id": "estimates_for_customer",
         "prompt": "any pending estimates for Lew?",
         "expected_tools_any": ["find_customer", "get_billing_documents"],
     },
-    # Write actions
+    # Write actions — multi-turn: first find the property, then call the action tool
     {
         "id": "add_equipment",
         "prompt": "add a Polaris PB4-60 booster pump to the Walili pool",
         "expected_tools": ["find_property", "add_equipment_to_pool"],
+        "max_turns": 2,
     },
     {
         "id": "log_reading",
         "prompt": "log pH 7.4, FC 2.5, alkalinity 100 for the Pinebrook pool",
-        "expected_tools_any": ["find_property", "log_chemical_reading"],
+        "expected_tools": ["find_property", "log_chemical_reading"],
+        "max_turns": 2,
+    },
+    # Billing for Sierra Oaks — multi-turn: find_property returns customer_id, then get_billing_documents
+    {
+        "id": "invoices_sierra_oaks_multiturn",
+        "prompt": "show me open invoices for Sierra Oaks property",
+        "expected_tools": ["find_property", "get_billing_documents"],
+        "max_turns": 2,
     },
     # Broadcasts
     {

@@ -284,6 +284,73 @@ Covers the long tail of data questions without requiring a new tool for every po
 **Why trigram similarity for search?**
 User typos and variant spellings ("walili" vs "walali") broke exact ILIKE searches. pg_trgm provides typo-tolerant fallback with a 0.3 similarity threshold. Primary search is still exact ILIKE for speed; trigram only runs when exact returns nothing.
 
+## Living eval suite
+
+The eval harness is not a static test list — it's a corpus that grows from real usage and adversarial generation.
+
+### Architecture
+
+**Table: `deepblue_eval_prompts`** — DB-backed test cases. Each prompt has:
+- `prompt_key` (stable slug for tracking across runs)
+- `source`: `static | knowledge_gap | ai_generated | manual`
+- `max_turns` (1-3) — for multi-step workflows
+- Expectations: `expected_tools`, `expected_tools_any`, `expected_off_topic`, `expected_no_tools_required`, `must_not_contain`
+- `active` flag — can disable without deleting
+- `consecutive_passes` + `last_run_at` — smart mode uses these
+
+**Table: `deepblue_eval_runs`** — history of all runs (total, passed, failed, model_used, system_prompt_hash, full results JSON)
+
+**New column on `deepblue_knowledge_gaps`:** `promoted_to_eval` — tracks which gaps have become eval prompts
+
+### Runner (`eval_runner.py`)
+
+Multi-turn capable. For each prompt:
+1. Start with user message
+2. Call Claude with tools
+3. If tools are called, execute them (reads go to real DB, writes return preview responses)
+4. Feed tool results back to Claude
+5. Loop up to `max_turns` or until no more tools called
+6. Evaluate all tools called across all turns against expectations
+
+**Safety:** write tools (`add_equipment_to_pool`, `log_chemical_reading`, `update_customer_note`) return preview dicts and never write to the DB — writes only happen via confirm endpoints which the runner doesn't call. So eval runs are always safe.
+
+### Modes
+
+- **Full**: runs all active prompts every time. Use for regression check after big changes.
+- **Smart**: skips prompts with ≥5 consecutive passes AND last run within 7 days. Focuses compute on unstable tests and stale stability checks. Use for routine runs.
+
+### Growth mechanisms
+
+1. **Static seeds** — `EVAL_PROMPTS` in `eval_prompts.py` are seeded into the DB on first run via `seed_static_prompts()`. Idempotent.
+2. **Knowledge gap promotion** — `POST /v1/deepblue/eval-prompts/promote-gap/{gap_id}` turns a real user question DeepBlue couldn't answer into an eval prompt. The resulting prompt has `must_not_contain: ["i don't know", "i can't find", ...]` so passing means DeepBlue now handles it.
+3. **AI adversarial generation** — `POST /v1/deepblue/eval-prompts/generate` calls Sonnet with the current tool list + recent failures + unresolved gaps + existing prompts, asks it to write new tricky test cases. Returns drafts for human review. `POST /v1/deepblue/eval-prompts/approve-draft` activates approved ones.
+
+### Endpoints
+
+- `POST /v1/deepblue/eval-run?mode=full|smart` — run suite, persist results
+- `GET /v1/deepblue/eval-runs` — list recent runs
+- `GET /v1/deepblue/eval-runs/{id}` — load a specific run with full results
+- `GET /v1/deepblue/eval-prompts` — list all prompts in the corpus
+- `PATCH /v1/deepblue/eval-prompts/{id}` — enable/disable a prompt
+- `POST /v1/deepblue/eval-prompts/promote-gap/{gap_id}` — promote a gap
+- `POST /v1/deepblue/eval-prompts/generate` — generate drafts
+- `POST /v1/deepblue/eval-prompts/approve-draft` — activate a draft
+
+### Dev UI
+
+`/dev` page has an "Eval Suite" card with three buttons:
+- **Smart** — skip-passing mode, fast iteration
+- **Full** — run everything
+- **Generate** — produce drafts via AI, review + approve individually
+
+Draft approval, history review, and per-prompt details all inline on the same card.
+
+### Future work
+
+- Mutation testing: auto-vary passing prompts to find brittleness ("Keith Lew" → "keith", "pH 6.8" → "pH 6.8-7.0")
+- Auto-promote knowledge gaps on a schedule instead of manual click
+- Per-prompt cost tracking (track how many tokens each eval prompt consumes across runs)
+
 ## Related systems
 
 ### Agent health monitoring

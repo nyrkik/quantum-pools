@@ -248,99 +248,302 @@ async def get_usage_stats(
 
 @router.post("/eval-run")
 async def run_eval(
+    mode: str = "full",
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Run the DeepBlue tool-selection eval suite. Owner only."""
+    """Run the DeepBlue tool-selection eval suite. Owner only.
+
+    Modes:
+    - full: run all active prompts
+    - smart: skip prompts passing 5+ consecutive runs if checked within last 7 days
+    """
     if ctx.org_user.role != "owner":
         raise HTTPException(status_code=403, detail="Owner only")
 
     import anthropic as _anthropic
     import os as _os
-    from src.services.deepblue.eval_prompts import EVAL_PROMPTS
-    from src.services.deepblue.tools import TOOLS
-    from src.services.deepblue.engine import _build_system_prompt
-    from src.services.deepblue.context_builder import DeepBlueContext, build_context
+    from src.services.deepblue.eval_runner import run_eval_suite, seed_static_prompts
+    from src.models.deepblue_eval_run import DeepBlueEvalRun
     from src.core.ai_models import get_model
 
     ANTHROPIC_KEY = _os.environ.get("ANTHROPIC_API_KEY", "")
     if not ANTHROPIC_KEY:
         raise HTTPException(status_code=500, detail="AI not configured")
 
-    # Build minimal context (no customer in view)
-    empty_ctx = DeepBlueContext()
-    built = await build_context(db, ctx.organization_id, empty_ctx)
-    system_prompt = _build_system_prompt(built, "Evaluator")
+    # Auto-seed static prompts on first run
+    await seed_static_prompts(db, ctx.organization_id)
 
     client = _anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     model = await get_model("fast")
 
-    results = []
-    for p in EVAL_PROMPTS:
-        try:
-            resp = client.messages.create(
-                model=model,
-                max_tokens=1024,
-                system=system_prompt,
-                tools=TOOLS,
-                messages=[{"role": "user", "content": p["prompt"]}],
-            )
-            tools_called = [b.name for b in resp.content if b.type == "tool_use"]
-            text_response = " ".join(b.text for b in resp.content if b.type == "text")
+    suite_result = await run_eval_suite(db, ctx.organization_id, client, model, mode=mode)
 
-            # Evaluate
-            passed = True
-            reason = ""
+    # Persist the run
+    run = DeepBlueEvalRun(
+        organization_id=ctx.organization_id,
+        run_by_user_id=ctx.user.id,
+        total=suite_result["total"],
+        passed=suite_result["passed"],
+        failed=suite_result["failed"],
+        model_used=suite_result["model_used"],
+        system_prompt_hash=suite_result["system_prompt_hash"],
+        results_json=json.dumps(suite_result["results"]),
+    )
+    db.add(run)
+    await db.commit()
 
-            if p.get("expected_off_topic"):
-                if "focused on pool" not in text_response.lower() and "i'm here to help" not in text_response.lower():
-                    passed = False
-                    reason = "Did not decline off-topic request"
-            elif p.get("expected_no_tools_required"):
-                if tools_called:
-                    passed = False
-                    reason = f"Called tools when none required: {tools_called}"
-            else:
-                expected = p.get("expected_tools", [])
-                expected_any = p.get("expected_tools_any", [])
-                if expected:
-                    missing = [t for t in expected if t not in tools_called]
-                    if missing:
-                        passed = False
-                        reason = f"Missing expected tools: {missing}. Called: {tools_called}"
-                if expected_any and passed:
-                    if not any(t in tools_called for t in expected_any):
-                        passed = False
-                        reason = f"None of {expected_any} were called. Got: {tools_called}"
-
-            must_not = p.get("must_not_contain", [])
-            for phrase in must_not:
-                if phrase.lower() in text_response.lower():
-                    passed = False
-                    reason = f"Response contained forbidden phrase: {phrase}"
-
-            results.append({
-                "id": p["id"],
-                "prompt": p["prompt"],
-                "tools_called": tools_called,
-                "text_response": text_response[:300],
-                "passed": passed,
-                "reason": reason,
-            })
-        except Exception as e:
-            results.append({
-                "id": p["id"],
-                "prompt": p["prompt"],
-                "passed": False,
-                "reason": f"Error: {str(e)[:200]}",
-            })
-
-    passed_count = sum(1 for r in results if r["passed"])
     return {
-        "total": len(results),
-        "passed": passed_count,
-        "failed": len(results) - passed_count,
-        "results": results,
+        "id": run.id,
+        "total": suite_result["total"],
+        "passed": suite_result["passed"],
+        "failed": suite_result["failed"],
+        "skipped": suite_result.get("skipped", 0),
+        "results": suite_result["results"],
+        "mode": mode,
+        "model_used": suite_result["model_used"],
+    }
+
+
+@router.get("/eval-prompts")
+async def list_eval_prompts(
+    source: Optional[str] = None,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all eval prompts in the living suite. Owner only."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
+
+    query = select(DeepBlueEvalPrompt).where(
+        DeepBlueEvalPrompt.organization_id == ctx.organization_id,
+    ).order_by(desc(DeepBlueEvalPrompt.created_at))
+    if source:
+        query = query.where(DeepBlueEvalPrompt.source == source)
+
+    prompts = (await db.execute(query)).scalars().all()
+    return {
+        "prompts": [
+            {
+                "id": p.id,
+                "prompt_key": p.prompt_key,
+                "prompt_text": p.prompt_text,
+                "source": p.source,
+                "max_turns": p.max_turns,
+                "expected_tools": json.loads(p.expected_tools or "[]"),
+                "expected_tools_any": json.loads(p.expected_tools_any or "[]"),
+                "expected_off_topic": p.expected_off_topic,
+                "expected_no_tools_required": p.expected_no_tools_required,
+                "active": p.active,
+                "consecutive_passes": p.consecutive_passes,
+                "last_run_at": p.last_run_at.isoformat() if p.last_run_at else None,
+                "last_passed_at": p.last_passed_at.isoformat() if p.last_passed_at else None,
+                "reasoning": p.reasoning,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in prompts
+        ],
+    }
+
+
+@router.patch("/eval-prompts/{prompt_id}")
+async def update_eval_prompt(
+    prompt_id: str,
+    active: Optional[bool] = None,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable/disable an eval prompt. Owner only."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
+
+    p = (await db.execute(
+        select(DeepBlueEvalPrompt).where(
+            DeepBlueEvalPrompt.id == prompt_id,
+            DeepBlueEvalPrompt.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    if active is not None:
+        p.active = active
+    await db.commit()
+    return {"active": p.active}
+
+
+@router.post("/eval-prompts/promote-gap/{gap_id}")
+async def promote_gap_to_eval(
+    gap_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a knowledge gap to an eval prompt. Owner only."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.models.deepblue_knowledge_gap import DeepBlueKnowledgeGap
+    from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
+    import uuid as _uuid
+
+    gap = (await db.execute(
+        select(DeepBlueKnowledgeGap).where(
+            DeepBlueKnowledgeGap.id == gap_id,
+            DeepBlueKnowledgeGap.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not gap:
+        raise HTTPException(status_code=404, detail="Gap not found")
+
+    # Create eval prompt from gap — no hard expectations, just "should not be unresolved"
+    key = f"gap_{gap_id[:8]}"
+    existing = (await db.execute(
+        select(DeepBlueEvalPrompt).where(
+            DeepBlueEvalPrompt.organization_id == ctx.organization_id,
+            DeepBlueEvalPrompt.prompt_key == key,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        return {"prompt_id": existing.id, "already_promoted": True}
+
+    prompt = DeepBlueEvalPrompt(
+        id=str(_uuid.uuid4()),
+        organization_id=ctx.organization_id,
+        prompt_key=key,
+        prompt_text=gap.user_question[:2000],
+        source="knowledge_gap",
+        max_turns=2,
+        # No hard expectation — just verify it doesn't surface as unresolved
+        must_not_contain=json.dumps(["i don't have", "i can't find", "i don't know", "i'm unable to"]),
+        reasoning=f"Promoted from knowledge gap ({gap.resolution}). Original reason: {(gap.reason or '')[:200]}",
+        source_id=gap.id,
+    )
+    db.add(prompt)
+    gap.promoted_to_eval = True
+    await db.commit()
+    return {"prompt_id": prompt.id, "promoted": True}
+
+
+class GenerateEvalRequest(BaseModel):
+    count: int = 5
+    focus: Optional[str] = None  # optional focus area
+
+
+@router.post("/eval-prompts/generate")
+async def generate_eval_prompts(
+    req: GenerateEvalRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-generated adversarial eval prompts. Returns drafts for human review — not auto-added."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.services.deepblue.eval_generator import generate_adversarial_prompts
+    drafts = await generate_adversarial_prompts(db, ctx.organization_id, count=req.count, focus=req.focus)
+    return {"drafts": drafts}
+
+
+class ApproveDraftRequest(BaseModel):
+    prompt_text: str
+    expected_tools_any: list[str] = []
+    max_turns: int = 1
+    reasoning: Optional[str] = None
+
+
+@router.post("/eval-prompts/approve-draft")
+async def approve_draft(
+    req: ApproveDraftRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Activate an AI-generated draft as a real eval prompt. Owner only."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
+    import uuid as _uuid
+
+    key = f"gen_{_uuid.uuid4().hex[:8]}"
+    prompt = DeepBlueEvalPrompt(
+        id=str(_uuid.uuid4()),
+        organization_id=ctx.organization_id,
+        prompt_key=key,
+        prompt_text=req.prompt_text,
+        source="ai_generated",
+        max_turns=max(1, min(req.max_turns, 3)),
+        expected_tools_any=json.dumps(req.expected_tools_any) if req.expected_tools_any else None,
+        reasoning=req.reasoning,
+    )
+    db.add(prompt)
+    await db.commit()
+    return {"prompt_id": prompt.id}
+
+
+@router.get("/eval-runs")
+async def list_eval_runs(
+    limit: int = 20,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List recent eval runs for this org. Owner only."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.models.deepblue_eval_run import DeepBlueEvalRun
+
+    results = (await db.execute(
+        select(DeepBlueEvalRun)
+        .where(DeepBlueEvalRun.organization_id == ctx.organization_id)
+        .order_by(desc(DeepBlueEvalRun.created_at))
+        .limit(limit)
+    )).scalars().all()
+
+    return {
+        "runs": [
+            {
+                "id": r.id,
+                "total": r.total,
+                "passed": r.passed,
+                "failed": r.failed,
+                "pass_rate": round(100 * r.passed / r.total, 1) if r.total > 0 else 0,
+                "model_used": r.model_used,
+                "system_prompt_hash": r.system_prompt_hash,
+                "run_by_user_id": r.run_by_user_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in results
+        ],
+    }
+
+
+@router.get("/eval-runs/{run_id}")
+async def get_eval_run(
+    run_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific eval run with full per-prompt results."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.models.deepblue_eval_run import DeepBlueEvalRun
+
+    run = (await db.execute(
+        select(DeepBlueEvalRun).where(
+            DeepBlueEvalRun.id == run_id,
+            DeepBlueEvalRun.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    return {
+        "id": run.id,
+        "total": run.total,
+        "passed": run.passed,
+        "failed": run.failed,
+        "model_used": run.model_used,
+        "system_prompt_hash": run.system_prompt_hash,
+        "results": json.loads(run.results_json or "[]"),
+        "created_at": run.created_at.isoformat() if run.created_at else None,
     }
 
 

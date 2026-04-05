@@ -29,7 +29,6 @@ import {
   Shield,
   ShieldCheck,
   Settings,
-  Wrench,
   LogOut,
   TrendingUp,
   Map,
@@ -66,7 +65,6 @@ const navItems = [
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
   { href: "/feedback", label: "Feedback", icon: MessageCircleQuestion, check: "canViewSettings" as keyof Permissions, badge: "feedback" as const },
-  { href: "/admin", label: "Admin", icon: Wrench, check: "canViewSettings" as keyof Permissions },
   { href: "/dev", label: "Dev", icon: Code2, check: "__dev__" as const },
 ];
 

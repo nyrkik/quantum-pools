@@ -436,6 +436,11 @@ async def execute_tool(tool_name: str, tool_input: dict, ctx: ToolContext) -> st
     except Exception as e:
         error_str = str(e)
         logger.error(f"Tool execution failed [{tool_name}]: {error_str}", exc_info=True)
+        # Rollback to clear any poisoned transaction state so subsequent tool calls work
+        try:
+            await ctx.db.rollback()
+        except Exception:
+            pass
         # Semantic user-safe error + instructive hint for Claude
         return json.dumps({
             "error": "This lookup didn't work.",
@@ -894,7 +899,12 @@ async def _exec_find_customer(inp: dict, ctx: ToolContext) -> dict:
     # FALLBACK: if nothing found, try trigram similarity for typo tolerance
     if not customers and not prop_customer_ids:
         sim_result = await ctx.db.execute(_text("""
-            SELECT DISTINCT c.id
+            SELECT c.id, MAX(GREATEST(
+                similarity(lower(c.display_name), lower(:q)),
+                similarity(lower(coalesce(c.company_name, '')), lower(:q)),
+                similarity(lower(coalesce(p.address, '')), lower(:q)),
+                similarity(lower(coalesce(p.name, '')), lower(:q))
+            )) AS score
             FROM customers c
             LEFT JOIN properties p ON p.customer_id = c.id
             WHERE c.organization_id = :org_id AND c.is_active = true
@@ -904,12 +914,8 @@ async def _exec_find_customer(inp: dict, ctx: ToolContext) -> dict:
                 similarity(lower(coalesce(p.address, '')), lower(:q)) > 0.3 OR
                 similarity(lower(coalesce(p.name, '')), lower(:q)) > 0.3
               )
-            ORDER BY GREATEST(
-                similarity(lower(c.display_name), lower(:q)),
-                similarity(lower(coalesce(c.company_name, '')), lower(:q)),
-                similarity(lower(coalesce(p.address, '')), lower(:q)),
-                similarity(lower(coalesce(p.name, '')), lower(:q))
-            ) DESC
+            GROUP BY c.id
+            ORDER BY score DESC
             LIMIT :limit
         """), {"org_id": ctx.org_id, "q": query, "limit": limit})
         sim_ids = [row[0] for row in sim_result.fetchall()]

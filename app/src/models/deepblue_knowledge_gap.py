@@ -29,5 +29,6 @@ class DeepBlueKnowledgeGap(Base):
     # Once reviewed by admin
     reviewed: Mapped[bool] = mapped_column(default=False)
     promoted_to_tool: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    promoted_to_eval: Mapped[bool] = mapped_column(default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

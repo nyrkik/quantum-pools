@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Bot, Send, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { Sparkles, Send, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 
 interface ConversationMessage {
   role: string;
@@ -157,7 +157,7 @@ export function CaseDeepBlueCard({
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-            <Bot className="h-3.5 w-3.5 text-primary" />
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
             DeepBlue
           </CardTitle>
           <div className="flex items-center gap-1">

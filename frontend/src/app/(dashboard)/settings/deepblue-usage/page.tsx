@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { PageLayout } from "@/components/layout/page-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bot, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2, Sparkles, TrendingUp, TrendingDown } from "lucide-react";
 
 interface UsageStats {
   current_month: {
@@ -153,7 +153,7 @@ export default function DeepBlueUsagePage() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <Bot className="h-4 w-4 text-primary" />
+              <Sparkles className="h-4 w-4 text-primary" />
               Usage by User
             </CardTitle>
           </CardHeader>

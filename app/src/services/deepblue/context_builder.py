@@ -155,7 +155,7 @@ async def build_context(db: AsyncSession, org_id: str, ctx: DeepBlueContext) -> 
     # Recent chemical readings (last 5)
     reading_query = select(ChemicalReading).order_by(ChemicalReading.created_at.desc()).limit(5)
     if ctx.bow_id:
-        reading_query = reading_query.where(ChemicalReading.body_of_water_id == ctx.bow_id)
+        reading_query = reading_query.where(ChemicalReading.water_feature_id == ctx.bow_id)
     elif ctx.property_id:
         reading_query = reading_query.where(ChemicalReading.property_id == ctx.property_id)
     elif ctx.customer_id:

@@ -3,9 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useDeepBlue, type DeepBlueMessage } from "./deepblue-provider";
 import { Button } from "@/components/ui/button";
-import { Bot, X, Send, Loader2, Trash2, ChevronDown, FolderOpen, Mail, History, Pin, Users, Share2 } from "lucide-react";
+import { Sparkles, X, Send, Loader2, Trash2, ChevronDown, FolderOpen, Mail, History, Pin, Users, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 function ToolResultCard({ name, result }: { name: string; result: Record<string, unknown> }) {
   if (name === "chemical_dosing_calculator") {
@@ -55,15 +56,47 @@ function ToolResultCard({ name, result }: { name: string; result: Record<string,
   }
 
   if (name === "find_replacement_parts") {
+    const mode = result.mode as string | undefined;
+    const matched = result.equipment_matched as string | undefined;
+    const partSearched = result.part_searched as string | undefined;
+
+    // Retailer compare mode
+    if (mode === "compare_retailers") {
+      const vendors = result.vendors as Array<Record<string, unknown>> | undefined;
+      if (!vendors?.length) return <p className="text-xs text-muted-foreground mt-1">No retailers found.</p>;
+      return (
+        <div className="bg-muted/50 rounded-md p-2 mt-1 text-xs space-y-1">
+          <p className="font-medium text-[10px] uppercase tracking-wide text-muted-foreground">
+            Price Comparison{matched ? ` — ${matched}` : ""}{partSearched ? ` (${partSearched})` : ""}
+          </p>
+          {vendors.map((v, i) => (
+            <div key={i} className="flex items-center justify-between gap-2 py-0.5">
+              <div className="min-w-0 flex-1">
+                {v.url ? (
+                  <a href={String(v.url)} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate block">
+                    {String(v.vendor || "Unknown")}
+                  </a>
+                ) : (
+                  <span className="truncate block">{String(v.vendor || "Unknown")}</span>
+                )}
+                <span className="text-[10px] text-muted-foreground truncate block">{String(v.name || "")}</span>
+              </div>
+              {v.price ? <span className="font-mono shrink-0 font-medium">${Number(v.price).toFixed(2)}</span> : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // Default find_parts mode
     const catalogParts = result.catalog_parts as Array<Record<string, unknown>> | undefined;
     const webResults = result.web_results as Array<Record<string, unknown>> | undefined;
-    const matched = result.equipment_matched as string | undefined;
     const hasParts = (catalogParts?.length || 0) + (webResults?.length || 0) > 0;
     return (
       <div className="bg-muted/50 rounded-md p-2 mt-1 text-xs space-y-1">
         {matched && (
           <p className="font-medium text-[10px] uppercase tracking-wide text-muted-foreground">
-            Parts — {matched}
+            Parts — {matched}{partSearched ? ` (${partSearched})` : ""}
           </p>
         )}
         {!hasParts ? (
@@ -105,8 +138,99 @@ function ToolResultCard({ name, result }: { name: string; result: Record<string,
     return <BroadcastPreviewCard preview={preview} />;
   }
 
+  if (name === "add_equipment_to_pool" && result.requires_confirmation) {
+    const preview = result.preview as Record<string, unknown> | undefined;
+    if (!preview) return null;
+    return <ConfirmCard
+      title="Add equipment"
+      endpoint="/v1/deepblue/confirm-add-equipment"
+      payload={preview}
+      summary={`${preview.equipment_type}: ${preview.brand} ${preview.model}`}
+      subtitle={`On ${preview.bow_name} — ${preview.property_address}`}
+    />;
+  }
+
+  if (name === "log_chemical_reading" && result.requires_confirmation) {
+    const preview = result.preview as Record<string, unknown> | undefined;
+    if (!preview) return null;
+    const readings = preview.readings as Record<string, number>;
+    const summary = Object.entries(readings).map(([k, v]) => `${k}: ${v}`).join(", ");
+    return <ConfirmCard
+      title="Log chemical reading"
+      endpoint="/v1/deepblue/confirm-log-reading"
+      payload={preview}
+      summary={summary}
+      subtitle={preview.property_address as string}
+    />;
+  }
+
+  if (name === "update_customer_note" && result.requires_confirmation) {
+    const preview = result.preview as Record<string, unknown> | undefined;
+    if (!preview) return null;
+    return <ConfirmCard
+      title="Add note to customer"
+      endpoint="/v1/deepblue/confirm-update-note"
+      payload={preview}
+      summary={preview.appending as string}
+      subtitle={`For ${preview.customer_name}`}
+    />;
+  }
+
   // Generic fallback
   return null;
+}
+
+function ConfirmCard({
+  title, endpoint, payload, summary, subtitle,
+}: {
+  title: string;
+  endpoint: string;
+  payload: Record<string, unknown>;
+  summary: string;
+  subtitle?: string;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      const resp = await fetch(`/api${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error();
+      setSaved(true);
+      toast.success("Saved");
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-muted/50 rounded-md p-2.5 mt-1.5 text-xs space-y-2 border border-primary/20">
+      <p className="font-medium text-[10px] uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div>
+        <p className="font-medium whitespace-pre-wrap">{summary}</p>
+        {subtitle && <p className="text-muted-foreground mt-0.5">{subtitle}</p>}
+      </div>
+      {saved ? (
+        <p className="text-green-600 font-medium">Saved ✓</p>
+      ) : (
+        <div className="flex gap-2">
+          <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Confirm
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8" onClick={() => setSaved(true)}>Cancel</Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function BroadcastPreviewCard({ preview }: { preview: Record<string, unknown> }) {
@@ -225,6 +349,8 @@ interface ConversationListItem {
 }
 
 export function DeepBlueSheet() {
+  const { user } = useAuth();
+  const currentUserId = user?.id || "";
   const {
     isOpen, isLoading, messages, context, conversationId, closeDeepBlue, sendMessage, clearConversation, saveToCase, loadConversation,
   } = useDeepBlue();
@@ -275,15 +401,24 @@ export function DeepBlueSheet() {
     } catch { toast.error("Failed"); }
   };
 
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this conversation? You can restore it within 30 days.")) return;
+    if (pendingDelete !== id) {
+      setPendingDelete(id);
+      setTimeout(() => setPendingDelete((p) => (p === id ? null : p)), 3000);
+      toast("Tap delete again to confirm", { duration: 3000 });
+      return;
+    }
+    setPendingDelete(null);
     try {
-      await fetch(`/api/v1/deepblue/conversations/${id}`, {
+      const resp = await fetch(`/api/v1/deepblue/conversations/${id}`, {
         method: "DELETE", credentials: "include",
       });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       toast.success("Deleted");
       loadHistory(historyScope);
-    } catch { toast.error("Failed"); }
+    } catch { toast.error("Failed to delete"); }
   };
 
   const handleResume = async (id: string) => {
@@ -320,7 +455,7 @@ export function DeepBlueSheet() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b bg-primary/5 shrink-0 sm:rounded-t-xl">
         <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-primary" />
+          <Sparkles className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">DeepBlue</span>
         </div>
         <div className="flex items-center gap-1">
@@ -388,37 +523,55 @@ export function DeepBlueSheet() {
           ) : (
             <div className="divide-y">
               {conversations.map((c) => (
-                <div key={c.id} className="p-2 hover:bg-muted/40 group">
-                  <button
-                    className="w-full text-left"
-                    onClick={() => handleResume(c.id)}
-                  >
-                    <div className="flex items-start gap-1.5">
-                      {c.pinned && <Pin className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{c.title || "Untitled"}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {c.message_count} messages · {new Date(c.updated_at).toLocaleDateString()}
-                          {c.visibility === "shared" && " · Shared"}
-                        </p>
+                <div key={c.id} className="p-2 hover:bg-muted/40">
+                  <div className="flex items-start gap-1.5">
+                    <button
+                      className="flex-1 min-w-0 text-left"
+                      onClick={() => handleResume(c.id)}
+                    >
+                      <div className="flex items-start gap-1.5">
+                        {c.pinned && <Pin className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{c.title || "Untitled"}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {c.message_count} messages · {new Date(c.updated_at).toLocaleDateString()}
+                            {c.visibility === "shared" && " · Shared"}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                  {historyScope === "mine" && (
-                    <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1.5" onClick={() => handleTogglePin(c.id, c.pinned)}>
-                        <Pin className="h-2.5 w-2.5 mr-0.5" />
-                        {c.pinned ? "Unpin" : "Pin"}
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1.5" onClick={() => handleToggleShare(c.id, c.visibility)}>
-                        <Share2 className="h-2.5 w-2.5 mr-0.5" />
-                        {c.visibility === "shared" ? "Unshare" : "Share"}
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1.5 text-destructive hover:text-destructive" onClick={() => handleDelete(c.id)}>
-                        <Trash2 className="h-2.5 w-2.5" />
-                      </Button>
-                    </div>
-                  )}
+                    </button>
+                    {c.user_id === currentUserId && (
+                      <div className="flex gap-0.5 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => { e.stopPropagation(); handleTogglePin(c.id, c.pinned); }}
+                          title={c.pinned ? "Unpin" : "Pin"}
+                        >
+                          <Pin className={`h-3 w-3 ${c.pinned ? "text-amber-500 fill-amber-500" : "text-muted-foreground"}`} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => { e.stopPropagation(); handleToggleShare(c.id, c.visibility); }}
+                          title={c.visibility === "shared" ? "Make private" : "Share with team"}
+                        >
+                          <Share2 className={`h-3 w-3 ${c.visibility === "shared" ? "text-primary" : "text-muted-foreground"}`} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={`h-7 w-7 ${pendingDelete === c.id ? "bg-destructive/10" : ""}`}
+                          onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }}
+                          title={pendingDelete === c.id ? "Tap to confirm" : "Delete"}
+                        >
+                          <Trash2 className={`h-3 w-3 ${pendingDelete === c.id ? "text-destructive" : "text-muted-foreground hover:text-destructive"}`} />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -428,7 +581,7 @@ export function DeepBlueSheet() {
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
           {messages.length === 0 && (
             <div className="text-center text-sm text-muted-foreground py-8">
-              <Bot className="h-8 w-8 mx-auto mb-2 opacity-30" />
+              <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
               <p>How can I help?</p>
               <p className="text-xs mt-1">Pool troubleshooting, dosing, parts, customer emails, broadcasts...</p>
             </div>

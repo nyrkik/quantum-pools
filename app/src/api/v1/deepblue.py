@@ -246,6 +246,104 @@ async def get_usage_stats(
     }
 
 
+@router.post("/eval-run")
+async def run_eval(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run the DeepBlue tool-selection eval suite. Owner only."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+
+    import anthropic as _anthropic
+    import os as _os
+    from src.services.deepblue.eval_prompts import EVAL_PROMPTS
+    from src.services.deepblue.tools import TOOLS
+    from src.services.deepblue.engine import _build_system_prompt
+    from src.services.deepblue.context_builder import DeepBlueContext, build_context
+    from src.core.ai_models import get_model
+
+    ANTHROPIC_KEY = _os.environ.get("ANTHROPIC_API_KEY", "")
+    if not ANTHROPIC_KEY:
+        raise HTTPException(status_code=500, detail="AI not configured")
+
+    # Build minimal context (no customer in view)
+    empty_ctx = DeepBlueContext()
+    built = await build_context(db, ctx.organization_id, empty_ctx)
+    system_prompt = _build_system_prompt(built, "Evaluator")
+
+    client = _anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    model = await get_model("fast")
+
+    results = []
+    for p in EVAL_PROMPTS:
+        try:
+            resp = client.messages.create(
+                model=model,
+                max_tokens=1024,
+                system=system_prompt,
+                tools=TOOLS,
+                messages=[{"role": "user", "content": p["prompt"]}],
+            )
+            tools_called = [b.name for b in resp.content if b.type == "tool_use"]
+            text_response = " ".join(b.text for b in resp.content if b.type == "text")
+
+            # Evaluate
+            passed = True
+            reason = ""
+
+            if p.get("expected_off_topic"):
+                if "focused on pool" not in text_response.lower() and "i'm here to help" not in text_response.lower():
+                    passed = False
+                    reason = "Did not decline off-topic request"
+            elif p.get("expected_no_tools_required"):
+                if tools_called:
+                    passed = False
+                    reason = f"Called tools when none required: {tools_called}"
+            else:
+                expected = p.get("expected_tools", [])
+                expected_any = p.get("expected_tools_any", [])
+                if expected:
+                    missing = [t for t in expected if t not in tools_called]
+                    if missing:
+                        passed = False
+                        reason = f"Missing expected tools: {missing}. Called: {tools_called}"
+                if expected_any and passed:
+                    if not any(t in tools_called for t in expected_any):
+                        passed = False
+                        reason = f"None of {expected_any} were called. Got: {tools_called}"
+
+            must_not = p.get("must_not_contain", [])
+            for phrase in must_not:
+                if phrase.lower() in text_response.lower():
+                    passed = False
+                    reason = f"Response contained forbidden phrase: {phrase}"
+
+            results.append({
+                "id": p["id"],
+                "prompt": p["prompt"],
+                "tools_called": tools_called,
+                "text_response": text_response[:300],
+                "passed": passed,
+                "reason": reason,
+            })
+        except Exception as e:
+            results.append({
+                "id": p["id"],
+                "prompt": p["prompt"],
+                "passed": False,
+                "reason": f"Error: {str(e)[:200]}",
+            })
+
+    passed_count = sum(1 for r in results if r["passed"])
+    return {
+        "total": len(results),
+        "passed": passed_count,
+        "failed": len(results) - passed_count,
+        "results": results,
+    }
+
+
 @router.post("/retention/run")
 async def run_retention(
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -557,6 +655,138 @@ async def mark_gap_reviewed(
         gap.promoted_to_tool = req.promoted_to_tool
     await db.commit()
     return {"reviewed": True}
+
+
+class ConfirmAddEquipmentRequest(BaseModel):
+    bow_id: str
+    equipment_type: str
+    brand: str
+    model: str
+    notes: Optional[str] = None
+
+
+@router.post("/confirm-add-equipment")
+async def confirm_add_equipment(
+    req: ConfirmAddEquipmentRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm adding equipment to a body of water."""
+    import uuid as _uuid
+    from src.models.equipment_item import EquipmentItem
+    from src.models.water_feature import WaterFeature
+    from src.models.property import Property
+
+    # Verify BOW belongs to this org
+    wf = (await db.execute(
+        select(WaterFeature).where(WaterFeature.id == req.bow_id)
+    )).scalar_one_or_none()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Body of water not found")
+    prop = (await db.execute(
+        select(Property).where(
+            Property.id == wf.property_id,
+            Property.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    item = EquipmentItem(
+        id=str(_uuid.uuid4()),
+        water_feature_id=req.bow_id,
+        equipment_type=req.equipment_type,
+        brand=req.brand,
+        model=req.model,
+        notes=req.notes,
+        is_active=True,
+    )
+    db.add(item)
+    await db.commit()
+    return {"equipment_id": item.id, "saved": True}
+
+
+class ConfirmLogReadingRequest(BaseModel):
+    property_id: str
+    bow_id: Optional[str] = None
+    ph: Optional[float] = None
+    free_chlorine: Optional[float] = None
+    combined_chlorine: Optional[float] = None
+    alkalinity: Optional[int] = None
+    calcium_hardness: Optional[int] = None
+    cyanuric_acid: Optional[int] = None
+    phosphates: Optional[int] = None
+    water_temp: Optional[float] = None
+    notes: Optional[str] = None
+
+
+@router.post("/confirm-log-reading")
+async def confirm_log_reading(
+    req: ConfirmLogReadingRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm logging a chemical reading."""
+    import uuid as _uuid
+    from src.models.chemical_reading import ChemicalReading
+    from src.models.property import Property
+
+    prop = (await db.execute(
+        select(Property).where(
+            Property.id == req.property_id,
+            Property.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    reading = ChemicalReading(
+        id=str(_uuid.uuid4()),
+        organization_id=ctx.organization_id,
+        property_id=req.property_id,
+        water_feature_id=req.bow_id,
+        ph=req.ph,
+        free_chlorine=req.free_chlorine,
+        combined_chlorine=req.combined_chlorine,
+        alkalinity=req.alkalinity,
+        calcium_hardness=req.calcium_hardness,
+        cyanuric_acid=req.cyanuric_acid,
+        phosphates=req.phosphates,
+        water_temp=req.water_temp,
+        notes=req.notes,
+    )
+    db.add(reading)
+    await db.commit()
+    return {"reading_id": reading.id, "saved": True}
+
+
+class ConfirmUpdateNoteRequest(BaseModel):
+    customer_id: str
+    note_text: str
+
+
+@router.post("/confirm-update-note")
+async def confirm_update_note(
+    req: ConfirmUpdateNoteRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Append a note to a customer record."""
+    from src.models.customer import Customer
+
+    cust = (await db.execute(
+        select(Customer).where(
+            Customer.id == req.customer_id,
+            Customer.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    current = cust.notes or ""
+    cust.notes = (current + "\n\n" + req.note_text).strip() if current else req.note_text
+    await db.commit()
+    return {"saved": True}
 
 
 class ConfirmBroadcastRequest(BaseModel):

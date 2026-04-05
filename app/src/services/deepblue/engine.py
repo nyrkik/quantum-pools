@@ -21,6 +21,20 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MAX_TOOL_ROUNDS = 5  # Prevent infinite tool loops
 
 
+def _extract_text_from_blocks(blocks) -> str:
+    """Extract plain text from a list of Anthropic content blocks for display/summary."""
+    if not isinstance(blocks, list):
+        return str(blocks) if blocks else ""
+    parts = []
+    for b in blocks:
+        if isinstance(b, dict):
+            if b.get("type") == "text":
+                parts.append(b.get("text", ""))
+        elif hasattr(b, "type") and b.type == "text":
+            parts.append(getattr(b, "text", ""))
+    return " ".join(parts).strip()
+
+
 def _build_system_prompt(ctx: DeepBlueContext, user_name: str) -> str:
     """Build the DeepBlue system prompt with resolved context."""
     return f"""You are DeepBlue, the AI assistant for Sapphire Pool Service. You help with pool service operations, business management, and customer communications.
@@ -42,6 +56,24 @@ TOOL SELECTION PRIORITY:
 1. Use specific tools first (get_invoices, get_open_jobs, get_equipment, etc.) — they're fast and focused.
 2. Use query_database ONLY as a last resort when no specific tool fits. This lets you answer novel questions about the data.
 3. Never say "I don't have access to that" if it's data in the system. Try a specific tool first, then query_database.
+
+PERSISTENCE (critical — don't give up easily):
+When the user gives partial info (a name fragment, address piece, pool nickname, phone number), resolve it yourself. Try this order:
+1. find_customer with the fragment (typo-tolerant — uses fuzzy matching)
+2. find_property with the fragment (typo-tolerant)
+3. search_equipment_catalog if it looks like an equipment term
+4. query_database as a last resort
+5. Only after all of these fail, ask the user — and ask specifically by showing your closest guesses ("I found 'Pinebrook Village' — is that who you mean?")
+
+NOTE: find_customer and find_property are typo-tolerant. If "walili" returns nothing, the fuzzy fallback should catch "walali". You don't need to ask the user to check spelling.
+
+NEVER ask the user for an ID (customer_id, property_id, bow_id). Always look IDs up yourself using the search tools.
+NEVER ask "which one?" without first showing the options you found.
+
+ERROR HANDLING:
+When a tool returns an error, DO NOT quote the error text to the user. Errors contain internal debugging info like "database constraint", "validation failed", or "auto-scope missing" — these are for you, not the user.
+- If a tool returns error + retry_hint, follow the hint and retry with a different approach.
+- If the retry also fails, respond naturally with what you couldn't find — "I couldn't find a customer matching 'walili'. Can you give me another detail?" — not "I'm hitting a database constraint."
 
 GUIDELINES:
 - Be concise and practical. Field techs need quick answers, not essays.
@@ -149,10 +181,16 @@ class DeepBlueEngine:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
-        # Build Claude messages (strip our metadata fields)
+        # Build Claude messages — preserves text, tool_use, and tool_result blocks from prior turns
+        # so Claude has full access to past tool results, not just text summaries.
         claude_messages = []
         for m in messages_history:
-            claude_messages.append({"role": m["role"], "content": m["content"]})
+            if m.get("blocks"):
+                # Structured turn with tool_use / tool_result blocks
+                claude_messages.append({"role": m["role"], "content": m["blocks"]})
+            else:
+                # Plain text turn
+                claude_messages.append({"role": m["role"], "content": m["content"]})
 
         tool_ctx = ToolContext(
             db=self.db,
@@ -244,12 +282,31 @@ class DeepBlueEngine:
                 # No tools called — we're done
                 break
 
-        # Save assistant response to conversation history
-        messages_history.append({
-            "role": "assistant",
-            "content": full_text,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        # Save assistant response to conversation history.
+        # We persist the full block structure from the tool loop so future turns
+        # have access to past tool_use and tool_result data, not just text summaries.
+        # claude_messages contains everything we sent/received this turn — but we only
+        # want to append what was NEW this turn (everything after the initial messages_history).
+        new_turn_blocks = claude_messages[len(messages_history):]  # skip the prior turns
+        # The first entry in new_turn_blocks is the user message we just added; skip it
+        # since it's already in messages_history.
+        for i, msg in enumerate(new_turn_blocks):
+            if i == 0 and msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                continue  # this is the current user message, already appended
+            if isinstance(msg.get("content"), list):
+                # Structured blocks — store in "blocks" field for reconstruction next turn
+                messages_history.append({
+                    "role": msg["role"],
+                    "content": _extract_text_from_blocks(msg["content"]),
+                    "blocks": msg["content"],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            else:
+                messages_history.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
 
         # Classify and log the turn
         from .category_tagger import classify_prompt, detect_off_topic_response

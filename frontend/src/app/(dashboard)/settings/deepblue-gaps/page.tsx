@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Check, Bot, Database, HelpCircle } from "lucide-react";
+import { Loader2, Check, Sparkles, Database, HelpCircle } from "lucide-react";
 
 interface KnowledgeGap {
   id: string;
@@ -94,7 +94,7 @@ export default function DeepBlueGapsPage() {
         ) : groups.length === 0 ? (
           <Card className="shadow-sm">
             <CardContent className="py-12 text-center text-muted-foreground">
-              <Bot className="h-10 w-10 mx-auto mb-2 opacity-30" />
+              <Sparkles className="h-10 w-10 mx-auto mb-2 opacity-30" />
               <p>No knowledge gaps. DeepBlue is answering everything with existing tools.</p>
             </CardContent>
           </Card>

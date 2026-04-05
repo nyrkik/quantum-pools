@@ -1,7 +1,7 @@
 "use client";
 
 import { useDeepBlue } from "./deepblue-provider";
-import { Bot } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 export function DeepBlueTrigger() {
   const { isOpen, toggleDeepBlue } = useDeepBlue();
@@ -15,7 +15,7 @@ export function DeepBlueTrigger() {
       style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
       title="Ask DeepBlue"
     >
-      <Bot className="h-5 w-5" />
+      <Sparkles className="h-5 w-5" />
     </button>
   );
 }

@@ -23,7 +23,7 @@ import {
   CalendarCheck,
   FileText,
   Send,
-  Bot,
+  Sparkles,
 } from "lucide-react";
 import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
 import type { AgentAction, ServiceCase } from "@/types/agent";
@@ -321,21 +321,23 @@ export default function DashboardPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-primary" />
+                  <Sparkles className="h-4 w-4 text-primary" />
                   <CardTitle className="text-sm font-semibold">Recent DeepBlue Chats</CardTitle>
                 </div>
-                <Button variant="ghost" size="sm" className="text-xs h-7" onClick={openDeepBlue}>
-                  Open <ArrowRight className="h-3 w-3 ml-1" />
-                </Button>
+                <Link href="/deepblue">
+                  <Button variant="ghost" size="sm" className="text-xs h-7">
+                    Open <ArrowRight className="h-3 w-3 ml-1" />
+                  </Button>
+                </Link>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-1">
                 {data.recentDeepBlueChats.map((c) => (
-                  <button
+                  <Link
                     key={c.id}
-                    onClick={() => resumeDeepBlueChat(c.id)}
-                    className="w-full flex items-center gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors text-left"
+                    href={`/deepblue?id=${c.id}`}
+                    className="w-full flex items-center gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium truncate block">{c.title || "Untitled"}</span>
@@ -344,7 +346,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(c.updated_at)}</span>
-                  </button>
+                  </Link>
                 ))}
               </div>
             </CardContent>

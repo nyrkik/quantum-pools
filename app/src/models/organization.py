@@ -53,6 +53,15 @@ class Organization(Base):
     # Structured addresses: {mailing: {street, city, state, zip}, physical: {same_as: "mailing"} | {street...}, billing: {same_as: "mailing"} | {street...}}
     addresses: Mapped[str | None] = mapped_column(Text)
 
+    # DeepBlue quotas — per-user and per-org caps (defaults set in migration)
+    deepblue_user_daily_input_tokens: Mapped[int] = mapped_column(Integer, default=500000)
+    deepblue_user_daily_output_tokens: Mapped[int] = mapped_column(Integer, default=100000)
+    deepblue_user_monthly_input_tokens: Mapped[int] = mapped_column(Integer, default=5000000)
+    deepblue_user_monthly_output_tokens: Mapped[int] = mapped_column(Integer, default=1000000)
+    deepblue_org_monthly_input_tokens: Mapped[int] = mapped_column(Integer, default=50000000)
+    deepblue_org_monthly_output_tokens: Mapped[int] = mapped_column(Integer, default=10000000)
+    deepblue_rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=30)
+
     # Contact learning — show modal/banner for unknown email senders
     email_contact_learning: Mapped[bool] = mapped_column(Boolean, default=True)
 

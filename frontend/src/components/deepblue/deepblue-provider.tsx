@@ -32,6 +32,7 @@ interface DeepBlueState {
   sendMessage: (text: string) => Promise<void>;
   clearConversation: () => void;
   saveToCase: (caseId: string) => Promise<boolean>;
+  loadConversation: (id: string) => Promise<void>;
 }
 
 const DeepBlueContext = createContext<DeepBlueState | null>(null);
@@ -56,6 +57,24 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
   const clearConversation = useCallback(() => {
     setMessages([]);
     setConversationId(null);
+  }, []);
+
+  const loadConversation = useCallback(async (id: string): Promise<void> => {
+    try {
+      const resp = await fetch(`/api/v1/deepblue/conversations/${id}`, { credentials: "include" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const loaded: DeepBlueMessage[] = (data.messages || []).map((m: { role: string; content: string; timestamp?: string }, i: number) => ({
+        id: `loaded-${id}-${i}`,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        timestamp: m.timestamp || new Date().toISOString(),
+      }));
+      setMessages(loaded);
+      setConversationId(id);
+    } catch {
+      // Silent fail
+    }
   }, []);
 
   const saveToCase = useCallback(async (caseId: string): Promise<boolean> => {
@@ -195,7 +214,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
     <DeepBlueContext.Provider
       value={{
         isOpen, isLoading, messages, conversationId, context: contextRef.current,
-        openDeepBlue, closeDeepBlue, toggleDeepBlue, setContext, sendMessage, clearConversation, saveToCase,
+        openDeepBlue, closeDeepBlue, toggleDeepBlue, setContext, sendMessage, clearConversation, saveToCase, loadConversation,
       }}
     >
       {children}

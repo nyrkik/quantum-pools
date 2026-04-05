@@ -23,10 +23,12 @@ import {
   CalendarCheck,
   FileText,
   Send,
+  Bot,
 } from "lucide-react";
 import { formatTime, formatDueDate, isOverdue } from "@/lib/format";
 import type { AgentAction, ServiceCase } from "@/types/agent";
 import { CasesAnnouncement } from "@/components/layout/cases-announcement";
+import { useDeepBlue } from "@/components/deepblue/deepblue-provider";
 
 interface DashboardData {
   // My stuff
@@ -45,14 +47,21 @@ interface DashboardData {
   openCases: ServiceCase[];
   // Recent
   recentThreads: { id: string; customer_name: string; subject: string; last_message_at: string; status: string }[];
+  recentDeepBlueChats: { id: string; title: string; message_count: number; updated_at: string }[];
 }
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const perms = usePermissions();
   const router = useRouter();
+  const { openDeepBlue, loadConversation } = useDeepBlue();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const resumeDeepBlueChat = async (id: string) => {
+    await loadConversation(id);
+    openDeepBlue();
+  };
 
   useEffect(() => {
     (async () => {
@@ -61,7 +70,7 @@ export default function DashboardPage() {
           unreadMessages: 0, latestMessages: [], myJobs: [],
           todayVisits: 0, activeVisit: null,
           pendingEmails: 0, staleEmails: 0, overdueJobs: 0, pendingEstimates: 0, draftEstimates: 0,
-          openCases: [], recentThreads: [],
+          openCases: [], recentThreads: [], recentDeepBlueChats: [],
         };
 
         const results = await Promise.allSettled([
@@ -83,6 +92,8 @@ export default function DashboardPage() {
           perms.canViewInvoices ? api.get<{ total: number }>("/v1/invoices?status=draft&limit=1") : null,
           // Cases
           api.get<{ items: ServiceCase[] }>("/v1/cases?limit=5"),
+          // DeepBlue recent chats
+          api.get<{ conversations: DashboardData["recentDeepBlueChats"] }>("/v1/deepblue/conversations?scope=mine&limit=5"),
         ]);
 
         // Messages
@@ -112,6 +123,9 @@ export default function DashboardPage() {
         }
         if (results[10]?.status === "fulfilled" && results[10].value) {
           d.openCases = ((results[10].value as { items: ServiceCase[] }).items || []).filter(c => c.status !== "closed" && c.status !== "cancelled");
+        }
+        if (results[11]?.status === "fulfilled" && results[11].value) {
+          d.recentDeepBlueChats = ((results[11].value as { conversations: DashboardData["recentDeepBlueChats"] }).conversations || []);
         }
 
         setData(d);
@@ -295,6 +309,42 @@ export default function DashboardPage() {
                       <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(t.last_message_at)}</span>
                     </div>
                   </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Recent DeepBlue Chats */}
+        {data.recentDeepBlueChats.length > 0 && (
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bot className="h-4 w-4 text-primary" />
+                  <CardTitle className="text-sm font-semibold">Recent DeepBlue Chats</CardTitle>
+                </div>
+                <Button variant="ghost" size="sm" className="text-xs h-7" onClick={openDeepBlue}>
+                  Open <ArrowRight className="h-3 w-3 ml-1" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1">
+                {data.recentDeepBlueChats.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => resumeDeepBlueChat(c.id)}
+                    className="w-full flex items-center gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors text-left"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium truncate block">{c.title || "Untitled"}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {c.message_count} message{c.message_count !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{formatTime(c.updated_at)}</span>
+                  </button>
                 ))}
               </div>
             </CardContent>

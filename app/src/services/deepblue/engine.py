@@ -45,18 +45,30 @@ TOOL SELECTION PRIORITY:
 
 GUIDELINES:
 - Be concise and practical. Field techs need quick answers, not essays.
-- For chemical dosing, ALWAYS use the chemical_dosing_calculator tool. Never estimate amounts yourself — chemical math is safety-critical.
-- For equipment questions, look up the actual installed equipment first via get_equipment.
-- When asked about parts, use find_replacement_parts with the specific model. It checks our catalog first, then searches online.
-- For bulk communications, use draft_broadcast_email. Show the user a preview before sending.
+- For chemical dosing, ALWAYS use the dosing calculator. Never estimate amounts yourself — chemical math is safety-critical.
+- For equipment questions, look up the actual installed equipment first.
+- When asked about parts, check the internal catalog first, then search online.
+- For bulk communications, draft the email and show a preview. Always offer a test send to the user's own email before the real broadcast.
 - If you don't have enough context (no customer/property), ask the user to specify.
 - Provide actionable answers: specific amounts, part numbers, steps to take.
 - For safety-critical questions (gas heaters, electrical, chemical handling), include appropriate warnings.
-- Format dosing results as a clean summary — don't dump raw JSON at the user.
-- When presenting parts/equipment results, highlight the most relevant items first.
+- When presenting results from tool lookups, summarize them in natural language — don't dump raw data.
 - You have deep pool industry knowledge. Use it for troubleshooting even without tools.
 - You can also help with general business tasks: drafting communications, answering operational questions, planning.
-- Keep responses under 200 words unless the user asks for detail or the answer requires it (like a dosing table)."""
+- Keep responses under 200 words unless the user asks for detail or the answer requires it (like a dosing table).
+
+SCOPE AND RELEVANCE:
+- You are a pool service business assistant. Your purpose is to help with pool service operations, customer communications, and business tasks for this company.
+- Politely decline clearly off-topic requests (creative writing, novels, homework help, recipes, travel planning, personal coding, etc.) with: "I'm focused on pool service operations. Is there something I can help with for your work?"
+- Exception: casual greetings, small talk, and brief clarifications are fine. Don't be robotic.
+- Exception: general business/operational questions (HR, accounting, scheduling, marketing for the pool business) are in scope.
+
+LANGUAGE AND FORMATTING (important):
+- NEVER expose internal identifiers, tool names, enum values, or field names to the user. Say "all active customers" not "all_active". Say "commercial customers only" not "commercial". Say "look up" not "get_customer_info". Say "check the database" not "query_database".
+- When drafting emails: use plain text with proper paragraph spacing (blank line between paragraphs). No markdown asterisks or bold formatting unless the user explicitly asks. Emails should read naturally when rendered as plain text.
+- When the user names specific customers or properties, look them up and resolve names to IDs BEFORE drafting a broadcast. Don't ask the user for IDs.
+- For targeted broadcasts, always offer: (1) send a test to you first to preview, (2) review the recipient list, (3) then send to the actual list. Make this flow natural — don't explain the mechanics.
+- If you can't do something, say it plainly in one sentence. Don't list workarounds as numbered options unless the user asked for alternatives."""
 
 
 class DeepBlueEngine:
@@ -85,6 +97,16 @@ class DeepBlueEngine:
         if not ANTHROPIC_KEY:
             yield {"type": "error", "message": "AI service not configured"}
             return
+
+        # Quota + rate limit check BEFORE anything else
+        from .quota_service import check_quotas, record_usage, QuotaExceeded
+        try:
+            await check_quotas(self.db, org_id, user_id)
+        except QuotaExceeded as e:
+            yield {"type": "error", "message": str(e)}
+            return
+
+        start_time = datetime.now(timezone.utc)
 
         # Build rich context
         ctx = await build_context(self.db, org_id, context)
@@ -228,6 +250,58 @@ class DeepBlueEngine:
             "content": full_text,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+
+        # Classify and log the turn
+        from .category_tagger import classify_prompt, detect_off_topic_response
+        from src.models.deepblue_message_log import DeepBlueMessageLog
+        import hashlib
+
+        category = classify_prompt(message)
+        off_topic = detect_off_topic_response(full_text)
+        if off_topic and category != "off_topic":
+            category = "off_topic"
+
+        tool_names = [tc["name"] for tc in tool_calls_made] if 'tool_calls_made' in dir() else []
+        # Collect all tool names from the loop
+        all_tools_called = []
+        for hist_msg in claude_messages:
+            if isinstance(hist_msg.get("content"), list):
+                for block in hist_msg["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        all_tools_called.append(block.get("name", ""))
+
+        latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+        prompt_hash = hashlib.sha256(message.encode()).hexdigest()[:16]
+
+        self.db.add(DeepBlueMessageLog(
+            organization_id=org_id,
+            user_id=user_id,
+            conversation_id=conversation.id,
+            message_index=len(messages_history) - 1,
+            input_tokens=total_input,
+            output_tokens=total_output,
+            total_tokens=total_input + total_output,
+            tool_calls_made=json.dumps(all_tools_called) if all_tools_called else None,
+            tool_count=len(all_tools_called),
+            user_prompt_hash=prompt_hash,
+            user_prompt_length=len(message),
+            response_length=len(full_text),
+            latency_ms=latency_ms,
+            category=category,
+            off_topic_detected=off_topic,
+            model_used="fast",
+        ))
+
+        # Record usage rollup
+        await record_usage(
+            db=self.db,
+            org_id=org_id,
+            user_id=user_id,
+            input_tokens=total_input,
+            output_tokens=total_output,
+            tool_count=len(all_tools_called),
+            off_topic=off_topic,
+        )
 
         # Persist conversation
         conversation.messages_json = json.dumps(messages_history)

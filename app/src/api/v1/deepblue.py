@@ -1,6 +1,7 @@
 """DeepBlue Field API — streaming AI assistant for field operations."""
 
 import json
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -74,30 +75,49 @@ async def send_message(
 
 @router.get("/conversations")
 async def list_conversations(
-    limit: int = 20,
+    scope: str = "mine",  # mine | shared | all
+    limit: int = 50,
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List recent DeepBlue conversations for the current user."""
+    """List DeepBlue conversations. scope: mine | shared | all."""
     from src.models.deepblue_conversation import DeepBlueConversation
 
-    results = (await db.execute(
-        select(DeepBlueConversation)
-        .where(
-            DeepBlueConversation.user_id == ctx.user.id,
-            DeepBlueConversation.organization_id == ctx.organization_id,
-        )
-        .order_by(desc(DeepBlueConversation.updated_at))
-        .limit(limit)
-    )).scalars().all()
+    query = select(DeepBlueConversation).where(
+        DeepBlueConversation.organization_id == ctx.organization_id,
+        DeepBlueConversation.deleted_at.is_(None),
+        DeepBlueConversation.case_id.is_(None),  # case-linked chats are in the case UI
+    )
+
+    if scope == "mine":
+        query = query.where(DeepBlueConversation.user_id == ctx.user.id)
+    elif scope == "shared":
+        query = query.where(DeepBlueConversation.visibility == "shared")
+    elif scope == "all":
+        # Admin view — only for owner/admin
+        if ctx.org_user.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Admin only")
+    else:
+        raise HTTPException(status_code=400, detail="Invalid scope")
+
+    query = query.order_by(
+        desc(DeepBlueConversation.pinned),
+        desc(DeepBlueConversation.updated_at),
+    ).limit(limit)
+
+    results = (await db.execute(query)).scalars().all()
 
     return {
         "conversations": [
             {
                 "id": c.id,
                 "title": c.title,
+                "user_id": c.user_id,
+                "visibility": c.visibility,
+                "pinned": c.pinned,
                 "context": json.loads(c.context_json or "{}"),
                 "message_count": len(json.loads(c.messages_json or "[]")),
+                "shared_at": c.shared_at.isoformat() if c.shared_at else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "updated_at": c.updated_at.isoformat() if c.updated_at else None,
             }
@@ -106,13 +126,188 @@ async def list_conversations(
     }
 
 
-@router.get("/conversations/{conversation_id}")
-async def get_conversation(
-    conversation_id: str,
+@router.get("/usage-stats")
+async def get_usage_stats(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Load a specific conversation with full message history."""
+    """Admin dashboard data: org totals + per-user breakdown for current month."""
+    if ctx.org_user.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from datetime import date as _date
+    from sqlalchemy import func as _func
+    from src.models.deepblue_user_usage import DeepBlueUserUsage
+    from src.models.user import User
+    from src.models.organization import Organization
+
+    from datetime import timedelta as _td
+    today = _date.today()
+    month_start = today.replace(day=1)
+    prev_month_end = month_start - _td(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
+
+    org = (await db.execute(select(Organization).where(Organization.id == ctx.organization_id))).scalar_one_or_none()
+
+    # Current month org totals
+    current = (await db.execute(
+        select(
+            _func.coalesce(_func.sum(DeepBlueUserUsage.input_tokens), 0),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.output_tokens), 0),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.message_count), 0),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.off_topic_count), 0),
+        ).where(
+            DeepBlueUserUsage.organization_id == ctx.organization_id,
+            DeepBlueUserUsage.date >= month_start,
+        )
+    )).one()
+
+    # Previous month for comparison
+    previous = (await db.execute(
+        select(
+            _func.coalesce(_func.sum(DeepBlueUserUsage.input_tokens), 0),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.output_tokens), 0),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.message_count), 0),
+        ).where(
+            DeepBlueUserUsage.organization_id == ctx.organization_id,
+            DeepBlueUserUsage.date >= prev_month_start,
+            DeepBlueUserUsage.date <= prev_month_end,
+        )
+    )).one()
+
+    # Per-user breakdown current month
+    per_user = (await db.execute(
+        select(
+            DeepBlueUserUsage.user_id,
+            _func.coalesce(_func.sum(DeepBlueUserUsage.input_tokens), 0).label("input_tokens"),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.output_tokens), 0).label("output_tokens"),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.message_count), 0).label("message_count"),
+            _func.coalesce(_func.sum(DeepBlueUserUsage.off_topic_count), 0).label("off_topic_count"),
+            _func.max(DeepBlueUserUsage.date).label("last_active"),
+        ).where(
+            DeepBlueUserUsage.organization_id == ctx.organization_id,
+            DeepBlueUserUsage.date >= month_start,
+        ).group_by(DeepBlueUserUsage.user_id)
+    )).all()
+
+    # Resolve user names
+    user_ids = [r.user_id for r in per_user]
+    users_map = {}
+    if user_ids:
+        users = (await db.execute(
+            select(User).where(User.id.in_(user_ids))
+        )).scalars().all()
+        users_map = {u.id: f"{u.first_name} {u.last_name}".strip() or u.email for u in users}
+
+    # Cost estimation (Haiku pricing)
+    def estimate_cost(inp, out):
+        return inp * 0.80 / 1_000_000 + out * 4.00 / 1_000_000
+
+    user_rows = [
+        {
+            "user_id": r.user_id,
+            "name": users_map.get(r.user_id, "Unknown"),
+            "message_count": r.message_count,
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
+            "estimated_cost_usd": round(estimate_cost(r.input_tokens, r.output_tokens), 4),
+            "off_topic_count": r.off_topic_count,
+            "off_topic_pct": round(100 * r.off_topic_count / r.message_count, 1) if r.message_count else 0,
+            "last_active": r.last_active.isoformat() if r.last_active else None,
+        }
+        for r in per_user
+    ]
+    user_rows.sort(key=lambda x: x["input_tokens"] + x["output_tokens"], reverse=True)
+
+    return {
+        "current_month": {
+            "input_tokens": current[0],
+            "output_tokens": current[1],
+            "message_count": current[2],
+            "off_topic_count": current[3],
+            "estimated_cost_usd": round(estimate_cost(current[0], current[1]), 2),
+        },
+        "previous_month": {
+            "input_tokens": previous[0],
+            "output_tokens": previous[1],
+            "message_count": previous[2],
+            "estimated_cost_usd": round(estimate_cost(previous[0], previous[1]), 2),
+        },
+        "limits": {
+            "user_daily_input": org.deepblue_user_daily_input_tokens if org else 500000,
+            "user_daily_output": org.deepblue_user_daily_output_tokens if org else 100000,
+            "user_monthly_input": org.deepblue_user_monthly_input_tokens if org else 5000000,
+            "user_monthly_output": org.deepblue_user_monthly_output_tokens if org else 1000000,
+            "org_monthly_input": org.deepblue_org_monthly_input_tokens if org else 50000000,
+            "org_monthly_output": org.deepblue_org_monthly_output_tokens if org else 10000000,
+            "rate_limit_per_minute": org.deepblue_rate_limit_per_minute if org else 30,
+        },
+        "users": user_rows,
+    }
+
+
+@router.post("/retention/run")
+async def run_retention(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run retention cleanup. Owner only. Can be called by a cron job or manually."""
+    if ctx.org_user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    from src.services.deepblue.retention_service import run_retention_cleanup
+    counts = await run_retention_cleanup(db)
+    return counts
+
+
+class ShareRequest(BaseModel):
+    visibility: str  # private | shared
+
+
+@router.patch("/conversations/{conversation_id}/visibility")
+async def update_visibility(
+    conversation_id: str,
+    req: ShareRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.deepblue_conversation import DeepBlueConversation
+    from datetime import datetime, timezone
+
+    conv = (await db.execute(
+        select(DeepBlueConversation).where(
+            DeepBlueConversation.id == conversation_id,
+            DeepBlueConversation.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Not found")
+    if conv.user_id != ctx.user.id:
+        raise HTTPException(status_code=403, detail="Only the creator can share this conversation")
+    if req.visibility not in ("private", "shared"):
+        raise HTTPException(status_code=400, detail="Invalid visibility")
+
+    conv.visibility = req.visibility
+    if req.visibility == "shared":
+        conv.shared_at = datetime.now(timezone.utc)
+        conv.shared_by = ctx.user.id
+    else:
+        conv.shared_at = None
+        conv.shared_by = None
+    await db.commit()
+    return {"visibility": conv.visibility}
+
+
+class PinRequest(BaseModel):
+    pinned: bool
+
+
+@router.patch("/conversations/{conversation_id}/pin")
+async def update_pin(
+    conversation_id: str,
+    req: PinRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
     from src.models.deepblue_conversation import DeepBlueConversation
 
     conv = (await db.execute(
@@ -121,8 +316,122 @@ async def get_conversation(
             DeepBlueConversation.user_id == ctx.user.id,
         )
     )).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Not found")
+    conv.pinned = req.pinned
+    await db.commit()
+    return {"pinned": conv.pinned}
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete a conversation. Owner only. Case-linked and shared conversations cannot be deleted."""
+    from src.models.deepblue_conversation import DeepBlueConversation
+    from datetime import datetime, timezone
+
+    conv = (await db.execute(
+        select(DeepBlueConversation).where(
+            DeepBlueConversation.id == conversation_id,
+            DeepBlueConversation.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Not found")
+    if conv.user_id != ctx.user.id:
+        raise HTTPException(status_code=403, detail="Only the creator can delete this conversation")
+    if conv.case_id:
+        raise HTTPException(status_code=400, detail="Case-linked conversations cannot be deleted")
+
+    conv.deleted_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"deleted": True}
+
+
+@router.post("/conversations/{conversation_id}/restore")
+async def restore_conversation(
+    conversation_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.deepblue_conversation import DeepBlueConversation
+
+    conv = (await db.execute(
+        select(DeepBlueConversation).where(
+            DeepBlueConversation.id == conversation_id,
+            DeepBlueConversation.user_id == ctx.user.id,
+        )
+    )).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Not found")
+    conv.deleted_at = None
+    await db.commit()
+    return {"restored": True}
+
+
+@router.post("/conversations/{conversation_id}/fork")
+async def fork_conversation(
+    conversation_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fork a shared conversation into a new private copy for the current user."""
+    from src.models.deepblue_conversation import DeepBlueConversation
+    import uuid as _uuid
+
+    source = (await db.execute(
+        select(DeepBlueConversation).where(
+            DeepBlueConversation.id == conversation_id,
+            DeepBlueConversation.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Not found")
+    if source.visibility != "shared" and source.user_id != ctx.user.id:
+        raise HTTPException(status_code=403, detail="Cannot fork this conversation")
+
+    fork = DeepBlueConversation(
+        id=str(_uuid.uuid4()),
+        organization_id=ctx.organization_id,
+        user_id=ctx.user.id,
+        context_json=source.context_json,
+        title=f"Fork: {source.title}"[:200] if source.title else "Forked conversation",
+        messages_json=source.messages_json,
+        visibility="private",
+    )
+    db.add(fork)
+    await db.commit()
+    return {"id": fork.id}
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Load a specific conversation. Accessible if: owner, or shared within org, or case-linked."""
+    from src.models.deepblue_conversation import DeepBlueConversation
+
+    conv = (await db.execute(
+        select(DeepBlueConversation).where(
+            DeepBlueConversation.id == conversation_id,
+            DeepBlueConversation.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
 
     if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    # Access check
+    is_owner = conv.user_id == ctx.user.id
+    is_shared = conv.visibility == "shared"
+    is_case_linked = conv.case_id is not None
+    if not (is_owner or is_shared or is_case_linked):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if conv.deleted_at and not is_owner:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     return {
@@ -254,6 +563,8 @@ class ConfirmBroadcastRequest(BaseModel):
     subject: str
     body: str
     filter_type: str = "all_active"
+    customer_ids: Optional[list[str]] = None
+    test_recipient: Optional[str] = None
 
 
 @router.post("/confirm-broadcast")
@@ -263,12 +574,23 @@ async def confirm_broadcast(
     db: AsyncSession = Depends(get_db),
 ):
     """Confirm and send a broadcast email drafted by DeepBlue."""
+    import json as _json
     from src.services.broadcast_service import BroadcastService
-    from src.api.deps import require_roles, OrgRole
 
     # Only admin+ can broadcast
     if ctx.org_user.role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Only admins can send broadcast emails")
+
+    # Default test recipient to current user's email
+    test_recipient = req.test_recipient
+    if req.filter_type == "test" and not test_recipient:
+        test_recipient = ctx.user.email
+
+    filter_data = None
+    if req.filter_type == "custom":
+        if not req.customer_ids:
+            raise HTTPException(status_code=400, detail="customer_ids required for custom filter")
+        filter_data = _json.dumps(req.customer_ids)
 
     svc = BroadcastService(db)
     broadcast = await svc.create_broadcast(
@@ -276,7 +598,9 @@ async def confirm_broadcast(
         subject=req.subject,
         body=req.body,
         filter_type=req.filter_type,
+        filter_data=filter_data,
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
+        test_recipient=test_recipient,
     )
 
     return {

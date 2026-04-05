@@ -267,20 +267,31 @@ TOOLS = [
     {
         "name": "draft_broadcast_email",
         "description": (
-            "Draft and send a bulk email to multiple customers. Use this for announcements, "
-            "address changes, seasonal notices, rate updates, etc. "
-            "Provide the email content and recipient filter. Returns a preview with recipient count — "
-            "the user must confirm before it sends."
+            "Draft a bulk email for review. Use for announcements, address changes, seasonal notices, etc. "
+            "Returns a preview with recipient count — the user must confirm before it sends. "
+            "Recipient options: all active customers, commercial only, residential only, a specific list of customer IDs, "
+            "or a test send to a single address (for previewing). "
+            "IMPORTANT: when the user names specific customers, first resolve those names to customer IDs using "
+            "get_customer_info or query_database, then pass the IDs in customer_ids."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "subject": {"type": "string", "description": "Email subject line"},
-                "body": {"type": "string", "description": "Email body text. Professional, concise. Use \\n for line breaks."},
+                "body": {"type": "string", "description": "Email body text. Professional, concise. Use \\n\\n for paragraph breaks, \\n for single line breaks. Do not include markdown formatting."},
                 "filter_type": {
                     "type": "string",
-                    "enum": ["all_active", "commercial", "residential"],
-                    "description": "Which customers to send to",
+                    "enum": ["all_active", "commercial", "residential", "custom", "test"],
+                    "description": "all_active=everyone, commercial=commercial only, residential=residential only, custom=specific customer list, test=single preview email",
+                },
+                "customer_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Customer IDs when filter_type='custom'. Required for custom filter.",
+                },
+                "test_recipient": {
+                    "type": "string",
+                    "description": "Email address for filter_type='test'. If not provided, uses the current user's email.",
                 },
             },
             "required": ["subject", "body", "filter_type"],
@@ -917,23 +928,69 @@ async def _exec_query_database(inp: dict, ctx: ToolContext) -> dict:
 
 
 async def _exec_broadcast(inp: dict, ctx: ToolContext) -> dict:
-    """Draft a broadcast email — returns preview with recipient count. Does NOT send yet."""
+    """Draft a broadcast email — returns preview. Does NOT send yet."""
     from src.services.broadcast_service import BroadcastService
+    from src.models.customer import Customer
 
     subject = inp.get("subject", "")
     body = inp.get("body", "")
     filter_type = inp.get("filter_type", "all_active")
+    customer_ids = inp.get("customer_ids") or []
+    test_recipient = inp.get("test_recipient")
 
     if not subject or not body:
         return {"error": "Subject and body are required."}
 
+    # Test send — single recipient preview
+    if filter_type == "test":
+        return {
+            "action": "broadcast_email",
+            "requires_confirmation": True,
+            "preview": {
+                "subject": subject,
+                "body": body,
+                "filter_type": "test",
+                "filter_label": f"Test send to {test_recipient or 'your email'}",
+                "test_recipient": test_recipient,
+                "recipient_count": 1,
+                "customer_names": [test_recipient or "you"],
+            },
+        }
+
+    # Custom list — validate and resolve names
+    if filter_type == "custom":
+        if not customer_ids:
+            return {"error": "customer_ids required when filter_type is 'custom'"}
+        customers = (await ctx.db.execute(
+            select(Customer).where(
+                Customer.id.in_(customer_ids),
+                Customer.organization_id == ctx.org_id,
+                Customer.is_active == True,
+            )
+        )).scalars().all()
+        names = [c.display_name for c in customers]
+        return {
+            "action": "broadcast_email",
+            "requires_confirmation": True,
+            "preview": {
+                "subject": subject,
+                "body": body,
+                "filter_type": "custom",
+                "filter_label": f"{len(customers)} selected customer{'s' if len(customers) != 1 else ''}",
+                "customer_ids": [c.id for c in customers],
+                "customer_names": names,
+                "recipient_count": len(customers),
+            },
+        }
+
+    # Standard segment filters
     svc = BroadcastService(ctx.db)
     count = await svc.get_recipient_count(ctx.org_id, filter_type)
 
     filter_labels = {
-        "all_active": "All active customers",
-        "commercial": "Commercial customers only",
-        "residential": "Residential customers only",
+        "all_active": "all active customers",
+        "commercial": "commercial customers",
+        "residential": "residential customers",
     }
 
     return {

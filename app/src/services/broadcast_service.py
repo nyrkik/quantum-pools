@@ -32,8 +32,47 @@ class BroadcastService:
         filter_type: str = "all_active",
         filter_data: str | None = None,
         created_by: str | None = None,
+        test_recipient: str | None = None,
     ) -> BroadcastEmail:
         """Create a broadcast and immediately begin sending."""
+        # Test send bypasses customer resolution — single email to arbitrary address
+        if filter_type == "test":
+            if not test_recipient:
+                raise ValueError("test_recipient required for test broadcasts")
+            broadcast = BroadcastEmail(
+                id=str(uuid.uuid4()),
+                organization_id=org_id,
+                subject=subject,
+                body=body,
+                filter_type="test",
+                filter_data=test_recipient,
+                recipient_count=1,
+                status="sending",
+                created_by=created_by,
+            )
+            self.db.add(broadcast)
+            await self.db.commit()
+
+            email_svc = EmailService(self.db)
+            try:
+                result = await email_svc.send_agent_reply(
+                    org_id=org_id,
+                    to=test_recipient,
+                    subject=subject,
+                    body=body,
+                    is_new=True,
+                )
+                broadcast.sent_count = 1 if result.success else 0
+                broadcast.failed_count = 0 if result.success else 1
+            except Exception as e:
+                logger.error(f"Test broadcast failed: {e}")
+                broadcast.failed_count = 1
+
+            broadcast.status = "completed"
+            broadcast.completed_at = datetime.now(timezone.utc)
+            await self.db.commit()
+            return broadcast
+
         customers = await self._get_recipients(org_id, filter_type, filter_data)
 
         broadcast = BroadcastEmail(

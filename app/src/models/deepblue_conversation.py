@@ -31,6 +31,13 @@ class DeepBlueConversation(Base):
         String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), nullable=True, index=True,
     )
 
+    # Conversation management
+    visibility: Mapped[str] = mapped_column(String(20), default="private")  # private | shared | case
+    pinned: Mapped[bool] = mapped_column(default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shared_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     # Cost tracking
     model_tier: Mapped[str] = mapped_column(String(20), default="fast")  # fast (haiku) or standard (sonnet)
     total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)

@@ -50,6 +50,12 @@ class Organization(Base):
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
     )
 
+    # Structured addresses: {mailing: {street, city, state, zip}, physical: {same_as: "mailing"} | {street...}, billing: {same_as: "mailing"} | {street...}}
+    addresses: Mapped[str | None] = mapped_column(Text)
+
+    # Contact learning — show modal/banner for unknown email senders
+    email_contact_learning: Mapped[bool] = mapped_column(Boolean, default=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

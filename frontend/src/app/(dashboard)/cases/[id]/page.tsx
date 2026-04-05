@@ -32,6 +32,9 @@ import {
 } from "lucide-react";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { ComposeMessage } from "@/components/messages/compose-message";
+import { useCompose } from "@/components/email/compose-provider";
+import { CaseDeepBlueCard } from "@/components/deepblue/case-deepblue-card";
+import { useDeepBlueContext } from "@/components/deepblue/deepblue-provider";
 import { useTeamMembers } from "@/hooks/use-team-members";
 import {
   Select,
@@ -100,6 +103,16 @@ interface TimelineEntry {
   metadata: Record<string, unknown>;
 }
 
+interface DeepBlueConversation {
+  id: string;
+  title: string;
+  user_id: string;
+  message_count: number;
+  messages: { role: string; content: string; timestamp: string }[];
+  created_at: string;
+  updated_at: string;
+}
+
 interface CaseDetail {
   id: string;
   case_number: string;
@@ -119,6 +132,7 @@ interface CaseDetail {
   jobs: CaseJob[];
   threads: CaseThread[];
   invoices: CaseInvoice[];
+  deepblue_conversations: DeepBlueConversation[];
   timeline: TimelineEntry[];
 }
 
@@ -474,7 +488,9 @@ function InvoiceCard({ invoice, router }: { invoice: CaseInvoice; router: Return
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { openCompose } = useCompose();
   const teamMembers = useTeamMembers();
+  useDeepBlueContext({ caseId: id });
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -624,6 +640,21 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           )}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <CaseStatusBadge status={detail.status} />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs gap-1"
+              onClick={() => openCompose({
+                customerId: detail.customer_id || undefined,
+                customerName: detail.customer_name || undefined,
+                subject: detail.title,
+                caseId: id,
+                onSent: load,
+              })}
+            >
+              <Mail className="h-3 w-3" />
+              Send Email
+            </Button>
             {detail.customer_name && (
               <Link href={`/customers/${detail.customer_id}`} className="text-sm text-muted-foreground hover:underline">
                 {detail.customer_name}
@@ -883,6 +914,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               ))}
             </CardContent>
           </Card>
+
+          {/* DeepBlue */}
+          <CaseDeepBlueCard
+            caseId={id}
+            customerId={detail.customer_id}
+            conversations={detail.deepblue_conversations || []}
+            onUpdate={load}
+          />
         </div>
       </div>
 

@@ -255,9 +255,15 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
 
     category = result.get("category", "general")
     if category in ("spam", "auto_reply", "no_response", "thank_you"):
-        if sender_is_customer and category not in ("spam", "auto_reply"):
-            # Customer emails are NEVER auto-ignored — override to pending
+        if sender_is_customer and category in ("spam", "auto_reply"):
+            # Spam/auto-reply from a customer address is suspicious — override to pending
             logger.info(f"Customer email classified as {category}, overriding to pending: {subject[:50]}")
+            category = "general"
+            result["category"] = "general"
+            result["needs_approval"] = True
+        elif category not in ("spam", "auto_reply") and sender_is_customer and result.get("confidence") != "high":
+            # Low/medium confidence no_response from a customer — play it safe
+            logger.info(f"Customer email classified as {category} (confidence={result.get('confidence')}), overriding to pending: {subject[:50]}")
             category = "general"
             result["category"] = "general"
             result["needs_approval"] = True
@@ -379,24 +385,8 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             cust_name = (thread_obj.customer_name if thread_obj else None) or result.get("customer_name")
             prop_addr = (thread_obj.property_address if thread_obj else None) or result.get("_property_address")
 
-            # Create case on first job for this thread (not on email arrival)
-            if not case_id:
-                try:
-                    from src.services.service_case_service import ServiceCaseService
-                    case_svc = ServiceCaseService(db)
-                    case = await case_svc.find_or_create_case(
-                        org_id=organization_id,
-                        customer_id=cust_id,
-                        thread_id=thread.id,
-                        subject=subject,
-                        source="email",
-                        created_by="DeepBlue",
-                    )
-                    case_id = case.id
-                    if thread_obj and not thread_obj.case_id:
-                        thread_obj.case_id = case_id
-                except Exception as e:
-                    logger.warning(f"Case creation failed for job: {e}")
+            # Cases are created manually by users from the inbox (Create Case / Create Job buttons).
+            # Auto-creating cases from every email action clutters the case list with noise.
 
             db.add(AgentAction(
                 organization_id=organization_id,

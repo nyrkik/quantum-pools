@@ -116,3 +116,64 @@ async def upload_logo(
         await db.commit()
 
     return {"logo_url": logo_url}
+
+
+# ── Organization Addresses ────────────────────────────────────────────
+
+import json
+
+
+@router.get("/addresses")
+async def get_addresses(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    org = (await db.execute(select(Organization).where(Organization.id == ctx.organization_id))).scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    addresses = json.loads(org.addresses or "{}") if org.addresses else {}
+    return {"addresses": addresses}
+
+
+class AddressesUpdate(BaseModel):
+    addresses: dict  # {mailing: {street, city, state, zip}, physical: {same_as: "mailing"} | {street...}, ...}
+
+
+@router.put("/addresses")
+async def update_addresses(
+    body: AddressesUpdate,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    org = (await db.execute(select(Organization).where(Organization.id == ctx.organization_id))).scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # Validate structure
+    valid_keys = {"mailing", "physical", "billing"}
+    valid_fields = {"street", "city", "state", "zip", "same_as"}
+    for key, val in body.addresses.items():
+        if key not in valid_keys:
+            raise HTTPException(status_code=400, detail=f"Invalid address type: {key}")
+        if not isinstance(val, dict):
+            raise HTTPException(status_code=400, detail=f"Address '{key}' must be an object")
+        if "same_as" in val:
+            if val["same_as"] not in valid_keys or val["same_as"] == key:
+                raise HTTPException(status_code=400, detail=f"Invalid same_as reference for '{key}'")
+        else:
+            for field in val:
+                if field not in valid_fields:
+                    raise HTTPException(status_code=400, detail=f"Invalid field '{field}' in '{key}'")
+
+    org.addresses = json.dumps(body.addresses)
+
+    # Also sync flat fields from mailing for backward compat
+    mailing = body.addresses.get("mailing", {})
+    if mailing and "same_as" not in mailing:
+        org.address = mailing.get("street") or org.address
+        org.city = mailing.get("city") or org.city
+        org.state = mailing.get("state") or org.state
+        org.zip_code = mailing.get("zip") or org.zip_code
+
+    await db.commit()
+    return {"addresses": body.addresses}

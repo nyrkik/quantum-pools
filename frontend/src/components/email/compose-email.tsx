@@ -226,6 +226,7 @@ export function ComposeEmail() {
         body: body.trim(),
         customer_id: customerId,
         job_id: options.jobId || undefined,
+        case_id: options.caseId || undefined,
         attachment_ids: attachments.length ? attachments.map((a) => a.id) : undefined,
       });
 

@@ -3,7 +3,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Integer, ForeignKey, Enum, UniqueConstraint
+from sqlalchemy import String, Boolean, DateTime, Integer, Text, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -40,6 +40,9 @@ class OrganizationUser(Base):
     )
     role_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     permission_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # JSON array of sender emails this user has dismissed from contact learning prompts
+    dismissed_sender_emails: Mapped[str] = mapped_column(Text, default="[]")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     organization = relationship("Organization", back_populates="members")

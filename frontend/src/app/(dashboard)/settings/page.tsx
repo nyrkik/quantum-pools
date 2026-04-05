@@ -18,6 +18,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { AddressesSection } from "@/components/settings/addresses-section";
 
 // --- Types ---
 
@@ -444,6 +445,7 @@ export default function SettingsPage() {
             </Card>
           </div>
           {canEdit && <BrandingSection />}
+          {canEdit && <AddressesSection />}
         </div>
       )}
 

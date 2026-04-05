@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
+import { useDeepBlueContext } from "@/components/deepblue/deepblue-provider";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -110,6 +111,9 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
   useEffect(() => {
     load();
   }, [load]);
+
+  // Set DeepBlue context
+  useDeepBlueContext({ customerId: id, propertyId: properties[0]?.id });
 
   const displayName = customer
     ? (customer as { display_name?: string }).display_name || customer.first_name

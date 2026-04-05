@@ -41,6 +41,7 @@ import { formatTime } from "@/lib/format";
 import type { ThreadDetail } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "./inbox-badges";
 import { CollapsibleBody } from "./collapsible-body";
+import { ContactLearningPrompt } from "./contact-learning-modal";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 import { AttachmentDisplay } from "@/components/ui/attachment-display";
 
@@ -413,6 +414,9 @@ export function ThreadDetailSheet({
           )}
         </div>
       </div>
+
+      {/* Contact learning prompt */}
+      <ContactLearningPrompt threadId={threadId} onContactSaved={() => { loadThread(); onAction(); }} />
 
       {/* Conversation timeline */}
       <div className="flex-1 overflow-y-auto py-4 space-y-4">

@@ -20,6 +20,7 @@ class ComposeRequest(BaseModel):
     body: str
     customer_id: Optional[str] = None
     job_id: Optional[str] = None
+    case_id: Optional[str] = None
     attachment_ids: Optional[list[str]] = None
 
 
@@ -47,6 +48,7 @@ async def compose_email(
         sender_name=f"{ctx.user.first_name} {ctx.user.last_name}",
         sender_user_id=ctx.user.id,
         job_id=req.job_id,
+        case_id=req.case_id,
         attachment_ids=req.attachment_ids,
     )
     if not result.get("success"):

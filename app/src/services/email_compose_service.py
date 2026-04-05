@@ -52,6 +52,7 @@ class EmailComposeService:
         customer_id: str | None = None,
         sender_name: str | None = None,
         job_id: str | None = None,
+        case_id: str | None = None,
         sender_user_id: str | None = None,
         attachment_ids: list[str] | None = None,
     ) -> dict:
@@ -110,6 +111,10 @@ class EmailComposeService:
                 customer_name=customer_name,
                 property_address=property_address,
             )
+
+        # Link thread to case if provided
+        if case_id and thread and not thread.case_id:
+            thread.case_id = case_id
 
         # ── Step 1: Create all records with status=queued ──
         now = datetime.now(timezone.utc)

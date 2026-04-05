@@ -1,5 +1,6 @@
 """ServiceCase endpoints — org-scoped."""
 
+import json
 from typing import Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -150,6 +151,26 @@ async def get_case(
             ],
         }
         for inv in invoices_result.scalars().all()
+    ]
+
+    # Load DeepBlue conversations
+    from src.models.deepblue_conversation import DeepBlueConversation
+    db_convos = (await db.execute(
+        select(DeepBlueConversation)
+        .where(DeepBlueConversation.case_id == case_id)
+        .order_by(DeepBlueConversation.updated_at.desc())
+    )).scalars().all()
+    d["deepblue_conversations"] = [
+        {
+            "id": c.id,
+            "title": c.title,
+            "user_id": c.user_id,
+            "message_count": len(json.loads(c.messages_json or "[]")),
+            "messages": json.loads(c.messages_json or "[]"),
+            "created_at": presenter._iso(c.created_at),
+            "updated_at": presenter._iso(c.updated_at),
+        }
+        for c in db_convos
     ]
 
     # Load internal messages

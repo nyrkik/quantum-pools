@@ -6,6 +6,9 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { DevModeProvider, useDevMode } from "@/lib/dev-mode";
 import { ComposeProvider } from "@/components/email/compose-provider";
 import { ComposeEmail } from "@/components/email/compose-email";
+import { DeepBlueProvider } from "@/components/deepblue/deepblue-provider";
+import { DeepBlueSheet } from "@/components/deepblue/deepblue-sheet";
+import { DeepBlueTrigger } from "@/components/deepblue/deepblue-trigger";
 import { Sidebar } from "@/components/layout/sidebar";
 import { ActiveVisitBanner } from "@/components/layout/active-visit-banner";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
@@ -62,8 +65,12 @@ export default function DashboardLayout({
     <AuthProvider>
       <DevModeProvider>
         <ComposeProvider>
-          <AuthenticatedLayout>{children}</AuthenticatedLayout>
-          <ComposeEmail />
+          <DeepBlueProvider>
+            <AuthenticatedLayout>{children}</AuthenticatedLayout>
+            <ComposeEmail />
+            <DeepBlueTrigger />
+            <DeepBlueSheet />
+          </DeepBlueProvider>
         </ComposeProvider>
       </DevModeProvider>
     </AuthProvider>

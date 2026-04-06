@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import {
   Sparkles, Send, Loader2, Plus, Pin, PinOff, Trash2, Users, Search, Menu, X, Lock,
 } from "lucide-react";
+import { ToolResultCard } from "@/components/deepblue/tool-cards";
 
 interface ConversationListItem {
   id: string;
@@ -24,6 +25,8 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp?: string;
+  toolCalls?: { name: string; input: Record<string, unknown> }[];
+  toolResults?: { name: string; result: Record<string, unknown> }[];
 }
 
 interface ConversationDetail {
@@ -141,6 +144,8 @@ export default function DeepBluePage() {
       let buffer = "";
       let fullContent = "";
       let newConvoId = activeId;
+      const toolCalls: { name: string; input: Record<string, unknown> }[] = [];
+      const toolResults: { name: string; result: Record<string, unknown> }[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -157,6 +162,10 @@ export default function DeepBluePage() {
             if (event.type === "text_delta") {
               fullContent += event.content;
               setStreamingContent(fullContent);
+            } else if (event.type === "tool_call") {
+              toolCalls.push({ name: event.name, input: event.input });
+            } else if (event.type === "tool_result") {
+              toolResults.push({ name: event.name, result: event.result });
             } else if (event.type === "done" && event.conversation_id) {
               newConvoId = event.conversation_id;
             } else if (event.type === "error") {
@@ -166,7 +175,13 @@ export default function DeepBluePage() {
         }
       }
 
-      const assistantMsg: Message = { role: "assistant", content: fullContent, timestamp: new Date().toISOString() };
+      const assistantMsg: Message = {
+        role: "assistant",
+        content: fullContent,
+        timestamp: new Date().toISOString(),
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        toolResults: toolResults.length > 0 ? toolResults : undefined,
+      };
       setActive((prev) =>
         prev ? { ...prev, messages: [...prev.messages, assistantMsg], id: newConvoId || prev.id } : null
       );
@@ -237,17 +252,14 @@ export default function DeepBluePage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] sm:h-[calc(100vh-3rem)] -m-4 sm:-m-6 -mt-16 sm:-mt-6">
-      {/* Sidebar */}
+      {/* Sidebar — on mobile, starts below the global app top bar (h-14) */}
       <div className={`
         ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} sm:translate-x-0
-        fixed sm:static inset-y-0 left-0 z-40 w-72 bg-background border-r flex flex-col
+        fixed sm:static top-14 sm:top-0 bottom-0 left-0 z-40 w-72 bg-background border-r flex flex-col
         transition-transform duration-200
       `}>
         <div className="flex items-center justify-between p-3 border-b">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold">DeepBlue</span>
-          </div>
+          <span className="text-sm font-semibold">Chats</span>
           <Button size="sm" variant="ghost" className="sm:hidden" onClick={() => setSidebarOpen(false)}>
             <X className="h-4 w-4" />
           </Button>
@@ -328,21 +340,29 @@ export default function DeepBluePage() {
         </div>
       </div>
 
-      {/* Backdrop for mobile sidebar */}
+      {/* Backdrop for mobile sidebar — below the global top bar */}
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/30 z-30 sm:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-x-0 bottom-0 top-14 bg-black/30 z-30 sm:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 bg-muted/20">
-        <div className="flex items-center justify-between p-3 border-b bg-background">
-          <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => setSidebarOpen(true)}>
-            <Menu className="h-4 w-4" />
+        {/* Mobile spacer to clear the global top bar */}
+        <div className="h-14 shrink-0 sm:hidden" />
+        <div className="flex items-center justify-between p-3 border-b bg-background gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="sm:hidden h-8 gap-1.5 shrink-0"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu className="h-3.5 w-3.5" />
+            Chats
           </Button>
           <p className="text-sm font-medium truncate flex-1 text-center sm:text-left">
             {active?.title || "New conversation"}
           </p>
-          <div className="w-8" />
+          <div className="w-8 sm:hidden" />
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -477,7 +497,18 @@ function MessageRow({ message }: { message: Message }) {
       <div className={`max-w-[85%] rounded-lg p-3 text-sm ${
         isUser ? "bg-primary text-primary-foreground" : "bg-background border"
       }`}>
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        {message.content && (
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        )}
+        {message.toolResults?.map((tr, i) => (
+          <ToolResultCard key={i} name={tr.name} result={tr.result} />
+        ))}
+        {message.toolCalls && message.toolCalls.length > (message.toolResults?.length || 0) && (
+          <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Working...
+          </div>
+        )}
       </div>
     </div>
   );

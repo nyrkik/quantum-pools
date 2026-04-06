@@ -49,19 +49,22 @@ import {
 const ALL_ROLES: Role[] = ["owner", "admin", "manager", "technician", "readonly"];
 
 const navItems = [
+  // Daily operations
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, check: null },
-  { href: "/deepblue", label: "DeepBlue", icon: Sparkles, check: null },
-  { href: "/customers", label: "Clients", icon: Users, check: null },
-  { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
-  { href: "/cases", label: "Cases", icon: FolderOpen, check: "canViewInbox" as keyof Permissions },
-  { href: "/jobs", label: "Jobs", icon: ClipboardList, check: "canViewInbox" as keyof Permissions },
   { href: "/inbox", label: "Inbox", icon: Mail, check: "canViewInbox" as keyof Permissions, badge: "pending" as const },
   { href: "/messages", label: "Messages", icon: MessageSquare, check: null, badge: "messages" as const },
+  { href: "/cases", label: "Cases", icon: FolderOpen, check: "canViewInbox" as keyof Permissions },
+  { href: "/jobs", label: "Jobs", icon: ClipboardList, check: "canViewInbox" as keyof Permissions },
+  { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
-  { href: "/parts", label: "Catalog", icon: Package, check: null },
+  { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
+  // Tools & analysis
+  { href: "/deepblue", label: "DeepBlue", icon: Sparkles, check: null },
   { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },
   { href: "/profitability", label: "Profitability", icon: TrendingUp, check: "canViewProfitability" as keyof Permissions },
   { href: "/inspections", label: "Inspections", icon: Shield, check: "canViewInspection" as keyof Permissions },
+  { href: "/parts", label: "Catalog", icon: Package, check: null },
+  // Admin
   { href: "/team", label: "Team", icon: UsersRound, check: "canViewTeam" as keyof Permissions },
   { href: "/settings", label: "Settings", icon: Settings, check: "canViewSettings" as keyof Permissions },
   { href: "/feedback", label: "Feedback", icon: MessageCircleQuestion, check: "canViewSettings" as keyof Permissions, badge: "feedback" as const },

@@ -1,12 +1,14 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useDeepBlue } from "./deepblue-provider";
 import { Sparkles } from "lucide-react";
 
 export function DeepBlueTrigger() {
   const { isOpen, toggleDeepBlue } = useDeepBlue();
+  const pathname = usePathname();
 
-  if (isOpen) return null;
+  if (isOpen || pathname === "/deepblue") return null;
 
   return (
     <button

@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import String, Integer, Float, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from src.core.database import Base
 
@@ -25,6 +25,12 @@ class DeepBlueEvalRun(Base):
     model_used: Mapped[str | None] = mapped_column(String(100))
     system_prompt_hash: Mapped[str | None] = mapped_column(String(32))
     results_json: Mapped[str] = mapped_column(Text)  # full per-prompt breakdown
+
+    # Token + cost tracking
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
 
     notes: Mapped[str | None] = mapped_column(Text)  # optional human notes
     created_at: Mapped[datetime] = mapped_column(

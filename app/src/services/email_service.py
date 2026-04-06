@@ -274,7 +274,11 @@ class EmailService:
         if sender_name:
             first_name = sender_name.split()[0]
             sig_parts.append(first_name)
-        if org_name:
+        # Only include org_name separately if the configured signature doesn't already start with it
+        sig_has_org_name = bool(
+            org_sig and org_name and org_sig.strip().lower().startswith(org_name.strip().lower())
+        )
+        if org_name and not sig_has_org_name:
             sig_parts.append(org_name)
         if org_sig:
             sig_parts.append(org_sig)

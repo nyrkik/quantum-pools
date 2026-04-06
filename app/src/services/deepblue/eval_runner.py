@@ -81,6 +81,8 @@ async def run_single_prompt(
     messages = [{"role": "user", "content": prompt.prompt_text}]
     all_tools_called = []
     full_text = ""
+    total_input_tokens = 0
+    total_output_tokens = 0
     max_turns = max(1, min(prompt.max_turns, MAX_EVAL_TURNS))
 
     try:
@@ -92,6 +94,9 @@ async def run_single_prompt(
                 tools=TOOLS,
                 messages=messages,
             )
+
+            total_input_tokens += response.usage.input_tokens
+            total_output_tokens += response.usage.output_tokens
 
             assistant_content = []
             turn_tool_uses = []
@@ -141,6 +146,8 @@ async def run_single_prompt(
             "reason": f"Runner error: {str(e)[:200]}",
             "tools_called": all_tools_called,
             "text_response": full_text[:300],
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
         }
 
     # Evaluate
@@ -155,6 +162,8 @@ async def run_single_prompt(
         "reason": reason,
         "source": prompt.source,
         "max_turns": max_turns,
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_output_tokens,
     }
 
 
@@ -198,9 +207,15 @@ async def run_eval_suite(
     mode: str = "full",
 ) -> dict:
     """Run the full eval suite and update per-prompt pass history."""
+    import time
+    start_time = time.monotonic()
     prompts = await select_prompts_for_run(db, org_id, mode)
     if not prompts:
-        return {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "results": [], "mode": mode}
+        return {
+            "total": 0, "passed": 0, "failed": 0, "skipped": 0, "results": [],
+            "mode": mode, "total_input_tokens": 0, "total_output_tokens": 0,
+            "total_cost_usd": 0.0, "duration_seconds": 0.0,
+        }
 
     # Build context + system prompt once (same for all prompts)
     empty_ctx = DeepBlueContext()
@@ -298,6 +313,13 @@ async def run_eval_suite(
         )).scalars().all()
         skipped = len(list(all_prompts)) - len(prompts)
 
+    # Aggregate token usage and cost
+    total_input = sum(r.get("input_tokens", 0) for r in results)
+    total_output = sum(r.get("output_tokens", 0) for r in results)
+    # Haiku 4.5 pricing
+    cost = (total_input * 0.80 + total_output * 4.00) / 1_000_000
+    duration = time.monotonic() - start_time
+
     return {
         "total": len(results),
         "passed": passed_count,
@@ -307,6 +329,10 @@ async def run_eval_suite(
         "mode": mode,
         "system_prompt_hash": hashlib.sha256(system_prompt.encode()).hexdigest()[:16],
         "model_used": model,
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_cost_usd": round(cost, 6),
+        "duration_seconds": round(duration, 1),
     }
 
 

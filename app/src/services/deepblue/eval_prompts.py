@@ -6,11 +6,11 @@ just a sanity check after changes.
 """
 
 EVAL_PROMPTS = [
-    # Fuzzy search
+    # Fuzzy search — accept either tool; address fragment is reasonable as property or customer search
     {
         "id": "find_by_address_fragment",
         "prompt": "find the account at Walili",
-        "expected_tools": ["find_customer", "find_property"],
+        "expected_tools_any": ["find_customer", "find_property"],
         "must_not_contain": ["I need", "can you give me"],
     },
     {
@@ -67,11 +67,12 @@ EVAL_PROMPTS = [
         "expected_tools": ["find_property", "get_billing_documents"],
         "max_turns": 2,
     },
-    # Broadcasts
+    # Broadcasts — multi-turn: may need to look up org info first, then draft
     {
         "id": "broadcast_test_send",
         "prompt": "draft an email about our new mailing address and send me a test",
         "expected_tools": ["draft_broadcast_email"],
+        "max_turns": 2,
     },
     # Cases/jobs
     {

@@ -59,7 +59,7 @@ class BroadcastService:
                     org_id=org_id,
                     to=test_recipient,
                     subject=subject,
-                    body=body,
+                    body_text=body,
                     is_new=True,
                 )
                 broadcast.sent_count = 1 if result.success else 0
@@ -111,7 +111,7 @@ class BroadcastService:
                     org_id=org_id,
                     to=primary_email,
                     subject=subject,
-                    body=body,
+                    body_text=body,
                     is_new=True,
                 )
                 if result.success:

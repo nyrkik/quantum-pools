@@ -58,6 +58,10 @@ interface EvalRunSummary {
   pass_rate: number;
   model_used: string | null;
   system_prompt_hash: string | null;
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  total_cost_usd?: number;
+  duration_seconds?: number | null;
   created_at: string;
 }
 
@@ -232,7 +236,7 @@ export default function DevPage() {
   const [loading, setLoading] = useState(true);
   const [runningHealthCheck, setRunningHealthCheck] = useState(false);
   const [runningEval, setRunningEval] = useState(false);
-  const [evalResults, setEvalResults] = useState<{ total: number; passed: number; failed: number; results: EvalResult[] } | null>(null);
+  const [evalResults, setEvalResults] = useState<{ total: number; passed: number; failed: number; skipped?: number; results: EvalResult[]; total_cost_usd?: number; total_input_tokens?: number; total_output_tokens?: number; duration_seconds?: number } | null>(null);
   const [evalHistory, setEvalHistory] = useState<EvalRunSummary[]>([]);
 
   const loadEvalHistory = useCallback(async () => {
@@ -607,11 +611,23 @@ export default function DevPage() {
             <p className="text-sm text-muted-foreground">Tests DeepBlue&apos;s tool selection on a growing corpus of prompts. Click the help icon above for details.</p>
           ) : (
             <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl font-bold">{evalResults.passed}/{evalResults.total}</span>
-                <span className="text-sm text-muted-foreground">passed</span>
-                {evalResults.failed > 0 && (
-                  <span className="text-xs text-red-600">{evalResults.failed} failed</span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl font-bold">{evalResults.passed}/{evalResults.total}</span>
+                  <span className="text-sm text-muted-foreground">passed</span>
+                  {evalResults.failed > 0 && (
+                    <span className="text-xs text-red-600">{evalResults.failed} failed</span>
+                  )}
+                </div>
+                {(evalResults.total_cost_usd !== undefined || evalResults.duration_seconds !== undefined) && (
+                  <div className="text-xs text-muted-foreground text-right">
+                    {evalResults.total_cost_usd !== undefined && (
+                      <div className="font-mono">${evalResults.total_cost_usd.toFixed(4)}</div>
+                    )}
+                    {evalResults.duration_seconds !== undefined && evalResults.duration_seconds !== null && (
+                      <div>{evalResults.duration_seconds.toFixed(1)}s</div>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="space-y-1 max-h-96 overflow-y-auto">
@@ -673,13 +689,19 @@ export default function DevPage() {
                     onClick={() => loadEvalRun(r.id)}
                     className="w-full flex items-center justify-between p-2 rounded hover:bg-muted/50 text-xs text-left"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span className={`font-mono font-medium ${r.pass_rate >= 90 ? "text-green-600" : r.pass_rate >= 75 ? "text-amber-600" : "text-red-600"}`}>
                         {r.passed}/{r.total}
                       </span>
                       <span className="text-muted-foreground">({r.pass_rate}%)</span>
+                      {r.total_cost_usd !== undefined && r.total_cost_usd > 0 && (
+                        <span className="font-mono text-muted-foreground">${r.total_cost_usd.toFixed(4)}</span>
+                      )}
+                      {r.duration_seconds !== undefined && r.duration_seconds !== null && r.duration_seconds > 0 && (
+                        <span className="text-muted-foreground">{r.duration_seconds.toFixed(0)}s</span>
+                      )}
                     </div>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[10px] text-muted-foreground shrink-0">
                       {new Date(r.created_at).toLocaleString()}
                     </span>
                   </button>

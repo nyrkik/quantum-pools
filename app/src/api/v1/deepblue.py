@@ -289,6 +289,10 @@ async def run_eval(
         model_used=suite_result["model_used"],
         system_prompt_hash=suite_result["system_prompt_hash"],
         results_json=json.dumps(suite_result["results"]),
+        total_input_tokens=suite_result.get("total_input_tokens", 0),
+        total_output_tokens=suite_result.get("total_output_tokens", 0),
+        total_cost_usd=suite_result.get("total_cost_usd", 0.0),
+        duration_seconds=suite_result.get("duration_seconds"),
     )
     db.add(run)
     await db.commit()
@@ -302,6 +306,10 @@ async def run_eval(
         "results": suite_result["results"],
         "mode": mode,
         "model_used": suite_result["model_used"],
+        "total_input_tokens": suite_result.get("total_input_tokens", 0),
+        "total_output_tokens": suite_result.get("total_output_tokens", 0),
+        "total_cost_usd": suite_result.get("total_cost_usd", 0.0),
+        "duration_seconds": suite_result.get("duration_seconds"),
     }
 
 
@@ -508,6 +516,10 @@ async def list_eval_runs(
                 "model_used": r.model_used,
                 "system_prompt_hash": r.system_prompt_hash,
                 "run_by_user_id": r.run_by_user_id,
+                "total_input_tokens": r.total_input_tokens,
+                "total_output_tokens": r.total_output_tokens,
+                "total_cost_usd": float(r.total_cost_usd or 0),
+                "duration_seconds": r.duration_seconds,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             for r in results

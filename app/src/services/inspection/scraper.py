@@ -93,24 +93,40 @@ class EMDScraper:
             await page.wait_for_selector(".alt-datePicker", timeout=15000)
             logger.info("Page loaded, date picker found")
 
-            # Set date filter via JavaScript (same approach as the Selenium version)
-            await page.eval_on_selector(
-                ".alt-datePicker",
-                """(el, dateRange) => {
-                    el.value = '';
-                    el.focus();
-                    el.value = dateRange;
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                    el.blur();
-                }""",
-                date_range,
-            )
+            # Set date filter via native keyboard input with retry — JS injection
+            # doesn't trigger the date picker library's internal state update.
+            # The picker can be flaky so we verify the value took and retry if not.
+            picker = page.locator(".alt-datePicker")
+            for attempt in range(3):
+                await picker.click(click_count=3)
+                await asyncio.sleep(0.5)
+                await page.keyboard.press("Backspace")
+                await asyncio.sleep(0.5)
+                await picker.type(date_range, delay=50)
+                await asyncio.sleep(0.3)
+                await page.keyboard.press("Enter")
 
-            logger.info(f"Date filter set to: {date_range}")
+                # Wait for results to load
+                await asyncio.sleep(self.rate_limit_seconds)
 
-            # Wait for results to load
-            await asyncio.sleep(self.rate_limit_seconds)
+                # Verify the filter took by checking the input value
+                current_val = await picker.input_value()
+                if formatted_start in current_val:
+                    logger.info(f"Date filter set to: {current_val} (attempt {attempt + 1})")
+                    break
+                logger.warning(f"Date filter didn't take (got '{current_val}'), retrying ({attempt + 1}/3)")
+                # Reload the page for a clean retry
+                await asyncio.sleep(self.rate_limit_seconds)
+                try:
+                    await page.goto(EMD_URL, wait_until="domcontentloaded", timeout=60000)
+                    await page.wait_for_selector(".alt-datePicker", timeout=15000)
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Page reload failed on retry: {e}")
+                    continue
+            else:
+                logger.error(f"Date filter failed after 3 attempts, aborting")
+                return []
 
             # Check for results
             results = await page.query_selector_all(".flex-row")
@@ -207,6 +223,16 @@ class EMDScraper:
         address_el = await element.query_selector(".establishment-list-address")
         address = (await address_el.text_content() or "Unknown").strip() if address_el else "Unknown"
 
+        # Get actual inspection date from the result HTML (e.g. "March 26, 2026")
+        inspection_date = search_date
+        date_divs = await element.query_selector_all(".text-right")
+        for div in date_divs:
+            text = (await div.text_content() or "").strip()
+            parsed = self._parse_inspection_date(text)
+            if parsed:
+                inspection_date = parsed
+                break
+
         # Get PDF/inspection URL
         pdf_url = None
         inspection_id = None
@@ -222,8 +248,22 @@ class EMDScraper:
             "url": url,
             "pdf_url": pdf_url,
             "inspection_id": inspection_id,
-            "inspection_date": search_date,
+            "inspection_date": inspection_date,
         }
+
+    @staticmethod
+    def _parse_inspection_date(text: str) -> Optional[str]:
+        """Parse date like 'March 26, 2026' from result text, return YYYY-MM-DD."""
+        match = re.search(
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})",
+            text,
+        )
+        if match:
+            try:
+                return datetime.strptime(match.group(0), "%B %d, %Y").strftime("%Y-%m-%d")
+            except ValueError:
+                return None
+        return None
 
     @staticmethod
     def _extract_inspection_id(url: str) -> Optional[str]:

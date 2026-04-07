@@ -9,6 +9,7 @@
 | 1 | Chemistry Advisor | **Partial** | `dosing_engine.py` exists, DeepBlue has `_exec_dosing()` tool. No standalone agent yet. |
 | 2 | Profitability Analyst | **Partial** | `profitability_service.py` + `pricing_service.py` do calculations. No AI narrative generation yet. |
 | 3 | Inspection Intelligence | **Partial** | Scraper, PDF extractor, facility matching all built. No AI summarization agent yet. |
+| 11 | Site Discovery Agent | **Planned** | Dev tool: Playwright + Claude Vision analyzes county portals, auto-generates scraper adapter configs. |
 | 4 | Service Narrator | **Not started** | No implementation. Planned for Phase 3c. |
 | 5 | Route Strategist | **Partial** | OR-Tools VRP optimization built. No AI strategic reasoning yet. |
 | 6 | Equipment Oracle | **Partial** | Equipment catalog + items + events tracked. DeepBlue has equipment tools. No predictive agent. |

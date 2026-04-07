@@ -10,9 +10,14 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.api.deps import get_current_org_user, OrgUserContext
+from src.api.deps import get_current_org_user, require_roles, OrgUserContext, require_feature
+from src.models.organization_user import OrgRole
 
-router = APIRouter(prefix="/deepblue", tags=["deepblue"])
+router = APIRouter(
+    prefix="/deepblue",
+    tags=["deepblue"],
+    dependencies=[Depends(require_feature("deepblue"))],
+)
 
 
 class MessageRequest(BaseModel):
@@ -139,12 +144,10 @@ async def list_conversations(
 
 @router.get("/usage-stats")
 async def get_usage_stats(
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Admin dashboard data: org totals + per-user breakdown for current month."""
-    if ctx.org_user.role not in ("owner", "admin"):
-        raise HTTPException(status_code=403, detail="Admin only")
 
     from datetime import date as _date
     from sqlalchemy import func as _func
@@ -260,7 +263,7 @@ async def get_usage_stats(
 @router.post("/eval-run")
 async def run_eval(
     mode: str = "full",
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """Run the DeepBlue tool-selection eval suite. Owner only.
@@ -269,8 +272,6 @@ async def run_eval(
     - full: run all active prompts
     - smart: skip prompts passing 5+ consecutive runs if checked within last 7 days
     """
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
 
     import anthropic as _anthropic
     import os as _os
@@ -327,12 +328,10 @@ async def run_eval(
 @router.get("/eval-prompts")
 async def list_eval_prompts(
     source: Optional[str] = None,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """List all eval prompts in the living suite. Owner only."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
 
     query = select(DeepBlueEvalPrompt).where(
@@ -370,12 +369,10 @@ async def list_eval_prompts(
 async def update_eval_prompt(
     prompt_id: str,
     active: Optional[bool] = None,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """Enable/disable an eval prompt. Owner only."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
 
     p = (await db.execute(
@@ -396,12 +393,10 @@ async def update_eval_prompt(
 @router.post("/eval-prompts/promote-gap/{gap_id}")
 async def promote_gap_to_eval(
     gap_id: str,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """Promote a knowledge gap to an eval prompt. Owner only."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.models.deepblue_knowledge_gap import DeepBlueKnowledgeGap
     from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
     import uuid as _uuid
@@ -452,12 +447,10 @@ class GenerateEvalRequest(BaseModel):
 @router.post("/eval-prompts/generate")
 async def generate_eval_prompts(
     req: GenerateEvalRequest,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """AI-generated adversarial eval prompts. Returns drafts for human review — not auto-added."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.services.deepblue.eval_generator import generate_adversarial_prompts
     drafts = await generate_adversarial_prompts(db, ctx.organization_id, count=req.count, focus=req.focus)
     return {"drafts": drafts}
@@ -473,12 +466,10 @@ class ApproveDraftRequest(BaseModel):
 @router.post("/eval-prompts/approve-draft")
 async def approve_draft(
     req: ApproveDraftRequest,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """Activate an AI-generated draft as a real eval prompt. Owner only."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.models.deepblue_eval_prompt import DeepBlueEvalPrompt
     import uuid as _uuid
 
@@ -501,12 +492,10 @@ async def approve_draft(
 @router.get("/eval-runs")
 async def list_eval_runs(
     limit: int = 20,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """List recent eval runs for this org. Owner only."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.models.deepblue_eval_run import DeepBlueEvalRun
 
     results = (await db.execute(
@@ -541,12 +530,10 @@ async def list_eval_runs(
 @router.get("/eval-runs/{run_id}")
 async def get_eval_run(
     run_id: str,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a specific eval run with full per-prompt results."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.models.deepblue_eval_run import DeepBlueEvalRun
 
     run = (await db.execute(
@@ -572,12 +559,10 @@ async def get_eval_run(
 
 @router.post("/retention/run")
 async def run_retention(
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
     db: AsyncSession = Depends(get_db),
 ):
     """Run retention cleanup. Owner only. Can be called by a cron job or manually."""
-    if ctx.org_user.role != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     from src.services.deepblue.retention_service import run_retention_cleanup
     counts = await run_retention_cleanup(db)
     return counts
@@ -812,15 +797,13 @@ async def list_knowledge_gaps(
     resolution: Optional[str] = None,
     reviewed: Optional[bool] = None,
     limit: int = 100,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """List DeepBlue knowledge gaps — queries that needed meta-tool or went unresolved."""
     from src.api.deps import OrgRole
     from src.models.deepblue_knowledge_gap import DeepBlueKnowledgeGap
 
-    if ctx.org_user.role not in ("owner", "admin"):
-        raise HTTPException(status_code=403, detail="Admin only")
 
     query = select(DeepBlueKnowledgeGap).where(
         DeepBlueKnowledgeGap.organization_id == ctx.organization_id
@@ -858,14 +841,12 @@ class MarkReviewedRequest(BaseModel):
 async def mark_gap_reviewed(
     gap_id: str,
     req: MarkReviewedRequest,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a knowledge gap as reviewed, optionally recording which tool was built for it."""
     from src.models.deepblue_knowledge_gap import DeepBlueKnowledgeGap
 
-    if ctx.org_user.role not in ("owner", "admin"):
-        raise HTTPException(status_code=403, detail="Admin only")
 
     gap = (await db.execute(
         select(DeepBlueKnowledgeGap).where(
@@ -1026,16 +1007,12 @@ class ConfirmBroadcastRequest(BaseModel):
 @router.post("/confirm-broadcast")
 async def confirm_broadcast(
     req: ConfirmBroadcastRequest,
-    ctx: OrgUserContext = Depends(get_current_org_user),
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
     """Confirm and send a broadcast email drafted by DeepBlue."""
     import json as _json
     from src.services.broadcast_service import BroadcastService
-
-    # Only admin+ can broadcast
-    if ctx.org_user.role not in ("owner", "admin"):
-        raise HTTPException(status_code=403, detail="Only admins can send broadcast emails")
 
     # Default test recipient to current user's email
     test_recipient = req.test_recipient

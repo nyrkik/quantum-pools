@@ -28,12 +28,7 @@ class BillingFrequency(str, enum.Enum):
     annual = "annual"
 
 
-class PaymentMethod(str, enum.Enum):
-    cash = "cash"
-    check = "check"
-    credit_card = "credit_card"
-    ach = "ach"
-    other = "other"
+from src.core.enums import PaymentMethod  # noqa: F401 — re-exported for backward compat
 
 
 class Customer(Base):

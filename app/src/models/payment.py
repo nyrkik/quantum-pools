@@ -8,13 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 
-class PaymentMethod(str, enum.Enum):
-    cash = "cash"
-    check = "check"
-    credit_card = "credit_card"
-    ach = "ach"
-    stripe = "stripe"
-    other = "other"
+from src.core.enums import PaymentMethod  # noqa: F401 — re-exported for backward compat
 
 
 class PaymentStatus(str, enum.Enum):

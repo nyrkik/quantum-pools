@@ -42,7 +42,7 @@ class Route(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    tech = relationship("Tech", lazy="noload")
+    tech = relationship("Tech", back_populates="routes", lazy="noload")
     stops = relationship(
         "RouteStop",
         back_populates="route",

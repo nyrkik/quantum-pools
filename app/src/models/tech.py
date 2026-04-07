@@ -68,6 +68,7 @@ class Tech(Base):
     )
 
     visits = relationship("Visit", back_populates="tech", lazy="noload")
+    routes = relationship("Route", back_populates="tech", lazy="noload")
 
     @property
     def full_name(self) -> str:

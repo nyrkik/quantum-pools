@@ -18,24 +18,8 @@ class PropertyCreate(BaseModel):
     zip_code: str = Field(..., min_length=1)
     county: Optional[str] = None
     emd_fa_number: Optional[str] = None
-    pool_type: Optional[str] = None
-    pool_gallons: Optional[int] = None
-    pool_sqft: Optional[float] = None
-    pool_surface: Optional[str] = None
-    pool_length_ft: Optional[float] = None
-    pool_width_ft: Optional[float] = None
-    pool_depth_shallow: Optional[float] = None
-    pool_depth_deep: Optional[float] = None
-    pool_depth_avg: Optional[float] = None
-    pool_shape: Optional[str] = None
-    pool_volume_method: Optional[str] = None
-    has_spa: bool = False
-    has_water_feature: bool = False
-    pump_type: Optional[str] = None
-    filter_type: Optional[str] = None
-    heater_type: Optional[str] = None
-    chlorinator_type: Optional[str] = None
-    automation_system: Optional[str] = None
+    # Pool/equipment fields live on WaterFeature, not Property.
+    # Create a WF via /api/v1/bodies-of-water/property/{id} after property creation.
     gate_code: Optional[str] = None
     access_instructions: Optional[str] = None
     dog_on_property: bool = False
@@ -54,24 +38,7 @@ class PropertyUpdate(BaseModel):
     zip_code: Optional[str] = None
     county: Optional[str] = None
     emd_fa_number: Optional[str] = None
-    pool_type: Optional[str] = None
-    pool_gallons: Optional[int] = None
-    pool_sqft: Optional[float] = None
-    pool_surface: Optional[str] = None
-    pool_length_ft: Optional[float] = None
-    pool_width_ft: Optional[float] = None
-    pool_depth_shallow: Optional[float] = None
-    pool_depth_deep: Optional[float] = None
-    pool_depth_avg: Optional[float] = None
-    pool_shape: Optional[str] = None
-    pool_volume_method: Optional[str] = None
-    has_spa: Optional[bool] = None
-    has_water_feature: Optional[bool] = None
-    pump_type: Optional[str] = None
-    filter_type: Optional[str] = None
-    heater_type: Optional[str] = None
-    chlorinator_type: Optional[str] = None
-    automation_system: Optional[str] = None
+    # Pool/equipment fields live on WaterFeature — update via WF endpoints.
     gate_code: Optional[str] = None
     access_instructions: Optional[str] = None
     dog_on_property: Optional[bool] = None

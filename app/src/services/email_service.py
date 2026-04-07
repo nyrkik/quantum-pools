@@ -228,6 +228,10 @@ class EmailService:
         # Fallback: if primary provider failed and it's Postmark, try SMTP
         if isinstance(self._provider, PostmarkProvider):
             logger.warning(f"Postmark failed for {message.to}: {result.error} — falling back to SMTP")
+            # If Postmark is pending approval, switch to SMTP for remaining sends this session
+            if "pending approval" in (result.error or ""):
+                logger.info("Postmark pending approval — switching to SMTP for this session")
+                self._provider = SmtpProvider()
             try:
                 smtp_result = await SmtpProvider().send(message)
                 if smtp_result.success:

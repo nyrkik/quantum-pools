@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import anthropic
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -131,8 +131,12 @@ class AgentThreadService:
         elif status == "archived":
             base = base.where(AgentThread.status == "archived")
         else:
-            # Default: exclude archived
-            base = base.where(AgentThread.status != "archived")
+            # Default: exclude archived and outbound-only threads (broadcasts, sent emails
+            # that never got a reply). These clutter the inbox — only show if customer responded.
+            base = base.where(
+                AgentThread.status != "archived",
+                or_(AgentThread.last_direction == "inbound", AgentThread.has_pending == True),
+            )
         if exclude_spam:
             base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
         if exclude_ignored:
@@ -240,6 +244,8 @@ class AgentThreadService:
                 .where(
                     thread_org,
                     AgentThread.status.notin_(("closed", "ignored")),
+                    # Only count as unread if last message was inbound (from customer)
+                    AgentThread.last_direction == "inbound",
                     or_(
                         ThreadRead.read_at.is_(None),
                         AgentThread.last_message_at > ThreadRead.read_at,

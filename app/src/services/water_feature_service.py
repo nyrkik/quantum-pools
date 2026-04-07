@@ -88,7 +88,7 @@ class WaterFeatureService:
                 id=str(uuid.uuid4()),
                 property_id=property_id,
                 organization_id=org_id,
-                body_of_water_id=wf_id,
+                water_feature_id=wf_id,
             ))
 
         # Link unlinked PropertyDifficulty to this WF

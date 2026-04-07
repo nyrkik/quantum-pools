@@ -180,8 +180,8 @@ Max 5 tool-use rounds per turn prevents runaway loops. Per-turn counter in `Tool
 ### Lookup (auto-execute)
 - `get_agent_health` — agent metrics, failures, per-agent breakdown (wraps agent-ops observability)
 - `find_customer` — fuzzy search customers (ILIKE + pg_trgm fallback)
-- `find_property` — fuzzy search properties with BOW details
-- `get_equipment` — equipment on a property/BOW
+- `find_property` — fuzzy search properties with WF details
+- `get_equipment` — equipment on a property/WF
 - `get_chemical_history` — recent readings
 - `get_service_history` — visits
 - `get_customer_info` — full customer detail

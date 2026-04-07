@@ -58,9 +58,9 @@ TOOLS = [
     {
         "name": "get_equipment",
         "description": (
-            "Get all equipment installed on a property or specific body of water (pool/spa). "
+            "Get all equipment installed on a property or specific water feature (pool/spa). "
             "Returns equipment type, brand, model, and linked catalog info. "
-            "Use the context IDs if available — you don't need to ask the user for property/BOW ID."
+            "Use the context IDs if available — you don't need to ask the user for property/WF ID."
         ),
         "input_schema": {
             "type": "object",
@@ -486,7 +486,7 @@ async def _exec_dosing(inp: dict, ctx: ToolContext) -> dict:
 
 
 async def _exec_get_equipment(inp: dict, ctx: ToolContext) -> dict:
-    """Get equipment installed on a property/BOW."""
+    """Get equipment installed on a property/water feature."""
     from src.models.equipment_item import EquipmentItem
     from src.models.water_feature import WaterFeature
 
@@ -1368,7 +1368,7 @@ async def _exec_query_database(inp: dict, ctx: ToolContext) -> dict:
 
 
 async def _exec_add_equipment(inp: dict, ctx: ToolContext) -> dict:
-    """Preview adding equipment to a BOW. Does NOT save — returns confirmation request."""
+    """Preview adding equipment to a water feature. Does NOT save — returns confirmation request."""
     from src.models.water_feature import WaterFeature
     from src.models.property import Property
 

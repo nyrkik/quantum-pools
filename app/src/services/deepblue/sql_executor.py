@@ -33,7 +33,7 @@ ORG_SCOPED_TABLES = {
     "service_cases", "routes", "route_stops",
     "techs", "broadcast_emails", "feedback_items", "customer_contacts",
     "property_difficulty", "property_jurisdiction", "satellite_analyses",
-    "pool_measurements", "body_of_waters", "equipment_catalog_items",
+    "pool_measurements", "water_features", "equipment_catalog_items",
     "org_cost_settings", "service_tiers", "job_invoices",
     "email_templates", "inbox_routing_rules", "visit_charges",
 }

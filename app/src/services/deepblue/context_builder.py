@@ -123,14 +123,14 @@ async def build_context(db: AsyncSession, org_id: str, ctx: DeepBlueContext) -> 
                 select(WaterFeature).where(WaterFeature.property_id == p.id, WaterFeature.is_active == True)
             )).scalars().all()
             for wf in wfs:
-                bow_line = f"  {wf.name or wf.water_type}"
+                wf_line = f"  {wf.name or wf.water_type}"
                 if wf.pool_gallons:
-                    bow_line += f" — {wf.pool_gallons:,} gallons"
+                    wf_line += f" — {wf.pool_gallons:,} gallons"
                 if wf.sanitizer_type:
-                    bow_line += f", {wf.sanitizer_type}"
-                lines.append(bow_line)
+                    wf_line += f", {wf.sanitizer_type}"
+                lines.append(wf_line)
 
-                # Equipment on this BOW
+                # Equipment on this water feature
                 equip = (await db.execute(
                     select(EquipmentItem)
                     .options(selectinload(EquipmentItem.catalog_equipment))

@@ -483,7 +483,7 @@ export default function MapPage() {
     }
   };
 
-  // --- BOW pin activation ---
+  // --- WF pin activation ---
 
   const handleBowPinActivate = (bowId: string) => {
     if (activeBowId === bowId) {

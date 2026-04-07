@@ -54,7 +54,7 @@
 > **Status key:** BUILT = in production, PARTIAL = foundation exists, PLANNED = in roadmap
 
 1. **AI-powered profitability analysis** with pricing recommendations — **BUILT** (profitability service + dashboard)
-2. **Satellite pool/vegetation detection** from imagery — **BUILT** (Claude Vision 2-pass, per-BOW)
+2. **Satellite pool/vegetation detection** from imagery — **BUILT** (Claude Vision 2-pass, per-WF)
 3. **Inspection intelligence** (Pool Scout) — **BUILT** (scraper, PDF extractor, 908 facilities)
 4. **Jurisdiction-aware bather load calculator** with estimation chain — **BUILT** (10 jurisdictions seeded)
 5. **Account health scoring** with churn prediction — **PLANNED** (Customer Intelligence agent, Phase 9-10)

@@ -903,7 +903,7 @@ async def confirm_add_equipment(
     from src.models.water_feature import WaterFeature
     from src.models.property import Property
 
-    # Verify BOW belongs to this org
+    # Verify water feature belongs to this org
     wf = (await db.execute(
         select(WaterFeature).where(WaterFeature.id == req.bow_id)
     )).scalar_one_or_none()

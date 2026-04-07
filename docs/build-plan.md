@@ -97,9 +97,9 @@ _Detailed spec: [profitability-feature-plan.md](profitability-feature-plan.md)_
 - [x] `SatelliteAnalysisService` — automated pool detection
   - [x] Google Static Maps API integration (fetch satellite image by lat/lng)
   - [x] Claude Vision 2-pass analysis (replaced OpenCV — zoom 21 detail + zoom 20 context)
-  - [x] Per-BOW analysis (each pool BOW gets own satellite analysis)
+  - [x] Per-WF analysis (each pool WF gets own satellite analysis)
   - [x] Confidence scoring and estimated field tagging
-  - [x] Result caching (per BOW)
+  - [x] Result caching (per WF)
 
 ### 3b.3 API Endpoints
 - [x] All profitability endpoints implemented (13 endpoints under `/api/v1/profitability/`)
@@ -174,11 +174,11 @@ _Priority: CRITICAL — table stakes features missing from current build_
 ### 3d.1 Multiple Bodies of Water — COMPLETE
 - [x] `WaterFeature` model (was `BodyOfWater`) — pool, spa, hot_tub, wading_pool, fountain, water_feature types
 - [x] Migration + backfill from properties (migration `8c1a65b5a13d`)
-- [x] Chemical readings linked to body_of_water
+- [x] Chemical readings linked to water_feature
 - [x] Separate equipment tracking per body (via `equipment_items`)
-- [x] Pool measurement per-BOW (`?bow={id}`)
-- [x] Satellite analysis per-BOW (one analysis per pool BOW)
-- [x] Frontend: BOW tiles on property detail with progressive disclosure
+- [x] Pool measurement per-WF (`?bow={id}`)
+- [x] Satellite analysis per-WF (one analysis per pool WF)
+- [x] Frontend: WF tiles on property detail with progressive disclosure
 - [ ] Separate billing rates per body of water (rate allocation exists but not fully wired)
 
 ### 3d.2 LSI Calculator & Dosing Engine — PARTIAL

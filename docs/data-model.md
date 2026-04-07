@@ -54,7 +54,7 @@ Core business entities: who we serve and where.
 | PropertyPhoto | `property_photos` | Photos of the property |
 | PropertyAccessCode | `property_access_codes` | Gate codes, lock combos per property |
 | PropertyDifficulty | `property_difficulties` | 12-factor difficulty scoring (shade, debris, access, etc.) |
-| PropertyJurisdiction | `property_jurisdictions` | Links property/BOW to bather load jurisdiction |
+| PropertyJurisdiction | `property_jurisdictions` | Links property/WF to bather load jurisdiction |
 | BatherLoadJurisdiction | `bather_load_jurisdictions` | Jurisdiction-specific bather load calculation rules |
 
 ### Service Operations
@@ -164,7 +164,7 @@ Cost analysis and pricing optimization.
 |-------|-------|---------|
 | OrgCostSettings | `org_cost_settings` | Org-wide cost defaults (labor rate, truck cost, overhead) |
 | OrgChemicalPrices | `org_chemical_prices` | Org-level chemical pricing |
-| ChemicalCostProfile | `chemical_cost_profiles` | Per-BOW chemical cost profile |
+| ChemicalCostProfile | `chemical_cost_profiles` | Per-WF chemical cost profile |
 | DimensionEstimate | `dimension_estimates` | AI-estimated pool dimensions |
 
 ### Pool Analysis
@@ -173,7 +173,7 @@ Satellite imagery and measurement tools.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| SatelliteAnalysis | `satellite_analyses` | Per-BOW satellite analysis (sqft, vegetation, obstructions). Unique FK to `water_features.id` |
+| SatelliteAnalysis | `satellite_analyses` | Per-WF satellite analysis (sqft, vegetation, obstructions). Unique FK to `water_features.id` |
 | PoolMeasurement | `pool_measurements` | Ground-truth measurements from tech photos + Claude Vision |
 
 ### Inspections (Pool Scout Pro)

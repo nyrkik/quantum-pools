@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
-  Sparkles, Send, Loader2, Plus, Pin, PinOff, Trash2, Users, Search, Menu, X, Lock,
+  Sparkles, Send, Loader2, Plus, Pin, PinOff, Trash2, Users, Search, Menu, X, Lock, Check,
 } from "lucide-react";
 import { ToolResultCard } from "@/components/deepblue/tool-cards";
 
@@ -220,13 +220,13 @@ export default function DeepBluePage() {
     } catch { toast.error("Failed"); }
   };
 
-  const handleDelete = async (id: string) => {
-    if (pendingDelete !== id) {
-      setPendingDelete(id);
-      setTimeout(() => setPendingDelete((p) => (p === id ? null : p)), 3000);
-      toast("Tap delete again to confirm", { duration: 3000 });
-      return;
-    }
+  const handleDeleteStart = (id: string) => {
+    setPendingDelete(id);
+    // Auto-cancel after 5s if no action taken
+    setTimeout(() => setPendingDelete((p) => (p === id ? null : p)), 5000);
+  };
+
+  const handleDeleteConfirm = async (id: string) => {
     setPendingDelete(null);
     try {
       const resp = await fetch(`/api/v1/deepblue/conversations/${id}`, {
@@ -242,6 +242,8 @@ export default function DeepBluePage() {
       loadList();
     } catch { toast.error("Failed to delete"); }
   };
+
+  const handleDeleteCancel = () => setPendingDelete(null);
 
   const filtered = conversations.filter((c) =>
     !search.trim() || (c.title || "").toLowerCase().includes(search.toLowerCase())
@@ -310,7 +312,9 @@ export default function DeepBluePage() {
                       onSelect={() => loadConversation(c.id)}
                       onPin={() => handleTogglePin(c.id, c.pinned)}
                       onShare={() => handleToggleShare(c.id, c.visibility)}
-                      onDelete={() => handleDelete(c.id)}
+                      onDeleteStart={() => handleDeleteStart(c.id)}
+                      onDeleteConfirm={() => handleDeleteConfirm(c.id)}
+                      onDeleteCancel={handleDeleteCancel}
                     />
                   ))}
                 </>
@@ -330,7 +334,9 @@ export default function DeepBluePage() {
                       onSelect={() => loadConversation(c.id)}
                       onPin={() => handleTogglePin(c.id, c.pinned)}
                       onShare={() => handleToggleShare(c.id, c.visibility)}
-                      onDelete={() => handleDelete(c.id)}
+                      onDeleteStart={() => handleDeleteStart(c.id)}
+                      onDeleteConfirm={() => handleDeleteConfirm(c.id)}
+                      onDeleteCancel={handleDeleteCancel}
                     />
                   ))}
                 </>
@@ -421,7 +427,8 @@ export default function DeepBluePage() {
 }
 
 function ConversationRow({
-  conv, isActive, showActions, pendingDelete, onSelect, onPin, onShare, onDelete,
+  conv, isActive, showActions, pendingDelete, onSelect, onPin, onShare,
+  onDeleteStart, onDeleteConfirm, onDeleteCancel,
 }: {
   conv: ConversationListItem;
   isActive: boolean;
@@ -430,7 +437,9 @@ function ConversationRow({
   onSelect: () => void;
   onPin: () => void;
   onShare: () => void;
-  onDelete: () => void;
+  onDeleteStart: () => void;
+  onDeleteConfirm: () => void;
+  onDeleteCancel: () => void;
 }) {
   return (
     <div className={`group rounded-md p-1.5 ${isActive ? "bg-primary/10" : "hover:bg-muted/50"}`}>
@@ -475,15 +484,38 @@ function ConversationRow({
             )}
           </Button>
           <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-6 w-6 ${pendingDelete === conv.id ? "bg-destructive/10" : ""}`}
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            title={pendingDelete === conv.id ? "Tap again to confirm delete" : "Delete conversation"}
-          >
-            <Trash2 className={`h-2.5 w-2.5 ${pendingDelete === conv.id ? "text-destructive" : "text-muted-foreground"}`} />
-          </Button>
+          {pendingDelete === conv.id ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={(e) => { e.stopPropagation(); onDeleteCancel(); }}
+                title="Cancel delete"
+              >
+                <X className="h-2.5 w-2.5 text-muted-foreground" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={(e) => { e.stopPropagation(); onDeleteConfirm(); }}
+                title="Confirm delete"
+              >
+                <Check className="h-2.5 w-2.5 text-destructive" />
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={(e) => { e.stopPropagation(); onDeleteStart(); }}
+              title="Delete conversation"
+            >
+              <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
+            </Button>
+          )}
         </div>
       )}
     </div>

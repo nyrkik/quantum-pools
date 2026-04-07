@@ -1,3 +1,9 @@
+---
+name: cpu
+description: Commit, push, and update docs — use after any code changes to keep docs aligned
+user_invocable: true
+---
+
 Commit, push, and update documentation. Run all three steps in order.
 
 ## Step 1: Commit & Push

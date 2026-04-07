@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import date
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -65,6 +66,8 @@ async def create_invoice(
         tax_rate=body.tax_rate,
         is_recurring=body.is_recurring,
         notes=body.notes,
+        billing_name=body.billing_name,
+        billing_email=body.billing_email,
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),
     )
     # Link to job if provided
@@ -289,7 +292,40 @@ async def send_invoice(
             await log_job_activity(db, invoice_id, f"Estimate {invoice.invoice_number} sent to {', '.join(result['to'])}")
             await db.commit()
     else:
-        await log_job_activity(db, invoice_id, f"Invoice {invoice.invoice_number} marked as sent")
+        # Send invoice email with payment link
+        from src.services.email_service import EmailService
+        from src.models.customer import Customer
+        from src.core.config import settings
+
+        to_email = None
+        to_name = None
+        if invoice.customer_id:
+            cust = (await db.execute(
+                select(Customer).where(Customer.id == invoice.customer_id)
+            )).scalar_one_or_none()
+            if cust:
+                to_email = cust.email
+                to_name = cust.display_name
+        else:
+            to_email = invoice.billing_email
+            to_name = invoice.billing_name or "Customer"
+
+        if to_email:
+            pay_url = f"{settings.frontend_url}/pay/{invoice.payment_token}"
+            email_svc = EmailService(db)
+            await email_svc.send_invoice_email(
+                org_id=ctx.organization_id,
+                to=to_email,
+                customer_name=to_name or "",
+                invoice_number=invoice.invoice_number or "",
+                subject=f"Invoice: {invoice.subject or invoice.invoice_number or 'Service Invoice'}",
+                total=f"${invoice.total:,.2f}",
+                due_date=invoice.due_date.strftime("%B %d, %Y") if invoice.due_date else "Upon receipt",
+                view_url=pay_url,
+            )
+            await log_job_activity(db, invoice_id, f"Invoice {invoice.invoice_number} sent to {to_email}")
+        else:
+            await log_job_activity(db, invoice_id, f"Invoice {invoice.invoice_number} marked as sent (no email on file)")
         await db.commit()
 
     return _invoice_to_response(invoice)

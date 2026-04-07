@@ -231,13 +231,16 @@ class InvoiceService:
             raise NotFoundError("Invoice")
         return invoice
 
-    async def create(self, org_id: str, customer_id: str, line_items_data: List[dict], **kwargs) -> Invoice:
-        # Verify customer exists
-        cust_result = await self.db.execute(
-            select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
-        )
-        if not cust_result.scalar_one_or_none():
-            raise NotFoundError("Customer")
+    async def create(self, org_id: str, customer_id: str | None = None, line_items_data: List[dict] = [], **kwargs) -> Invoice:
+        # Verify customer exists (if provided)
+        if customer_id:
+            cust_result = await self.db.execute(
+                select(Customer).where(Customer.id == customer_id, Customer.organization_id == org_id)
+            )
+            if not cust_result.scalar_one_or_none():
+                raise NotFoundError("Customer")
+        elif not kwargs.get("billing_name"):
+            raise ValidationError("Either customer_id or billing_name is required")
 
         invoice = Invoice(
             id=str(uuid.uuid4()),

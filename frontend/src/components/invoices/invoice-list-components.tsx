@@ -204,11 +204,17 @@ export function MonthlyChart({
                         <div className="text-amber-600">Open ${d.open.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
                       </div>
                     )}
-                    {/* Bar container */}
-                    <div className={`flex-1 flex flex-col justify-end rounded-t overflow-hidden transition-opacity duration-150 ${d.isFuture ? "opacity-40" : highlighted ? "opacity-100" : faded ? "opacity-40" : "opacity-100"}`}>
-                      <div className={`${highlighted ? "bg-slate-300" : "bg-slate-200"} transition-colors duration-150`} style={{ flexBasis: `${greyPct}%`, minHeight: 0 }} />
-                      {openPct > 0 && <div className="bg-amber-400" style={{ flexBasis: `${openPct}%`, minHeight: 0 }} />}
-                      {paidPct > 0 && <div className="bg-green-600" style={{ flexBasis: `${paidPct}%`, minHeight: 0 }} />}
+                    {/* Bar container — absolute positioning for precise height */}
+                    <div className={`flex-1 relative rounded-t overflow-hidden transition-opacity duration-150 ${d.isFuture ? "opacity-40" : highlighted ? "opacity-100" : faded ? "opacity-40" : "opacity-100"}`}>
+                      {/* Grey background fills entire bar */}
+                      <div className={`absolute inset-0 ${highlighted ? "bg-slate-300" : "bg-slate-200"} transition-colors duration-150`} />
+                      {/* Colored segments anchored to bottom */}
+                      {(openPct > 0 || paidPct > 0) && (
+                        <div className="absolute bottom-0 left-0 right-0 flex flex-col">
+                          {openPct > 0 && <div className="bg-amber-400" style={{ height: `${(openPct / 100) * chartHeight}px` }} />}
+                          {paidPct > 0 && <div className="bg-green-600" style={{ height: `${(paidPct / 100) * chartHeight}px` }} />}
+                        </div>
+                      )}
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-center text-muted-foreground mt-1.5 select-none">{d.month}</p>
                   </div>
@@ -231,6 +237,12 @@ interface CreateInvoiceDialogProps {
   customers: Customer[];
   selectedCustomerId: string;
   setSelectedCustomerId: (id: string) => void;
+  isNonClient: boolean;
+  setIsNonClient: (v: boolean) => void;
+  billingName: string;
+  setBillingName: (v: string) => void;
+  billingEmail: string;
+  setBillingEmail: (v: string) => void;
   lineItems: LineItem[];
   addLineItem: () => void;
   removeLineItem: (index: number) => void;
@@ -253,6 +265,12 @@ export function CreateInvoiceDialog({
   customers,
   selectedCustomerId,
   setSelectedCustomerId,
+  isNonClient,
+  setIsNonClient,
+  billingName,
+  setBillingName,
+  billingEmail,
+  setBillingEmail,
   lineItems,
   addLineItem,
   removeLineItem,
@@ -282,26 +300,52 @@ export function CreateInvoiceDialog({
           <DialogTitle>New {label}</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          {/* Client toggle */}
+          <div className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isNonClient}
+                onChange={(e) => { setIsNonClient(e.target.checked); if (e.target.checked) setSelectedCustomerId(""); }}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              <span className="text-muted-foreground">Bill a non-client</span>
+            </label>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Client</Label>
-              <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select client" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.first_name} {c.last_name}
-                      {c.company_name ? ` (${c.company_name})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {isNonClient ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Name</Label>
+                  <Input value={billingName} onChange={(e) => setBillingName(e.target.value)} placeholder="Full name or company" required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input type="email" value={billingEmail} onChange={(e) => setBillingEmail(e.target.value)} placeholder="email@example.com" required />
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Label>Client</Label>
+                <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.first_name} {c.last_name}
+                        {c.company_name ? ` (${c.company_name})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="subject">Subject</Label>
-              <Input id="subject" name="subject" placeholder="Monthly pool service" />
+              <Input id="subject" name="subject" placeholder="Monthly pool service" required />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -436,7 +480,10 @@ export function CreateInvoiceDialog({
             <Textarea id="notes" name="notes" rows={2} />
           </div>
 
-          <Button type="submit" className="w-full" disabled={!selectedCustomerId}>
+          <Button type="submit" className="w-full" disabled={
+            (isNonClient ? (!billingName.trim() || !billingEmail.trim()) : !selectedCustomerId)
+            || !lineItems.some(li => li.description.trim() && li.unit_price > 0)
+          }>
             Create {label}
           </Button>
         </form>

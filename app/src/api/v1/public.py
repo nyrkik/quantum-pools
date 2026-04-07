@@ -1,5 +1,6 @@
 """Public endpoints — no authentication required. Token-gated access."""
 
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -14,6 +15,8 @@ from src.models.estimate_approval import EstimateApproval
 from src.models.agent_action import AgentAction
 from src.models.organization import Organization
 from src.models.org_cost_settings import OrgCostSettings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -227,3 +230,182 @@ async def download_estimate_pdf(token: str, db: AsyncSession = Depends(get_db)):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Public Invoice View & Payment ──────────────────────────────────
+
+
+@router.get("/invoice/{token}")
+async def view_invoice(token: str, db: AsyncSession = Depends(get_db)):
+    """Public invoice view — customer clicks link from email to view and pay."""
+    invoice = (await db.execute(
+        select(Invoice).where(Invoice.payment_token == token)
+    )).scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found or link expired")
+
+    org = (await db.execute(
+        select(Organization).where(Organization.id == invoice.organization_id)
+    )).scalar_one_or_none()
+
+    items = (await db.execute(
+        select(InvoiceLineItem).where(InvoiceLineItem.invoice_id == invoice.id).order_by(InvoiceLineItem.sort_order)
+    )).scalars().all()
+
+    customer_name = invoice.billing_name
+    if invoice.customer_id:
+        from src.models.customer import Customer
+        cust = (await db.execute(select(Customer).where(Customer.id == invoice.customer_id))).scalar_one_or_none()
+        if cust:
+            customer_name = cust.display_name
+
+    # Mark as viewed
+    if not invoice.viewed_at:
+        invoice.viewed_at = datetime.now(timezone.utc)
+        if invoice.status == "sent":
+            invoice.status = "viewed"
+        await db.commit()
+
+    return {
+        "invoice_number": invoice.invoice_number,
+        "document_type": invoice.document_type,
+        "subject": invoice.subject,
+        "customer_name": customer_name,
+        "org_name": org.name if org else None,
+        "org_color": getattr(org, "primary_color", None) if org else None,
+        "status": invoice.status,
+        "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
+        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+        "line_items": [
+            {"description": li.description, "quantity": float(li.quantity),
+             "unit_price": float(li.unit_price), "total": float(li.amount or li.quantity * li.unit_price)}
+            for li in items
+        ],
+        "subtotal": float(invoice.subtotal or 0),
+        "tax_amount": float(invoice.tax_amount or 0),
+        "discount": float(invoice.discount or 0),
+        "total": float(invoice.total or 0),
+        "amount_paid": float(invoice.amount_paid or 0),
+        "balance": float(invoice.balance or 0),
+        "paid_date": invoice.paid_date.isoformat() if invoice.paid_date else None,
+        "notes": invoice.notes,
+    }
+
+
+@router.post("/invoice/{token}/checkout")
+async def create_checkout_session(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a Stripe Checkout Session for an invoice. Returns checkout URL."""
+    from src.core.config import settings
+    from src.services.stripe_service import StripeService
+
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    invoice = (await db.execute(
+        select(Invoice).where(Invoice.payment_token == token)
+    )).scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found or link expired")
+
+    if invoice.status == "paid":
+        raise HTTPException(status_code=400, detail="Invoice is already paid")
+
+    base_url = settings.frontend_url
+    success_url = f"{base_url}/pay/{token}?status=success"
+    cancel_url = f"{base_url}/pay/{token}?status=cancelled"
+
+    svc = StripeService(db)
+    try:
+        checkout_url = await svc.create_checkout_session(invoice, success_url, cancel_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"checkout_url": checkout_url}
+
+
+@router.post("/invoice/{token}/verify-payment")
+async def verify_payment(token: str, db: AsyncSession = Depends(get_db)):
+    """Called when customer returns from Stripe Checkout. Verifies session and records payment."""
+    import stripe
+    from src.core.config import settings
+    from src.services.stripe_service import StripeService
+
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    stripe.api_key = settings.stripe_secret_key
+
+    invoice = (await db.execute(
+        select(Invoice).where(Invoice.payment_token == token)
+    )).scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if invoice.status == "paid":
+        return {"status": "already_paid"}
+
+    # Find completed checkout sessions for this invoice
+    try:
+        sessions = stripe.checkout.Session.list(
+            limit=5,
+            payment_intent=invoice.stripe_payment_intent_id,
+        ) if invoice.stripe_payment_intent_id else None
+
+        # If no payment_intent stored, search by metadata
+        if not sessions or not sessions.data:
+            sessions = stripe.checkout.Session.list(limit=10)
+            sessions.data = [
+                s for s in sessions.data
+                if s.metadata.get("qp_invoice_id") == invoice.id and s.payment_status == "paid"
+            ]
+
+        for session in (sessions.data if sessions else []):
+            if session.payment_status == "paid":
+                svc = StripeService(db)
+                await svc.handle_checkout_completed(session.to_dict() if hasattr(session, 'to_dict') else dict(session))
+                return {"status": "paid", "amount": session.amount_total / 100}
+
+    except Exception as e:
+        logger.error(f"Stripe payment verification failed: {e}")
+
+    return {"status": "pending"}
+
+
+@router.post("/stripe/webhook")
+async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """Stripe webhook — processes payment events. Signature-verified."""
+    import stripe
+    from src.core.config import settings
+    from src.services.stripe_service import StripeService
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+
+    # Verify signature if webhook secret is configured
+    if settings.stripe_webhook_secret:
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, settings.stripe_webhook_secret,
+            )
+        except stripe.SignatureVerificationError:
+            logger.warning("Stripe webhook signature verification failed")
+            raise HTTPException(status_code=400, detail="Invalid signature")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid payload")
+    else:
+        # No webhook secret — parse without verification (dev/test only)
+        import json
+        event = json.loads(payload)
+
+    event_type = event.get("type") if isinstance(event, dict) else event.type
+    data = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
+
+    if event_type == "checkout.session.completed":
+        svc = StripeService(db)
+        await svc.handle_checkout_completed(data if isinstance(data, dict) else data.to_dict())
+        logger.info(f"Stripe checkout.session.completed processed: {data.get('id') if isinstance(data, dict) else data.id}")
+
+    return {"received": True}

@@ -232,6 +232,18 @@ async def get_thread(
         existing_read.read_at = datetime.now(timezone.utc)
     else:
         db.add(ThreadRead(user_id=ctx.user.id, thread_id=thread_id))
+
+    # Mark related notifications as read so the bell updates
+    from src.models.notification import Notification
+    from sqlalchemy import update
+    await db.execute(
+        update(Notification).where(
+            Notification.user_id == ctx.user.id,
+            Notification.organization_id == ctx.organization_id,
+            Notification.is_read == False,
+            Notification.link == f"/messages?thread={thread_id}",
+        ).values(is_read=True)
+    )
     await db.flush()
 
     await publish(EventType.MESSAGE_READ, ctx.organization_id, {"thread_id": thread_id}, user_id=ctx.user.id)

@@ -6,10 +6,10 @@ from datetime import datetime, date
 
 
 class PaymentCreate(BaseModel):
-    customer_id: str
+    customer_id: Optional[str] = None
     invoice_id: Optional[str] = None
     amount: float = Field(..., gt=0)
-    payment_method: str = Field(..., pattern="^(cash|check|credit_card|ach|stripe|other)$")
+    payment_method: str = Field(..., pattern="^(cash|check|credit_card|card|ach|stripe|other)$")
     payment_date: date
     reference_number: Optional[str] = None
     notes: Optional[str] = None
@@ -18,7 +18,7 @@ class PaymentCreate(BaseModel):
 class PaymentResponse(BaseModel):
     id: str
     organization_id: str
-    customer_id: str
+    customer_id: Optional[str] = None
     invoice_id: Optional[str] = None
     amount: float
     payment_method: str

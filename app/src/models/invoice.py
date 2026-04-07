@@ -27,9 +27,13 @@ class Invoice(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    customer_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    customer_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
     )
+
+    # Non-client billing (used when customer_id is null)
+    billing_name: Mapped[str | None] = mapped_column(String(200))
+    billing_email: Mapped[str | None] = mapped_column(String(255))
 
     # Document type and details
     document_type: Mapped[str] = mapped_column(String(20), default="invoice")  # estimate, invoice

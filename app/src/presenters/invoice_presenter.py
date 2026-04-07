@@ -24,7 +24,9 @@ class InvoicePresenter(Presenter):
         d = {
             "id": inv.id,
             "customer_id": inv.customer_id,
-            "customer_name": inv.customer.display_name if inv.customer else None,
+            "customer_name": inv.customer.display_name if inv.customer else inv.billing_name,
+            "billing_name": inv.billing_name,
+            "billing_email": inv.billing_email,
             "invoice_number": inv.invoice_number,
             "case_id": inv.case_id if hasattr(inv, "case_id") else None,
             "document_type": inv.document_type if hasattr(inv, "document_type") else "invoice",

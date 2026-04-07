@@ -25,8 +25,8 @@ class Payment(Base):
     organization_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    customer_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    customer_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     invoice_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("invoices.id", ondelete="SET NULL"), index=True

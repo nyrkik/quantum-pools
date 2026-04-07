@@ -180,7 +180,7 @@ export default function InvoiceDetailPage({
 
   const handleDownloadPdf = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/v1/invoices/${id}/pdf`, {
+      const res = await fetch(`/api/v1/invoices/${id}/pdf`, {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to generate PDF");

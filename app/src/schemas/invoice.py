@@ -30,7 +30,9 @@ class InvoiceLineItemResponse(BaseModel):
 
 
 class InvoiceCreate(BaseModel):
-    customer_id: str
+    customer_id: Optional[str] = None  # null for non-client invoices
+    billing_name: Optional[str] = None  # required when no customer_id
+    billing_email: Optional[str] = None  # required when no customer_id
     document_type: str = "invoice"  # estimate, invoice
     subject: Optional[str] = None
     issue_date: date
@@ -57,7 +59,9 @@ class InvoiceUpdate(BaseModel):
 class InvoiceResponse(BaseModel):
     id: str
     organization_id: str
-    customer_id: str
+    customer_id: Optional[str] = None
+    billing_name: Optional[str] = None
+    billing_email: Optional[str] = None
     document_type: str = "invoice"
     invoice_number: str
     subject: Optional[str] = None

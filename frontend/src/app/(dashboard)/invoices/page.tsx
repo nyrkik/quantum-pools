@@ -46,6 +46,9 @@ export default function InvoicesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [isNonClient, setIsNonClient] = useState(false);
+  const [billingName, setBillingName] = useState("");
+  const [billingEmail, setBillingEmail] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([
     { description: "", quantity: 1, unit_price: 0, is_taxed: false },
   ]);
@@ -204,8 +207,10 @@ export default function InvoicesPage() {
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const body = {
-      customer_id: selectedCustomerId,
+    const body: Record<string, unknown> = {
+      customer_id: isNonClient ? undefined : selectedCustomerId,
+      billing_name: isNonClient ? billingName : undefined,
+      billing_email: isNonClient ? billingEmail : undefined,
       document_type: docView === "estimates" ? "estimate" : "invoice",
       subject: (form.get("subject") as string) || undefined,
       issue_date: form.get("issue_date") as string,
@@ -228,6 +233,9 @@ export default function InvoicesPage() {
       toast.success(docView === "estimates" ? "Estimate created" : "Invoice created");
       setDialogOpen(false);
       setSelectedCustomerId("");
+      setIsNonClient(false);
+      setBillingName("");
+      setBillingEmail("");
       setLineItems([
         { description: "", quantity: 1, unit_price: 0, is_taxed: false },
       ]);
@@ -272,6 +280,12 @@ export default function InvoicesPage() {
           customers={customers}
           selectedCustomerId={selectedCustomerId}
           setSelectedCustomerId={setSelectedCustomerId}
+          isNonClient={isNonClient}
+          setIsNonClient={setIsNonClient}
+          billingName={billingName}
+          setBillingName={setBillingName}
+          billingEmail={billingEmail}
+          setBillingEmail={setBillingEmail}
           lineItems={lineItems}
           addLineItem={addLineItem}
           removeLineItem={removeLineItem}

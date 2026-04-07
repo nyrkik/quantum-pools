@@ -29,6 +29,7 @@ import {
   Clock,
   ExternalLink,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { ComposeMessage } from "@/components/messages/compose-message";
@@ -490,8 +491,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const router = useRouter();
   const { openCompose } = useCompose();
   const teamMembers = useTeamMembers();
-  useDeepBlueContext({ caseId: id });
   const [detail, setDetail] = useState<CaseDetail | null>(null);
+  useDeepBlueContext({ caseId: id, customerId: detail?.customer_id || undefined });
   const [loading, setLoading] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState("");
@@ -903,10 +904,20 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           {/* Documents */}
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                Documents
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  Documents
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[10px] px-1.5"
+                  onClick={() => router.push(`/invoices/new?type=estimate&customer=${detail.customer_id}&case=${id}`)}
+                >
+                  <Plus className="h-3 w-3 mr-0.5" /> Estimate
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2">
               {detail.invoices.map((inv) => (

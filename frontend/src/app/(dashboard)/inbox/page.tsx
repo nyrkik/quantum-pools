@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -205,8 +206,55 @@ export default function InboxPage() {
         </div>
       </div>
 
-      {/* Thread table */}
-      <Card className="shadow-sm">
+      {/* Mobile thread list */}
+      <div className="sm:hidden space-y-1">
+        {loading ? (
+          <div className="text-center py-12"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></div>
+        ) : threads.length === 0 ? (
+          <p className="text-center py-12 text-muted-foreground text-sm">No threads found</p>
+        ) : threads.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`w-full text-left px-3 py-2.5 rounded-lg border bg-background active:bg-blue-50 transition-colors ${
+              t.has_pending ? "border-l-4 border-l-amber-400" : ""
+            } ${t.is_unread ? "font-medium" : ""}`}
+            onClick={() => setSelectedThreadId(t.id)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {t.is_unread && <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />}
+                <span className={`text-sm truncate ${t.is_unread ? "font-semibold" : ""}`}>
+                  {t.customer_name || t.contact_email.split("@")[0]}
+                </span>
+                {t.assigned_to_name && (
+                  <Badge variant="secondary" className="text-[10px] px-1.5 shrink-0">
+                    {t.assigned_to_user_id === user?.id ? "Mine" : t.assigned_to_name}
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <StatusBadge status={t.status} />
+                <UrgencyBadge urgency={t.urgency} />
+                <span className="text-[10px] text-muted-foreground">{formatTime(t.last_message_at)}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 mt-0.5">
+              {t.last_direction === "outbound" ? (
+                <ArrowUpRight className="h-3 w-3 text-blue-500 shrink-0" />
+              ) : (
+                <ArrowDownLeft className="h-3 w-3 text-green-600 shrink-0" />
+              )}
+              <span className={`text-xs truncate ${t.is_unread ? "font-semibold" : "text-muted-foreground"}`}>
+                {t.subject || t.last_snippet || "No subject"}
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Desktop thread table */}
+      <Card className="shadow-sm hidden sm:block">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-100 dark:bg-slate-800">
@@ -235,7 +283,7 @@ export default function InboxPage() {
               threads.map((t, i) => (
                 <TableRow
                   key={t.id}
-                  className={`cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-950 ${
+                  className={`cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-950 touch-manipulation ${
                     i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""
                   } ${t.has_pending ? "border-l-4 border-l-amber-400" : ""} ${t.is_unread ? "font-medium" : ""}`}
                   onClick={() => setSelectedThreadId(t.id)}
@@ -378,23 +426,23 @@ export default function InboxPage() {
         </div>
       )}
 
-      {/* Thread detail overlay */}
-      <Overlay open={!!selectedThreadId} onOpenChange={(open) => { if (!open) { setSelectedThreadId(null); loadThreads(); } }}>
-        <OverlayContent className="max-w-xl">
-          <OverlayHeader>
-            <OverlayTitle>Conversation</OverlayTitle>
-          </OverlayHeader>
-          {selectedThreadId && (
-            <OverlayBody className="p-0">
+      {/* Thread detail */}
+      <Sheet open={!!selectedThreadId} onOpenChange={(open) => { if (!open) { setSelectedThreadId(null); loadThreads(); } }}>
+        <SheetContent side="right" className="w-full sm:max-w-xl p-0 flex flex-col">
+          <SheetHeader className="px-4 pt-3 pb-2 border-b shrink-0">
+            <SheetTitle className="text-base">Conversation</SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto">
+            {selectedThreadId && (
               <ThreadDetailSheet
                 threadId={selectedThreadId}
                 onClose={() => setSelectedThreadId(null)}
                 onAction={() => { loadThreads(); loadStats(); }}
               />
-            </OverlayBody>
-          )}
-        </OverlayContent>
-      </Overlay>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <InboxSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </PageLayout>

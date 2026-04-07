@@ -136,11 +136,18 @@ class EMDScraper:
 
             logger.info(f"Found {len(results)} initial results")
 
-            # Handle "Load more" button
-            await self._handle_load_more(page, max_load_more)
-
-            # Extract facility data
+            # Extract initial results before Load More (safety net — Load More
+            # can sometimes blank the page on the EMD portal)
             facilities = await self._extract_facilities(page, start_date)
+
+            # Try Load More for additional results
+            had_load_more = await self._handle_load_more(page, max_load_more)
+            if had_load_more:
+                post_load = await self._extract_facilities(page, start_date)
+                if len(post_load) >= len(facilities):
+                    facilities = post_load
+                else:
+                    logger.warning(f"Load More reduced results ({len(facilities)} -> {len(post_load)}), keeping pre-Load More data")
             logger.info(f"Extracted {len(facilities)} facilities")
 
             # Deduplicate by inspection_id
@@ -164,8 +171,10 @@ class EMDScraper:
             await page.close()
             await context.close()
 
-    async def _handle_load_more(self, page, max_attempts: int):
-        """Click 'Load more' button until no more results or max attempts reached."""
+    async def _handle_load_more(self, page, max_attempts: int) -> bool:
+        """Click 'Load more' button until no more results or max attempts reached.
+        Returns True if any Load More clicks were made."""
+        clicked = False
         for attempt in range(max_attempts):
             buttons = await page.query_selector_all(".load-more-results-button")
             if not buttons:
@@ -182,6 +191,7 @@ class EMDScraper:
 
             current_count = len(await page.query_selector_all(".flex-row"))
             await button.click()
+            clicked = True
             logger.info(f"Load More clicked (attempt {attempt + 1}/{max_attempts})")
 
             await asyncio.sleep(self.rate_limit_seconds)
@@ -192,6 +202,8 @@ class EMDScraper:
             if new_count <= current_count:
                 logger.info("No new results loaded, stopping")
                 break
+
+        return clicked
 
     async def _extract_facilities(self, page, search_date: str) -> list[dict]:
         """Extract facility data from all .flex-row elements on the page."""

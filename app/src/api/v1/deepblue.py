@@ -40,8 +40,19 @@ async def send_message(
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     engine = DeepBlueEngine(db)
+
+    # Resolve case_id → customer_id if not already provided
+    customer_id = req.customer_id
+    if not customer_id and req.case_id:
+        from src.models.service_case import ServiceCase
+        case = (await db.execute(
+            select(ServiceCase).where(ServiceCase.id == req.case_id, ServiceCase.organization_id == ctx.organization_id)
+        )).scalar_one_or_none()
+        if case and case.customer_id:
+            customer_id = case.customer_id
+
     context = DeepBlueContext(
-        customer_id=req.customer_id,
+        customer_id=customer_id,
         property_id=req.property_id,
         bow_id=req.bow_id,
         visit_id=req.visit_id,
@@ -1055,6 +1066,44 @@ async def confirm_broadcast(
         "sent_count": broadcast.sent_count,
         "failed_count": broadcast.failed_count,
     }
+
+
+class ConfirmCustomerEmailRequest(BaseModel):
+    customer_id: str
+    subject: str
+    body: str
+
+
+@router.post("/confirm-customer-email")
+async def confirm_customer_email(
+    req: ConfirmCustomerEmailRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a customer email drafted by DeepBlue."""
+    from src.models.customer import Customer
+    from src.services.email_compose_service import EmailComposeService
+
+    customer = (await db.execute(
+        select(Customer).where(Customer.id == req.customer_id, Customer.organization_id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if not customer.email:
+        raise HTTPException(status_code=400, detail="Customer has no email address")
+
+    svc = EmailComposeService(db)
+    sender_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    result = await svc.compose_and_send(
+        org_id=ctx.organization_id,
+        to=customer.email,
+        subject=req.subject,
+        body=req.body,
+        customer_id=req.customer_id,
+        sender_name=sender_name,
+        sender_user_id=ctx.user.id,
+    )
+    return {"sent": True, "message_id": result.get("message_id") if isinstance(result, dict) else None}
 
 
 class SaveToCaseRequest(BaseModel):

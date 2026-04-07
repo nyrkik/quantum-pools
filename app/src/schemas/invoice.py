@@ -41,6 +41,7 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = None
     line_items: list[InvoiceLineItemCreate] = []
     job_id: Optional[str] = None  # link to job on creation
+    case_id: Optional[str] = None  # link to case on creation
 
 
 class InvoiceUpdate(BaseModel):

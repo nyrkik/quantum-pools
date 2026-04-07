@@ -357,11 +357,11 @@ export default function InvoicesPage() {
               {docView === "estimates" ? "Create Estimate" : "Create Invoice"}
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>{docView === "estimates" ? "New Estimate" : "New Invoice"}</DialogTitle>
             </DialogHeader>
-            <form onSubmit={handleCreate} className="space-y-4">
+            <form onSubmit={handleCreate} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Client</Label>

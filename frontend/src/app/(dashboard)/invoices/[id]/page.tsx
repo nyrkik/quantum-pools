@@ -387,10 +387,42 @@ export default function InvoiceDetailPage({
             </Button>
           )}
           {canConvert && (
-            <Button size="sm" onClick={handleConvert} disabled={converting}>
-              {converting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ArrowRightLeft className="mr-2 h-3.5 w-3.5" />}
-              Convert to Invoice
-            </Button>
+            <>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Pencil className="mr-2 h-3.5 w-3.5" />
+                    Revise
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Revise approved estimate?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will clear the approval so you can make changes. The estimate will need to be re-approved after editing.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={async () => {
+                      try {
+                        await api.post(`/v1/invoices/${id}/revise`, {});
+                        toast.success("Estimate reopened for revision");
+                        fetchData();
+                      } catch {
+                        toast.error("Failed to revise estimate");
+                      }
+                    }}>
+                      Revise
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button size="sm" onClick={handleConvert} disabled={converting}>
+                {converting ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ArrowRightLeft className="mr-2 h-3.5 w-3.5" />}
+                Convert to Invoice
+              </Button>
+            </>
           )}
           <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
             <Download className="mr-2 h-3.5 w-3.5" />

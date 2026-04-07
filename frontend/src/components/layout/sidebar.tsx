@@ -14,6 +14,13 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -96,12 +103,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     api.get<{ unread: number }>("/v1/messages/stats")
       .then((s) => setUnreadMessages(s.unread ?? 0))
       .catch(() => {});
-    if (dev) {
+    if (dev.isDeveloper) {
       api.get<{ open: number }>("/v1/feedback/stats")
         .then((s) => setOpenFeedback(s.open ?? 0))
-        .catch(() => {});
+        .catch(() => setOpenFeedback(0));
+    } else {
+      setOpenFeedback(0);
     }
-  }, [perms.canViewInbox, dev]);
+  }, [perms.canViewInbox, dev.isDeveloper]);
 
   useEffect(() => {
     fetchCounts();
@@ -230,33 +239,37 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <div className="border-t p-4">
-        <Link
-          href="/profile"
-          onClick={onNavigate}
-          className="mb-3 flex items-center gap-3 rounded-md p-1 -mx-1 transition-colors hover:bg-accent/50"
-        >
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-            {user?.first_name?.[0]}
-            {user?.last_name?.[0]}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">
-              {user?.first_name} {user?.last_name}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {organizationName}
-            </p>
-          </div>
-        </Link>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-muted-foreground"
-          onClick={() => logout()}
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          Sign out
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex w-full items-center gap-3 rounded-md p-1 -mx-1 transition-colors hover:bg-accent/50">
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                {user?.first_name?.[0]}
+                {user?.last_name?.[0]}
+              </div>
+              <div className="min-w-0 text-left">
+                <p className="text-sm font-medium truncate">
+                  {user?.first_name} {user?.last_name}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {organizationName}
+                </p>
+              </div>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top" className="w-48">
+            <DropdownMenuItem asChild>
+              <Link href="/profile" onClick={onNavigate} className="flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                Settings
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => logout()} className="text-destructive focus:text-destructive">
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </>
   );
@@ -402,11 +415,10 @@ export function Sidebar() {
 
       {/* Desktop sidebar */}
       <aside className="hidden sm:flex h-screen w-64 flex-col border-r bg-background relative">
-        <SidebarContent />
         {unreadNotifs > 0 && (
           <button
             onClick={handleBellClick}
-            className="absolute top-4 right-4 z-10 relative"
+            className="absolute top-4 right-4 z-10"
           >
             <Bell className="h-4 w-4 text-muted-foreground" />
             <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-500 px-1 text-[8px] font-bold text-white">
@@ -414,6 +426,7 @@ export function Sidebar() {
             </span>
           </button>
         )}
+        <SidebarContent />
       </aside>
     </>
   );

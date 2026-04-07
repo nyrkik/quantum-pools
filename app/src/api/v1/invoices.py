@@ -73,6 +73,10 @@ async def create_invoice(
         user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
         await link_job_invoice(db, body.job_id, invoice.id, linked_by=user_name)
         await db.commit()
+    # Link to case if provided
+    if body.case_id:
+        invoice.case_id = body.case_id
+        await db.commit()
     return _invoice_to_response(invoice)
 
 
@@ -608,6 +612,33 @@ async def get_revisions(
         }
         for r in revisions
     ]
+
+
+@router.post("/{invoice_id}/revise")
+async def revise_estimate(
+    invoice_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revise an approved estimate — clears approval so it can be edited and re-approved."""
+    from src.core.exceptions import ValidationError
+
+    svc = InvoiceService(db)
+    invoice = await svc.get(ctx.organization_id, invoice_id)
+    if invoice.document_type != "estimate":
+        raise ValidationError("Only estimates can be revised")
+    if not invoice.approved_at:
+        raise ValidationError("Estimate is not approved")
+
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    invoice.approved_at = None
+    invoice.approved_by = None
+    invoice.approval_id = None
+    invoice.status = "revised"
+    await log_job_activity(db, invoice_id, f"Estimate approval revoked for revision by {user_name}")
+    await db.commit()
+    await db.refresh(invoice)
+    return _invoice_to_response(invoice)
 
 
 @router.post("/{invoice_id}/convert-to-invoice", )

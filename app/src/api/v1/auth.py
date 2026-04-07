@@ -41,29 +41,35 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    is_secure = settings.cookie_secure or settings.environment == "production"
+    domain = settings.cookie_domain  # e.g. ".quantumpoolspro.com" for cross-subdomain
+    samesite: str = "none" if is_secure else "lax"
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=settings.environment == "production",
-        samesite="lax",
+        secure=is_secure,
+        samesite=samesite,
         max_age=settings.jwt_access_token_expire_hours * 3600,
         path="/",
+        domain=domain,
     )
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=settings.environment == "production",
-        samesite="lax",
+        secure=is_secure,
+        samesite=samesite,
         max_age=settings.jwt_refresh_token_expire_days * 86400,
         path="/api/v1/auth",
+        domain=domain,
     )
 
 
 def _clear_auth_cookies(response: Response) -> None:
-    response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/api/v1/auth")
+    domain = settings.cookie_domain
+    response.delete_cookie(key="access_token", path="/", domain=domain)
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth", domain=domain)
 
 
 @router.post("/register", response_model=OrgUserResponse, status_code=status.HTTP_201_CREATED)

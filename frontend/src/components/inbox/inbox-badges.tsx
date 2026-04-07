@@ -1,12 +1,14 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { Circle, CheckCircle2, EyeOff, Archive, AlertTriangle, Minus } from "lucide-react";
+import { Circle, CheckCircle2, EyeOff, Archive, AlertTriangle, Minus, Send } from "lucide-react";
 
 export function StatusBadge({ status }: { status: string }) {
   switch (status) {
     case "pending":
       return <span title="Pending"><Circle className="h-4 w-4 text-amber-500" /></span>;
+    case "awaiting_reply":
+      return <span title="Awaiting reply"><Send className="h-4 w-4 text-blue-500" /></span>;
     case "handled":
       return <span title="Handled"><CheckCircle2 className="h-4 w-4 text-green-600" /></span>;
     case "ignored":

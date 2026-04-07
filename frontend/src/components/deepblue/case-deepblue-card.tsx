@@ -5,11 +5,13 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Send, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { ToolResultCard } from "./tool-cards";
 
 interface ConversationMessage {
   role: string;
   content: string;
   timestamp: string;
+  toolResults?: { name: string; result: Record<string, unknown> }[];
 }
 
 interface Conversation {
@@ -65,13 +67,23 @@ export function CaseDeepBlueCard({
 
     // Optimistic user message
     const tempUserMsg: ConversationMessage = { role: "user", content: text, timestamp: new Date().toISOString() };
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeConvoId
-          ? { ...c, messages: [...c.messages, tempUserMsg] }
-          : c
-      )
-    );
+    if (activeConvoId) {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeConvoId
+            ? { ...c, messages: [...c.messages, tempUserMsg] }
+            : c
+        )
+      );
+    } else {
+      // New conversation — create a temporary entry so the message is visible
+      const tempId = `temp-${Date.now()}`;
+      setConversations((prev) => [
+        { id: tempId, title: text.slice(0, 60), messages: [tempUserMsg], updated_at: new Date().toISOString() },
+        ...prev,
+      ]);
+      setActiveConvoId(tempId);
+    }
 
     try {
       const resp = await fetch("/api/v1/deepblue/message", {
@@ -94,6 +106,7 @@ export function CaseDeepBlueCard({
       const decoder = new TextDecoder();
       let buffer = "";
       let fullContent = "";
+      let toolResults: { name: string; result: Record<string, unknown> }[] = [];
       let newConvoId = activeConvoId;
 
       while (true) {
@@ -111,6 +124,8 @@ export function CaseDeepBlueCard({
             if (event.type === "text_delta") {
               fullContent += event.content;
               setStreamingContent(fullContent);
+            } else if (event.type === "tool_result") {
+              toolResults.push({ name: event.name, result: event.result });
             } else if (event.type === "done" && event.conversation_id) {
               newConvoId = event.conversation_id;
             }
@@ -119,15 +134,23 @@ export function CaseDeepBlueCard({
       }
 
       // Finalize: add assistant message to conversation
-      const assistantMsg: ConversationMessage = { role: "assistant", content: fullContent, timestamp: new Date().toISOString() };
+      const assistantMsg: ConversationMessage = {
+        role: "assistant",
+        content: fullContent,
+        timestamp: new Date().toISOString(),
+        toolResults: toolResults.length > 0 ? toolResults : undefined,
+      };
 
       if (newConvoId && newConvoId !== activeConvoId) {
-        // New conversation was created
+        // New conversation was created — replace temp entry or prepend
         setActiveConvoId(newConvoId);
-        setConversations((prev) => [
-          { id: newConvoId!, title: text.slice(0, 60), messages: [tempUserMsg, assistantMsg], updated_at: new Date().toISOString() },
-          ...prev,
-        ]);
+        setConversations((prev) => {
+          const withoutTemp = prev.filter((c) => !c.id.startsWith("temp-"));
+          return [
+            { id: newConvoId!, title: text.slice(0, 60), messages: [tempUserMsg, assistantMsg], updated_at: new Date().toISOString() },
+            ...withoutTemp,
+          ];
+        });
       } else {
         setConversations((prev) =>
           prev.map((c) =>
@@ -196,7 +219,10 @@ export function CaseDeepBlueCard({
                 <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs ${
                   m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted/70"
                 }`}>
-                  <div className="whitespace-pre-wrap">{m.content}</div>
+                  {m.content && <div className="whitespace-pre-wrap">{m.content}</div>}
+                  {m.toolResults?.map((tr, j) => (
+                    <ToolResultCard key={j} name={tr.name} result={tr.result} />
+                  ))}
                 </div>
               </div>
             ))}

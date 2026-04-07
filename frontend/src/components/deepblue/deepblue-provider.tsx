@@ -44,6 +44,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<DeepBlueMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
   const contextRef = useRef<DeepBlueContextData>({});
 
   const openDeepBlue = useCallback(() => setIsOpen(true), []);
@@ -57,6 +58,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
   const clearConversation = useCallback(() => {
     setMessages([]);
     setConversationId(null);
+    conversationIdRef.current = null;
   }, []);
 
   const loadConversation = useCallback(async (id: string): Promise<void> => {
@@ -71,6 +73,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
         timestamp: m.timestamp || new Date().toISOString(),
       }));
       setMessages(loaded);
+      conversationIdRef.current = id;
       setConversationId(id);
     } catch {
       // Silent fail
@@ -121,7 +124,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
         credentials: "include",
         body: JSON.stringify({
           message: text,
-          conversation_id: conversationId,
+          conversation_id: conversationIdRef.current,
           customer_id: ctx.customerId || null,
           property_id: ctx.propertyId || null,
           bow_id: ctx.bowId || null,
@@ -181,6 +184,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
               );
             } else if (event.type === "done") {
               if (event.conversation_id) {
+                conversationIdRef.current = event.conversation_id;
                 setConversationId(event.conversation_id);
               }
             } else if (event.type === "error") {
@@ -208,7 +212,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [conversationId]);
+  }, []);
 
   return (
     <DeepBlueContext.Provider

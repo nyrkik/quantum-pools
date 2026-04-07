@@ -413,6 +413,25 @@ TOOLS = [
             "required": ["subject", "body", "filter_type"],
         },
     },
+    {
+        "name": "draft_customer_email",
+        "description": (
+            "Draft an email to a specific customer for review. Use when the user wants to email "
+            "the customer they're currently looking at (from a case, thread, or customer page). "
+            "Returns a preview — the user must confirm before it sends. "
+            "Do NOT use draft_broadcast_email for single-customer emails — use this instead. "
+            "The customer's email is resolved automatically from context — never ask the user for it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "Email subject line"},
+                "body": {"type": "string", "description": "Email body text. Professional, concise. Use \\n\\n for paragraph breaks. No markdown."},
+                "customer_id": {"type": "string", "description": "Customer ID. Use context if available — don't ask the user."},
+            },
+            "required": ["subject", "body"],
+        },
+    },
 ]
 
 
@@ -1531,6 +1550,42 @@ async def _exec_broadcast(inp: dict, ctx: ToolContext) -> dict:
     }
 
 
+async def _exec_draft_customer_email(inp: dict, ctx: ToolContext) -> dict:
+    """Draft an email to a specific customer for review."""
+    from src.models.customer import Customer
+
+    subject = inp.get("subject", "").strip()
+    body = inp.get("body", "").strip()
+    if not subject or not body:
+        return {"error": "Subject and body are required."}
+
+    customer_id = inp.get("customer_id") or ctx.customer_id
+    if not customer_id:
+        return {"error": "No customer in context. Navigate to a customer or case first."}
+
+    customer = (await ctx.db.execute(
+        select(Customer).where(Customer.id == customer_id, Customer.organization_id == ctx.org_id)
+    )).scalar_one_or_none()
+    if not customer:
+        return {"error": "Customer not found."}
+
+    email = customer.email
+    if not email:
+        return {"error": f"{customer.display_name} has no email address on file."}
+
+    return {
+        "requires_confirmation": True,
+        "preview": {
+            "type": "customer_email",
+            "subject": subject,
+            "body": body,
+            "customer_id": customer_id,
+            "customer_name": customer.display_name,
+            "to_email": email,
+        },
+    }
+
+
 _EXECUTORS = {
     "chemical_dosing_calculator": _exec_dosing,
     "get_equipment": _exec_get_equipment,
@@ -1544,6 +1599,7 @@ _EXECUTORS = {
     "log_chemical_reading": _exec_log_reading,
     "update_customer_note": _exec_update_note,
     "draft_broadcast_email": _exec_broadcast,
+    "draft_customer_email": _exec_draft_customer_email,
     "get_organization_info": _exec_org_info,
     "get_agent_health": _exec_agent_health,
     # Fuzzy search

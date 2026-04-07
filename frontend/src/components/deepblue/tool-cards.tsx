@@ -134,6 +134,12 @@ export function ToolResultCard({ name, result }: { name: string; result: Record<
     return <BroadcastPreviewCard preview={preview} />;
   }
 
+  if (name === "draft_customer_email" && result.requires_confirmation) {
+    const preview = result.preview as Record<string, unknown> | undefined;
+    if (!preview) return null;
+    return <CustomerEmailPreviewCard preview={preview} />;
+  }
+
   if (name === "add_equipment_to_pool" && result.requires_confirmation) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
@@ -215,9 +221,9 @@ export function ConfirmCard({
         {subtitle && <p className="text-muted-foreground mt-0.5">{subtitle}</p>}
       </div>
       {saved ? (
-        <p className="text-green-600 font-medium">Saved ✓</p>
+        <p className="text-green-600 text-[10px] font-medium pt-1 border-t">Saved ✓</p>
       ) : cancelled ? (
-        <p className="text-muted-foreground">Cancelled</p>
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
@@ -236,6 +242,9 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
   const [sent, setSent] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [result, setResult] = useState<{ sent_count: number; failed_count: number } | null>(null);
+  const [subject, setSubject] = useState(String(preview.subject));
+  const [body, setBody] = useState(String(preview.body));
+  const edited = subject !== String(preview.subject) || body !== String(preview.body);
 
   const handleConfirm = async () => {
     setSending(true);
@@ -243,8 +252,8 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
       const res = await api.post<{ sent_count: number; failed_count: number; recipient_count: number }>(
         "/v1/deepblue/confirm-broadcast",
         {
-          subject: preview.subject,
-          body: preview.body,
+          subject,
+          body,
           filter_type: preview.filter_type,
           customer_ids: preview.customer_ids,
           test_recipient: preview.test_recipient,
@@ -263,18 +272,38 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
   const isTest = preview.filter_type === "test";
   const customerNames = preview.customer_names as string[] | undefined;
   const count = Number(preview.recipient_count || 0);
+  const locked = sent || cancelled;
 
   return (
-    <div className="bg-muted/50 rounded-md p-2.5 mt-1.5 text-xs space-y-2 border border-primary/20">
+    <div className={`bg-muted/50 rounded-md p-2.5 mt-1.5 text-xs space-y-2 border ${edited && !locked ? "border-amber-400" : "border-primary/20"}`}>
       <div className="flex items-center gap-1.5">
         <Mail className="h-3 w-3 text-primary" />
         <span className="font-medium text-[10px] uppercase tracking-wide text-muted-foreground">
           {isTest ? "Test Email Preview" : "Broadcast Preview"}
+          {edited && !locked && <span className="text-amber-600 ml-1">(edited)</span>}
         </span>
       </div>
-      <div className="space-y-1">
-        <p className="font-medium">{String(preview.subject)}</p>
-        <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{String(preview.body)}</p>
+      <div className="space-y-1.5">
+        {locked ? (
+          <>
+            <p className="font-medium">{subject}</p>
+            <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{body}</p>
+          </>
+        ) : (
+          <>
+            <input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="w-full font-medium bg-background border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/30"
+            />
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={Math.min(Math.max(body.split("\n").length, 3), 10)}
+              className="w-full text-muted-foreground bg-background border rounded px-2 py-1.5 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary/30 resize-none"
+            />
+          </>
+        )}
       </div>
       <div className="pt-1 border-t space-y-1">
         <p className="text-muted-foreground">
@@ -288,19 +317,94 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
         )}
       </div>
       {sent && result ? (
-        <p className="text-green-600 font-medium">
+        <p className="text-green-600 text-[10px] font-medium pt-1 border-t">
           {isTest
             ? (result.sent_count > 0 ? "Test email sent ✓" : "Test email failed")
-            : `Sent to ${result.sent_count} customer${result.sent_count !== 1 ? "s" : ""}${result.failed_count > 0 ? ` (${result.failed_count} failed)` : ""}`
+            : `Sent to ${result.sent_count} customer${result.sent_count !== 1 ? "s" : ""}${result.failed_count > 0 ? ` (${result.failed_count} failed)` : ""} ✓`
           }
         </p>
       ) : cancelled ? (
-        <p className="text-muted-foreground">Cancelled</p>
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : (
         <div className="flex gap-2">
-          <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={sending}>
+          <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={sending || !subject.trim() || !body.trim()}>
             {sending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Send className="h-3 w-3 mr-1" />}
             {isTest ? "Send test email" : `Send to ${count} customer${count !== 1 ? "s" : ""}`}
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8" onClick={() => setCancelled(true)}>Cancel</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CustomerEmailPreviewCard({ preview }: { preview: Record<string, unknown> }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const [subject, setSubject] = useState(String(preview.subject));
+  const [body, setBody] = useState(String(preview.body));
+  const edited = subject !== String(preview.subject) || body !== String(preview.body);
+  const locked = sent || cancelled;
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await api.post("/v1/deepblue/confirm-customer-email", {
+        customer_id: preview.customer_id,
+        subject,
+        body,
+      });
+      setSent(true);
+      toast.success(`Email sent to ${preview.customer_name}`);
+    } catch {
+      toast.error("Failed to send email");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className={`bg-muted/50 rounded-md p-2.5 mt-1.5 text-xs space-y-2 border ${edited && !locked ? "border-amber-400" : "border-primary/20"}`}>
+      <div className="flex items-center gap-1.5">
+        <Mail className="h-3 w-3 text-primary" />
+        <span className="font-medium text-[10px] uppercase tracking-wide text-muted-foreground">
+          Email to {String(preview.customer_name)}
+          {edited && !locked && <span className="text-amber-600 ml-1">(edited)</span>}
+        </span>
+      </div>
+      <p className="text-[10px] text-muted-foreground">{String(preview.to_email)}</p>
+      <div className="space-y-1.5">
+        {locked ? (
+          <>
+            <p className="font-medium">{subject}</p>
+            <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{body}</p>
+          </>
+        ) : (
+          <>
+            <input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="w-full font-medium bg-background border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/30"
+            />
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={Math.min(Math.max(body.split("\n").length, 3), 10)}
+              className="w-full text-muted-foreground bg-background border rounded px-2 py-1.5 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary/30 resize-none"
+            />
+          </>
+        )}
+      </div>
+      {sent ? (
+        <p className="text-green-600 text-[10px] font-medium pt-1 border-t">Sent to {String(preview.customer_name)} ✓</p>
+      ) : cancelled ? (
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
+      ) : (
+        <div className="flex gap-2">
+          <Button size="sm" className="h-8 flex-1" onClick={handleSend} disabled={sending || !subject.trim() || !body.trim()}>
+            {sending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Send className="h-3 w-3 mr-1" />}
+            Send Email
           </Button>
           <Button variant="ghost" size="sm" className="h-8" onClick={() => setCancelled(true)}>Cancel</Button>
         </div>

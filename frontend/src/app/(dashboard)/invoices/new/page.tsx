@@ -64,6 +64,7 @@ function NewInvoiceForm() {
   const editId = params.get("edit");
   const preCustomer = params.get("customer");
   const preType = params.get("type") as "estimate" | "invoice" | null;
+  const preCaseId = params.get("case");
 
   const [docType, setDocType] = useState<"estimate" | "invoice">(preType || "invoice");
   const [customerId, setCustomerId] = useState(preCustomer || "");
@@ -219,6 +220,7 @@ function NewInvoiceForm() {
         const result = await api.post<{ id: string }>("/v1/invoices", {
           ...payload,
           job_id: effectiveJobId || undefined,
+          case_id: preCaseId || undefined,
         });
         invoiceId = result.id;
         toast.success(`${label} created`);
@@ -259,6 +261,9 @@ function NewInvoiceForm() {
           <h1 className="text-2xl font-bold tracking-tight">
             {isEdit ? `Edit ${label}` : `New ${label}`}
           </h1>
+          {preCaseId && (
+            <p className="text-xs text-muted-foreground mt-0.5">Linked to case</p>
+          )}
         </div>
         {/* Document type toggle */}
         {!isEdit && (
@@ -466,6 +471,7 @@ function NewInvoiceForm() {
                       const result = await api.post<{ id: string }>("/v1/invoices", {
                         ...payload,
                         job_id: effectiveJobId || undefined,
+                        case_id: preCaseId || undefined,
                       });
                       invoiceId = result.id;
                     }

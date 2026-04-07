@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.broadcast_email import BroadcastEmail
 from src.models.customer import Customer
-from src.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 
@@ -53,17 +52,18 @@ class BroadcastService:
             self.db.add(broadcast)
             await self.db.commit()
 
-            email_svc = EmailService(self.db)
+            from src.services.email_compose_service import EmailComposeService
+            compose_svc = EmailComposeService(self.db)
             try:
-                result = await email_svc.send_agent_reply(
+                result = await compose_svc.compose_and_send(
                     org_id=org_id,
                     to=test_recipient,
                     subject=subject,
-                    body_text=body,
-                    is_new=True,
+                    body=body,
+                    sender_name=created_by,
                 )
-                broadcast.sent_count = 1 if result.success else 0
-                broadcast.failed_count = 0 if result.success else 1
+                broadcast.sent_count = 1 if result.get("success", True) else 0
+                broadcast.failed_count = 0 if result.get("success", True) else 1
             except Exception as e:
                 logger.error(f"Test broadcast failed: {e}")
                 broadcast.failed_count = 1
@@ -89,8 +89,9 @@ class BroadcastService:
         self.db.add(broadcast)
         await self.db.commit()
 
-        # Send synchronously (for now — move to background worker for large lists)
-        email_svc = EmailService(self.db)
+        # Send synchronously via compose service (creates AgentMessage + AgentThread)
+        from src.services.email_compose_service import EmailComposeService
+        compose_svc = EmailComposeService(self.db)
         sent = 0
         failed = 0
 
@@ -100,25 +101,25 @@ class BroadcastService:
                 failed += 1
                 continue
 
-            # Send to first email if comma-separated
             primary_email = email_addr.split(",")[0].strip()
             if not primary_email:
                 failed += 1
                 continue
 
             try:
-                result = await email_svc.send_agent_reply(
+                result = await compose_svc.compose_and_send(
                     org_id=org_id,
                     to=primary_email,
                     subject=subject,
-                    body_text=body,
-                    is_new=True,
+                    body=body,
+                    customer_id=cust.id,
+                    sender_name=created_by,
                 )
-                if result.success:
+                if result.get("success", True):
                     sent += 1
                 else:
                     failed += 1
-                    logger.warning(f"Broadcast send failed to {primary_email}: {result.error}")
+                    logger.warning(f"Broadcast send failed to {primary_email}: {result.get('error')}")
             except Exception as e:
                 failed += 1
                 logger.error(f"Broadcast send error to {primary_email}: {e}")

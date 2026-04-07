@@ -70,6 +70,10 @@ The email pipeline handles all inbound and outbound email for QuantumPools. It i
        |
        +--- PostmarkProvider (if POSTMARK_SERVER_TOKEN set)
        +--- SmtpProvider (Gmail SMTP fallback)
+       Auto-fallback: if Postmark fails, retries via SMTP.
+       If Postmark returns "pending approval", switches to
+       SMTP for the remainder of the session (no more wasted
+       Postmark attempts in batch sends).
        v
   AgentMessage (direction=outbound, status=sent)
   update_thread_status()

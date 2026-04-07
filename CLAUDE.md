@@ -247,8 +247,9 @@ Frontend views are filtered by role. A `usePermissions()` hook exposes feature f
 
 ### Single Exit Points — one function per operation type.
 Every operation that has side effects MUST go through a single service method. No inline implementations in routers.
-- **Outbound customer email**: ALL paths go through `EmailService.send_agent_reply()` — signature, from-name, subject prefix handled there. Never call `send_email()` directly for customer-facing email.
+- **Outbound customer email**: ALL paths go through `EmailService.send_agent_reply()` — signature, from-name, subject prefix, HTML body handled there. Never call `send_email()` directly for customer-facing email. Provider auto-falls back from Postmark to SMTP on failure.
 - **Thread status**: after ANY message creation or modification, call `update_thread_status(thread_id)`. Never manually set thread.message_count, thread.status, etc.
+- **Outbound threads are invisible**: Threads where `last_direction == "outbound"` (broadcasts, sent emails without replies) are excluded from the default inbox view and the unread count. They reappear when a customer replies. Never mark outbound-only threads as unread.
 - **Invoice creation**: always through `InvoiceService.create()` for numbering and totals. Agent code uses `InvoiceService` methods, not direct `Invoice()` constructors.
 - **Visit completion**: always through `VisitService.complete()` or `VisitExperienceService.complete_visit()` — both calculate duration_minutes.
 

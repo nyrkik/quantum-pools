@@ -135,6 +135,37 @@ If you have questions, reply to this email.
     return text, html
 
 
+def customer_email_template(
+    org_name: str,
+    body_text: str,
+    branding_color: str = "#1a1a2e",
+) -> tuple[str, str]:
+    """Customer-facing email (replies, followups, broadcasts).
+
+    Takes the full plain-text body (already includes signature) and wraps it
+    in the branded HTML shell. Preserves paragraph breaks as HTML.
+    """
+    # Plain text is the body as-is
+    text = body_text
+
+    # HTML: convert double newlines to paragraph breaks, single to <br>
+    import re
+    paragraphs = re.split(r"\n{2,}", body_text.strip())
+    html_paragraphs = []
+    for p in paragraphs:
+        # Signature separator
+        if p.strip() == "--":
+            html_paragraphs.append('<hr style="border: none; border-top: 1px solid #e2e8f0; margin: 16px 0;">')
+            continue
+        escaped = p.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines = escaped.replace("\n", "<br>")
+        html_paragraphs.append(f'<p style="color: #4a5568; line-height: 1.6; margin: 0 0 12px 0;">{lines}</p>')
+
+    content = "\n".join(html_paragraphs)
+    html = _base_html(org_name, branding_color, content)
+    return text, html
+
+
 def notification_template(
     org_name: str,
     title: str,

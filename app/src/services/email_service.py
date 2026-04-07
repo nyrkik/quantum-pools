@@ -374,7 +374,16 @@ class EmailService:
             final_subject = f"Re: {final_subject}"
 
         from_name = f"{sender_name} at {org_name}" if sender_name and org_name else org_name or None
-        msg = EmailMessage(to=to, subject=final_subject, text_body=full_body, from_email=from_address, from_name=from_name, attachments=attachments)
+
+        # Generate HTML version from plain text
+        from src.services.email_templates import customer_email_template
+        color = getattr(org, "branding_color", None) or "#1a1a2e"
+        _, html_body = customer_email_template(org_name or "QuantumPools", full_body, branding_color=color)
+
+        msg = EmailMessage(
+            to=to, subject=final_subject, text_body=full_body, html_body=html_body,
+            from_email=from_address, from_name=from_name, attachments=attachments,
+        )
         return await self.send_email(org_id, msg)
 
 

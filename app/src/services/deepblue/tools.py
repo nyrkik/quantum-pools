@@ -146,15 +146,18 @@ TOOLS = [
     {
         "name": "find_customer",
         "description": (
-            "Fuzzy search for customers by ANY text fragment — name, company, email, phone, or partial. "
+            "Fuzzy search for customers by ANY text fragment — name, management company, email, phone, or partial. "
+            "Searches: display_name, company_name, first_name, last_name, email, phone, plus property address/name. "
             "Use this FIRST when the user mentions a customer by any partial identifier. "
+            "When searching for a management company (e.g., 'BLVD', 'WestCal'), use just the company name — not 'all BLVD'. "
+            "Increase limit to 50 when you expect many results (e.g., all clients under a management company). "
             "Never ask the user for a customer ID — use this tool to resolve partial info."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Text fragment to search (e.g., 'lew', 'walili', 'brightpm')"},
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "query": {"type": "string", "description": "Text fragment to search (e.g., 'lew', 'BLVD', 'westcal', 'brightpm')"},
+                "limit": {"type": "integer", "description": "Max results (default 10, max 50)"},
             },
             "required": ["query"],
         },

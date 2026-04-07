@@ -53,7 +53,7 @@ async def _exec_find_customer(inp: dict, ctx: ToolContext) -> dict:
     query = (inp.get("query") or "").strip()
     if not query:
         return {"error": "Query is required"}
-    limit = min(inp.get("limit", 5), 20)
+    limit = min(inp.get("limit", 10), 50)
     pattern = f"%{query}%"
 
     # Search across customer fields (ILIKE)
@@ -155,7 +155,7 @@ async def _exec_find_property(inp: dict, ctx: ToolContext) -> dict:
     query = (inp.get("query") or "").strip()
     if not query:
         return {"error": "Query is required"}
-    limit = min(inp.get("limit", 5), 20)
+    limit = min(inp.get("limit", 10), 50)
     pattern = f"%{query}%"
 
     # Join with customers to also match customer name fragments (ILIKE first)

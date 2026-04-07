@@ -170,14 +170,25 @@ def enforce_org_scope_and_limit(query: str, tables: set[str], org_id: str) -> st
     """
     org_scoped_used = tables & ORG_SCOPED_TABLES
 
-    # If org-scoped tables are used, require an org_id filter in the query
+    # If org-scoped tables are used, auto-inject org_id filter if missing
     if org_scoped_used:
-        # Simple check: the query must mention organization_id
         if not re.search(r'\borganization_id\b', query, re.IGNORECASE):
-            raise SQLValidationError(
-                f"Query uses org-scoped table(s) {sorted(org_scoped_used)} but doesn't filter by organization_id. "
-                f"Add 'WHERE organization_id = :org_id' or similar."
-            )
+            # Auto-inject: wrap in subquery with org filter on the first org-scoped table
+            # Find the first org-scoped table in the FROM clause to scope on
+            first_table = sorted(org_scoped_used)[0]
+            # Inject organization_id filter into WHERE clause
+            if re.search(r'\bWHERE\b', query, re.IGNORECASE):
+                query = re.sub(
+                    r'\bWHERE\b',
+                    f"WHERE {first_table}.organization_id = :org_id AND",
+                    query, count=1, flags=re.IGNORECASE,
+                )
+            else:
+                # No WHERE clause — add one before ORDER BY/GROUP BY/LIMIT or at end
+                insert_before = re.search(r'\b(ORDER BY|GROUP BY|LIMIT|$)', query, re.IGNORECASE)
+                pos = insert_before.start() if insert_before else len(query)
+                query = query[:pos] + f" WHERE {first_table}.organization_id = :org_id " + query[pos:]
+            logger.info(f"Auto-injected org scope on table '{first_table}'")
 
     # Apply/enforce LIMIT. If the query already has a LIMIT, cap it at MAX_ROWS.
     # Simplest: wrap as subquery with outer LIMIT.

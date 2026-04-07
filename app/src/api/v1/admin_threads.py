@@ -90,8 +90,8 @@ async def get_thread(
     result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_permission_slugs=perm_slugs)
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
-    # Mark as read when viewing
-    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id)
+    # Mark as read — admins/owners broadcast to all users
+    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
     return result
 
 
@@ -114,8 +114,7 @@ async def approve_thread(
     if "error" in result:
         code = {"no_pending": 400, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
-    # Sender's own reply should not show as unread
-    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id)
+    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
     return result
 
 
@@ -225,8 +224,7 @@ async def send_thread_followup(
     if "error" in result:
         code = {"not_found": 404, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
-    # Sender's own reply should not show as unread
-    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id)
+    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
     return result
 
 

@@ -31,6 +31,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
+import { toast } from "sonner";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { ComposeMessage } from "@/components/messages/compose-message";
 import { useCompose } from "@/components/email/compose-provider";
@@ -614,6 +615,44 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="min-w-0 flex-1">
+        </div>
+        {detail.status !== "closed" ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 shrink-0"
+            onClick={async () => {
+              try {
+                await api.put(`/v1/cases/${id}`, { status: "closed" });
+                toast.success("Case closed");
+                load();
+              } catch (_) { toast.error("Failed to close case"); }
+            }}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Close Case
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5 shrink-0"
+            onClick={async () => {
+              try {
+                await api.put(`/v1/cases/${id}`, { status: "open" });
+                toast.success("Case reopened");
+                load();
+              } catch (_) { toast.error("Failed to reopen case"); }
+            }}
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            Reopen
+          </Button>
+        )}
+      </div>
+      <div className="flex items-start gap-3">
+        <div className="w-8 shrink-0" />
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-mono text-muted-foreground">{detail.case_number}</p>
           {editingTitle ? (
             <div className="flex items-center gap-1 mt-0.5">
@@ -641,21 +680,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           )}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <CaseStatusBadge status={detail.status} />
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 text-xs gap-1"
-              onClick={() => openCompose({
-                customerId: detail.customer_id || undefined,
-                customerName: detail.customer_name || undefined,
-                subject: detail.title,
-                caseId: id,
-                onSent: load,
-              })}
-            >
-              <Mail className="h-3 w-3" />
-              Send Email
-            </Button>
             {detail.customer_name && (
               <Link href={`/customers/${detail.customer_id}`} className="text-sm text-muted-foreground hover:underline">
                 {detail.customer_name}
@@ -886,10 +910,26 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           {/* Emails */}
           <Card className="shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                Emails
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                  Emails
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[10px] px-1.5"
+                  onClick={() => openCompose({
+                    customerId: detail.customer_id || undefined,
+                    customerName: detail.customer_name || undefined,
+                    subject: detail.title,
+                    caseId: id,
+                    onSent: load,
+                  })}
+                >
+                  <Plus className="h-3 w-3 mr-0.5" /> Email
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-1.5">
               {detail.threads.map((t) => (

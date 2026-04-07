@@ -509,6 +509,7 @@ async def approve_estimate(
     invoice.approved_at = now
     invoice.approved_by = approver_name
     invoice.approval_id = approval.id
+    invoice.status = "approved"
 
     # Create or update linked job
     from src.services.job_invoice_service import get_first_job_for_invoice, link_job_invoice
@@ -635,6 +636,16 @@ async def revise_estimate(
     invoice.approved_by = None
     invoice.approval_id = None
     invoice.status = "revised"
+    # Append R suffix to estimate number (EST-26004 → EST-26004R, EST-26004R → EST-26004R2, etc.)
+    num = invoice.invoice_number or ""
+    if num and not num.endswith("R") and not num[-1].isdigit() == False:
+        import re
+        r_match = re.search(r'R(\d*)$', num)
+        if r_match:
+            rev = int(r_match.group(1) or "1") + 1
+            invoice.invoice_number = re.sub(r'R\d*$', f"R{rev}", num)
+        else:
+            invoice.invoice_number = f"{num}R"
     await log_job_activity(db, invoice_id, f"Estimate approval revoked for revision by {user_name}")
     await db.commit()
     await db.refresh(invoice)

@@ -213,13 +213,12 @@ export default function InboxPage() {
         ) : threads.length === 0 ? (
           <p className="text-center py-12 text-muted-foreground text-sm">No threads found</p>
         ) : threads.map((t) => (
-          <button
+          <a
             key={t.id}
-            type="button"
-            className={`w-full text-left px-3 py-2.5 rounded-lg border bg-background active:bg-blue-50 transition-colors ${
+            href={`/inbox/${t.id}`}
+            className={`block w-full text-left px-3 py-2.5 rounded-lg border bg-background active:bg-blue-50 transition-colors ${
               t.has_pending ? "border-l-4 border-l-amber-400" : ""
             } ${t.is_unread ? "font-medium" : ""}`}
-            onClick={() => setSelectedThreadId(t.id)}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -249,7 +248,7 @@ export default function InboxPage() {
                 {t.subject || t.last_snippet || "No subject"}
               </span>
             </div>
-          </button>
+          </a>
         ))}
       </div>
 

@@ -51,7 +51,7 @@ _tracker = _ErrorTracker()
 async def _send_error_alert(endpoint: str, count: int, error_msg: str):
     """Send email alert for repeated 500s. Best-effort, never crashes."""
     try:
-        from src.services.email_service import SmtpProvider, EmailMessage
+        from src.services.email_service import get_provider, EmailMessage
         notification_email = os.environ.get("NOTIFICATION_EMAIL")
         if not notification_email:
             logger.warning("NOTIFICATION_EMAIL not set — skipping error alert")
@@ -69,7 +69,7 @@ async def _send_error_alert(endpoint: str, count: int, error_msg: str):
             from_email=os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"),
             from_name="QuantumPools Monitor",
         )
-        provider = SmtpProvider()
+        provider = get_provider()
         result = await provider.send(msg)
         if result.success:
             logger.info(f"Error alert sent for {endpoint}")

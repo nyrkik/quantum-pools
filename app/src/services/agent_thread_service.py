@@ -594,25 +594,54 @@ class AgentThreadService:
             "assigned_at": thread.assigned_at.isoformat() if thread.assigned_at else None,
         }
 
-    async def mark_thread_read(self, thread_id: str, user_id: str) -> None:
-        """Mark a thread as read by the current user."""
+    async def mark_thread_read(self, thread_id: str, user_id: str, org_id: str | None = None, user_role: str | None = None) -> None:
+        """Mark a thread as read.
+
+        If the reader is an admin/owner OR the assigned user, broadcast the read
+        to all org users so the thread clears from everyone's unread list.
+        Otherwise only mark read for the current user.
+        """
         from src.models.thread_read import ThreadRead
         from datetime import datetime, timezone
 
-        result = await self.db.execute(
-            select(ThreadRead).where(
-                ThreadRead.user_id == user_id,
-                ThreadRead.thread_id == thread_id,
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
-            existing.read_at = datetime.now(timezone.utc)
+        broadcast = False
+        if user_role in ("owner", "admin"):
+            broadcast = True
+        elif org_id:
+            # Check if user is the assignee
+            thread = (await self.db.execute(
+                select(AgentThread).where(AgentThread.id == thread_id)
+            )).scalar_one_or_none()
+            if thread and thread.assigned_to_user_id == user_id:
+                broadcast = True
+
+        now = datetime.now(timezone.utc)
+
+        if broadcast and org_id:
+            # Mark read for all users in the org
+            from src.models.organization import OrganizationUser
+            org_users = (await self.db.execute(
+                select(OrganizationUser.user_id).where(OrganizationUser.organization_id == org_id)
+            )).scalars().all()
+
+            for uid in org_users:
+                existing = (await self.db.execute(
+                    select(ThreadRead).where(ThreadRead.user_id == uid, ThreadRead.thread_id == thread_id)
+                )).scalar_one_or_none()
+                if existing:
+                    existing.read_at = now
+                else:
+                    self.db.add(ThreadRead(user_id=uid, thread_id=thread_id))
         else:
-            self.db.add(ThreadRead(
-                user_id=user_id,
-                thread_id=thread_id,
-            ))
+            # Single-user read
+            existing = (await self.db.execute(
+                select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
+            )).scalar_one_or_none()
+            if existing:
+                existing.read_at = now
+            else:
+                self.db.add(ThreadRead(user_id=user_id, thread_id=thread_id))
+
         await self.db.flush()
 
     async def send_followup(self, org_id: str, thread_id: str, text: str, user_name: str, attachment_ids: list[str] | None = None) -> dict:

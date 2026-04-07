@@ -46,8 +46,8 @@ async def send_approval_request(agent_msg_id: str, summary: str, draft: str, fro
 
 
 async def send_email_response(to: str, subject: str, body: str):
-    """Send email reply via EmailService (SMTP provider)."""
-    from src.services.email_service import EmailMessage, SmtpProvider
+    """Send email reply via best available provider (Postmark or SMTP fallback)."""
+    from src.services.email_service import EmailMessage, EmailResult, get_provider
 
     re_subject = f"Re: {subject}" if subject and not subject.startswith("Re:") else subject
     msg = EmailMessage(
@@ -59,17 +59,17 @@ async def send_email_response(to: str, subject: str, body: str):
     )
 
     try:
-        provider = SmtpProvider()
+        provider = get_provider()
         result = await provider.send(msg)
         if result.success:
-            logger.info(f"Email sent to {to}: {subject}")
-            return True
+            logger.info(f"Email sent to {to}: {subject} (id={result.message_id})")
+            return result
         else:
             logger.error(f"Failed to send email to {to}: {result.error}")
-            return False
+            return None
     except Exception as e:
         logger.error(f"Failed to send email to {to}: {e}")
-        return False
+        return None
 
 
 async def notify_others(approver: str, summary: str):

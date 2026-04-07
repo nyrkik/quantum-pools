@@ -4,6 +4,7 @@ All email sending in the app goes through EmailService. The provider (SMTP, Post
 SES, etc.) is swappable via the EmailProvider interface.
 """
 
+import base64
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -14,6 +15,7 @@ from email.mime.text import MIMEText
 from email import encoders
 
 import aiosmtplib
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -118,6 +120,73 @@ class SmtpProvider(EmailProvider):
             return EmailResult(success=False, error=str(e))
 
 
+class PostmarkProvider(EmailProvider):
+    """Postmark transactional email provider."""
+
+    API_URL = "https://api.postmarkapp.com/email"
+
+    def __init__(self, server_token: str):
+        self.server_token = server_token
+
+    async def send(self, message: EmailMessage) -> EmailResult:
+        from_str = (
+            f"{message.from_name} <{message.from_email}>"
+            if message.from_name
+            else message.from_email or ""
+        )
+
+        body: dict = {
+            "From": from_str,
+            "To": message.to,
+            "Subject": message.subject,
+            "TextBody": message.text_body,
+            "MessageStream": "outbound",
+        }
+        if message.html_body:
+            body["HtmlBody"] = message.html_body
+        if message.reply_to:
+            body["ReplyTo"] = message.reply_to
+
+        if message.attachments:
+            body["Attachments"] = [
+                {
+                    "Name": att["filename"],
+                    "Content": base64.b64encode(att["content_bytes"]).decode(),
+                    "ContentType": att["mime_type"],
+                }
+                for att in message.attachments
+            ]
+
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Postmark-Server-Token": self.server_token,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(self.API_URL, json=body, headers=headers)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                return EmailResult(success=True, message_id=data.get("MessageID"))
+            else:
+                error_msg = resp.json().get("Message", resp.text[:200])
+                logger.error(f"Postmark send failed ({resp.status_code}): {error_msg}")
+                return EmailResult(success=False, error=f"Postmark {resp.status_code}: {error_msg}")
+        except Exception as e:
+            logger.error(f"Postmark send error: {e}")
+            return EmailResult(success=False, error=str(e))
+
+
+def get_provider() -> EmailProvider:
+    """Return the best available email provider based on env config."""
+    token = os.environ.get("POSTMARK_SERVER_TOKEN")
+    if token:
+        return PostmarkProvider(token)
+    return SmtpProvider()
+
+
 # ---------------------------------------------------------------------------
 # EmailService
 # ---------------------------------------------------------------------------
@@ -127,7 +196,7 @@ class EmailService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self._provider: EmailProvider = SmtpProvider()
+        self._provider: EmailProvider = get_provider()
 
     async def _get_org(self, org_id: str) -> Organization | None:
         result = await self.db.execute(select(Organization).where(Organization.id == org_id))
@@ -330,7 +399,7 @@ PDFs on file: {pdfs}
         if len(errors) > 10:
             body += f"\n  ... and {len(errors) - 10} more"
 
-    provider = SmtpProvider()
+    provider = get_provider()
     msg = EmailMessage(
         to=to,
         subject=subject,

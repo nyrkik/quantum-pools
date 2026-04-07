@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     notification_email: Optional[str] = Field(default=None, env="NOTIFICATION_EMAIL")
     frontend_url: str = Field(default="http://localhost:7060", env="FRONTEND_URL")
 
+    # Postmark (if set, replaces SMTP for outbound email)
+    postmark_server_token: Optional[str] = Field(default=None, env="POSTMARK_SERVER_TOKEN")
+
     # AI Services
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
     ai_model_fast: str = Field(default="claude-haiku-4-5-20251001", env="AI_MODEL_FAST")

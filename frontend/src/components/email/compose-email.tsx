@@ -19,6 +19,7 @@ import {
   User,
   Search,
   FileText,
+  Plus,
 } from "lucide-react";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 
@@ -32,6 +33,14 @@ interface CustomerResult {
   customer_type: string;
   email?: string;
   display_name?: string;
+}
+
+interface CustomerContact {
+  id: string;
+  name: string | null;
+  email: string;
+  role: string | null;
+  is_primary: boolean;
 }
 
 interface CustomerContext {
@@ -48,6 +57,7 @@ interface CustomerContext {
   open_invoices: { number: string; total: number; due_date: string; status: string }[];
   open_jobs: { type: string; description: string; status: string }[];
   last_visit: string | null;
+  contacts: CustomerContact[];
 }
 
 interface EmailTemplate {
@@ -68,6 +78,9 @@ export function ComposeEmail() {
   const [body, setBody] = useState("");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
+  const [extraEmails, setExtraEmails] = useState<string[]>([]);
+  const [addingEmail, setAddingEmail] = useState(false);
+  const [newEmailInput, setNewEmailInput] = useState("");
 
   // Customer search
   const [customerSearch, setCustomerSearch] = useState("");
@@ -110,6 +123,9 @@ export function ComposeEmail() {
       setContext(null);
       setShowContext(false);
       setAttachments([]);
+      setExtraEmails([]);
+      setAddingEmail(false);
+      setNewEmailInput("");
 
       if (options.customerId) {
         loadContext(options.customerId);
@@ -164,6 +180,12 @@ export function ComposeEmail() {
     try {
       const ctx = await api.get<CustomerContext>(`/v1/email/customer-context/${custId}`);
       setContext(ctx);
+      // Auto-fill To from contacts (primary first) or customer email
+      const primaryContact = ctx.contacts?.find((c) => c.is_primary);
+      const defaultEmail = primaryContact?.email || ctx.email;
+      if (defaultEmail) {
+        setTo(defaultEmail);
+      }
     } catch {
       setContext(null);
     } finally {
@@ -308,21 +330,83 @@ export function ComposeEmail() {
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground w-8">To</span>
             {customerId && customerName ? (
-              <div className="flex flex-1 items-center gap-2">
-                <Badge variant="secondary" className="gap-1 text-xs">
-                  <User className="h-3 w-3" />
-                  {customerName}
-                  <button type="button" onClick={clearCustomer} className="ml-0.5 hover:text-destructive">
-                    <X className="h-3 w-3" />
+              <div className="flex flex-1 items-center gap-1.5 flex-wrap">
+                {context?.contacts && context.contacts.length > 0 ? (
+                  context.contacts.map((c) => {
+                    const isSelected = to.includes(c.email);
+                    return (
+                      <Badge
+                        key={c.id}
+                        variant={isSelected ? "default" : "outline"}
+                        className={`gap-1 text-xs cursor-pointer transition-colors ${isSelected ? "" : "opacity-60 hover:opacity-100"}`}
+                        title={c.email}
+                        onClick={() => {
+                          const emails = to.split(",").map(e => e.trim()).filter(Boolean);
+                          if (isSelected) {
+                            setTo(emails.filter(e => e !== c.email).join(", "));
+                          } else {
+                            setTo([...emails, c.email].join(", "));
+                          }
+                        }}
+                      >
+                        <User className="h-3 w-3" />
+                        {c.name || c.email.split("@")[0]}
+                        {c.role && <span className="text-[9px] opacity-70">({c.role})</span>}
+                      </Badge>
+                    );
+                  })
+                ) : (
+                  <Badge variant="secondary" className="gap-1 text-xs" title={to}>
+                    <User className="h-3 w-3" />
+                    {customerName}
+                  </Badge>
+                )}
+                {extraEmails.map((email) => (
+                  <Badge key={email} variant="default" className="gap-1 text-xs">
+                    {email}
+                    <button type="button" onClick={() => {
+                      setExtraEmails(prev => prev.filter(e => e !== email));
+                      setTo(prev => prev.split(",").map(e => e.trim()).filter(e => e !== email).join(", "));
+                    }} className="ml-0.5 hover:text-destructive">
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </Badge>
+                ))}
+                {addingEmail ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="email"
+                      value={newEmailInput}
+                      onChange={(e) => setNewEmailInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const email = newEmailInput.trim();
+                          if (email && email.includes("@")) {
+                            setExtraEmails(prev => [...prev, email]);
+                            setTo(prev => prev ? `${prev}, ${email}` : email);
+                            setNewEmailInput("");
+                            setAddingEmail(false);
+                          }
+                        }
+                        if (e.key === "Escape") { setAddingEmail(false); setNewEmailInput(""); }
+                      }}
+                      className="h-6 w-40 text-xs"
+                      placeholder="email@example.com"
+                      autoFocus
+                    />
+                    <button type="button" onClick={() => { setAddingEmail(false); setNewEmailInput(""); }} className="text-muted-foreground hover:text-destructive">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setAddingEmail(true)} className="text-muted-foreground hover:text-foreground" title="Add recipient">
+                    <Plus className="h-3.5 w-3.5" />
                   </button>
-                </Badge>
-                <Input
-                  type="email"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="h-8 text-sm flex-1"
-                  placeholder="email@example.com"
-                />
+                )}
+                <button type="button" onClick={clearCustomer} className="ml-auto text-muted-foreground hover:text-destructive shrink-0" title="Clear customer">
+                  <X className="h-3 w-3" />
+                </button>
               </div>
             ) : (
               <div className="flex-1 relative">

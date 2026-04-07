@@ -148,8 +148,8 @@ export default function MessagesPage() {
       }
     >
     <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-12rem)]">
-      {/* Thread list */}
-      <div className="lg:w-80 xl:w-96 shrink-0 border rounded-lg bg-background overflow-y-auto">
+      {/* Thread list — hidden on mobile when viewing a thread */}
+      <div className={`lg:w-80 xl:w-96 shrink-0 border rounded-lg bg-background overflow-y-auto ${selectedThreadId ? "hidden lg:block" : ""}`}>
         <div className="p-3 border-b space-y-2">
           {isAdmin && (
             <div className="flex gap-1 bg-muted p-0.5 rounded-md">
@@ -175,9 +175,10 @@ export default function MessagesPage() {
         ) : (
           <div className="divide-y">
             {threads.map((t) => (
-              <div
+              <button
+                type="button"
                 key={t.id}
-                className={`px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors ${selectedThreadId === t.id ? "bg-muted/50" : ""} ${t.is_unread ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
+                className={`w-full text-left px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors touch-manipulation ${selectedThreadId === t.id ? "bg-muted/50" : ""} ${t.is_unread ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
                 onClick={() => setSelectedThreadId(t.id)}
               >
                 <div className="flex items-center justify-between mb-0.5">
@@ -193,14 +194,14 @@ export default function MessagesPage() {
                   {t.priority === "urgent" && <Badge variant="outline" className="text-[9px] px-1 border-amber-400 text-amber-600">Urgent</Badge>}
                   {t.customer_name && <Badge variant="secondary" className="text-[9px] px-1">{t.customer_name}</Badge>}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Thread detail */}
-      <div className="flex-1 border rounded-lg bg-background flex flex-col overflow-hidden">
+      {/* Thread detail — full screen on mobile when selected */}
+      <div className={`flex-1 border rounded-lg bg-background flex flex-col overflow-hidden ${!selectedThreadId ? "hidden lg:flex" : ""}`}>
         {!selectedThreadId ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <div className="text-center">
@@ -215,13 +216,17 @@ export default function MessagesPage() {
             {/* Header */}
             <div className="p-3 border-b shrink-0">
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold">{detail.subject || detail.participants.join(", ")}</p>
-                  {detail.subject && <p className="text-xs text-muted-foreground">{detail.participants.join(", ")}</p>}
-                  {detail.subject && <p className="text-xs text-muted-foreground">{detail.subject}</p>}
-                  {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
+                <div className="flex items-center gap-2 min-w-0">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 lg:hidden shrink-0" onClick={() => setSelectedThreadId(null)}>
+                    <ArrowRightToLine className="h-4 w-4 rotate-180" />
+                  </Button>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{detail.subject || detail.participants.join(", ")}</p>
+                    {detail.subject && <p className="text-xs text-muted-foreground truncate">{detail.participants.join(", ")}</p>}
+                    {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
+                  </div>
                 </div>
-                <div className="flex gap-1.5">
+                <div className="flex gap-1.5 shrink-0">
                   {detail.case_id ? (
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => router.push(`/cases/${detail.case_id}`)}>
                       <FolderOpen className="h-3 w-3 mr-1" /> View Case

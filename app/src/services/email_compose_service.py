@@ -488,6 +488,26 @@ class EmailComposeService:
         except Exception:
             pass
 
+        # Contacts
+        contacts = []
+        try:
+            from src.models.customer_contact import CustomerContact
+            contact_rows = (await self.db.execute(
+                select(CustomerContact).where(CustomerContact.customer_id == customer_id)
+                .order_by(CustomerContact.is_primary.desc())
+            )).scalars().all()
+            for c in contact_rows:
+                if c.email:
+                    contacts.append({
+                        "id": c.id,
+                        "name": f"{c.first_name or ''} {c.last_name or ''}".strip() or None,
+                        "email": c.email,
+                        "role": c.role,
+                        "is_primary": c.is_primary,
+                    })
+        except Exception:
+            pass
+
         return {
             "id": cust.id,
             "name": cust.display_name,
@@ -502,6 +522,7 @@ class EmailComposeService:
             "open_invoices": open_invoices,
             "open_jobs": open_jobs,
             "last_visit": last_visit,
+            "contacts": contacts,
         }
 
     # ------------------------------------------------------------------

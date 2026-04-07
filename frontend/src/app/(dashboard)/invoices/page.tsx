@@ -100,7 +100,7 @@ interface LineItem {
 import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
 import { PageLayout, PageTabs } from "@/components/layout/page-layout";
 
-const OPEN_STATUSES = "draft,sent,revised,viewed,overdue";
+const OPEN_STATUSES = "draft,sent,revised,viewed,overdue,approved";
 
 type DocView = "invoices" | "estimates";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";

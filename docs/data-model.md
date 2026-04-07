@@ -262,9 +262,10 @@ Read pool dimensions from `water_features`. Read equipment from `equipment_items
 
 ## Known Issues
 
-- **Duplicate PaymentMethod enum**: defined in both `payment.py` and `invoice.py` (or schema). Should be consolidated.
-- **Missing Tech.routes relationship**: `Tech` model has no `relationship("Route")` — routes must be queried via `Route.tech_id`.
+- ~~Duplicate PaymentMethod enum~~ — **FIXED 2026-04-07**: centralized in `core/enums.py`, both models re-export
+- ~~Missing Tech.routes relationship~~ — **FIXED 2026-04-07**: bidirectional `back_populates` added
 - **OrgRole name collision**: `OrgRole` exists as both an enum in `organization_user.py` and a model class in `org_role.py`. The enum is the legacy role system; the model is the new granular permission system.
+- **Deprecated Property columns still exist**: 16 pool/equipment columns on Property model. Schemas no longer accept writes (fixed 2026-04-07) but columns remain for backward-compat reads.
 
 ---
 

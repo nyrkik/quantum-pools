@@ -70,6 +70,7 @@ async def send_message(
                 org_id=ctx.organization_id,
                 user_id=ctx.user.id,
                 user_name=user_name,
+                user_email=ctx.user.email,
                 message=req.message,
                 context=context,
                 conversation_id=req.conversation_id,

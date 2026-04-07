@@ -35,11 +35,15 @@ def _extract_text_from_blocks(blocks) -> str:
     return " ".join(parts).strip()
 
 
-def _build_system_prompt(ctx: DeepBlueContext, user_name: str) -> str:
+def _build_system_prompt(ctx: DeepBlueContext, user_name: str, user_email: str | None = None) -> str:
     """Build the DeepBlue system prompt with resolved context."""
+    user_line = f"You are talking to {user_name}"
+    if user_email:
+        user_line += f" ({user_email})"
+    user_line += "."
     return f"""You are DeepBlue, the AI assistant for Sapphire Pool Service. You help with pool service operations, business management, and customer communications.
 
-You are talking to {user_name}.
+{user_line}
 
 CURRENT CONTEXT (your organization profile and any relevant customer/property the user is viewing):
 {ctx.context_summary}
@@ -185,6 +189,7 @@ class DeepBlueEngine:
         context: DeepBlueContext,
         conversation_id: str | None = None,
         case_id: str | None = None,
+        user_email: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Process a user message with streaming. Yields SSE event dicts.
 
@@ -211,7 +216,7 @@ class DeepBlueEngine:
 
         # Build rich context
         ctx = await build_context(self.db, org_id, context)
-        system_prompt = _build_system_prompt(ctx, user_name)
+        system_prompt = _build_system_prompt(ctx, user_name, user_email)
 
         # Load or create conversation
         conversation = None

@@ -131,7 +131,10 @@ QuantumPools/
 │       │   ├── deepblue/              # DeepBlue AI (engine, tools, eval, quota)
 │       │   ├── inspection/            # Inspection scraper + PDF extractor
 │       │   ├── emd/                   # EMD service (backward-compat aliases)
-│       │   └── parts/                 # Parts catalog services
+│       │   ├── parts/                 # Parts catalog services
+│       │   ├── thread_action_service.py  # Thread email sending, approval, dismissal
+│       │   ├── thread_ai_service.py      # AI drafting, job extraction, estimate generation
+│       │   └── estimate_workflow_service.py  # Estimate approval, snapshot, email sending
 │       ├── seeds/
 │       └── utils/
 ├── frontend/                          # Next.js 16
@@ -142,7 +145,14 @@ QuantumPools/
 │   │   ├── layout/                    # Sidebar (responsive) + mobile nav
 │   │   ├── maps/                      # Leaflet components
 │   │   ├── measurement/              # Pool measurement photo capture + results
-│   │   └── {domain}/                  # Domain-specific components
+│   │   ├── cases/                     # Case detail: TimelineItem, JobCard, InvoiceCard
+│   │   ├── customers/                 # ClientSection, CreateClientDialog, FilterBar
+│   │   ├── inbox/                     # InboxFilters, ThreadTable, Pagination
+│   │   ├── invoices/                  # Detail + list extracted components
+│   │   ├── jobs/                      # FilterBar, GroupList, AiSuggestionBanner
+│   │   ├── profitability/             # Charts, tables, cost cards (9 components)
+│   │   ├── team/                      # MemberDetail, InviteDialog, TeamTable
+│   │   └── {domain}/                  # Other domain-specific components
 │   └── lib/
 │       ├── api.ts                     # API client (cookie auth + FormData upload)
 │       ├── auth-context.tsx           # AuthProvider + useAuth

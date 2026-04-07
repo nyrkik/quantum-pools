@@ -150,15 +150,15 @@ Cleanup triggered via `POST /v1/deepblue/retention/run` (owner only). Future: AP
 
 ## Tool-use loop
 
-`engine.py:DeepBlueEngine.process_message()` implements the agent loop:
+`engine.py:DeepBlueEngine.process_message()` implements the agent loop using `AsyncAnthropic` (non-blocking async client):
 
 ```
 1. Quota check (fails fast if exceeded)
-2. Build context (org profile + page context IDs → rich text)
+2. Build context (org profile + page context IDs → rich text, tech names resolved)
 3. Load or create conversation
 4. Reconstruct claude_messages from messages_history (text + structured blocks)
 5. Loop (max 5 rounds):
-     a. Call Claude with system prompt + tools + messages
+     a. await client.messages.create() with system prompt + tools + messages
      b. For each content block in response:
           - text: stream to client, append to assistant turn
           - tool_use: execute tool, stream result, append to turn
@@ -197,8 +197,8 @@ Max 5 tool-use rounds per turn prevents runaway loops. Per-turn counter in `Tool
 - `get_inspections` — health dept inspection history for a property
 - `get_payments` — payment history
 
-### Meta
-- `query_database` — read-only SELECT with 6-layer safety stack (sqlparse validator, table whitelist, org-scope enforcement, row limit, timeout, read-only transaction)
+### Database (first-class read tool)
+- `query_database` — read-only SELECT with 6-layer safety stack (sqlparse validator, table whitelist, org-scope enforcement, row limit, timeout, read-only transaction). Positioned as a first-class tool (not a fallback) giving DeepBlue read access to the entire database for profitability, satellite, measurements, email threads, contacts, notifications, and any cross-table query.
 
 ### Action (requires preview + confirm)
 - `draft_broadcast_email` — bulk email with recipient filters (all_active, commercial, residential, custom, test)
@@ -278,8 +278,8 @@ Without tool results, resuming a conversation loses fidelity. Claude only sees i
 
 Each table has a single responsibility. Mixing them would create schema drift and coupling.
 
-**Why a meta-tool (`query_database`)?**
-Covers the long tail of data questions without requiring a new tool for every possibility. Hard-secured with 6 defense layers. Every use is logged to `deepblue_knowledge_gaps` so repeated patterns can be promoted to dedicated tools.
+**Why `query_database` as a first-class tool?**
+Covers the long tail of data questions without requiring a new tool for every table. The tool description lists all available tables (40+ org-scoped + shared) so Claude knows exactly what it can query. Hard-secured with 6 defense layers. Every use is logged to `deepblue_knowledge_gaps` so repeated patterns can be promoted to dedicated tools if needed.
 
 **Why trigram similarity for search?**
 User typos and variant spellings ("walili" vs "walali") broke exact ILIKE searches. pg_trgm provides typo-tolerant fallback with a 0.3 similarity threshold. Primary search is still exact ILIKE for speed; trigram only runs when exact returns nothing.

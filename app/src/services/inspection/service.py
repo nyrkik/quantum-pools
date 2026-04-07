@@ -50,9 +50,9 @@ class InspectionService:
 
         Returns summary dict with counts.
         """
-        from src.services.inspection.scraper import EMDScraper
+        from src.services.inspection.scraper import InspectionScraper
 
-        scraper = EMDScraper(rate_limit_seconds=rate_limit_seconds)
+        scraper = InspectionScraper(rate_limit_seconds=rate_limit_seconds)
         try:
             facilities_data = await scraper.scrape_date_range(start_date, end_date)
 

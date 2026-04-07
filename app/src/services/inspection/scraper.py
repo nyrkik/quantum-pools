@@ -1,7 +1,9 @@
-"""EMD Website Scraper — Playwright async port of the original Selenium-based Pool Scout Pro scraper.
+"""Inspection Portal Scraper — Playwright-based scraper for health department portals.
 
-Navigates to Sacramento County's myhealthdepartment.com inspection portal,
-filters by date range, extracts facility listings and inspection PDF URLs.
+Supports any county that uses the myhealthdepartment.com platform (or similar).
+County-specific behavior is configured via CountyConfig dataclass.
+
+Default: Sacramento County EMD inspection portal.
 """
 
 import asyncio
@@ -10,35 +12,36 @@ import re
 from datetime import datetime
 from typing import Optional
 
+from src.services.inspection.county_config import CountyConfig, SACRAMENTO
+
 logger = logging.getLogger(__name__)
 
-EMD_URL = "https://inspections.myhealthdepartment.com/sacramento/program-rec-health"
-DEFAULT_RATE_LIMIT = 5  # seconds between requests
 
+class InspectionScraper:
+    """Playwright-based scraper for health department inspection portals.
 
-class EMDScraper:
-    """Playwright-based scraper for Sacramento County EMD inspection portal."""
+    Accepts a CountyConfig to handle county-specific quirks (URL, selectors,
+    date handling). Defaults to Sacramento County.
+    """
 
-    def __init__(self, rate_limit_seconds: int = DEFAULT_RATE_LIMIT):
-        self.rate_limit_seconds = rate_limit_seconds
+    def __init__(self, config: CountyConfig | None = None, rate_limit_seconds: int | None = None):
+        self.config = config or SACRAMENTO
+        self.rate_limit_seconds = rate_limit_seconds or self.config.default_rate_limit_seconds
         self._browser = None
         self._playwright = None
 
     async def _ensure_browser(self):
-        """Launch Firefox browser if not already running.
-
-        Uses Firefox (not Chromium) because the EMD portal blocks headless Chrome.
-        The original Pool Scout Pro used selenium/standalone-firefox successfully.
-        """
+        """Launch browser if not already running."""
         if self._browser and self._browser.is_connected():
             return
 
         from playwright.async_api import async_playwright
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.firefox.launch(
-            headless=True,
-        )
-        logger.info("Playwright Firefox browser launched")
+        if self.config.use_firefox:
+            self._browser = await self._playwright.firefox.launch(headless=True)
+        else:
+            self._browser = await self._playwright.chromium.launch(headless=True)
+        logger.info(f"Playwright browser launched for {self.config.county_name}")
 
     async def close(self):
         """Clean up browser resources."""
@@ -54,14 +57,14 @@ class EMDScraper:
         self,
         start_date: str,
         end_date: Optional[str] = None,
-        max_load_more: int = 10,
+        max_load_more: int | None = None,
     ) -> list[dict]:
-        """Scrape EMD inspections for a date range.
+        """Scrape inspections for a date range.
 
         Args:
             start_date: YYYY-MM-DD format
             end_date: YYYY-MM-DD format (defaults to start_date)
-            max_load_more: Maximum "Load more" clicks
+            max_load_more: Maximum "Load more" clicks (defaults to config)
 
         Returns:
             List of facility dicts with keys: name, address, url, pdf_url,
@@ -69,10 +72,13 @@ class EMDScraper:
         """
         if end_date is None:
             end_date = start_date
+        if max_load_more is None:
+            max_load_more = self.config.max_load_more_clicks
 
+        cfg = self.config
         await self._ensure_browser()
         context = await self._browser.new_context(
-            user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",
+            user_agent=cfg.user_agent,
             extra_http_headers={
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
@@ -81,73 +87,42 @@ class EMDScraper:
         page = await context.new_page()
 
         try:
-            # Format dates for the date picker: MM/DD/YYYY
-            formatted_start = datetime.strptime(start_date, "%Y-%m-%d").strftime("%m/%d/%Y")
-            formatted_end = datetime.strptime(end_date, "%Y-%m-%d").strftime("%m/%d/%Y")
-            date_range = f"{formatted_start} to {formatted_end}"
+            formatted_start = datetime.strptime(start_date, "%Y-%m-%d").strftime(cfg.date_input_format)
+            formatted_end = datetime.strptime(end_date, "%Y-%m-%d").strftime(cfg.date_input_format)
+            date_range = f"{formatted_start}{cfg.date_range_separator}{formatted_end}"
 
-            logger.info(f"Navigating to EMD portal for {start_date} to {end_date}")
-            await page.goto(EMD_URL, wait_until="domcontentloaded", timeout=60000)
-
-            # Wait for the date picker to be present
-            await page.wait_for_selector(".alt-datePicker", timeout=15000)
+            logger.info(f"Navigating to {cfg.county_name} portal for {start_date} to {end_date}")
+            await page.goto(cfg.portal_url, wait_until="domcontentloaded", timeout=cfg.page_load_timeout_ms)
+            await page.wait_for_selector(cfg.date_picker_selector, timeout=cfg.selector_timeout_ms)
             logger.info("Page loaded, date picker found")
 
-            # Set date filter via native keyboard input with retry — JS injection
-            # doesn't trigger the date picker library's internal state update.
-            # The picker can be flaky so we verify the value took and retry if not.
-            picker = page.locator(".alt-datePicker")
-            for attempt in range(3):
-                await picker.click(click_count=3)
-                await asyncio.sleep(0.5)
-                await page.keyboard.press("Backspace")
-                await asyncio.sleep(0.5)
-                await picker.type(date_range, delay=50)
-                await asyncio.sleep(0.3)
-                await page.keyboard.press("Enter")
-
-                # Wait for results to load
-                await asyncio.sleep(self.rate_limit_seconds)
-
-                # Verify the filter took by checking the input value
-                current_val = await picker.input_value()
-                if formatted_start in current_val:
-                    logger.info(f"Date filter set to: {current_val} (attempt {attempt + 1})")
-                    break
-                logger.warning(f"Date filter didn't take (got '{current_val}'), retrying ({attempt + 1}/3)")
-                # Reload the page for a clean retry
-                await asyncio.sleep(self.rate_limit_seconds)
-                try:
-                    await page.goto(EMD_URL, wait_until="domcontentloaded", timeout=60000)
-                    await page.wait_for_selector(".alt-datePicker", timeout=15000)
-                    await asyncio.sleep(2)
-                except Exception as e:
-                    logger.warning(f"Page reload failed on retry: {e}")
-                    continue
-            else:
-                logger.error(f"Date filter failed after 3 attempts, aborting")
+            # Set date filter
+            success = await self._set_date_filter(page, date_range, formatted_start)
+            if not success:
                 return []
 
             # Check for results
-            results = await page.query_selector_all(".flex-row")
+            results = await page.query_selector_all(cfg.results_row_selector)
             if not results:
                 logger.info("No results found for this date range")
                 return []
 
             logger.info(f"Found {len(results)} initial results")
 
-            # Extract initial results before Load More (safety net — Load More
-            # can sometimes blank the page on the EMD portal)
-            facilities = await self._extract_facilities(page, start_date)
+            # Extract results (with Load More safety net if configured)
+            if cfg.extract_before_load_more:
+                facilities = await self._extract_facilities(page, start_date)
+                had_load_more = await self._handle_load_more(page, max_load_more)
+                if had_load_more:
+                    post_load = await self._extract_facilities(page, start_date)
+                    if len(post_load) >= len(facilities):
+                        facilities = post_load
+                    else:
+                        logger.warning(f"Load More reduced results ({len(facilities)} -> {len(post_load)}), keeping pre-Load More data")
+            else:
+                await self._handle_load_more(page, max_load_more)
+                facilities = await self._extract_facilities(page, start_date)
 
-            # Try Load More for additional results
-            had_load_more = await self._handle_load_more(page, max_load_more)
-            if had_load_more:
-                post_load = await self._extract_facilities(page, start_date)
-                if len(post_load) >= len(facilities):
-                    facilities = post_load
-                else:
-                    logger.warning(f"Load More reduced results ({len(facilities)} -> {len(post_load)}), keeping pre-Load More data")
             logger.info(f"Extracted {len(facilities)} facilities")
 
             # Deduplicate by inspection_id
@@ -171,44 +146,104 @@ class EMDScraper:
             await page.close()
             await context.close()
 
+    async def _set_date_filter(self, page, date_range: str, expected_value: str) -> bool:
+        """Set the date filter on the portal. Returns True if successful."""
+        cfg = self.config
+
+        if cfg.use_keyboard_date_input:
+            return await self._set_date_keyboard(page, date_range, expected_value)
+        else:
+            return await self._set_date_js(page, date_range)
+
+    async def _set_date_keyboard(self, page, date_range: str, expected_value: str) -> bool:
+        """Set date via native keyboard input with retry (robust but slow)."""
+        cfg = self.config
+        picker = page.locator(cfg.date_picker_selector)
+
+        for attempt in range(3):
+            await picker.click(click_count=3)
+            await asyncio.sleep(0.5)
+            await page.keyboard.press("Backspace")
+            await asyncio.sleep(0.5)
+            await picker.type(date_range, delay=50)
+            await asyncio.sleep(0.3)
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(self.rate_limit_seconds)
+
+            current_val = await picker.input_value()
+            if expected_value in current_val:
+                logger.info(f"Date filter set to: {current_val} (attempt {attempt + 1})")
+                return True
+
+            logger.warning(f"Date filter didn't take (got '{current_val}'), retrying ({attempt + 1}/3)")
+            await asyncio.sleep(self.rate_limit_seconds)
+            try:
+                await page.goto(cfg.portal_url, wait_until="domcontentloaded", timeout=cfg.page_load_timeout_ms)
+                await page.wait_for_selector(cfg.date_picker_selector, timeout=cfg.selector_timeout_ms)
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.warning(f"Page reload failed on retry: {e}")
+                continue
+
+        logger.error("Date filter failed after 3 attempts, aborting")
+        return False
+
+    async def _set_date_js(self, page, date_range: str) -> bool:
+        """Set date via JavaScript injection (faster but less robust)."""
+        cfg = self.config
+        try:
+            await page.eval_on_selector(
+                cfg.date_picker_selector,
+                """(el, dateRange) => {
+                    el.value = '';
+                    el.focus();
+                    el.value = dateRange;
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                    el.blur();
+                }""",
+                date_range,
+            )
+            await asyncio.sleep(self.rate_limit_seconds)
+            return True
+        except Exception as e:
+            logger.error(f"JS date injection failed: {e}")
+            return False
+
     async def _handle_load_more(self, page, max_attempts: int) -> bool:
-        """Click 'Load more' button until no more results or max attempts reached.
-        Returns True if any Load More clicks were made."""
+        """Click 'Load more' button until no more results or max attempts reached."""
+        cfg = self.config
         clicked = False
+
         for attempt in range(max_attempts):
-            buttons = await page.query_selector_all(".load-more-results-button")
+            buttons = await page.query_selector_all(cfg.load_more_selector)
             if not buttons:
-                logger.info("No Load More button found")
                 break
 
             button = buttons[0]
-            is_visible = await button.is_visible()
-            is_enabled = await button.is_enabled()
-
-            if not is_visible or not is_enabled:
-                logger.info("Load More button disabled or hidden")
+            if not await button.is_visible() or not await button.is_enabled():
                 break
 
-            current_count = len(await page.query_selector_all(".flex-row"))
+            current_count = len(await page.query_selector_all(cfg.results_row_selector))
             await button.click()
             clicked = True
             logger.info(f"Load More clicked (attempt {attempt + 1}/{max_attempts})")
 
             await asyncio.sleep(self.rate_limit_seconds)
 
-            new_count = len(await page.query_selector_all(".flex-row"))
+            new_count = len(await page.query_selector_all(cfg.results_row_selector))
             logger.info(f"Results: {current_count} -> {new_count}")
 
             if new_count <= current_count:
-                logger.info("No new results loaded, stopping")
                 break
 
         return clicked
 
     async def _extract_facilities(self, page, search_date: str) -> list[dict]:
-        """Extract facility data from all .flex-row elements on the page."""
+        """Extract facility data from all result elements on the page."""
+        cfg = self.config
         facilities = []
-        elements = await page.query_selector_all(".flex-row")
+        elements = await page.query_selector_all(cfg.results_row_selector)
 
         for i, element in enumerate(elements):
             try:
@@ -223,32 +258,33 @@ class EMDScraper:
 
     async def _extract_single_facility(self, element, index: int, search_date: str) -> Optional[dict]:
         """Extract data from a single facility element."""
-        # Get facility name and URL
-        name_link = await element.query_selector("h4.establishment-list-name a")
+        cfg = self.config
+
+        name_link = await element.query_selector(cfg.facility_name_selector)
         if not name_link:
             return None
 
         name = (await name_link.text_content() or "").strip()
         url = await name_link.get_attribute("href") or ""
 
-        # Get address
-        address_el = await element.query_selector(".establishment-list-address")
+        address_el = await element.query_selector(cfg.address_selector)
         address = (await address_el.text_content() or "Unknown").strip() if address_el else "Unknown"
 
-        # Get actual inspection date from the result HTML (e.g. "March 26, 2026")
+        # Get inspection date — from HTML if configured, otherwise use search date
         inspection_date = search_date
-        date_divs = await element.query_selector_all(".text-right")
-        for div in date_divs:
-            text = (await div.text_content() or "").strip()
-            parsed = self._parse_inspection_date(text)
-            if parsed:
-                inspection_date = parsed
-                break
+        if cfg.parse_date_from_results:
+            date_divs = await element.query_selector_all(cfg.date_display_selector)
+            for div in date_divs:
+                text = (await div.text_content() or "").strip()
+                parsed = self._parse_inspection_date(text)
+                if parsed:
+                    inspection_date = parsed
+                    break
 
         # Get PDF/inspection URL
         pdf_url = None
         inspection_id = None
-        inspection_btn = await element.query_selector(".view-inspections-button")
+        inspection_btn = await element.query_selector(cfg.inspection_button_selector)
         if inspection_btn:
             pdf_url = await inspection_btn.get_attribute("href")
             if pdf_url:
@@ -287,24 +323,13 @@ class EMDScraper:
         return match.group(1).upper() if match else None
 
     async def download_pdf(self, inspection_url: str, save_path: str) -> bool:
-        """Download inspection PDF via two-step process:
-        1. Navigate to the inspection detail page
-        2. Find the "View Original Inspection PDF" link
-        3. Download the actual PDF
-
-        Args:
-            inspection_url: Inspection detail page URL (relative or absolute)
-            save_path: Local path to save the file
-
-        Returns:
-            True if download succeeded
-        """
-        BASE = "https://inspections.myhealthdepartment.com"
-        full_url = (BASE + inspection_url) if inspection_url.startswith("/") else inspection_url
+        """Download inspection PDF via two-step process."""
+        cfg = self.config
+        full_url = (cfg.base_url + inspection_url) if inspection_url.startswith("/") else inspection_url
 
         await self._ensure_browser()
         context = await self._browser.new_context(
-            user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",
+            user_agent=cfg.user_agent,
             extra_http_headers={
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
@@ -312,20 +337,17 @@ class EMDScraper:
         )
         page = await context.new_page()
         try:
-            # Step 1: Navigate to inspection detail page
             logger.info(f"Navigating to inspection page: {full_url}")
-            await page.goto(full_url, timeout=60000, wait_until="domcontentloaded")
+            await page.goto(full_url, timeout=cfg.page_load_timeout_ms, wait_until="domcontentloaded")
 
-            # Wait for the PDF link to appear (JS rendering)
             try:
-                await page.wait_for_selector('a:has-text("View Original Inspection PDF")', timeout=15000)
+                await page.wait_for_selector(cfg.pdf_link_selector, timeout=cfg.selector_timeout_ms)
             except Exception:
-                await asyncio.sleep(5)  # Extra wait if selector times out
+                await asyncio.sleep(5)
 
-            # Step 2: Find the "View Original Inspection PDF" link
-            pdf_link = await page.query_selector('a:has-text("View Original Inspection PDF")')
+            pdf_link = await page.query_selector(cfg.pdf_link_selector)
             if not pdf_link:
-                pdf_link = await page.query_selector('a:has-text("PDF")')
+                pdf_link = await page.query_selector(cfg.pdf_link_fallback_selector)
             if not pdf_link:
                 logger.warning(f"No PDF link found on inspection page: {full_url}")
                 return False
@@ -335,17 +357,14 @@ class EMDScraper:
                 logger.warning("PDF link has no href")
                 return False
 
-            actual_pdf_url = (BASE + pdf_href) if pdf_href.startswith("/") else pdf_href
+            actual_pdf_url = (cfg.base_url + pdf_href) if pdf_href.startswith("/") else pdf_href
             logger.info(f"Found PDF URL: {actual_pdf_url}")
 
-            # Step 3: Download the actual PDF using Playwright's download handler
             import os
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-            # Use expect_download — the PDF link triggers a browser download
             try:
                 async with page.expect_download(timeout=30000) as download_info:
-                    # Click the PDF link instead of navigating (triggers download naturally)
                     await pdf_link.click()
                 download = await download_info.value
                 await download.save_as(save_path)
@@ -357,15 +376,11 @@ class EMDScraper:
             except Exception as e:
                 logger.warning(f"Download via click failed: {e}")
 
-                # Fallback: get cookies from browser and download via aiohttp
                 cookies = await context.cookies()
                 cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
                 try:
                     import aiohttp
-                    headers = {
-                        "Cookie": cookie_header,
-                        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",
-                    }
+                    headers = {"Cookie": cookie_header, "User-Agent": cfg.user_agent}
                     async with aiohttp.ClientSession() as session:
                         async with session.get(actual_pdf_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                             if resp.status == 200:
@@ -382,7 +397,6 @@ class EMDScraper:
             return False
         except Exception as e:
             logger.error(f"PDF download error: {e}")
-            # Restart browser on errors to clear stale state
             try:
                 await self.close()
             except Exception:
@@ -393,10 +407,8 @@ class EMDScraper:
             await context.close()
 
     async def get_facility_detail(self, facility_url: str) -> dict:
-        """Navigate to a facility detail page and extract additional data.
-
-        Returns dict with keys: permit_holder, phone, facility_id, facility_type, address_parts
-        """
+        """Navigate to a facility detail page and extract additional data."""
+        cfg = self.config
         await self._ensure_browser()
         page = await self._browser.new_page()
         try:
@@ -404,12 +416,10 @@ class EMDScraper:
             await asyncio.sleep(2)
 
             detail = {}
-
-            # Try to extract structured data from the detail page
-            info_items = await page.query_selector_all(".establishment-info-item")
+            info_items = await page.query_selector_all(cfg.facility_detail_item_selector)
             for item in info_items:
-                label_el = await item.query_selector(".info-label")
-                value_el = await item.query_selector(".info-value")
+                label_el = await item.query_selector(cfg.info_label_selector)
+                value_el = await item.query_selector(cfg.info_value_selector)
                 if label_el and value_el:
                     label = (await label_el.text_content() or "").strip().lower()
                     value = (await value_el.text_content() or "").strip()
@@ -428,3 +438,7 @@ class EMDScraper:
             return {}
         finally:
             await page.close()
+
+
+# Backward compatibility alias
+EMDScraper = InspectionScraper

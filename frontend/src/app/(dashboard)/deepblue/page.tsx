@@ -114,6 +114,8 @@ export default function DeepBluePage() {
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setSending(true);
+    // Re-focus input so user can keep typing
+    setTimeout(() => inputRef.current?.focus(), 50);
     setStreamingContent("");
 
     const userMsg: Message = { role: "user", content: text, timestamp: new Date().toISOString() };

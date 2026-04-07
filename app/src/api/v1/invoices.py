@@ -281,111 +281,13 @@ async def send_invoice(
     user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
     invoice = await svc.send(ctx.organization_id, invoice_id, sent_by=user_name)
 
-    # For estimates, also send the email with approval link
     if invoice.document_type == "estimate":
-        import json, secrets
-        from sqlalchemy import select
-        from src.models.estimate_approval import EstimateApproval
-        from src.models.customer import Customer
-        from src.models.customer_contact import CustomerContact
-        from src.services.email_service import EmailService
-        from src.models.property import Property
-        from src.core.config import settings
-
-        # Get customer
-        cust = (await db.execute(
-            select(Customer).where(Customer.id == invoice.customer_id)
-        )).scalar_one_or_none()
-        if not cust:
-            return _invoice_to_response(invoice)
-
-        # Find estimate contacts
-        contacts = (await db.execute(
-            select(CustomerContact).where(
-                CustomerContact.customer_id == invoice.customer_id,
-                CustomerContact.receives_estimates == True,
-                CustomerContact.email.isnot(None),
-            )
-        )).scalars().all()
-
-        recipients = [c.email for c in contacts] if contacts else ([cust.email] if cust.email else [])
-        if not recipients:
-            return _invoice_to_response(invoice)
-
-        # Create or reuse approval record
-        existing = (await db.execute(
-            select(EstimateApproval).where(EstimateApproval.invoice_id == invoice.id)
-        )).scalar_one_or_none()
-
-        if not existing:
-            from src.models.invoice import InvoiceLineItem
-            items = (await db.execute(
-                select(InvoiceLineItem).where(InvoiceLineItem.invoice_id == invoice.id).order_by(InvoiceLineItem.sort_order)
-            )).scalars().all()
-
-            snapshot = {
-                "line_items": [
-                    {"description": li.description, "quantity": float(li.quantity),
-                     "unit_price": float(li.unit_price), "total": float(li.amount or li.quantity * li.unit_price)}
-                    for li in items
-                ],
-                "total": float(invoice.total or 0),
-                "subject": invoice.subject,
-            }
-            import uuid
-            existing = EstimateApproval(
-                id=str(uuid.uuid4()),
-                organization_id=ctx.organization_id,
-                invoice_id=invoice.id,
-                approved_by_type="pending",
-                approved_by_name="",
-                approval_token=secrets.token_urlsafe(32),
-                approval_method="email_link",
-                snapshot_json=json.dumps(snapshot),
-            )
-            db.add(existing)
-
-        # Set recipient info
-        c0 = contacts[0] if contacts else None
-        existing.recipient_name = " ".join(filter(None, [c0.first_name, c0.last_name])) if c0 and (c0.first_name or c0.last_name) else None
-        existing.recipient_email = recipients[0]
-
-        base_url = getattr(settings, "FRONTEND_URL", None) or "https://app.quantumpoolspro.com"
-        approve_url = f"{base_url}/approve/{existing.approval_token}"
-
-        # Build property line
-        prop = (await db.execute(
-            select(Property).where(Property.customer_id == invoice.customer_id, Property.is_active == True)
-        )).scalars().first()
-        property_line = ""
-        if prop:
-            if prop.name:
-                property_line = prop.name
-                if prop.address:
-                    property_line += f" ({prop.address})"
-            elif prop.address:
-                property_line = prop.address
-
-        # Send emails
-        email_svc = EmailService(db)
-        def _first_name_for(email: str) -> str:
-            match = next((c for c in contacts if c.email == email and c.first_name), None)
-            return match.first_name if match else ""
-
-        for recipient in recipients:
-            await email_svc.send_estimate_email(
-                org_id=ctx.organization_id,
-                to=recipient,
-                estimate_number=invoice.invoice_number,
-                subject=f"Estimate: {invoice.subject or 'Service Estimate'}",
-                total=float(invoice.total or 0),
-                view_url=approve_url,
-                property_line=property_line,
-                recipient_first_name=_first_name_for(recipient),
-            )
-
-        await log_job_activity(db, invoice_id, f"Estimate {invoice.invoice_number} sent to {', '.join(recipients)}")
-        await db.commit()
+        from src.services.estimate_workflow_service import EstimateWorkflowService
+        wf = EstimateWorkflowService(db)
+        result = await wf.send_estimate_email(ctx.organization_id, invoice)
+        if result.get("sent"):
+            await log_job_activity(db, invoice_id, f"Estimate {invoice.invoice_number} sent to {', '.join(result['to'])}")
+            await db.commit()
     else:
         await log_job_activity(db, invoice_id, f"Invoice {invoice.invoice_number} marked as sent")
         await db.commit()
@@ -438,109 +340,17 @@ async def approve_estimate(
     db: AsyncSession = Depends(get_db),
 ):
     """Approve an estimate — admin on behalf of client. Creates frozen snapshot."""
-    import json
-    from datetime import datetime, timezone
-    from pydantic import BaseModel
-    from src.models.estimate_approval import EstimateApproval
-
-    class ApproveBody(BaseModel):
-        notes: Optional[str] = None
-        client_name: Optional[str] = None
-
-    # Parse body manually since we defined inline
-    from fastapi import Request
-    body_raw = {}
-    try:
-        import starlette
-    except:
-        pass
-
     svc = InvoiceService(db)
     invoice = await svc.get(ctx.organization_id, invoice_id)
 
-    if invoice.document_type != "estimate":
-        from src.core.exceptions import ValidationError
-        raise ValidationError("Only estimates can be approved")
-
-    if invoice.approved_at:
-        from src.core.exceptions import ValidationError
-        raise ValidationError("Estimate is already approved")
-
-    # Build frozen snapshot
-    snapshot = {
-        "estimate_number": invoice.invoice_number,
-        "customer_name": invoice.customer.display_name if invoice.customer else "",
-        "subject": invoice.subject,
-        "line_items": [
-            {
-                "description": li.description,
-                "quantity": li.quantity,
-                "unit_price": li.unit_price,
-                "amount": li.amount,
-            }
-            for li in (invoice.line_items or [])
-        ],
-        "subtotal": invoice.subtotal,
-        "discount": invoice.discount,
-        "tax_rate": invoice.tax_rate,
-        "tax_amount": invoice.tax_amount,
-        "total": invoice.total,
-        "notes": invoice.notes,
-        "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
-        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
-    }
-
-    now = datetime.now(timezone.utc)
+    from src.services.estimate_workflow_service import EstimateWorkflowService
+    wf = EstimateWorkflowService(db)
     approver_name = f"{ctx.user.first_name} {ctx.user.last_name}"
-
-    approval = EstimateApproval(
-        organization_id=ctx.organization_id,
-        invoice_id=invoice_id,
-        approved_by_type="admin_on_behalf",
-        approved_by_name=approver_name,
-        approved_by_user_id=ctx.user.id,
-        approval_method="admin_dashboard",
-        snapshot_json=json.dumps(snapshot),
-        approved_at=now,
-    )
-    db.add(approval)
-    await db.flush()
-
-    invoice.approved_at = now
-    invoice.approved_by = approver_name
-    invoice.approval_id = approval.id
-    invoice.status = "approved"
-
-    # Create or update linked job
-    from src.services.job_invoice_service import get_first_job_for_invoice, link_job_invoice
-    action = await get_first_job_for_invoice(db, invoice_id)
-    if action:
-        action.status = "open"
-    else:
-        from src.models.agent_action import AgentAction
-        action = AgentAction(
-            organization_id=ctx.organization_id,
-            customer_id=invoice.customer_id,
-            action_type="repair",
-            description=f"Approved: {invoice.subject or 'Service Estimate'}",
-            status="open",
-            job_path="customer",
-            created_by=approver_name,
-        )
-        db.add(action)
-        await db.flush()
-        await link_job_invoice(db, action.id, invoice_id, linked_by=approver_name)
-
-    await log_job_activity(db, invoice_id, f"Estimate approved by {approver_name} (on behalf of client)")
-    await db.commit()
-
-    return {
-        "approved": True,
-        "approval_id": approval.id,
-        "approved_by": approver_name,
-        "approved_at": now.isoformat(),
-        "approval_token": approval.approval_token,
-    }
+    result = await wf.approve_by_admin(ctx.organization_id, invoice, ctx.user.id, approver_name)
+    if "error" in result:
+        from src.core.exceptions import ValidationError
+        raise ValidationError(result["detail"])
+    return result
 
 
 @router.get("/{invoice_id}/approval")

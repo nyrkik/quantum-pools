@@ -1,104 +1,23 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import {
-  Plus,
-  Search,
-  DollarSign,
-  AlertTriangle,
-  Trash2,
-  ChevronLeft,
-  ChevronRight,
-  X,
-  CheckCircle2,
-  Loader2,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-
-interface Invoice {
-  id: string;
-  invoice_number: string | null;
-  customer_id: string;
-  customer_name: string;
-  subject: string | null;
-  status: string;
-  document_type: string;
-  issue_date: string;
-  due_date: string;
-  total: number;
-  balance: number;
-  approved_at: string | null;
-  approved_by: string | null;
-}
-
-interface InvoiceStats {
-  total_outstanding: number;
-  total_overdue: number;
-  monthly_revenue: number;
-  invoice_count: number;
-  paid_count: number;
-  overdue_count: number;
-}
-
-interface MonthlyData {
-  month: string;
-  paid: number;
-  open: number;
-}
-
-interface Customer {
-  id: string;
-  first_name: string;
-  last_name: string;
-  company_name: string | null;
-}
-
-interface LineItem {
-  description: string;
-  quantity: number;
-  unit_price: number;
-  is_taxed: boolean;
-}
-
-import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
+import { Search } from "lucide-react";
 import { PageLayout, PageTabs } from "@/components/layout/page-layout";
+import {
+  MonthlyChart,
+  CreateInvoiceDialog,
+  InvoiceTable,
+  ApproveEstimateDialog,
+  type Invoice,
+  type InvoiceStats,
+  type MonthlyData,
+  type Customer,
+  type LineItem,
+} from "@/components/invoices/invoice-list-components";
 
 const OPEN_STATUSES = "draft,sent,revised,viewed,overdue,approved";
 
@@ -324,13 +243,9 @@ export default function InvoicesPage() {
 
   const today = new Date().toISOString().split("T")[0];
   const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth(); // 0-indexed
+  const currentMonth = new Date().getMonth();
 
   const [hoveredMonth, setHoveredMonth] = useState<number | null>(null);
-  const chartData = monthlyData.map((m, i) => ({
-    ...m,
-    isFuture: chartYear > currentYear || (chartYear === currentYear && i > currentMonth),
-  }));
 
   const tabs: { key: TabFilter; label: string; count?: number }[] = [
     {
@@ -350,230 +265,27 @@ export default function InvoicesPage() {
       title="Invoices"
       subtitle={undefined}
       action={
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              {docView === "estimates" ? "Create Estimate" : "Create Invoice"}
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{docView === "estimates" ? "New Estimate" : "New Invoice"}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreate} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Client</Label>
-                  <Select
-                    value={selectedCustomerId}
-                    onValueChange={setSelectedCustomerId}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select client" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.first_name} {c.last_name}
-                          {c.company_name ? ` (${c.company_name})` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="subject">Subject</Label>
-                  <Input
-                    id="subject"
-                    name="subject"
-                    placeholder="Monthly pool service"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="issue_date">Issue Date</Label>
-                  <Input
-                    id="issue_date"
-                    name="issue_date"
-                    type="date"
-                    defaultValue={today}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="due_date">Due Date</Label>
-                  <Input
-                    id="due_date"
-                    name="due_date"
-                    type="date"
-                    defaultValue={
-                      new Date(Date.now() + 30 * 86400000)
-                        .toISOString()
-                        .split("T")[0]
-                    }
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Line Items */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Line Items</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={addLineItem}
-                  >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Add Item
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  {lineItems.map((item, index) => (
-                    <div key={index} className="flex items-start gap-2">
-                      <Input
-                        placeholder="Description"
-                        className="flex-1"
-                        value={item.description}
-                        onChange={(e) =>
-                          updateLineItem(index, "description", e.target.value)
-                        }
-                        required={index === 0}
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Qty"
-                        className="w-20"
-                        min="0"
-                        step="1"
-                        value={item.quantity}
-                        onChange={(e) =>
-                          updateLineItem(
-                            index,
-                            "quantity",
-                            parseFloat(e.target.value) || 0
-                          )
-                        }
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Price"
-                        className="w-28"
-                        min="0"
-                        step="0.01"
-                        value={item.unit_price}
-                        onChange={(e) =>
-                          updateLineItem(
-                            index,
-                            "unit_price",
-                            parseFloat(e.target.value) || 0
-                          )
-                        }
-                      />
-                      <div className="flex items-center gap-1 pt-2">
-                        <Checkbox
-                          checked={item.is_taxed}
-                          onCheckedChange={(checked) =>
-                            updateLineItem(
-                              index,
-                              "is_taxed",
-                              checked === true
-                            )
-                          }
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          Tax
-                        </span>
-                      </div>
-                      <span className="w-20 pt-2 text-right text-sm">
-                        ${(item.quantity * item.unit_price).toFixed(2)}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeLineItem(index)}
-                        disabled={lineItems.length <= 1}
-                        className="px-2"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="tax_rate">Tax Rate (%)</Label>
-                  <Input
-                    id="tax_rate"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={taxRate}
-                    onChange={(e) =>
-                      setTaxRate(parseFloat(e.target.value) || 0)
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="discount">Discount ($)</Label>
-                  <Input
-                    id="discount"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={discount}
-                    onChange={(e) =>
-                      setDiscount(parseFloat(e.target.value) || 0)
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="bg-muted/50 rounded-md p-3 text-sm space-y-1">
-                <div className="flex justify-between">
-                  <span>Subtotal</span>
-                  <span>${subtotal.toFixed(2)}</span>
-                </div>
-                {taxRate > 0 && (
-                  <div className="flex justify-between">
-                    <span>Tax ({taxRate}%)</span>
-                    <span>${taxAmount.toFixed(2)}</span>
-                  </div>
-                )}
-                {discount > 0 && (
-                  <div className="flex justify-between text-red-600">
-                    <span>Discount</span>
-                    <span>-${discount.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-bold border-t pt-1">
-                  <span>Total</span>
-                  <span>${computedTotal.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea id="notes" name="notes" rows={2} />
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={!selectedCustomerId}
-              >
-                {docView === "estimates" ? "Create Estimate" : "Create Invoice"}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <CreateInvoiceDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          docView={docView}
+          customers={customers}
+          selectedCustomerId={selectedCustomerId}
+          setSelectedCustomerId={setSelectedCustomerId}
+          lineItems={lineItems}
+          addLineItem={addLineItem}
+          removeLineItem={removeLineItem}
+          updateLineItem={updateLineItem}
+          taxRate={taxRate}
+          setTaxRate={setTaxRate}
+          discount={discount}
+          setDiscount={setDiscount}
+          subtotal={subtotal}
+          taxAmount={taxAmount}
+          computedTotal={computedTotal}
+          today={today}
+          onSubmit={handleCreate}
+        />
       }
       tabs={[
         { key: "invoices", label: "Invoices" },
@@ -583,110 +295,25 @@ export default function InvoicesPage() {
       onTabChange={(key) => { setDocView(key as DocView); setSearch(""); setSelectedMonth(null); setChartSegment("all"); setActiveTab("open"); }}
       context={docView === "invoices" ? (
         <>
-      {/* Chart */}
-      <Card>
-        <CardContent className="pt-4 px-3 sm:px-6">
-          <div className="flex items-center justify-between mb-2">
-            {/* Paid/Open — left */}
-            <div className="flex items-baseline gap-3 sm:gap-5">
-              {(() => {
-                const activeIdx = selectedMonth ?? hoveredMonth;
-                const paid = activeIdx !== null ? (monthlyData[activeIdx]?.paid || 0) : monthlyData.reduce((s, m) => s + m.paid, 0);
-                const open = activeIdx !== null ? (monthlyData[activeIdx]?.open || 0) : monthlyData.reduce((s, m) => s + m.open, 0);
-                return (
-                  <>
-                    <span className="text-green-700 text-base sm:text-lg font-bold">Paid ${paid.toLocaleString("en-US", { minimumFractionDigits: 0 })}</span>
-                    <span className="text-amber-600 text-base sm:text-lg font-bold">Open ${open.toLocaleString("en-US", { minimumFractionDigits: 0 })}</span>
-                    {stats && stats.total_overdue > 0 && selectedMonth === null && hoveredMonth === null && (
-                      <span className="text-destructive text-base sm:text-lg font-bold">Overdue ${stats.total_overdue.toLocaleString("en-US", { minimumFractionDigits: 0 })}</span>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-            {/* Selected month + year nav — right */}
-            <div className="flex items-center gap-2">
-              {selectedMonth !== null && (
-                <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-green-600 text-white">
-                  {monthlyData[selectedMonth]?.month}
-                  <button onClick={() => { setSelectedMonth(null); setChartSegment("all"); }} className="ml-0.5 opacity-70 hover:opacity-100"><X className="h-3 w-3" /></button>
-                </span>
-              )}
-              <div className="flex items-center gap-0.5">
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setChartYear((y) => y - 1); setSelectedMonth(null); setChartSegment("all"); }}>
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </Button>
-                <span className="text-sm font-semibold w-10 text-center">{chartYear}</span>
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setChartYear((y) => y + 1); setSelectedMonth(null); setChartSegment("all"); }} disabled={chartYear >= currentYear}>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-            {/* Pure CSS bar chart */}
-            {(() => {
-              const maxVal = Math.max(...chartData.map(d => d.paid + d.open), 1);
-              const chartHeight = 160;
-              return (
-                <div className="flex gap-1 sm:gap-2" style={{ height: chartHeight }} onMouseLeave={() => setHoveredMonth(null)}>
-                  {chartData.map((d, i) => {
-                    const total = d.paid + d.open;
-                    const paidPct = total > 0 ? (d.paid / maxVal) * 100 : 0;
-                    const openPct = total > 0 ? (d.open / maxVal) * 100 : 0;
-                    const greyPct = d.isFuture ? 100 : 100 - paidPct - openPct;
-
-                    const isSelected = selectedMonth === i;
-                    const isHovered = hoveredMonth === i;
-                    const highlighted = isSelected || isHovered;
-                    const faded = (selectedMonth !== null && !isSelected) || (hoveredMonth !== null && selectedMonth === null && !isHovered);
-
-                    return (
-                      <div
-                        key={i}
-                        className={`relative flex-1 flex flex-col items-stretch ${d.isFuture ? "cursor-default" : "cursor-pointer"}`}
-                        onMouseEnter={() => !d.isFuture && setHoveredMonth(i)}
-                        onMouseLeave={() => setHoveredMonth(null)}
-                        onClick={() => {
-                          if (d.isFuture) return;
-                          setHoveredMonth(null);
-                          setSelectedMonth(selectedMonth === i ? null : i);
-                          setChartSegment("all");
-                        }}
-                      >
-                        {/* Tooltip on hover — centered over column */}
-                        {isHovered && !d.isFuture && (
-                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-popover/95 backdrop-blur-sm border rounded shadow-md px-2.5 py-1.5 text-[11px] whitespace-nowrap z-20 pointer-events-none">
-                            <div className="font-medium mb-0.5">{d.month}</div>
-                            <div className="text-green-700">Paid ${d.paid.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
-                            <div className="text-amber-600">Open ${d.open.toLocaleString("en-US", { minimumFractionDigits: 0 })}</div>
-                          </div>
-                        )}
-                        {/* Bar container — always full height */}
-                        <div className={`flex-1 flex flex-col justify-end rounded-t overflow-hidden transition-opacity duration-150 ${d.isFuture ? "opacity-40" : highlighted ? "opacity-100" : faded ? "opacity-40" : "opacity-100"}`}>
-                          {/* Grey remainder — top */}
-                          <div className={`${highlighted ? "bg-slate-300" : "bg-slate-200"} transition-colors duration-150`} style={{ flexBasis: `${greyPct}%`, minHeight: 0 }} />
-                          {/* Open (amber) — middle */}
-                          {openPct > 0 && <div className="bg-amber-400" style={{ flexBasis: `${openPct}%`, minHeight: 0 }} />}
-                          {/* Paid (green) — bottom */}
-                          {paidPct > 0 && <div className="bg-green-600" style={{ flexBasis: `${paidPct}%`, minHeight: 0 }} />}
-                        </div>
-                        {/* Month label */}
-                        <p className="text-[10px] sm:text-[11px] text-center text-muted-foreground mt-1.5 select-none">{d.month}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-        </CardContent>
-      </Card>
-
-      {/* Sub-tabs: Open / All / Paid / Overdue */}
-      <PageTabs
-        tabs={tabs}
-        activeTab={activeTab}
-        onTabChange={(key) => setActiveTab(key as TabFilter)}
-      />
+          <MonthlyChart
+            monthlyData={monthlyData}
+            stats={stats}
+            chartYear={chartYear}
+            setChartYear={setChartYear}
+            selectedMonth={selectedMonth}
+            setSelectedMonth={setSelectedMonth}
+            chartSegment={chartSegment}
+            setChartSegment={setChartSegment}
+            hoveredMonth={hoveredMonth}
+            setHoveredMonth={setHoveredMonth}
+            currentYear={currentYear}
+            currentMonth={currentMonth}
+          />
+          <PageTabs
+            tabs={tabs}
+            activeTab={activeTab}
+            onTabChange={(key) => setActiveTab(key as TabFilter)}
+          />
         </>
       ) : undefined}
     >
@@ -701,129 +328,21 @@ export default function InvoicesPage() {
         />
       </div>
 
-      {/* Table */}
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Status</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>{docView === "estimates" ? "Estimate #" : "Invoice #"}</TableHead>
-              <TableHead>Client</TableHead>
-              <TableHead>Subject</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              {docView === "invoices" && <TableHead className="text-right">Balance</TableHead>}
-              {docView === "estimates" && <TableHead>Approval</TableHead>}
-              {docView === "estimates" && <TableHead></TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={docView === "invoices" ? 7 : 8} className="text-center py-8">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            ) : invoices.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={docView === "invoices" ? 7 : 8}
-                  className="text-center py-8 text-muted-foreground"
-                >
-                  No {docView === "estimates" ? "estimates" : "invoices"} found
-                </TableCell>
-              </TableRow>
-            ) : (
-              invoices.map((inv, i) => (
-                <TableRow key={inv.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
-                  <TableCell>
-                    <InvoiceStatusBadge status={inv.status} />
-                  </TableCell>
-                  <TableCell>{inv.issue_date}</TableCell>
-                  <TableCell>
-                    <Link
-                      href={`/invoices/${inv.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {inv.invoice_number || "Draft"}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{inv.customer_name}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {inv.subject || "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    ${inv.total.toFixed(2)}
-                  </TableCell>
-                  {docView === "invoices" && (
-                    <TableCell
-                      className={`text-right ${inv.balance > 0 ? "text-red-600 font-medium" : ""}`}
-                    >
-                      ${inv.balance.toFixed(2)}
-                    </TableCell>
-                  )}
-                  {docView === "estimates" && (
-                    <TableCell>
-                      {inv.approved_at ? (
-                        <div className="flex items-center gap-1">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                          <span className="text-xs text-green-700">{inv.approved_by}</span>
-                        </div>
-                      ) : ["sent", "revised", "viewed"].includes(inv.status) ? (
-                        <span className="text-xs text-muted-foreground">Awaiting</span>
-                      ) : null}
-                    </TableCell>
-                  )}
-                  {docView === "estimates" && (
-                    <TableCell>
-                      {!inv.approved_at && ["sent", "revised", "viewed"].includes(inv.status) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => { setApproveDialogId(inv.id); setApproveNote(""); }}
-                        >
-                          Approve
-                        </Button>
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <InvoiceTable
+        invoices={invoices}
+        loading={loading}
+        docView={docView}
+        onApprove={(id) => { setApproveDialogId(id); setApproveNote(""); }}
+      />
 
-      {/* Approve Estimate Dialog */}
-      <Dialog open={!!approveDialogId} onOpenChange={(open) => { if (!open) setApproveDialogId(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Approve Estimate</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              This will approve the estimate on behalf of the client. A job will be created automatically.
-            </p>
-            <div className="space-y-1">
-              <Label className="text-xs">Note (optional)</Label>
-              <Input
-                value={approveNote}
-                onChange={(e) => setApproveNote(e.target.value)}
-                placeholder="e.g. Client approved via email 3/30"
-                className="text-sm"
-              />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setApproveDialogId(null)}>Cancel</Button>
-              <Button size="sm" onClick={handleApproveEstimate} disabled={approving}>
-                {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />}
-                Approve
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ApproveEstimateDialog
+        approveDialogId={approveDialogId}
+        setApproveDialogId={setApproveDialogId}
+        approveNote={approveNote}
+        setApproveNote={setApproveNote}
+        approving={approving}
+        onApprove={handleApproveEstimate}
+      />
     </PageLayout>
   );
 }

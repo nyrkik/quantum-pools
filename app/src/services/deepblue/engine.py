@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-import anthropic
+from anthropic import AsyncAnthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,12 +54,12 @@ CAPABILITIES:
 - Pool service: equipment troubleshooting, chemical dosing calculations, parts lookup, service history, inspections
 - Business operations: draft emails, send broadcasts, customer lookups, invoices, estimates, jobs, cases, payments, routes, techs, billing terms, service tiers
 - Field support: quick answers for techs on-site, equipment specs, code/inspection questions
-- Database queries: for anything not covered by a specific tool, use query_database (SQL SELECT with safety limits)
+- Database queries: query_database gives you read access to the ENTIRE database — use it freely for any data not covered by a specific tool
 
 TOOL SELECTION PRIORITY:
-1. Use specific tools first (get_billing_documents, get_open_jobs, get_equipment, etc.) — they're fast and focused.
-2. Use query_database ONLY as a last resort when no specific tool fits. This lets you answer novel questions about the data.
-3. Never say "I don't have access to that" if it's data in the system. Try a specific tool first, then query_database.
+1. Use specific tools first (get_billing_documents, get_open_jobs, get_equipment, etc.) — they're fast and return well-structured data.
+2. Use query_database freely for anything else — profitability data, satellite results, measurements, email threads, water feature details, contacts, feedback, notifications, broadcast history, or any cross-table query. It's a first-class tool, not a fallback.
+3. Never say "I don't have access to that" — between specific tools and query_database, you can read everything in the system.
 
 CHEMICAL DOSING — SAFETY CRITICAL:
 For ANY question involving pH, chlorine, alkalinity, calcium hardness, cyanuric acid, phosphates, or chemical amounts, you MUST call the chemical_dosing_calculator tool. This is non-negotiable.
@@ -85,7 +85,7 @@ When the user gives partial info (a name fragment, address piece, pool nickname,
 1. find_customer with the fragment (typo-tolerant — uses fuzzy matching)
 2. find_property with the fragment (typo-tolerant)
 3. search_equipment_catalog if it looks like an equipment term
-4. query_database as a last resort
+4. query_database for broader or cross-table searches
 5. Only after all of these fail, ask the user — and ask specifically by showing your closest guesses ("I found 'Pinebrook Village' — is that who you mean?")
 
 NOTE: find_customer and find_property are typo-tolerant. If "walili" returns nothing, the fuzzy fallback should catch "walali". You don't need to ask the user to check spelling.
@@ -279,12 +279,12 @@ class DeepBlueEngine:
         total_output = 0
         meta_tool_invocations = []  # Track query_database calls for gap logging
 
-        client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+        client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
         model = await get_model("fast")
 
         # Tool use loop — Claude may call tools, we execute and feed results back
         for _round in range(MAX_TOOL_ROUNDS):
-            response = client.messages.create(
+            response = await client.messages.create(
                 model=model,
                 max_tokens=2048,
                 system=system_prompt,
@@ -443,7 +443,7 @@ class DeepBlueEngine:
         # Auto-generate a smart title after the first exchange (user + assistant)
         if len(messages_history) == 2 and full_text:
             try:
-                title_resp = client.messages.create(
+                title_resp = await client.messages.create(
                     model=model,
                     max_tokens=20,
                     messages=[{

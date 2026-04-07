@@ -126,103 +126,21 @@ async def approve_estimate(
     db: AsyncSession = Depends(get_db),
 ):
     """Customer approves an estimate — single step: name + typed signature + consent."""
-    result = await db.execute(
-        select(EstimateApproval).where(EstimateApproval.approval_token == token)
+    from src.services.estimate_workflow_service import EstimateWorkflowService
+    wf = EstimateWorkflowService(db)
+    result = await wf.approve_by_customer(
+        token=token,
+        name=body.name,
+        email=body.email,
+        signature=body.signature,
+        user_agent=body.user_agent,
+        notes=body.notes,
+        client_ip=request.client.host if request.client else None,
     )
-    approval = result.scalar_one_or_none()
-    if not approval:
-        raise HTTPException(status_code=404, detail="Estimate not found or link expired")
-
-    if approval.approved_by_type and approval.approved_by_type != "pending":
-        return {"already_approved": True, "approved_at": approval.approved_at.isoformat()}
-
-    if not body.name or not body.name.strip():
-        raise HTTPException(status_code=400, detail="Name is required")
-    if not body.signature or not body.signature.strip():
-        raise HTTPException(status_code=400, detail="Typed signature is required")
-
-    # Record approval with full evidence chain
-    now = datetime.now(timezone.utc)
-    approval.approved_at = now
-    approval.approved_by_type = "client"
-    approval.approved_by_name = body.name.strip()
-    approval.client_email = body.email
-    approval.client_ip = request.client.host if request.client else None
-    approval.approval_method = "email_link"
-    approval.signature_data = body.signature.strip()
-    approval.notes = f"User-Agent: {body.user_agent or 'unknown'}" + (f"\n{body.notes}" if body.notes else "")
-
-    # Update invoice and create/update job
-    invoice_result = await db.execute(
-        select(Invoice).where(Invoice.id == approval.invoice_id)
-    )
-    invoice = invoice_result.scalar_one_or_none()
-    if invoice:
-        invoice.approved_at = now
-        invoice.approved_by = body.name.strip()
-        invoice.status = "approved"
-
-        # Update linked job if exists, otherwise create one
-        from src.services.job_invoice_service import get_first_job_for_invoice, link_job_invoice
-        action = await get_first_job_for_invoice(db, invoice.id)
-        if action:
-            action.status = "open"
-        else:
-            # Auto-create job for approved estimate, inheriting case from invoice
-            import uuid
-            action = AgentAction(
-                id=str(uuid.uuid4()),
-                organization_id=approval.organization_id,
-                customer_id=invoice.customer_id,
-                case_id=invoice.case_id,
-                action_type="repair",
-                description=f"Approved: {invoice.subject or 'Service Estimate'}",
-                status="open",
-                job_path="customer",
-                created_by=body.name.strip(),
-            )
-            db.add(action)
-            await db.flush()
-            await link_job_invoice(db, action.id, invoice.id, linked_by=body.name.strip())
-
-        # Update case status after approval
-        if invoice.case_id:
-            try:
-                from src.services.service_case_service import ServiceCaseService
-                await ServiceCaseService(db).update_status_from_children(invoice.case_id)
-            except Exception:
-                pass
-
-    # Notify admins/owners
-    if invoice:
-        from src.models.organization_user import OrganizationUser
-        from src.models.notification import Notification
-        admins = (await db.execute(
-            select(OrganizationUser).where(
-                OrganizationUser.organization_id == approval.organization_id,
-                OrganizationUser.role.in_(("owner", "admin")),
-            )
-        )).scalars().all()
-
-        customer_name = body.name.strip()
-        for admin in admins:
-            db.add(Notification(
-                organization_id=approval.organization_id,
-                user_id=admin.user_id,
-                type="estimate_approved",
-                title=f"Estimate approved by {customer_name}",
-                body=f"{invoice.invoice_number} — {invoice.subject or 'Service Estimate'} (${invoice.total:,.2f})",
-                link=f"/invoices/{invoice.id}",
-            ))
-
-    # Log activity on linked job
-    if invoice:
-        from src.services.invoice_service import log_job_activity
-        await log_job_activity(db, invoice.id, f"Estimate {invoice.invoice_number} approved by customer ({body.name.strip()})")
-
-    await db.commit()
-
-    return {"approved": True, "approved_at": now.isoformat()}
+    if "error" in result:
+        code = {"not_found": 404, "validation": 400}[result["error"]]
+        raise HTTPException(status_code=code, detail=result["detail"])
+    return result
 
 
 @router.get("/estimate/{token}/pdf")

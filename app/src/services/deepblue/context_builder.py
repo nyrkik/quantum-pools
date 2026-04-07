@@ -16,6 +16,7 @@ from src.models.equipment_item import EquipmentItem
 from src.models.chemical_reading import ChemicalReading
 from src.models.visit import Visit
 from src.models.organization import Organization
+from src.models.tech import Tech
 
 logger = logging.getLogger(__name__)
 
@@ -197,13 +198,19 @@ async def build_context(db: AsyncSession, org_id: str, ctx: DeepBlueContext) -> 
             .order_by(Visit.scheduled_date.desc()).limit(5)
         )).scalars().all()
         if visits:
+            # Batch-resolve tech names
+            tech_ids = {v.tech_id for v in visits if v.tech_id}
+            tech_map = {}
+            if tech_ids:
+                techs = (await db.execute(select(Tech).where(Tech.id.in_(tech_ids)))).scalars().all()
+                tech_map = {t.id: f"{t.first_name} {t.last_name}" for t in techs}
             lines.append("\nRecent visits:")
             for v in visits:
                 date_str = v.scheduled_date.strftime("%m/%d") if v.scheduled_date else "?"
-                tech = v.tech_id or "unknown"
+                tech_name = tech_map.get(v.tech_id, "unknown")
                 notes = f" — {v.notes[:60]}" if v.notes else ""
-                lines.append(f"  {date_str} by {tech}{notes}")
-                ctx.recent_visits.append({"date": date_str, "tech": tech, "notes": v.notes})
+                lines.append(f"  {date_str} by {tech_name}{notes}")
+                ctx.recent_visits.append({"date": date_str, "tech": tech_name, "notes": v.notes})
 
     ctx.context_summary = "\n".join(lines) if lines else "No specific context — user is on the general dashboard."
     return ctx

@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 async def _exec_service_history(inp: dict, ctx: ToolContext) -> dict:
     """Get recent service visits."""
     from src.models.visit import Visit
+    from src.models.tech import Tech
 
     property_id = inp.get("property_id") or ctx.property_id
     limit = inp.get("limit", 10)
@@ -24,11 +25,20 @@ async def _exec_service_history(inp: dict, ctx: ToolContext) -> dict:
         .order_by(desc(Visit.scheduled_date)).limit(limit)
     )).scalars().all()
 
+    # Batch-resolve tech names
+    tech_ids = {v.tech_id for v in visits if v.tech_id}
+    tech_map = {}
+    if tech_ids:
+        techs = (await ctx.db.execute(
+            select(Tech).where(Tech.id.in_(tech_ids))
+        )).scalars().all()
+        tech_map = {t.id: f"{t.first_name} {t.last_name}" for t in techs}
+
     return {
         "visits": [
             {
                 "date": v.scheduled_date.strftime("%Y-%m-%d") if v.scheduled_date else None,
-                "tech": v.tech_id,
+                "tech": tech_map.get(v.tech_id, "Unknown"),
                 "duration_minutes": v.duration_minutes,
                 "status": v.status,
                 "notes": v.notes[:200] if v.notes else None,
@@ -41,42 +51,60 @@ async def _exec_service_history(inp: dict, ctx: ToolContext) -> dict:
 async def _exec_get_routes_today(inp: dict, ctx: ToolContext) -> dict:
     from datetime import date
     from src.models.route import Route
-    from src.models.route_stop import RouteStop
     from src.models.tech import Tech
     from src.models.property import Property
+    from sqlalchemy.orm import selectinload
 
     # "service_day" is day-of-week name; match today's weekday
     weekday_name = date.today().strftime("%A")
 
-    query = select(Route).where(
-        Route.organization_id == ctx.org_id,
-        Route.service_day == weekday_name,
+    query = (
+        select(Route)
+        .options(selectinload(Route.stops))
+        .where(
+            Route.organization_id == ctx.org_id,
+            Route.service_day == weekday_name,
+        )
     )
     if inp.get("tech_id"):
         query = query.where(Route.tech_id == inp["tech_id"])
 
-    routes = (await ctx.db.execute(query)).scalars().all()
+    routes = (await ctx.db.execute(query)).scalars().unique().all()
+
+    # Batch-resolve techs and properties
+    tech_ids = {r.tech_id for r in routes if r.tech_id}
+    all_prop_ids = set()
+    for r in routes:
+        for s in r.stops:
+            if s.property_id:
+                all_prop_ids.add(s.property_id)
+
+    tech_map = {}
+    if tech_ids:
+        techs = (await ctx.db.execute(select(Tech).where(Tech.id.in_(tech_ids)))).scalars().all()
+        tech_map = {t.id: f"{t.first_name} {t.last_name}" for t in techs}
+
+    prop_map = {}
+    if all_prop_ids:
+        props = (await ctx.db.execute(select(Property).where(Property.id.in_(all_prop_ids)))).scalars().all()
+        prop_map = {p.id: p.full_address for p in props}
 
     result = []
     for r in routes:
-        tech = (await ctx.db.execute(select(Tech).where(Tech.id == r.tech_id))).scalar_one_or_none()
-        stops = (await ctx.db.execute(
-            select(RouteStop).where(RouteStop.route_id == r.id).order_by(RouteStop.sequence)
-        )).scalars().all()
-        stop_list = []
-        for s in stops:
-            prop = (await ctx.db.execute(select(Property).where(Property.id == s.property_id))).scalar_one_or_none()
-            stop_list.append({
-                "sequence": s.sequence,
-                "property": prop.full_address if prop else None,
-                "eta": str(s.estimated_arrival_time) if s.estimated_arrival_time else None,
-            })
+        sorted_stops = sorted(r.stops, key=lambda s: s.sequence or 0)
         result.append({
-            "tech_name": f"{tech.first_name} {tech.last_name}" if tech else "Unknown",
+            "tech_name": tech_map.get(r.tech_id, "Unknown"),
             "total_stops": r.total_stops,
             "total_duration_minutes": r.total_duration_minutes,
             "total_distance_miles": r.total_distance_miles,
-            "stops": stop_list,
+            "stops": [
+                {
+                    "sequence": s.sequence,
+                    "property": prop_map.get(s.property_id),
+                    "eta": str(s.estimated_arrival_time) if s.estimated_arrival_time else None,
+                }
+                for s in sorted_stops
+            ],
         })
 
     return {"date": weekday_name, "routes": result}

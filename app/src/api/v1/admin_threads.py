@@ -16,6 +16,8 @@ from src.core.events import EventType, publish
 from src.api.deps import OrgUserContext, require_roles, OrgRole
 from src.schemas.agent_thread import ApproveBody, ReviseDraftBody, AssignThreadBody
 from src.services.agent_thread_service import AgentThreadService
+from src.services.thread_action_service import ThreadActionService
+from src.services.thread_ai_service import ThreadAIService
 
 router = APIRouter(prefix="/admin", tags=["admin-threads"])
 
@@ -104,7 +106,7 @@ async def approve_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Approve the latest pending message in a thread."""
-    service = AgentThreadService(db)
+    service = ThreadActionService(db)
     result = await service.approve_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,
@@ -115,7 +117,8 @@ async def approve_thread(
     if "error" in result:
         code = {"no_pending": 400, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
-    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
+    thread_svc = AgentThreadService(db)
+    await thread_svc.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
     await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "approved"})
     return result
 
@@ -127,7 +130,7 @@ async def dismiss_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Dismiss all pending messages in a thread."""
-    service = AgentThreadService(db)
+    service = ThreadActionService(db)
     result = await service.dismiss_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,
@@ -222,7 +225,7 @@ async def send_thread_followup(
     db: AsyncSession = Depends(get_db),
 ):
     """Send a follow-up in a thread."""
-    service = AgentThreadService(db)
+    service = ThreadActionService(db)
     result = await service.send_followup(
         org_id=ctx.organization_id,
         thread_id=thread_id,
@@ -233,7 +236,8 @@ async def send_thread_followup(
     if "error" in result:
         code = {"not_found": 404, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
-    await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
+    thread_svc = AgentThreadService(db)
+    await thread_svc.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
     await publish(EventType.THREAD_MESSAGE_NEW, ctx.organization_id, {"thread_id": thread_id, "action": "followup_sent"})
     return result
 
@@ -246,7 +250,7 @@ async def revise_thread_draft(
     db: AsyncSession = Depends(get_db),
 ):
     """Revise the draft on the latest pending message in a thread."""
-    service = AgentThreadService(db)
+    service = ThreadAIService(db)
     result = await service.revise_draft(
         org_id=ctx.organization_id,
         thread_id=thread_id,
@@ -266,7 +270,7 @@ async def draft_thread_followup(
     db: AsyncSession = Depends(get_db),
 ):
     """Draft a follow-up for a thread using full conversation context."""
-    service = AgentThreadService(db)
+    service = ThreadAIService(db)
     result = await service.draft_followup(
         org_id=ctx.organization_id,
         thread_id=thread_id,
@@ -341,7 +345,7 @@ async def create_job_from_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """AI creates a job from thread conversation context."""
-    service = AgentThreadService(db)
+    service = ThreadAIService(db)
     result = await service.create_job_from_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,
@@ -360,7 +364,7 @@ async def draft_estimate_from_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """AI drafts an estimate from thread conversation context."""
-    service = AgentThreadService(db)
+    service = ThreadAIService(db)
     result = await service.draft_estimate_from_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,

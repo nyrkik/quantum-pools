@@ -272,20 +272,24 @@ TOOLS = [
     {
         "name": "query_database",
         "description": (
-            "LAST RESORT: run a read-only SQL SELECT against the database when no specific tool fits. "
-            "Use this ONLY when no other tool can answer the question. Prefer specific tools (get_invoices, get_open_jobs, etc) first. "
-            "Query must be a single SELECT statement. Org scope is automatically enforced. Results capped at 100 rows. "
-            "Available tables (org-scoped): customers, properties, water_features, equipment_items, visits, chemical_readings, "
+            "Run a read-only SQL SELECT against the database. Use this for any data not covered by a specific tool — "
+            "profitability, satellite analyses, pool measurements, email threads/messages, water feature details, "
+            "customer contacts, feedback items, notifications, broadcast history, or any cross-table query. "
+            "This is a first-class read tool, not a fallback. Query must be a single SELECT. Org scope auto-enforced. Results capped at 100 rows. "
+            "Org-scoped tables: customers, properties, water_features, equipment_items, visits, chemical_readings, "
             "invoices, invoice_line_items, payments, agent_actions, agent_threads, agent_messages, service_cases, routes, route_stops, "
-            "techs, broadcast_emails, feedback_items, customer_contacts. "
-            "Shared tables: equipment_catalog, parts_catalog, inspection_facilities, inspections, inspection_violations, service_tiers, bather_load_jurisdictions. "
+            "techs, broadcast_emails, feedback_items, customer_contacts, satellite_analyses, "
+            "pool_measurements, property_difficulties, org_cost_settings, notifications, internal_messages, internal_threads, "
+            "visit_charges, charge_templates, org_chemical_prices, vendors, visit_photos. "
+            "Shared tables: equipment_catalog, parts_catalog, inspection_facilities, inspections, inspection_violations, "
+            "service_tiers, bather_load_jurisdictions. "
             "When querying org-scoped tables, include `organization_id = '<org>'` — the system auto-fills this but your WHERE clause must allow it."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "A single SELECT statement. No INSERT/UPDATE/DELETE/DDL. Use LIMIT."},
-                "reason": {"type": "string", "description": "Why no specific tool fits (1 sentence)"},
+                "reason": {"type": "string", "description": "Brief context for what you're looking up (1 sentence)"},
             },
             "required": ["query"],
         },

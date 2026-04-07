@@ -6,28 +6,11 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import {
-  Sparkles, Send, Loader2, Plus, Pin, PinOff, Trash2, Users, Search, Menu, X, Lock, Check,
-} from "lucide-react";
-import { ToolResultCard } from "@/components/deepblue/tool-cards";
-
-interface ConversationListItem {
-  id: string;
-  title: string;
-  user_id: string;
-  visibility: string;
-  pinned: boolean;
-  message_count: number;
-  updated_at: string;
-}
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  timestamp?: string;
-  toolCalls?: { name: string; input: Record<string, unknown> }[];
-  toolResults?: { name: string; result: Record<string, unknown> }[];
-}
+import { Sparkles, Send, Loader2, Menu } from "lucide-react";
+import { DeepBlueSidebar } from "@/components/deepblue/deepblue-sidebar";
+import { MessageRow } from "@/components/deepblue/message-row";
+import type { ChatMessage } from "@/components/deepblue/message-row";
+import type { ConversationListItem } from "@/components/deepblue/conversation-row";
 
 interface ConversationDetail {
   id: string;
@@ -35,7 +18,7 @@ interface ConversationDetail {
   visibility: string;
   pinned: boolean;
   case_id: string | null;
-  messages: Message[];
+  messages: ChatMessage[];
 }
 
 export default function DeepBluePage() {
@@ -75,7 +58,6 @@ export default function DeepBluePage() {
 
   useEffect(() => { loadList(); }, [loadList]);
 
-  // Auto-load conversation from ?id= query param
   useEffect(() => {
     if (initialId && !active) {
       loadConversation(initialId);
@@ -89,7 +71,7 @@ export default function DeepBluePage() {
       const data = await api.get<ConversationDetail>(`/v1/deepblue/conversations/${id}`);
       setActive(data);
       setActiveId(id);
-      setSidebarOpen(false); // close sidebar on mobile after selection
+      setSidebarOpen(false);
     } catch {
       toast.error("Failed to load conversation");
     } finally {
@@ -114,11 +96,10 @@ export default function DeepBluePage() {
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setSending(true);
-    // Re-focus input so user can keep typing
     setTimeout(() => inputRef.current?.focus(), 50);
     setStreamingContent("");
 
-    const userMsg: Message = { role: "user", content: text, timestamp: new Date().toISOString() };
+    const userMsg: ChatMessage = { role: "user", content: text, timestamp: new Date().toISOString() };
     const currentMessages = active?.messages || [];
     setActive((prev) =>
       prev
@@ -177,7 +158,7 @@ export default function DeepBluePage() {
         }
       }
 
-      const assistantMsg: Message = {
+      const assistantMsg: ChatMessage = {
         role: "assistant",
         content: fullContent,
         timestamp: new Date().toISOString(),
@@ -224,7 +205,6 @@ export default function DeepBluePage() {
 
   const handleDeleteStart = (id: string) => {
     setPendingDelete(id);
-    // Auto-cancel after 5s if no action taken
     setTimeout(() => setPendingDelete((p) => (p === id ? null : p)), 5000);
   };
 
@@ -247,115 +227,31 @@ export default function DeepBluePage() {
 
   const handleDeleteCancel = () => setPendingDelete(null);
 
-  const filtered = conversations.filter((c) =>
-    !search.trim() || (c.title || "").toLowerCase().includes(search.toLowerCase())
-  );
-
-  const pinnedChats = filtered.filter((c) => c.pinned);
-  const unpinnedChats = filtered.filter((c) => !c.pinned);
-
   return (
     <div className="flex h-[calc(100vh-4rem)] sm:h-[calc(100vh-3rem)] -m-4 sm:-m-6 -mt-16 sm:-mt-6">
-      {/* Sidebar — on mobile, starts below the global app top bar (h-14) */}
-      <div className={`
-        ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} sm:translate-x-0
-        fixed sm:static top-14 sm:top-0 bottom-0 left-0 z-40 w-72 bg-background border-r flex flex-col
-        transition-transform duration-200
-      `}>
-        <div className="flex items-center justify-between p-3 border-b">
-          <span className="text-sm font-semibold">Chats</span>
-          <Button size="sm" variant="ghost" className="sm:hidden" onClick={() => setSidebarOpen(false)}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="p-2 space-y-2">
-          <Button className="w-full justify-start" size="sm" onClick={startNew}>
-            <Plus className="h-3.5 w-3.5 mr-1.5" /> New chat
-          </Button>
-          <div className="relative">
-            <Search className="h-3 w-3 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search..."
-              className="w-full h-8 pl-7 pr-2 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
-            />
-          </div>
-          <div className="flex gap-1">
-            <Button size="sm" variant={scope === "mine" ? "default" : "ghost"} className="h-6 text-[10px] flex-1" onClick={() => setScope("mine")}>
-              Mine
-            </Button>
-            <Button size="sm" variant={scope === "shared" ? "default" : "ghost"} className="h-6 text-[10px] flex-1" onClick={() => setScope("shared")}>
-              <Users className="h-2.5 w-2.5 mr-0.5" /> Shared
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {loadingList ? (
-            <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
-          ) : filtered.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-6">
-              {scope === "mine" ? "No conversations yet." : "Nothing shared with the team."}
-            </p>
-          ) : (
-            <>
-              {pinnedChats.length > 0 && (
-                <>
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 pt-2 pb-1">Pinned</p>
-                  {pinnedChats.map((c) => (
-                    <ConversationRow
-                      key={c.id}
-                      conv={c}
-                      isActive={c.id === activeId}
-                      showActions={c.user_id === currentUserId}
-                      pendingDelete={pendingDelete}
-                      onSelect={() => loadConversation(c.id)}
-                      onPin={() => handleTogglePin(c.id, c.pinned)}
-                      onShare={() => handleToggleShare(c.id, c.visibility)}
-                      onDeleteStart={() => handleDeleteStart(c.id)}
-                      onDeleteConfirm={() => handleDeleteConfirm(c.id)}
-                      onDeleteCancel={handleDeleteCancel}
-                    />
-                  ))}
-                </>
-              )}
-              {unpinnedChats.length > 0 && (
-                <>
-                  {pinnedChats.length > 0 && (
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 pt-2 pb-1">Recent</p>
-                  )}
-                  {unpinnedChats.map((c) => (
-                    <ConversationRow
-                      key={c.id}
-                      conv={c}
-                      isActive={c.id === activeId}
-                      showActions={c.user_id === currentUserId}
-                      pendingDelete={pendingDelete}
-                      onSelect={() => loadConversation(c.id)}
-                      onPin={() => handleTogglePin(c.id, c.pinned)}
-                      onShare={() => handleToggleShare(c.id, c.visibility)}
-                      onDeleteStart={() => handleDeleteStart(c.id)}
-                      onDeleteConfirm={() => handleDeleteConfirm(c.id)}
-                      onDeleteCancel={handleDeleteCancel}
-                    />
-                  ))}
-                </>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Backdrop for mobile sidebar — below the global top bar */}
-      {sidebarOpen && (
-        <div className="fixed inset-x-0 bottom-0 top-14 bg-black/30 z-30 sm:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
+      <DeepBlueSidebar
+        conversations={conversations}
+        loadingList={loadingList}
+        scope={scope}
+        onScopeChange={setScope}
+        search={search}
+        onSearchChange={setSearch}
+        activeId={activeId}
+        currentUserId={currentUserId}
+        pendingDelete={pendingDelete}
+        sidebarOpen={sidebarOpen}
+        onSidebarClose={() => setSidebarOpen(false)}
+        onStartNew={startNew}
+        onSelectConversation={(id) => loadConversation(id)}
+        onTogglePin={handleTogglePin}
+        onToggleShare={handleToggleShare}
+        onDeleteStart={handleDeleteStart}
+        onDeleteConfirm={handleDeleteConfirm}
+        onDeleteCancel={handleDeleteCancel}
+      />
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 bg-muted/20">
-        {/* Mobile spacer to clear the global top bar */}
         <div className="h-14 shrink-0 sm:hidden" />
         <div className="flex items-center justify-between p-3 border-b bg-background gap-2">
           <Button
@@ -387,7 +283,6 @@ export default function DeepBluePage() {
           ) : (
             <div className="max-w-3xl mx-auto p-4 space-y-4">
               {active?.messages.map((m, i, arr) => {
-                // A message's tool cards are stale if any user message comes after it
                 const hasUserMsgAfter = arr.slice(i + 1).some((later) => later.role === "user");
                 return <MessageRow key={i} message={m} stale={hasUserMsgAfter} />;
               })}
@@ -425,126 +320,6 @@ export default function DeepBluePage() {
             </Button>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ConversationRow({
-  conv, isActive, showActions, pendingDelete, onSelect, onPin, onShare,
-  onDeleteStart, onDeleteConfirm, onDeleteCancel,
-}: {
-  conv: ConversationListItem;
-  isActive: boolean;
-  showActions: boolean;
-  pendingDelete: string | null;
-  onSelect: () => void;
-  onPin: () => void;
-  onShare: () => void;
-  onDeleteStart: () => void;
-  onDeleteConfirm: () => void;
-  onDeleteCancel: () => void;
-}) {
-  return (
-    <div className={`group rounded-md p-1.5 ${isActive ? "bg-primary/10" : "hover:bg-muted/50"}`}>
-      <button className="w-full text-left" onClick={onSelect}>
-        <div className="flex items-center gap-1.5">
-          {conv.pinned && <Pin className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium truncate">{conv.title || "Untitled"}</p>
-            <p className="text-[10px] text-muted-foreground">
-              {conv.message_count} · {new Date(conv.updated_at).toLocaleDateString()}
-              {conv.visibility === "shared" && " · Shared"}
-            </p>
-          </div>
-        </div>
-      </button>
-      {showActions && (
-        <div className="flex items-center gap-0.5 mt-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={(e) => { e.stopPropagation(); onPin(); }}
-            title={conv.pinned ? "Unpin conversation" : "Pin conversation"}
-          >
-            {conv.pinned ? (
-              <Pin className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
-            ) : (
-              <PinOff className="h-2.5 w-2.5 text-muted-foreground" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={(e) => { e.stopPropagation(); onShare(); }}
-            title={conv.visibility === "shared" ? "Shared with team — click to make private" : "Private — click to share with team"}
-          >
-            {conv.visibility === "shared" ? (
-              <Users className="h-2.5 w-2.5 text-primary" />
-            ) : (
-              <Lock className="h-2.5 w-2.5 text-muted-foreground" />
-            )}
-          </Button>
-          <div className="flex-1" />
-          {pendingDelete === conv.id ? (
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={(e) => { e.stopPropagation(); onDeleteCancel(); }}
-                title="Cancel delete"
-              >
-                <X className="h-2.5 w-2.5 text-muted-foreground" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={(e) => { e.stopPropagation(); onDeleteConfirm(); }}
-                title="Confirm delete"
-              >
-                <Check className="h-2.5 w-2.5 text-destructive" />
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={(e) => { e.stopPropagation(); onDeleteStart(); }}
-              title="Delete conversation"
-            >
-              <Trash2 className="h-2.5 w-2.5 text-muted-foreground" />
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MessageRow({ message, stale = false }: { message: Message; stale?: boolean }) {
-  const isUser = message.role === "user";
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[85%] rounded-lg p-3 text-sm ${
-        isUser ? "bg-primary text-primary-foreground" : "bg-background border"
-      }`}>
-        {message.content && (
-          <div className="whitespace-pre-wrap">{message.content}</div>
-        )}
-        {message.toolResults?.map((tr, i) => (
-          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} />
-        ))}
-        {message.toolCalls && message.toolCalls.length > (message.toolResults?.length || 0) && (
-          <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Working...
-          </div>
-        )}
       </div>
     </div>
   );

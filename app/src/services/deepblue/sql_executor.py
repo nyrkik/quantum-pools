@@ -28,14 +28,17 @@ STATEMENT_TIMEOUT_MS = 5000
 ORG_SCOPED_TABLES = {
     "customers", "properties", "water_features", "equipment_items",
     "visits", "chemical_readings",
-    "invoices", "invoice_line_items", "payments",
+    "invoices", "invoice_line_items", "invoice_revisions", "payments",
     "agent_actions", "agent_threads", "agent_messages", "agent_action_tasks", "agent_action_comments",
     "service_cases", "routes", "route_stops",
     "techs", "broadcast_emails", "feedback_items", "customer_contacts",
-    "property_difficulty", "property_jurisdiction", "satellite_analyses",
-    "pool_measurements", "water_features", "equipment_catalog_items",
+    "property_difficulties", "property_jurisdictions", "satellite_analyses",
+    "pool_measurements", "notifications",
     "org_cost_settings", "service_tiers", "job_invoices",
-    "email_templates", "inbox_routing_rules", "visit_charges",
+    "email_templates", "inbox_routing_rules", "visit_charges", "charge_templates",
+    "internal_threads", "internal_messages",
+    "org_chemical_prices", "vendors", "visit_photos",
+    "org_subscriptions", "message_attachments",
 }
 
 # Shared tables — allowed without org filter

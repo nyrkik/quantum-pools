@@ -3,117 +3,39 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, getBackendOrigin } from "@/lib/api";
 import { toast } from "sonner";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Overlay, OverlayContent, OverlayHeader, OverlayTitle, OverlayBody } from "@/components/ui/overlay";
 import {
   Search,
-  ExternalLink,
   Loader2,
   Package,
   RefreshCw,
   ChevronRight,
   ChevronDown,
-  Filter,
-  Cog,
-  Flame,
-  Droplets,
-  Cpu,
-  Wrench,
   Beaker,
-  CircleDot,
-  Settings2,
   Box,
-  Clock,
+  Settings2,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
 import { usePermissions } from "@/lib/permissions";
 import { VendorSettingsSheet } from "@/components/parts/vendor-settings-sheet";
-
-// --- Types ---
-
-type CatalogType = "equipment" | "parts" | "chemicals" | "services";
-
-interface CatalogPart {
-  id: string;
-  sku: string;
-  name: string;
-  brand: string | null;
-  category: string | null;
-  subcategory: string | null;
-  description: string | null;
-  image_url: string | null;
-  product_url: string | null;
-  is_chemical: boolean;
-  for_equipment_id?: string | null;
-}
-
-interface EquipmentEntry {
-  id: string;
-  canonical_name: string;
-  equipment_type: string;
-  manufacturer: string | null;
-  model_number: string | null;
-  category: string | null;
-  image_url: string | null;
-  specs: Record<string, unknown> | null;
-  parts?: CatalogPart[];
-}
-
-interface ServiceItem {
-  id: string;
-  name: string;
-  default_amount: number;
-  category: string;
-  is_taxable: boolean;
-}
-
-interface Vendor {
-  id: string;
-  name: string;
-  provider_type: string;
-  search_url_template: string | null;
-}
-
-// --- Constants ---
-
-const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  "Pumps & Motors": Cog, "Filters & Media": Filter, "Heaters": Flame,
-  "Water Treatment": Droplets, "Cleaners & Sweeps": Wrench,
-  "Plumbing & Fittings": Settings2, "Automation & Electrical": Cpu,
-  "Seals & O-Rings": CircleDot, "Safety & Compliance": Box,
-  "Chemicals": Beaker,
-  "time": Clock, "chemical": Beaker, "material": Package, "other": Box,
-};
-
-const EQUIP_TYPE_ICONS: Record<string, React.ElementType> = {
-  pump: Cog, filter: Filter, heater: Flame, chlorinator: Droplets,
-  automation: Cpu, booster_pump: Cog, jet_pump: Cog, chemical_feeder: Droplets, equipment: Box,
-};
-
-const EQUIP_TYPE_LABELS: Record<string, string> = {
-  pump: "Pumps", filter: "Filters", heater: "Heaters", chlorinator: "Chlorinators",
-  automation: "Automation", booster_pump: "Booster Pumps", jet_pump: "Jet Pumps",
-  chemical_feeder: "Chemical Feeders", equipment: "Other Equipment",
-};
-
-const PARTS_ORDER = [
-  "Pumps & Motors", "Filters & Media", "Heaters", "Water Treatment",
-  "Cleaners & Sweeps", "Plumbing & Fittings", "Automation & Electrical",
-  "Seals & O-Rings", "Safety & Compliance",
-];
-
-const EQUIP_ORDER = ["pump", "filter", "heater", "chlorinator", "automation", "booster_pump", "jet_pump", "chemical_feeder", "equipment"];
-
-const SERVICE_CATEGORY_LABELS: Record<string, string> = {
-  time: "Labor & Time", chemical: "Chemical Service", material: "Materials", other: "Other",
-};
-
-function getCategoryIcon(cat: string) {
-  return CATEGORY_ICONS[cat] || Package;
-}
+import { EquipmentRow } from "@/components/parts/equipment-row";
+import { PartRow } from "@/components/parts/part-row";
+import { EquipmentDetailOverlay } from "@/components/parts/equipment-detail-overlay";
+import {
+  type CatalogType,
+  type CatalogPart,
+  type EquipmentEntry,
+  type ServiceItem,
+  type Vendor,
+  EQUIP_TYPE_ICONS,
+  EQUIP_TYPE_LABELS,
+  PARTS_ORDER,
+  EQUIP_ORDER,
+  SERVICE_CATEGORY_LABELS,
+  getCategoryIcon,
+} from "@/components/parts/catalog-types";
 
 // --- Main Page ---
 
@@ -534,145 +456,3 @@ export default function CatalogPage() {
   );
 }
 
-// --- Equipment Row ---
-
-function EquipmentRow({ entry, backendOrigin, onClick }: { entry: EquipmentEntry; backendOrigin: string; onClick: () => void }) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors cursor-pointer" onClick={onClick}>
-      <div className="flex-shrink-0 h-10 w-10 rounded bg-muted/50 flex items-center justify-center overflow-hidden">
-        {entry.image_url ? (
-          <img src={`${backendOrigin}${entry.image_url}`} alt="" className="h-full w-full object-contain" />
-        ) : (
-          <Package className="h-4 w-4 text-muted-foreground" />
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{entry.canonical_name}</p>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          {entry.manufacturer && <span>{entry.manufacturer}</span>}
-          {entry.model_number && entry.model_number !== "?" && <span className="font-mono bg-muted px-1 rounded">{entry.model_number}</span>}
-          {entry.category && <span>· {entry.category}</span>}
-        </div>
-      </div>
-      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-    </div>
-  );
-}
-
-// --- Part Row ---
-
-function PartRow({ part, backendOrigin, onViewEquipment }: { part: CatalogPart; backendOrigin: string; onViewEquipment?: () => void }) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
-      <div className="flex-shrink-0 h-8 w-8 rounded bg-muted flex items-center justify-center overflow-hidden">
-        {part.image_url ? (
-          <img src={part.image_url.startsWith("/uploads") ? `${backendOrigin}${part.image_url}` : part.image_url} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <Package className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{part.name}</p>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <span className="font-mono bg-muted px-1 rounded">{part.sku}</span>
-          {part.brand && <span>{part.brand}</span>}
-        </div>
-      </div>
-      {onViewEquipment && (
-        <Button variant="ghost" size="sm" className="text-xs h-7 shrink-0" onClick={onViewEquipment}>
-          View Equipment
-        </Button>
-      )}
-      {part.product_url && (
-        <a href={part.product_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-muted-foreground hover:text-primary shrink-0">
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
-      )}
-    </div>
-  );
-}
-
-// --- Equipment Detail Overlay ---
-
-function EquipmentDetailOverlay({ equipmentId, open, onClose, backendOrigin }: { equipmentId: string | null; open: boolean; onClose: () => void; backendOrigin: string }) {
-  const [data, setData] = useState<EquipmentEntry | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!open || !equipmentId) return;
-    setLoading(true);
-    setData(null);
-    api.get<EquipmentEntry>(`/v1/equipment-catalog/${equipmentId}`)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [open, equipmentId]);
-
-  return (
-    <Overlay open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <OverlayContent className="max-w-md">
-        <OverlayHeader>
-          <OverlayTitle>{data?.canonical_name || "Equipment"}</OverlayTitle>
-        </OverlayHeader>
-        <OverlayBody className="space-y-4">
-          {loading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-          ) : !data ? (
-            <p className="text-sm text-muted-foreground text-center py-8">Not found</p>
-          ) : (
-            <>
-              {data.image_url && (
-                <div className="flex justify-center">
-                  <img src={`${backendOrigin}${data.image_url}`} alt={data.canonical_name} className="h-32 w-32 object-contain rounded-md bg-muted/30" />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                {[
-                  { label: "Manufacturer", value: data.manufacturer },
-                  { label: "Model #", value: data.model_number !== "?" ? data.model_number : null },
-                  { label: "Category", value: data.category },
-                  ...(data.specs ? Object.entries(data.specs).map(([k, v]) => ({ label: k.toUpperCase(), value: String(v) })) : []),
-                ].filter(d => d.value).map(d => (
-                  <div key={d.label} className="contents">
-                    <span className="text-muted-foreground text-xs">{d.label}</span>
-                    <span className="font-medium text-xs">{d.value}</span>
-                  </div>
-                ))}
-              </div>
-
-              {data.parts && data.parts.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Compatible Parts ({data.parts.length})</p>
-                  <div className="space-y-1.5">
-                    {data.parts.map(p => (
-                      <div key={p.id} className="flex items-start justify-between text-xs border rounded-md p-2 bg-muted/30">
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{p.name}</p>
-                          <div className="flex items-center gap-2 text-muted-foreground mt-0.5">
-                            {p.brand && <span>{p.brand}</span>}
-                            {p.sku && <span>SKU: {p.sku}</span>}
-                          </div>
-                          {p.category && <Badge variant="secondary" className="text-[9px] px-1 mt-1">{p.category}</Badge>}
-                        </div>
-                        {p.product_url && (
-                          <a href={p.product_url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0 ml-2">
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {(!data.parts || data.parts.length === 0) && (
-                <p className="text-xs text-muted-foreground italic text-center">No parts linked yet</p>
-              )}
-            </>
-          )}
-        </OverlayBody>
-      </OverlayContent>
-    </Overlay>
-  );
-}

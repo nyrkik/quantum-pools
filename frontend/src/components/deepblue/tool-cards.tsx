@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Mail, Send, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 
-export function ToolResultCard({ name, result }: { name: string; result: Record<string, unknown> }) {
+export function ToolResultCard({ name, result, stale = false }: { name: string; result: Record<string, unknown>; stale?: boolean }) {
   if (name === "chemical_dosing_calculator") {
     const dosing = result.dosing as Array<Record<string, unknown>> | undefined;
     if (!dosing?.length) return null;
@@ -131,13 +131,13 @@ export function ToolResultCard({ name, result }: { name: string; result: Record<
   if (name === "draft_broadcast_email" && result.requires_confirmation) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
-    return <BroadcastPreviewCard preview={preview} />;
+    return <BroadcastPreviewCard preview={preview} stale={stale} />;
   }
 
   if (name === "draft_customer_email" && result.requires_confirmation) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
-    return <CustomerEmailPreviewCard preview={preview} />;
+    return <CustomerEmailPreviewCard preview={preview} stale={stale} />;
   }
 
   if (name === "add_equipment_to_pool" && result.requires_confirmation) {
@@ -149,6 +149,7 @@ export function ToolResultCard({ name, result }: { name: string; result: Record<
       payload={preview}
       summary={`${preview.equipment_type}: ${preview.brand} ${preview.model}`}
       subtitle={`On ${preview.bow_name} — ${preview.property_address}`}
+      stale={stale}
     />;
   }
 
@@ -163,6 +164,7 @@ export function ToolResultCard({ name, result }: { name: string; result: Record<
       payload={preview}
       summary={summary}
       subtitle={preview.property_address as string}
+      stale={stale}
     />;
   }
 
@@ -175,6 +177,7 @@ export function ToolResultCard({ name, result }: { name: string; result: Record<
       payload={preview}
       summary={preview.appending as string}
       subtitle={`For ${preview.customer_name}`}
+      stale={stale}
     />;
   }
 
@@ -182,17 +185,19 @@ export function ToolResultCard({ name, result }: { name: string; result: Record<
 }
 
 export function ConfirmCard({
-  title, endpoint, payload, summary, subtitle,
+  title, endpoint, payload, summary, subtitle, stale = false,
 }: {
   title: string;
   endpoint: string;
   payload: Record<string, unknown>;
   summary: string;
   subtitle?: string;
+  stale?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [cancelled, setCancelled] = useState(false);
+  const locked = saved || cancelled || stale;
 
   const handleConfirm = async () => {
     setSaving(true);
@@ -224,6 +229,8 @@ export function ConfirmCard({
         <p className="text-green-600 text-[10px] font-medium pt-1 border-t">Saved ✓</p>
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
+      ) : stale ? (
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Expired — conversation continued</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
@@ -237,7 +244,7 @@ export function ConfirmCard({
   );
 }
 
-export function BroadcastPreviewCard({ preview }: { preview: Record<string, unknown> }) {
+export function BroadcastPreviewCard({ preview, stale = false }: { preview: Record<string, unknown>; stale?: boolean }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [cancelled, setCancelled] = useState(false);
@@ -272,7 +279,7 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
   const isTest = preview.filter_type === "test";
   const customerNames = preview.customer_names as string[] | undefined;
   const count = Number(preview.recipient_count || 0);
-  const locked = sent || cancelled;
+  const locked = sent || cancelled || stale;
 
   return (
     <div className={`bg-muted/50 rounded-md p-2.5 mt-1.5 text-xs space-y-2 border ${edited && !locked ? "border-amber-400" : "border-primary/20"}`}>
@@ -325,6 +332,8 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
         </p>
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
+      ) : stale ? (
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Expired — conversation continued</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={sending || !subject.trim() || !body.trim()}>
@@ -338,14 +347,14 @@ export function BroadcastPreviewCard({ preview }: { preview: Record<string, unkn
   );
 }
 
-export function CustomerEmailPreviewCard({ preview }: { preview: Record<string, unknown> }) {
+export function CustomerEmailPreviewCard({ preview, stale = false }: { preview: Record<string, unknown>; stale?: boolean }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [subject, setSubject] = useState(String(preview.subject));
   const [body, setBody] = useState(String(preview.body));
   const edited = subject !== String(preview.subject) || body !== String(preview.body);
-  const locked = sent || cancelled;
+  const locked = sent || cancelled || stale;
 
   const handleSend = async () => {
     setSending(true);
@@ -400,6 +409,8 @@ export function CustomerEmailPreviewCard({ preview }: { preview: Record<string, 
         <p className="text-green-600 text-[10px] font-medium pt-1 border-t">Sent to {String(preview.customer_name)} ✓</p>
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
+      ) : stale ? (
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Expired — conversation continued</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleSend} disabled={sending || !subject.trim() || !body.trim()}>

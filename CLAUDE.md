@@ -26,6 +26,7 @@ Enterprise pool service management platform consolidating:
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
 | Email | Postmark (primary), SMTP (fallback) — see `docs/email-pipeline.md` |
+| Payments | Stripe Checkout (test mode), webhook for confirmation, verify-on-return fallback |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
 ## UI Standards
@@ -134,7 +135,8 @@ QuantumPools/
 │       │   ├── parts/                 # Parts catalog services
 │       │   ├── thread_action_service.py  # Thread email sending, approval, dismissal
 │       │   ├── thread_ai_service.py      # AI drafting, job extraction, estimate generation
-│       │   └── estimate_workflow_service.py  # Estimate approval, snapshot, email sending
+│       │   ├── estimate_workflow_service.py  # Estimate approval, snapshot, email sending
+│       │   └── stripe_service.py         # Stripe Checkout sessions, payment verification, webhook
 │       ├── seeds/
 │       └── utils/
 ├── frontend/                          # Next.js 16
@@ -330,7 +332,7 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - [x] Phase 3b: Profitability Analysis (difficulty scoring, cost breakdown, bather load, satellite detection, whale curve)
 - [x] Pool Measurement: Ground-truth dimensions via tech photos + Claude Vision
 - [x] WaterFeature: Multi-body support (pool, spa, fountain per property)
-- [~] Phase 3c: Invoicing completion — email service (Postmark) DONE, PDF generation DONE, AutoPay/Stripe/recurring NOT STARTED
+- [~] Phase 3c: Invoicing completion — email service (Postmark) DONE, PDF generation DONE, Stripe Checkout DONE, public invoice pay page DONE, non-client invoices DONE, webhook PARTIAL, AutoPay/recurring NOT STARTED
 - [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)

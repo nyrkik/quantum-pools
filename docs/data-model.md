@@ -81,10 +81,10 @@ Invoicing, payments, estimates, and charges.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| Invoice | `invoices` | Customer invoice with status tracking |
+| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. |
 | InvoiceLineItem | `invoice_line_items` | Individual line items on an invoice |
 | InvoiceRevision | `invoice_revisions` | Audit trail of invoice changes |
-| Payment | `payments` | Payment received against an invoice |
+| Payment | `payments` | Payment received against an invoice. `customer_id` nullable (non-client). Stripe fields: `stripe_payment_intent_id`, `stripe_charge_id`. |
 | ChargeTemplate | `charge_templates` | Reusable charge definitions (e.g. "Filter Clean $85") |
 | VisitCharge | `visit_charges` | Ad-hoc charges from a visit |
 | EstimateApproval | `estimate_approvals` | Customer estimate with approval/rejection tracking |
@@ -200,8 +200,8 @@ Organization ─1──*─ Tech ─1──*─ Route ─1──*─ RouteStop �
 Organization ─1──*─ OrgRole ─1──*─ OrgRolePermission ──1─ Permission
 
 Customer ─1──*─ CustomerContact
-Customer ─1──*─ Invoice ─1──*─ InvoiceLineItem
-Customer ─1──*─ Payment ──1─ Invoice
+Customer ─1──*─ Invoice ─1──*─ InvoiceLineItem  (customer_id nullable for non-client invoices)
+Customer ─1──*─ Payment ──1─ Invoice  (customer_id nullable for non-client payments)
 
 Property ─1──*─ Visit ──1─ Tech
 Property ─1──*─ ChemicalReading

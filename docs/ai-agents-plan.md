@@ -1,5 +1,35 @@
 # QuantumPools — AI Agent Architecture
 
+> **Status as of 2026-04-07:** The agent *infrastructure* is built (DeepBlue conversational AI, email triage pipeline, agent learning system, tool execution framework). The 10 specialized domain agents below are the product roadmap — they represent the target architecture that DeepBlue tools and services are evolving toward. Several have partial implementations via DeepBlue tool executors in `deepblue/tools.py`.
+
+## Implementation Status
+
+| # | Agent | Status | Current Implementation |
+|---|-------|--------|----------------------|
+| 1 | Chemistry Advisor | **Partial** | `dosing_engine.py` exists, DeepBlue has `_exec_dosing()` tool. No standalone agent yet. |
+| 2 | Profitability Analyst | **Partial** | `profitability_service.py` + `pricing_service.py` do calculations. No AI narrative generation yet. |
+| 3 | Inspection Intelligence | **Partial** | Scraper, PDF extractor, facility matching all built. No AI summarization agent yet. |
+| 4 | Service Narrator | **Not started** | No implementation. Planned for Phase 3c. |
+| 5 | Route Strategist | **Partial** | OR-Tools VRP optimization built. No AI strategic reasoning yet. |
+| 6 | Equipment Oracle | **Partial** | Equipment catalog + items + events tracked. DeepBlue has equipment tools. No predictive agent. |
+| 7 | Customer Intelligence | **Not started** | No churn prediction or upsell identification. Planned for Phase 9-10. |
+| 8 | Onboarding Assistant | **Not started** | CSV import exists (`reimport_pss_csv.py`). No AI-guided onboarding. |
+| 9 | Satellite Analyst | **Partial** | Claude Vision analysis built (2-pass Haiku). No contextual narrative agent. |
+| 10 | Compliance Advisor | **Not started** | Inspection data exists but no compliance checking agent. |
+
+### What IS Built (not in the plan but exists)
+- **Email Triage Agent** — classifies inbound emails, auto-drafts responses (`classifier.py`, `triage_agent.py`)
+- **Customer Matcher** — fuzzy-matches emails to customers (`customer_matcher.py`)
+- **Command Executor** — executes structured commands from threads (`command_executor.py`)
+- **Health Monitor** — monitors agent success rates and alerts (`health_monitor.py`)
+- **DeepBlue** — conversational AI assistant with 29 tool executors covering most agent domains
+- **Agent Learning** — learns from human corrections to improve over time (`agent_learning_service.py`)
+
+### Architectural Note
+DeepBlue currently serves as a **unified agent** that covers multiple domain agent responsibilities via its tool system. The 10 agents below represent the target where each domain gets its own focused agent with dedicated prompts, context, and tool sets. The refactoring path: split `deepblue/tools.py` by domain → each domain tool set becomes the foundation for its dedicated agent.
+
+---
+
 ## Design Principles
 1. **Each agent has ONE job** — focused, testable, replaceable
 2. **Never expand an agent's scope** — if a new need arises, evaluate whether it's a new agent

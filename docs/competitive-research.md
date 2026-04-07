@@ -50,18 +50,21 @@
 | Open API | Pool Brain, Jobber | Phase 10 |
 
 ## Features NO Competitor Has (Our Differentiators)
-1. **AI-powered profitability analysis** with pricing recommendations
-2. **Satellite pool/vegetation detection** from imagery
-3. **EMD inspection intelligence** (Pool Scout)
-4. **Jurisdiction-aware bather load calculator** with estimation chain
-5. **Account health scoring** with churn prediction
-6. **AI Chemistry Advisor** (explains WHY, not just what dose)
-7. **AI Service Narrator** (customer-facing reports written by AI, not templates)
-8. **Predictive equipment failure**
-9. **Route strategy AI** (which stops on which routes, not just stop order)
-10. **Automated property assessment from satellite imagery**
-11. **Price increase impact modeling**
-12. **Whale curve profitability visualization**
+
+> **Status key:** BUILT = in production, PARTIAL = foundation exists, PLANNED = in roadmap
+
+1. **AI-powered profitability analysis** with pricing recommendations — **BUILT** (profitability service + dashboard)
+2. **Satellite pool/vegetation detection** from imagery — **BUILT** (Claude Vision 2-pass, per-BOW)
+3. **Inspection intelligence** (Pool Scout) — **BUILT** (scraper, PDF extractor, 908 facilities)
+4. **Jurisdiction-aware bather load calculator** with estimation chain — **BUILT** (10 jurisdictions seeded)
+5. **Account health scoring** with churn prediction — **PLANNED** (Customer Intelligence agent, Phase 9-10)
+6. **AI Chemistry Advisor** (explains WHY, not just what dose) — **PARTIAL** (dosing engine exists, DeepBlue has dosing tool)
+7. **AI Service Narrator** (customer-facing reports written by AI, not templates) — **PLANNED** (Phase 3c)
+8. **Predictive equipment failure** — **PLANNED** (Equipment Oracle agent, Phase 9)
+9. **Route strategy AI** (which stops on which routes, not just stop order) — **PARTIAL** (OR-Tools VRP built, no AI strategy layer)
+10. **Automated property assessment from satellite imagery** — **BUILT** (satellite + difficulty scoring)
+11. **Price increase impact modeling** — **PLANNED** (Phase 10)
+12. **Whale curve profitability visualization** — **BUILT** (Recharts whale curve on profitability dashboard)
 
 ## Key Customer Pain Points (from forums, reviews, industry publications)
 

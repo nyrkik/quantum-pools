@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { WebSocketProvider } from "@/lib/ws";
 import { DevModeProvider, useDevMode } from "@/lib/dev-mode";
 import { ComposeProvider } from "@/components/email/compose-provider";
 import { ComposeEmail } from "@/components/email/compose-email";
@@ -63,16 +64,18 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthProvider>
-      <DevModeProvider>
-        <ComposeProvider>
-          <DeepBlueProvider>
-            <AuthenticatedLayout>{children}</AuthenticatedLayout>
-            <ComposeEmail />
-            <DeepBlueTrigger />
-            <DeepBlueSheet />
-          </DeepBlueProvider>
-        </ComposeProvider>
-      </DevModeProvider>
+      <WebSocketProvider>
+        <DevModeProvider>
+          <ComposeProvider>
+            <DeepBlueProvider>
+              <AuthenticatedLayout>{children}</AuthenticatedLayout>
+              <ComposeEmail />
+              <DeepBlueTrigger />
+              <DeepBlueSheet />
+            </DeepBlueProvider>
+          </ComposeProvider>
+        </DevModeProvider>
+      </WebSocketProvider>
     </AuthProvider>
   );
 }

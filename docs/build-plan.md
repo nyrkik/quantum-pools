@@ -1,12 +1,17 @@
 # QuantumPools — Production Build Plan
 
-## Current State (as of 2026-03-10)
+## Current State (updated 2026-04-07)
+- **78 database models**, **370+ API endpoints**, **39 frontend pages**
 - Phases 0-2 complete (auth, RBAC, customers, properties, techs, visits, routes, maps, OR-Tools)
-- Phase 3 partially complete (invoices/payments CRUD — missing email, PDF, Stripe webhooks, background worker)
-- 16 database models, 43 API endpoints, 8 frontend pages
+- Phase 3a complete (invoices, payments, estimates, approval workflows)
+- Phase 3b complete (profitability analysis, difficulty scoring, bather load, satellite detection)
+- Phase 3c partial (email service built with Postmark, PDF generation built, Stripe subscription management exists; AutoPay/recurring billing not started)
+- Phase 3d partial (dosing engine exists, service checklists built; guided workflows not started)
+- Phase 5 complete (inspection scraping, PDF extraction, 908 facilities, frontend dashboard)
+- **Additional systems built not in original plan:** email/agent pipeline, AI inbox with triage, DeepBlue conversational AI, service cases, internal messaging, equipment catalog + parts, visit experience, real-time WebSocket events, granular permissions (60 slugs), à la carte subscriptions
+- Running on MS-01 via systemd + Cloudflare Tunnel (quantumpoolspro.com)
 - No tests, no CI/CD, no platform admin
 - DigitalOcean `.do/app.yaml` exists but not yet deployed
-- Production readiness: ~65%
 
 ## Target State
 Enterprise SaaS deployed on DigitalOcean, marketable to pool service companies nationwide. Two admin layers (org admin + platform admin). Profitability analysis and Pool Scout as key differentiators.
@@ -66,80 +71,47 @@ _Priority: CRITICAL — needed for own business operations, key differentiator_
 _Detailed spec: [profitability-feature-plan.md](profitability-feature-plan.md)_
 
 ### 3b.1 Database & Models
-- [ ] Create `OrgCostSettings` model (burdened labor rate, vehicle $/mile, chemical $/gal, overhead, target margin)
-- [ ] Create `PropertyDifficulty` model (measured fields + scored fields + overrides)
-- [ ] Create `BatherLoadJurisdiction` model (10 jurisdiction calculation methods)
-- [ ] Create `PropertyJurisdiction` model (links properties to jurisdiction)
-- [ ] Add relationships to `Property` model (difficulty, jurisdiction)
-- [ ] Alembic migration for all new tables
-- [ ] Register models in `__init__.py`
-- [ ] Seed bather load jurisdictions (CA, ISPSC, MAHC, TX, FL, AZ, NY, GA, NC, IL)
+- [x] Create `OrgCostSettings` model (burdened labor rate, vehicle $/mile, chemical $/gal, overhead, target margin)
+- [x] Create `PropertyDifficulty` model (measured fields + scored fields + overrides)
+- [x] Create `BatherLoadJurisdiction` model (10 jurisdiction calculation methods)
+- [x] Create `PropertyJurisdiction` model (links properties to jurisdiction)
+- [x] Add relationships to `Property` model (difficulty, jurisdiction)
+- [x] Alembic migration for all new tables
+- [x] Register models in `__init__.py`
+- [x] Seed bather load jurisdictions (CA, ISPSC, MAHC, TX, FL, AZ, NY, GA, NC, IL)
 
 ### 3b.2 Schemas & Services
-- [ ] Pydantic schemas: cost settings, difficulty, profitability responses, whale curve, pricing suggestions, bather load
-- [ ] `ProfitabilityService` — core calculation engine
-  - [ ] Difficulty score computation (weighted composite from measured + scored fields)
-  - [ ] Difficulty-to-multiplier mapping (0.8x to 1.6x)
-  - [ ] Per-account cost breakdown (chemical, labor, travel, overhead)
-  - [ ] Margin and suggested rate calculation
-  - [ ] Overview aggregation with filters (tech, route day, margin range, difficulty)
-  - [ ] Whale curve data generation
-  - [ ] Pricing suggestions (accounts below target, sorted by rate gap)
-- [ ] `BatherLoadService` — jurisdiction-aware calculator
-  - [ ] Calculation method per jurisdiction (depth-based, flat, dual-test, volume-based)
-  - [ ] Estimation chain (gallons→sqft, sqft→depth split, volume→GPM)
-  - [ ] Bulk jurisdiction assignment by city/zip
-- [ ] `SatelliteAnalysisService` — automated pool detection
-  - [ ] Google Static Maps API integration (fetch satellite image by lat/lng)
-  - [ ] OpenCV pool detection (HSV blue segmentation, contour analysis, sqft calculation)
-  - [ ] Vegetation/canopy detection (HSV green segmentation in buffer zone)
-  - [ ] Overhang detection (green pixels overlapping pool contour)
-  - [ ] Shadow analysis (value channel thresholding for seasonal compensation)
-  - [ ] Hardscape ratio calculation
-  - [ ] Confidence scoring and estimated field tagging
-  - [ ] Result caching (one-time per property)
+- [x] Pydantic schemas: cost settings, difficulty, profitability responses, whale curve, pricing suggestions, bather load
+- [x] `ProfitabilityService` — core calculation engine
+  - [x] Difficulty score computation (weighted composite from measured + scored fields)
+  - [x] Difficulty-to-multiplier mapping (0.8x to 1.6x)
+  - [x] Per-account cost breakdown (chemical, labor, travel, overhead)
+  - [x] Margin and suggested rate calculation
+  - [x] Overview aggregation with filters (tech, route day, margin range, difficulty)
+  - [x] Whale curve data generation
+  - [x] Pricing suggestions (accounts below target, sorted by rate gap)
+- [x] `BatherLoadService` — jurisdiction-aware calculator
+  - [x] Calculation method per jurisdiction (depth-based, flat, dual-test, volume-based)
+  - [x] Estimation chain (gallons→sqft, sqft→depth split, volume→GPM)
+  - [x] Bulk jurisdiction assignment by city/zip
+- [x] `SatelliteAnalysisService` — automated pool detection
+  - [x] Google Static Maps API integration (fetch satellite image by lat/lng)
+  - [x] Claude Vision 2-pass analysis (replaced OpenCV — zoom 21 detail + zoom 20 context)
+  - [x] Per-BOW analysis (each pool BOW gets own satellite analysis)
+  - [x] Confidence scoring and estimated field tagging
+  - [x] Result caching (per BOW)
 
 ### 3b.3 API Endpoints
-- [ ] `GET /profitability/overview` — all accounts with metrics, filterable
-- [ ] `GET /profitability/account/{id}` — single account cost breakdown
-- [ ] `GET /profitability/whale-curve` — chart data
-- [ ] `GET /profitability/suggestions` — pricing recommendations
-- [ ] `GET/PUT /profitability/settings` — org cost config (owner/admin)
-- [ ] `GET/PUT /profitability/properties/{id}/difficulty` — difficulty factors
-- [ ] `GET /profitability/jurisdictions` — list bather load methods
-- [ ] `PUT /profitability/properties/{id}/jurisdiction` — assign jurisdiction
-- [ ] `POST /profitability/bulk-jurisdiction` — bulk assign by locality
-- [ ] `GET /profitability/properties/{id}/bather-load` — calculate bather load
-- [ ] `POST /properties/{id}/detect-pool` — satellite analysis (single)
-- [ ] `POST /properties/bulk-detect` — satellite analysis (batch)
-- [ ] `GET /properties/{id}/satellite-analysis` — cached analysis results
-- [ ] Register all routes in `router.py`
+- [x] All profitability endpoints implemented (13 endpoints under `/api/v1/profitability/`)
+- [x] Satellite endpoints: `/satellite/pool-bows`, `/satellite/bows/{bow_id}`, `/satellite/bulk-analyze`
+- [x] All routes registered in `router.py`
 
 ### 3b.4 Frontend
-- [ ] TypeScript types for all profitability/difficulty/bather load responses
-- [ ] `/profitability` — main dashboard
-  - [ ] Summary cards (total accounts, avg margin, below target count, revenue vs cost)
-  - [ ] Whale curve chart (Recharts LineChart)
-  - [ ] Profitability quadrant scatter (Recharts ScatterChart, dot size by difficulty)
-  - [ ] Sortable/filterable account table ranked by margin
-  - [ ] Filter bar (tech, route day, margin range, difficulty range)
-- [ ] `/profitability/[customerId]` — account detail drilldown
-  - [ ] Cost waterfall chart (Recharts BarChart)
-  - [ ] Difficulty score breakdown (sliders for scored, inputs for measured)
-  - [ ] Estimated vs actual indicators on each field
-  - [ ] Bather load result with jurisdiction selector
-  - [ ] Current rate vs suggested rate with rate gap
-  - [ ] Satellite image with overlays (pool blue, canopy green, overhang orange)
-  - [ ] "Re-analyze" and manual override controls
-- [ ] `/profitability/settings` — org cost configuration (owner/admin only)
-- [ ] `/profitability/bather-load` — standalone calculator tool
-  - [ ] Jurisdiction selector
-  - [ ] Pool characteristics inputs with estimation fallbacks
-  - [ ] Calculated max bather load display
-  - [ ] Bulk assign by city/zip
-- [ ] Sidebar nav: add "Profitability" with TrendingUp icon
-- [ ] Map profitability overlay component (green/yellow/red markers by margin)
-- [ ] Add `opencv-python-headless` to backend requirements
+- [x] All profitability pages implemented: `/profitability`, `/profitability/[customerId]`, `/profitability/settings`, `/profitability/bather-load`
+- [x] Whale curve, scatter chart, account table, difficulty sliders, cost waterfall
+- [x] Satellite page: `/satellite?bow={id}`
+- [x] Sidebar nav with "Profitability" item
+- [ ] Map profitability overlay (green/yellow/red markers by margin) — **not yet built**
 
 ---
 
@@ -155,11 +127,11 @@ _Priority: CRITICAL — can't charge customers without this_
 - [ ] Customer self-service AutoPay management (in portal)
 
 ### 3c.2 Email Service
-- [ ] Create `EmailService` using aiosmtplib (already in requirements)
-- [ ] HTML email templates (invoice sent, payment received, overdue reminder, password reset)
-- [ ] Template rendering engine (Jinja2)
-- [ ] Wire invoice "send" endpoint to actually email the customer
-- [ ] Email delivery tracking (sent_at, opened_at if using tracking pixel)
+- [x] `EmailService` with provider abstraction (Postmark primary, SMTP fallback)
+- [x] HTML email templates (Jinja2 rendering)
+- [x] Invoice/estimate sending via email
+- [x] Delivery tracking (Postmark message IDs, sent_at)
+- [ ] Opened_at tracking pixel (not yet implemented)
 
 ### 3c.3 Service Email Reports ("Digital Door Hanger")
 - [ ] Auto-generate post-visit email per customer
@@ -169,11 +141,11 @@ _Priority: CRITICAL — can't charge customers without this_
 - [ ] Customer can reply to report (creates service request)
 
 ### 3c.4 PDF Generation
-- [ ] Create `PDFService` using reportlab (already in requirements)
-- [ ] Invoice PDF template (company branding, line items, totals, payment terms)
-- [ ] PDF storage (DigitalOcean Spaces / S3-compatible — BarkurrRX pattern)
-- [ ] `GET /invoices/{id}/pdf` endpoint to generate/download
-- [ ] Attach PDF to invoice emails
+- [x] `PDFService` implemented (invoice PDF generation)
+- [x] Invoice PDF template with branding, line items, totals
+- [x] `GET /invoices/{id}/pdf` endpoint
+- [ ] PDF storage on DO Spaces (currently local disk)
+- [ ] Attach PDF to invoice emails automatically
 
 ### 3c.5 Stripe Integration
 - [ ] Stripe webhook endpoint (`POST /webhooks/stripe`)
@@ -199,39 +171,33 @@ _Priority: CRITICAL — can't charge customers without this_
 ## PHASE 3d: Core Pool Operations Enhancements
 _Priority: CRITICAL — table stakes features missing from current build_
 
-### 3d.1 Multiple Bodies of Water
-- [ ] `BodyOfWater` model (property_id FK, type: pool/spa/wading/fountain, name, gallons, sqft, equipment, chemical settings)
-- [ ] Migrate existing property pool fields to body_of_water records
-- [ ] Chemical readings linked to body_of_water (not just property)
-- [ ] Visits can service multiple bodies per property
-- [ ] Separate billing rates per body of water
-- [ ] Separate equipment tracking per body
-- [ ] Update all existing endpoints to support body_of_water context
-- [ ] Frontend: property detail shows bodies of water as sub-sections
+### 3d.1 Multiple Bodies of Water — COMPLETE
+- [x] `WaterFeature` model (was `BodyOfWater`) — pool, spa, hot_tub, wading_pool, fountain, water_feature types
+- [x] Migration + backfill from properties (migration `8c1a65b5a13d`)
+- [x] Chemical readings linked to body_of_water
+- [x] Separate equipment tracking per body (via `equipment_items`)
+- [x] Pool measurement per-BOW (`?bow={id}`)
+- [x] Satellite analysis per-BOW (one analysis per pool BOW)
+- [x] Frontend: BOW tiles on property detail with progressive disclosure
+- [ ] Separate billing rates per body of water (rate allocation exists but not fully wired)
 
-### 3d.2 LSI Calculator & Dosing Engine
-- [ ] `DosingService` — water chemistry calculation engine
-  - [ ] Langelier Saturation Index (LSI) calculation from readings (pH, temp, calcium hardness, total alkalinity, TDS/CYA)
-  - [ ] Target ranges by pool type (residential, commercial, spa)
-  - [ ] Dosing recommendations: what chemical, how much, for given pool volume
-  - [ ] Chemical products database (chlorine types, acid, soda ash, calcium chloride, CYA, etc.)
-  - [ ] Dose calculation per product (oz/lbs needed based on current vs target reading and gallons)
-- [ ] `GET /chemistry/{body_of_water_id}/lsi` — current LSI with interpretation
-- [ ] `GET /chemistry/{body_of_water_id}/dosing` — recommended dosing from latest readings
-- [ ] Frontend: LSI gauge visualization (corrosive ↔ scaling range)
-- [ ] Frontend: dosing recommendation cards after entering readings
-- [ ] Mobile-friendly: tech enters readings in field → instant dosing guidance
+### 3d.2 LSI Calculator & Dosing Engine — PARTIAL
+- [x] `dosing_engine.py` exists with LSI calculation and dosing formulas
+- [x] DeepBlue `_exec_dosing()` tool provides conversational dosing guidance
+- [ ] Standalone API endpoints (`/chemistry/{bow_id}/lsi`, `/chemistry/{bow_id}/dosing`)
+- [ ] Frontend LSI gauge visualization
+- [ ] Frontend dosing recommendation cards
+- [ ] Mobile-friendly tech field entry flow
 
-### 3d.3 Guided Workflows & Service Checklists
-- [ ] `WorkflowTemplate` model (org-scoped, name, steps as ordered JSON)
-- [ ] `WorkflowStep` — step type (reading, checkbox, photo, note, dosing), required flag, order
-- [ ] `VisitWorkflow` — instance of workflow for a specific visit, tracks completion per step
-- [ ] Assign workflow templates to service types or individual properties
-- [ ] Enforce step order (can't skip required steps)
+### 3d.3 Guided Workflows & Service Checklists — PARTIAL
+- [x] `ServiceChecklistItem` model (org-scoped checklist templates)
+- [x] `VisitChecklistEntry` model (entries filled during visits)
+- [x] Checklist auto-created when visit starts
+- [x] Visit experience page with checklist completion
+- [ ] Full workflow templates with ordered steps and enforcement
 - [ ] Required photos at specific steps
-- [ ] Auto-log chemical readings from workflow steps into chemical_readings table
-- [ ] Frontend: workflow builder (drag-drop steps, set requirements)
-- [ ] Frontend: tech visit view follows guided workflow step-by-step
+- [ ] Auto-log chemical readings from workflow steps
+- [ ] Frontend: workflow builder (drag-drop steps)
 
 ### 3d.4 Filter/Salt Cell Auto-Scheduling
 - [ ] Maintenance schedule settings per body of water (filter clean every X weeks, salt cell clean every Y weeks)
@@ -276,36 +242,28 @@ _Priority: CRITICAL — required for self-service and reducing admin workload_
 
 ---
 
-## PHASE 5: EMD Inspection Intelligence (Pool Scout)
+## PHASE 5: Inspection Intelligence (Pool Scout) — COMPLETE
 _Priority: CRITICAL differentiator — Sacramento regional moat_
+_Completed 2026-03-25. 908 facilities, 1386 inspections, 8505 violations._
 
 ### 5.1 Scraping Infrastructure
-- [ ] Playwright service setup (headless browser for EMD site)
-- [ ] EMD facility search and scraping logic
-- [ ] Rate limiting and retry logic for scraping
-- [ ] Scheduled scraping jobs (APScheduler — weekly/configurable)
+- [x] Playwright scraper (`inspection/scraper.py`) — Sac County + Placer County
+- [x] Rate limiting and retry logic
+- [x] ScraperRun tracking model
+- [x] Backfill scripts for historical data
 
 ### 5.2 Data Extraction
-- [ ] `EMDFacility` model (name, address, permit info, geocoded location)
-- [ ] `EMDInspectionReport` model (date, inspector, result, pdf_url)
-- [ ] `EMDViolation` model (code, description, severity, status)
-- [ ] PDF extraction service (parse inspection report PDFs for structured data)
-- [ ] Alembic migration for EMD tables
+- [x] `InspectionFacility`, `Inspection`, `InspectionViolation`, `InspectionEquipment` models
+- [x] PyMuPDF PDF extractor (`inspection/pdf_extractor.py`)
+- [x] Facility-to-property address matching
+- [x] Backward-compat aliases (`emd_*.py` → `inspection_*.py`)
 
-### 5.3 AI Analysis
-- [ ] Claude API integration for violation summarization
-- [ ] Risk scoring per facility (frequency, severity, patterns)
-- [ ] Trend analysis (improving vs declining facilities)
-- [ ] Actionable recommendations generation
-
-### 5.4 EMD Frontend
-- [ ] `/emd` dashboard (replace placeholder)
-  - [ ] Facility search and map view
-  - [ ] Inspection history timeline per facility
-  - [ ] Violation breakdown charts
-  - [ ] AI-generated summaries and risk scores
-  - [ ] Export/report generation
-- [ ] Map overlay showing EMD facilities with risk coloring
+### 5.3 Intelligence
+- [x] Tier-gated access (`my_inspections`, `full_research`, `single_lookup`)
+- [x] Dashboard with facility search, inspection history, violation breakdown
+- [x] Frontend: `/inspections` with full inspection browsing
+- [ ] AI-generated summaries and risk scores (planned for Inspection Intelligence agent)
+- [ ] Trend analysis (planned)
 
 ---
 

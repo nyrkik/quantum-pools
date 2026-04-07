@@ -10,6 +10,7 @@ from sqlalchemy import select, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
+from src.core.events import EventType, publish
 from src.api.deps import get_current_org_user, OrgUserContext
 from src.models.internal_message import InternalThread, InternalMessage
 from src.models.message_attachment import MessageAttachment
@@ -128,6 +129,12 @@ async def send_message(
             ))
 
     await db.commit()
+
+    # Notify recipients via WebSocket
+    for pid in (thread.participant_ids or []):
+        if pid != from_user_id:
+            await publish(EventType.MESSAGE_NEW, org_id, {"thread_id": thread.id, "from_user_id": from_user_id}, user_id=pid)
+
     presenter = MessagePresenter(db)
     return await presenter.thread_detail(thread, from_user_id)
 
@@ -226,6 +233,8 @@ async def get_thread(
     else:
         db.add(ThreadRead(user_id=ctx.user.id, thread_id=thread_id))
     await db.flush()
+
+    await publish(EventType.MESSAGE_READ, ctx.organization_id, {"thread_id": thread_id}, user_id=ctx.user.id)
 
     presenter = MessagePresenter(db)
     return await presenter.thread_detail(thread, ctx.user.id)

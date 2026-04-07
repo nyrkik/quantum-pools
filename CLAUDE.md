@@ -24,6 +24,8 @@ Enterprise pool service management platform consolidating:
 | Route optimization | Google OR-Tools VRP |
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
+| Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
+| Email | Postmark (primary), SMTP (fallback) — see `docs/email-pipeline.md` |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
 ## UI Standards
@@ -125,7 +127,11 @@ QuantumPools/
 │       ├── models/                    # SQLAlchemy ORM (one file per model)
 │       ├── schemas/                   # Pydantic request/response
 │       ├── services/                  # Business logic layer
-│       │   └── inspection/            # Inspection-specific services
+│       │   ├── agents/                # Email pipeline agents (orchestrator, classifier, matcher, etc.)
+│       │   ├── deepblue/              # DeepBlue AI (engine, tools, eval, quota)
+│       │   ├── inspection/            # Inspection scraper + PDF extractor
+│       │   ├── emd/                   # EMD service (backward-compat aliases)
+│       │   └── parts/                 # Parts catalog services
 │       ├── seeds/
 │       └── utils/
 ├── frontend/                          # Next.js 16
@@ -139,8 +145,11 @@ QuantumPools/
 │   │   └── {domain}/                  # Domain-specific components
 │   └── lib/
 │       ├── api.ts                     # API client (cookie auth + FormData upload)
-│       └── auth-context.tsx           # AuthProvider + useAuth
-├── docs/
+│       ├── auth-context.tsx           # AuthProvider + useAuth
+│       ├── ws.tsx                     # WebSocketProvider + useWSEvent/useWSRefetch hooks
+│       ├── permissions.ts             # usePermissions hook (role + feature checks)
+│       └── dev-mode.tsx               # Dev mode context (view-as-role)
+├── docs/                              # Architecture docs (see Documentation section below)
 ├── docker-compose.yml
 ├── .do/app.yaml
 └── CLAUDE.md
@@ -252,6 +261,13 @@ All AI agents use `AgentLearningService` to learn from human corrections:
 - **Non-blocking**: learning queries are wrapped in try/except — never break the primary operation
 - Table: `agent_corrections` — stores input_context, original_output, corrected_output, correction_type
 
+### Real-Time Events — publish after every mutation the UI cares about.
+New features that change data visible in the UI MUST publish an event. See `docs/realtime-events.md`.
+- **Backend**: `from src.core.events import EventType, publish` → `await publish(EventType.XXX, org_id, {data})`
+- **Frontend**: `useWSRefetch(["event.type"], refetchFn)` — triggers targeted refetch on event, debounced
+- **Polling is the fallback**, not the primary. Frontend polls at 60s when WS is connected, 15s when disconnected.
+- **Never block on publish** — wrap in try/except, events are non-critical
+
 ### Notification Consistency
 - Notification type strings are centralized in `src/core/notification_types.py` — never use string literals
 - Job assignment, completion, and auto-close all trigger notifications
@@ -267,30 +283,31 @@ All AI agents use `AgentLearningService` to learn from human corrections:
 
 ## Key Relationships
 
+> Full model reference: `docs/data-model.md`
+
 ```
 Organization 1──* OrganizationUser *──1 User
 Organization 1──* Customer 1──* Property
 Organization 1──* Tech
 Organization 1──1 OrgCostSettings
-Customer 1──1 BillingSchedule
 Customer 1──* Invoice 1──* InvoiceLineItem
 Customer 1──* Payment
-Customer 1──1 PortalUser
-Customer 1──* ServiceRequest
-Property 1──* BodyOfWater (pool, spa, fountain, etc.)
+Property 1──* WaterFeature (pool, spa, fountain, etc.)
 Property 1──* Visit *──1 Tech
-Property 1──* ChemicalReading ──? BodyOfWater
-Property 1──1 PropertyDifficulty ──? BodyOfWater
-Property 1──1 PropertyJurisdiction ──1 BatherLoadJurisdiction
-Property 1──* SatelliteAnalysis (one per pool BOW)
-BodyOfWater 1──1 SatelliteAnalysis (pools only)
-Property 1──* PoolMeasurement ──? BodyOfWater
-Visit 1──* ChemicalReading
-Visit *──* Service (through VisitService)
+WaterFeature 1──1 SatelliteAnalysis (pools only)
+WaterFeature 1──* PoolMeasurement
+Visit 1──* ChemicalReading ──? WaterFeature
+Visit 1──* VisitCharge
 Tech 1──* Route 1──* RouteStop ──1 Property
+ServiceCase 1──* AgentAction (jobs)
+ServiceCase 1──? AgentThread
+AgentThread 1──* AgentMessage
+AgentThread 1──* AgentAction (jobs extracted from emails)
+AgentAction 1──* AgentActionTask (checklist items)
+AgentAction 1──* AgentActionComment
 InspectionFacility 1──* Inspection 1──* InspectionViolation
-InspectionFacility 1──* Inspection 1──1 InspectionEquipment
 InspectionFacility ──? Property (matched via address)
+EquipmentCatalog 1──* EquipmentItem *──1 Property
 ```
 
 ## Phase Status
@@ -298,12 +315,39 @@ InspectionFacility ──? Property (matched via address)
 - [x] Phase 0: Foundation (Auth + skeleton end-to-end)
 - [x] Phase 1: Core Business Operations (customers, properties, techs, visits, chemical readings)
 - [x] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
-- [x] Phase 3a: Invoicing CRUD (invoices, payments — missing email/PDF/Stripe/worker)
-- [x] Phase 3b: Profitability Analysis (models, difficulty scoring, cost breakdown, bather load calculator, frontend dashboard, satellite detection)
-- [x] Pool Measurement: Ground-truth dimensions via tech photos + Claude Vision (upload, analyze, apply to property)
-- [x] BodyOfWater: Multi-body support (pool, spa, fountain per property) — model, migration, CRUD, services, frontend
-- [ ] Phase 3c: Complete Invoicing (email, PDF, Stripe, AutoPay, background worker)
-- [ ] Phase 3d: Core Pool Ops (LSI/dosing, workflows)
+- [x] Phase 3a: Invoicing CRUD (invoices, payments, estimates, approval workflows)
+- [x] Phase 3b: Profitability Analysis (difficulty scoring, cost breakdown, bather load, satellite detection, whale curve)
+- [x] Pool Measurement: Ground-truth dimensions via tech photos + Claude Vision
+- [x] BodyOfWater: Multi-body support (pool, spa, fountain per property)
+- [~] Phase 3c: Invoicing completion — email service (Postmark) DONE, PDF generation DONE, AutoPay/Stripe/recurring NOT STARTED
+- [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
-- [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities migrated, frontend)
-- [ ] Phase 6: Advanced Features (Stripe, equipment tracking, SMS, PWA)
+- [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
+- [ ] Phase 6: Platform Admin (tenant management, subscriptions)
+- [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
+
+### Systems Built Outside Original Phases
+- Email/Agent Pipeline: AI inbox with triage, classification, auto-drafting, customer matching, thread management
+- DeepBlue: Conversational AI assistant with 29 domain tools, eval suite, usage tracking
+- Service Cases: Unifying entity linking threads → jobs → invoices per customer issue
+- Internal Messaging: Staff-to-staff messaging with threads, notifications, case linking
+- Real-Time Events: Redis Pub/Sub + WebSocket gateway for instant UI updates
+- Equipment & Parts: Catalog (114 entries), items per property, parts (434), vendor tracking
+- Granular Permissions: 60-slug permission system with presets, custom roles, per-user overrides
+- À La Carte Subscriptions: Feature gating with tiers, trial support, Stripe customer IDs
+- Feedback System: In-app user feedback with screenshots and resolution tracking
+
+## Documentation
+
+Architecture docs live in `docs/`. Read these for system details beyond what CLAUDE.md covers.
+
+| Doc | Covers |
+|-----|--------|
+| `docs/email-pipeline.md` | Full email flow: inbound → triage → classify → thread → draft → send |
+| `docs/realtime-events.md` | WebSocket + Redis Pub/Sub, event types, frontend hooks, how to add events |
+| `docs/data-model.md` | All 78 models organized by domain, relationships, conventions, deprecated fields |
+| `docs/deepblue-architecture.md` | DeepBlue AI: engine, tools, eval suite, quota, knowledge gaps |
+| `docs/ai-agents-plan.md` | 10 planned domain agents (product roadmap), current implementation status |
+| `docs/build-plan.md` | Full phase roadmap with completion status, feature priority tiers |
+| `docs/profitability-feature-plan.md` | Detailed spec for profitability (scoring weights, jurisdiction formulas) |
+| `docs/competitive-research.md` | Market audit, competitor analysis, our differentiators (with build status) |

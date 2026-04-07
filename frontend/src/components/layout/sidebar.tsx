@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { usePermissions, type Permissions } from "@/lib/permissions";
 import { useDevMode } from "@/lib/dev-mode";
+import { useWSRefetch, useWSStatus } from "@/lib/ws";
 import type { Role } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -112,11 +113,22 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     }
   }, [perms.canViewInbox, dev.isDeveloper]);
 
+  const { isConnected: wsConnected } = useWSStatus();
+
   useEffect(() => {
     fetchCounts();
-    const interval = setInterval(fetchCounts, 30000);
+    // When WebSocket is connected, poll less frequently (safety net)
+    // When disconnected, poll more aggressively
+    const interval = setInterval(fetchCounts, wsConnected ? 60000 : 15000);
     return () => clearInterval(interval);
-  }, [fetchCounts]);
+  }, [fetchCounts, wsConnected]);
+
+  // Instant refetch on real-time events
+  useWSRefetch(
+    ["thread.new", "thread.updated", "thread.message.new", "message.new", "message.read", "notification.new"],
+    fetchCounts,
+    300,
+  );
 
   // Tab title with unread count
   useEffect(() => {

@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { usePermissions } from "@/lib/permissions";
+import { useWSRefetch } from "@/lib/ws";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -88,6 +89,9 @@ export default function MessagesPage() {
   }, [view]);
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
+
+  // Real-time: refresh when new internal messages arrive
+  useWSRefetch(["message.new", "message.read"], loadThreads, 500);
 
   const loadDetail = useCallback((threadId: string) => {
     setDetailLoading(true);

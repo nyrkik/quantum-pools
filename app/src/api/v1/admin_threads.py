@@ -12,6 +12,7 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
+from src.core.events import EventType, publish
 from src.api.deps import OrgUserContext, require_roles, OrgRole
 from src.schemas.agent_thread import ApproveBody, ReviseDraftBody, AssignThreadBody
 from src.services.agent_thread_service import AgentThreadService
@@ -115,6 +116,7 @@ async def approve_thread(
         code = {"no_pending": 400, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
     await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "approved"})
     return result
 
 
@@ -126,11 +128,13 @@ async def dismiss_thread(
 ):
     """Dismiss all pending messages in a thread."""
     service = AgentThreadService(db)
-    return await service.dismiss_thread(
+    result = await service.dismiss_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,
         user_name=f"{ctx.user.first_name} {ctx.user.last_name}",
     )
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "dismissed"})
+    return result
 
 
 @router.post("/agent-threads/{thread_id}/archive")
@@ -141,7 +145,9 @@ async def archive_thread(
 ):
     """Archive a thread — hidden from inbox, preserved for records."""
     service = AgentThreadService(db)
-    return await service.archive_thread(org_id=ctx.organization_id, thread_id=thread_id)
+    result = await service.archive_thread(org_id=ctx.organization_id, thread_id=thread_id)
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "archived"})
+    return result
 
 
 @router.delete("/agent-threads/{thread_id}")
@@ -152,7 +158,9 @@ async def delete_thread(
 ):
     """Permanently delete a thread and all messages. Owner only."""
     service = AgentThreadService(db)
-    return await service.delete_thread(org_id=ctx.organization_id, thread_id=thread_id)
+    result = await service.delete_thread(org_id=ctx.organization_id, thread_id=thread_id)
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "deleted"})
+    return result
 
 
 @router.post("/agent-threads/{thread_id}/assign")
@@ -173,6 +181,7 @@ async def assign_thread(
     if "error" in result:
         code = {"not_found": 404, "forbidden": 403}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "assigned", "assigned_to": body.user_id})
     return result
 
 
@@ -225,6 +234,7 @@ async def send_thread_followup(
         code = {"not_found": 404, "no_text": 400, "send_failed": 500}[result["error"]]
         raise HTTPException(status_code=code, detail=result["detail"])
     await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
+    await publish(EventType.THREAD_MESSAGE_NEW, ctx.organization_id, {"thread_id": thread_id, "action": "followup_sent"})
     return result
 
 

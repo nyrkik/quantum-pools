@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from src.core.database import get_db
+from src.core.events import EventType, publish
 from src.api.deps import get_current_org_user, OrgUserContext
 from src.schemas.visit import (
     VisitCreate, VisitUpdate, VisitCompleteRequest, VisitResponse,
@@ -105,12 +106,14 @@ async def start_visit(
             if tech.user_id:
                 tech_user_id = tech.user_id
 
-        return await svc.start_visit(
+        result = await svc.start_visit(
             ctx.organization_id,
             body.property_id,
             tech_user_id,
             route_stop_id=body.route_stop_id,
         )
+        await publish(EventType.VISIT_STARTED, ctx.organization_id, {"visit_id": result.get("visit", {}).get("id"), "property_id": body.property_id})
+        return result
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -354,7 +357,9 @@ async def finish_visit(
     """Enhanced complete — calculates duration, marks route stop."""
     svc = VisitExperienceService(db)
     try:
-        return await svc.complete_visit(ctx.organization_id, visit_id, notes=body.notes)
+        result = await svc.complete_visit(ctx.organization_id, visit_id, notes=body.notes)
+        await publish(EventType.VISIT_COMPLETED, ctx.organization_id, {"visit_id": visit_id})
+        return result
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:

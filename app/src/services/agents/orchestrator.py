@@ -443,6 +443,18 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
     # Update thread status
     await update_thread_status(thread.id)
 
+    # Push real-time event
+    try:
+        from src.core.events import EventType, publish
+        is_new = thread.message_count <= 1
+        await publish(
+            EventType.THREAD_NEW if is_new else EventType.THREAD_MESSAGE_NEW,
+            organization_id,
+            {"thread_id": str(thread.id), "from_email": from_email, "subject": subject[:80]},
+        )
+    except Exception:
+        pass  # Non-blocking — never break email processing
+
     # Post-processing: verify customer match integrity
     from .customer_matcher import verify_customer_match
     await verify_customer_match(organization_id, from_email, thread.id)

@@ -63,6 +63,8 @@ async def receive_webhook(
     if result.get("status") == "error" and result.get("detail") == "Organization not found":
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    # Real-time events are published from the orchestrator after processing
+
     # Always return 200 to email providers (they retry on non-2xx)
     return result
 

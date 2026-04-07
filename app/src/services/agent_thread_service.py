@@ -619,7 +619,7 @@ class AgentThreadService:
 
         if broadcast and org_id:
             # Mark read for all users in the org
-            from src.models.organization import OrganizationUser
+            from src.models.organization_user import OrganizationUser
             org_users = (await self.db.execute(
                 select(OrganizationUser.user_id).where(OrganizationUser.organization_id == org_id)
             )).scalars().all()

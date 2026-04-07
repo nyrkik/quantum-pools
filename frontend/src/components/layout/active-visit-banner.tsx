@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { useWSRefetch } from "@/lib/ws";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Check, ExternalLink, Loader2, ClipboardList } from "lucide-react";
@@ -41,12 +42,15 @@ export function ActiveVisitBanner() {
     }
   }, []);
 
-  // Poll for active visit every 60s
+  // Poll for active visit (safety net)
   useEffect(() => {
     fetchActive();
     const poll = setInterval(fetchActive, 60_000);
     return () => clearInterval(poll);
   }, [fetchActive]);
+
+  // Real-time: instant update when a visit starts or completes
+  useWSRefetch(["visit.started", "visit.completed"], fetchActive, 300);
 
   // Live elapsed timer (updates every 30s to avoid excessive re-renders)
   useEffect(() => {

@@ -109,6 +109,10 @@ def create_app() -> FastAPI:
     # Routes
     app.include_router(api_router)
 
+    # WebSocket (mounted directly — not under API router prefix)
+    from src.api.v1.ws import router as ws_router
+    app.include_router(ws_router)
+
     @app.get("/api/health")
     async def health():
         db_ok = await check_connection()

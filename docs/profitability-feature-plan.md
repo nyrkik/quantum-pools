@@ -1,7 +1,9 @@
 # Profitability Analysis Feature — Full Plan
 
+> **Status: IMPLEMENTED (2026-03-12).** This feature is fully built and in production. This document serves as the detailed design reference — the reasoning behind scoring weights, jurisdiction methods, and calculation formulas that aren't obvious from code alone.
+
 ## Overview
-New feature for Phase 3b: per-account profitability analysis with difficulty scoring, bather load calculations, cost breakdown, and AI pricing recommendations. No competitor offers this level of analysis.
+Phase 3b: per-account profitability analysis with difficulty scoring, bather load calculations, cost breakdown, and AI pricing recommendations. No competitor offers this level of analysis.
 
 ## Database Changes
 

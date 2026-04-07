@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useWSRefetch } from "@/lib/ws";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -122,6 +123,10 @@ export default function InboxPage() {
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
   useEffect(() => { loadStats(); }, [loadStats]);
+
+  // Real-time: refresh thread list and stats when new emails arrive or threads change
+  useWSRefetch(["thread.new", "thread.updated", "thread.message.new"], loadThreads, 500);
+  useWSRefetch(["thread.new", "thread.updated", "thread.message.new", "thread.read"], loadStats, 300);
 
   const handleFilterChange = (f: typeof STATUS_FILTERS[number]) => {
     setFilter(f);

@@ -216,15 +216,28 @@ class EmailService:
                 message.from_name = os.environ.get("AGENT_FROM_NAME", "QuantumPools")
 
     async def send_email(self, org_id: str, message: EmailMessage) -> EmailResult:
-        """Send email using org's configured sender."""
+        """Send email using org's configured sender. Falls back to SMTP if Postmark fails."""
         org = await self._get_org(org_id)
         self._apply_org_defaults(message, org)
 
         result = await self._provider.send(message)
         if result.success:
             logger.info(f"Email sent to {message.to}: {message.subject}")
-        else:
-            logger.error(f"Email send failed to {message.to}: {result.error}")
+            return result
+
+        # Fallback: if primary provider failed and it's Postmark, try SMTP
+        if isinstance(self._provider, PostmarkProvider):
+            logger.warning(f"Postmark failed for {message.to}: {result.error} — falling back to SMTP")
+            try:
+                smtp_result = await SmtpProvider().send(message)
+                if smtp_result.success:
+                    logger.info(f"Email sent via SMTP fallback to {message.to}")
+                    return smtp_result
+                logger.error(f"SMTP fallback also failed for {message.to}: {smtp_result.error}")
+            except Exception as e:
+                logger.error(f"SMTP fallback exception for {message.to}: {e}")
+
+        logger.error(f"Email send failed to {message.to}: {result.error}")
         return result
 
     async def send_team_invite(

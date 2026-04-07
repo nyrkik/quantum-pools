@@ -147,7 +147,6 @@ class AgentThreadService:
             base = base.where(AgentThread.matched_customer_id == customer_id)
         # Visibility filtering: only show threads the user has permission to see
         if user_permission_slugs is not None:
-            from sqlalchemy import or_
             base = base.where(
                 or_(
                     AgentThread.visibility_permission.is_(None),
@@ -190,7 +189,6 @@ class AgentThreadService:
 
     async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_permission_slugs: set[str] | None = None) -> dict:
         """Thread-level stats. If user_permission_slugs provided, counts only visible threads."""
-        from sqlalchemy import or_
         thread_org = AgentThread.organization_id == org_id
 
         def _vis_filter(q):

@@ -116,9 +116,11 @@ export function parseStoredMessages(raw: Record<string, unknown>[], conversation
 interface MessageRowProps {
   message: ChatMessage;
   stale?: boolean;
+  /** Per-tool-result flag: is this the last occurrence of that tool type in the conversation? */
+  toolLastFlags?: boolean[];
 }
 
-export function MessageRow({ message, stale = false }: MessageRowProps) {
+export function MessageRow({ message, stale = false, toolLastFlags }: MessageRowProps) {
   const isUser = message.role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -129,7 +131,7 @@ export function MessageRow({ message, stale = false }: MessageRowProps) {
           <div className="whitespace-pre-wrap">{message.content}</div>
         )}
         {message.toolResults?.map((tr, i) => (
-          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} />
+          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} isLastOfType={toolLastFlags?.[i] ?? true} />
         ))}
         {message.toolCalls && message.toolCalls.length > (message.toolResults?.length || 0) && (
           <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">

@@ -37,11 +37,26 @@ export function ChatMessageList({ messages, streamingContent, emptyStateVariant 
     );
   }
 
+  // Build map: for each confirmation tool name, which message index has the LAST occurrence?
+  const lastToolIndex: Record<string, number> = {};
+  const confirmTools = new Set(["draft_broadcast_email", "draft_customer_email", "add_equipment_to_pool", "log_chemical_reading", "update_customer_note"]);
+  messages.forEach((m, i) => {
+    m.toolResults?.forEach((tr) => {
+      if (confirmTools.has(tr.name)) {
+        lastToolIndex[tr.name] = i;
+      }
+    });
+  });
+
   return (
     <>
       {messages.map((m, i, arr) => {
         const hasUserMsgAfter = arr.slice(i + 1).some((later) => later.role === "user");
-        return <MessageRow key={i} message={m} stale={historical || hasUserMsgAfter} />;
+        // For this message's tool results, is each one the last of its type?
+        const toolLastFlags = m.toolResults?.map((tr) =>
+          confirmTools.has(tr.name) ? lastToolIndex[tr.name] === i : true
+        );
+        return <MessageRow key={i} message={m} stale={historical || hasUserMsgAfter} toolLastFlags={toolLastFlags} />;
       })}
       {streamingContent && (
         <MessageRow message={{ role: "assistant", content: streamingContent }} />

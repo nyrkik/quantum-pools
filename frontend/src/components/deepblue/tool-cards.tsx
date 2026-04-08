@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Mail, Send, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 
-export function ToolResultCard({ name, result, stale = false }: { name: string; result: Record<string, unknown>; stale?: boolean }) {
+export function ToolResultCard({ name, result, stale = false, isLastOfType = true }: { name: string; result: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
   if (name === "chemical_dosing_calculator") {
     const dosing = result.dosing as Array<Record<string, unknown>> | undefined;
     if (!dosing?.length) return null;
@@ -131,13 +131,13 @@ export function ToolResultCard({ name, result, stale = false }: { name: string; 
   if (name === "draft_broadcast_email" && result.requires_confirmation) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
-    return <BroadcastPreviewCard preview={preview} stale={stale} />;
+    return <BroadcastPreviewCard preview={preview} stale={stale} isLastOfType={isLastOfType} />;
   }
 
   if (name === "draft_customer_email" && result.requires_confirmation) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
-    return <CustomerEmailPreviewCard preview={preview} stale={stale} />;
+    return <CustomerEmailPreviewCard preview={preview} stale={stale} isLastOfType={isLastOfType} />;
   }
 
   if (name === "add_equipment_to_pool" && result.requires_confirmation) {
@@ -150,6 +150,7 @@ export function ToolResultCard({ name, result, stale = false }: { name: string; 
       summary={`${preview.equipment_type}: ${preview.brand} ${preview.model}`}
       subtitle={`On ${preview.bow_name} — ${preview.property_address}`}
       stale={stale}
+      isLastOfType={isLastOfType}
     />;
   }
 
@@ -165,6 +166,7 @@ export function ToolResultCard({ name, result, stale = false }: { name: string; 
       summary={summary}
       subtitle={preview.property_address as string}
       stale={stale}
+      isLastOfType={isLastOfType}
     />;
   }
 
@@ -178,6 +180,7 @@ export function ToolResultCard({ name, result, stale = false }: { name: string; 
       summary={preview.appending as string}
       subtitle={`For ${preview.customer_name}`}
       stale={stale}
+      isLastOfType={isLastOfType}
     />;
   }
 
@@ -185,7 +188,7 @@ export function ToolResultCard({ name, result, stale = false }: { name: string; 
 }
 
 export function ConfirmCard({
-  title, endpoint, payload, summary, subtitle, stale = false,
+  title, endpoint, payload, summary, subtitle, stale = false, isLastOfType = true,
 }: {
   title: string;
   endpoint: string;
@@ -193,6 +196,7 @@ export function ConfirmCard({
   summary: string;
   subtitle?: string;
   stale?: boolean;
+  isLastOfType?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -230,7 +234,9 @@ export function ConfirmCard({
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : stale ? (
-        <p className="text-muted-foreground text-[10px] pt-1 border-t">Completed</p>
+        <p className={`text-[10px] pt-1 border-t ${isLastOfType ? "text-green-600 font-medium" : "text-muted-foreground"}`}>
+          {isLastOfType ? "Saved ✓" : "Revised below"}
+        </p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
@@ -244,7 +250,7 @@ export function ConfirmCard({
   );
 }
 
-export function BroadcastPreviewCard({ preview, stale = false }: { preview: Record<string, unknown>; stale?: boolean }) {
+export function BroadcastPreviewCard({ preview, stale = false, isLastOfType = true }: { preview: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [cancelled, setCancelled] = useState(false);
@@ -333,7 +339,9 @@ export function BroadcastPreviewCard({ preview, stale = false }: { preview: Reco
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : stale ? (
-        <p className="text-muted-foreground text-[10px] pt-1 border-t">Completed</p>
+        <p className={`text-[10px] pt-1 border-t ${isLastOfType ? "text-green-600 font-medium" : "text-muted-foreground"}`}>
+          {isLastOfType ? "Sent ✓" : "Revised below"}
+        </p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={sending || !subject.trim() || !body.trim()}>
@@ -347,7 +355,7 @@ export function BroadcastPreviewCard({ preview, stale = false }: { preview: Reco
   );
 }
 
-export function CustomerEmailPreviewCard({ preview, stale = false }: { preview: Record<string, unknown>; stale?: boolean }) {
+export function CustomerEmailPreviewCard({ preview, stale = false, isLastOfType = true }: { preview: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [cancelled, setCancelled] = useState(false);
@@ -410,7 +418,9 @@ export function CustomerEmailPreviewCard({ preview, stale = false }: { preview: 
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : stale ? (
-        <p className="text-muted-foreground text-[10px] pt-1 border-t">Completed</p>
+        <p className={`text-[10px] pt-1 border-t ${isLastOfType ? "text-green-600 font-medium" : "text-muted-foreground"}`}>
+          {isLastOfType ? `Sent to ${String(preview.customer_name)} ✓` : "Revised below"}
+        </p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleSend} disabled={sending || !subject.trim() || !body.trim()}>

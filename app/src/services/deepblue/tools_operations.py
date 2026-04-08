@@ -242,6 +242,36 @@ async def _exec_get_inspections(inp: dict, ctx: ToolContext) -> dict:
     }
 
 
+async def _exec_create_case(inp: dict, ctx: ToolContext) -> dict:
+    """Preview creating a service case. Does NOT save — returns confirmation request."""
+    title = (inp.get("title") or "").strip()
+    if not title:
+        return {"error": "Title is required", "retry_hint": "Provide a brief description of the issue."}
+
+    customer_id = inp.get("customer_id") or ctx.customer_id
+    customer_name = None
+    if customer_id:
+        from src.models.customer import Customer
+        cust = (await ctx.db.execute(
+            select(Customer).where(Customer.id == customer_id)
+        )).scalar_one_or_none()
+        if cust:
+            customer_name = cust.display_name
+
+    priority = inp.get("priority", "normal")
+
+    return {
+        "requires_confirmation": True,
+        "preview": {
+            "type": "create_case",
+            "title": title,
+            "customer_id": customer_id,
+            "customer_name": customer_name or "No customer linked",
+            "priority": priority,
+        },
+    }
+
+
 EXECUTORS = {
     "get_service_history": _exec_service_history,
     "get_routes_today": _exec_get_routes_today,
@@ -249,4 +279,5 @@ EXECUTORS = {
     "get_open_jobs": _exec_get_open_jobs,
     "get_cases": _exec_get_cases,
     "get_inspections": _exec_get_inspections,
+    "create_case": _exec_create_case,
 }

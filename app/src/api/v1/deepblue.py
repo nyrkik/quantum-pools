@@ -1084,6 +1084,53 @@ async def confirm_customer_email(
     return {"sent": True, "message_id": result.get("message_id") if isinstance(result, dict) else None}
 
 
+class ConfirmCreateCaseRequest(BaseModel):
+    title: str
+    customer_id: Optional[str] = None
+    priority: str = "normal"
+    conversation_id: Optional[str] = None
+
+
+@router.post("/confirm-create-case")
+async def confirm_create_case(
+    req: ConfirmCreateCaseRequest,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a case from DeepBlue and optionally link the conversation."""
+    from src.services.service_case_service import ServiceCaseService
+    from src.models.deepblue_conversation import DeepBlueConversation
+
+    svc = ServiceCaseService(db)
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    case = await svc.create(
+        org_id=ctx.organization_id,
+        title=req.title,
+        source="deepblue",
+        customer_id=req.customer_id,
+        priority=req.priority,
+        created_by=user_name,
+    )
+
+    # Link conversation to case if provided
+    if req.conversation_id:
+        conv = (await db.execute(
+            select(DeepBlueConversation).where(
+                DeepBlueConversation.id == req.conversation_id,
+                DeepBlueConversation.organization_id == ctx.organization_id,
+            )
+        )).scalar_one_or_none()
+        if conv:
+            conv.case_id = case.id
+
+    await db.commit()
+    return {
+        "case_id": case.id,
+        "case_number": case.case_number,
+        "title": case.title,
+    }
+
+
 class SaveToCaseRequest(BaseModel):
     case_id: str
 

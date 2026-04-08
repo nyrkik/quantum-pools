@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Mail, Send, Loader2 } from "lucide-react";
+import { Mail, Send, Loader2, FolderOpen } from "lucide-react";
 import { api } from "@/lib/api";
 
 export function ToolResultCard({ name, result, stale = false, isLastOfType = true }: { name: string; result: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
@@ -184,7 +184,74 @@ export function ToolResultCard({ name, result, stale = false, isLastOfType = tru
     />;
   }
 
+  if (name === "create_case" && result.requires_confirmation) {
+    const preview = result.preview as Record<string, unknown> | undefined;
+    if (!preview) return null;
+    return <CreateCaseCard preview={preview} stale={stale} isLastOfType={isLastOfType} />;
+  }
+
   return null;
+}
+
+function CreateCaseCard({ preview, stale = false, isLastOfType = true }: { preview: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [caseResult, setCaseResult] = useState<{ case_id: string; case_number: number } | null>(null);
+  const locked = saved || stale;
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post<{ case_id: string; case_number: number; title: string }>(
+        "/v1/deepblue/confirm-create-case",
+        {
+          title: preview.title,
+          customer_id: preview.customer_id,
+          priority: preview.priority || "normal",
+        }
+      );
+      setCaseResult(res);
+      setSaved(true);
+      toast.success(`Case #${res.case_number} created`);
+    } catch {
+      toast.error("Failed to create case");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const priorityLabel = String(preview.priority || "normal").replace(/\b\w/g, c => c.toUpperCase());
+
+  return (
+    <div className="bg-muted/50 rounded-md p-2.5 mt-1.5 text-xs space-y-2 border border-primary/20">
+      <div className="flex items-center gap-1.5">
+        <FolderOpen className="h-3 w-3 text-primary" />
+        <span className="font-medium text-[10px] uppercase tracking-wide text-muted-foreground">Create Case</span>
+      </div>
+      <div>
+        <p className="font-medium">{String(preview.title)}</p>
+        <p className="text-muted-foreground mt-0.5">
+          {String(preview.customer_name)} · {priorityLabel} priority
+        </p>
+      </div>
+      {saved && caseResult ? (
+        <p className="text-green-600 text-[10px] font-medium pt-1 border-t">
+          Case #{caseResult.case_number} created ✓
+        </p>
+      ) : stale ? (
+        <p className={`text-[10px] pt-1 border-t ${isLastOfType ? "text-green-600 font-medium" : "text-muted-foreground"}`}>
+          {isLastOfType ? "Created ✓" : "Revised below"}
+        </p>
+      ) : (
+        <div className="flex gap-2">
+          <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Create Case
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ConfirmCard({

@@ -429,6 +429,28 @@ TOOLS = [
             "required": ["subject", "body"],
         },
     },
+    {
+        "name": "create_case",
+        "description": (
+            "Create a service case to track a customer issue, repair, estimate, or follow-up. "
+            "Use when the user says 'create a case', 'track this', 'open a case', or after discussing a service issue that needs follow-up. "
+            "Returns a preview — the user must confirm. The case will be linked to this DeepBlue conversation automatically. "
+            "Use context to resolve the customer — don't ask for a customer ID."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Brief description of the issue (e.g., 'Broken tablet feeder — needs estimate')"},
+                "customer_id": {"type": "string", "description": "Customer ID. Use context if available."},
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "normal", "high", "urgent"],
+                    "description": "Priority level. Default: normal",
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 

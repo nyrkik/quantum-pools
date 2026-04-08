@@ -147,7 +147,7 @@ QuantumPools/
 │   │   ├── layout/                    # Sidebar (responsive) + mobile nav
 │   │   ├── maps/                      # Leaflet components
 │   │   ├── measurement/              # Pool measurement photo capture + results
-│   │   ├── cases/                     # Case detail: TimelineItem, JobCard, InvoiceCard
+│   │   ├── cases/                     # Case detail: timeline+detail two-column layout
 │   │   ├── customers/                 # ClientSection, CreateClientDialog, FilterBar
 │   │   ├── inbox/                     # InboxFilters, ThreadTable, Pagination
 │   │   ├── invoices/                  # Detail + list extracted components
@@ -314,6 +314,7 @@ Visit 1──* VisitCharge
 Tech 1──* Route 1──* RouteStop ──1 Property
 ServiceCase 1──* AgentAction (jobs)
 ServiceCase 1──? AgentThread
+ServiceCase 1──* DeepBlueConversation
 AgentThread 1──* AgentMessage
 AgentThread 1──* AgentAction (jobs extracted from emails)
 AgentAction 1──* AgentActionTask (checklist items)

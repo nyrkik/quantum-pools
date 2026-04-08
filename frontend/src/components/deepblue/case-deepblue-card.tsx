@@ -218,7 +218,7 @@ export function CaseDeepBlueCard({
 
         {/* Messages */}
         {expanded && (
-          <div className="max-h-[300px] overflow-y-auto space-y-2 mb-2">
+          <div className="max-h-[300px] overflow-y-auto overflow-x-hidden space-y-2 mb-2 break-words">
             <ChatMessageList
               messages={activeConvo?.messages || []}
               streamingContent={streamingContent || undefined}

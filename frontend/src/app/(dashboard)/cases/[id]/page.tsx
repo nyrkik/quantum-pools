@@ -551,7 +551,7 @@ function DeepBlueDetailPanel({
     : conversations;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0 overflow-hidden">
       <div className="flex items-center gap-2 mb-2">
         <Sparkles className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">DeepBlue Conversation</span>
@@ -1418,9 +1418,9 @@ export default function CaseDetailPage({
         </div>
 
         {/* Detail panel — right column (40%) */}
-        <div className="w-full lg:w-[40%] min-w-0">
+        <div className="w-full lg:w-[40%] min-w-0 overflow-hidden">
           <Card className="shadow-sm lg:sticky lg:top-4">
-            <CardContent className="p-4">
+            <CardContent className="p-4 overflow-x-hidden">
               <DetailPanel
                 selectedItem={selectedItem}
                 mergedTimeline={mergedTimeline}

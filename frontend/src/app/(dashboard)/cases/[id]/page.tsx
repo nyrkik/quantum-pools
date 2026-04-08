@@ -545,10 +545,10 @@ function DeepBlueDetailPanel({
 }) {
   const conversationId = entry.metadata?.conversation_id as string | undefined;
   const conversations = detail.deepblue_conversations || [];
-  // Filter to just the selected conversation so the card focuses on it
+  // Filter to just the selected conversation, or empty for new chat
   const filtered = conversationId
     ? conversations.filter((c) => c.id === conversationId)
-    : conversations;
+    : entry.id === "new" ? [] : conversations;
 
   return (
     <div className="space-y-3 min-w-0 overflow-hidden">
@@ -589,6 +589,18 @@ function DetailPanel({
         <Clock className="h-8 w-8 mb-2 opacity-40" />
         <p className="text-sm">Select an item from the timeline</p>
       </div>
+    );
+  }
+
+  // New DeepBlue chat — no existing conversation
+  if (selectedItem.type === "deepblue_chat" && selectedItem.id === "new") {
+    return (
+      <DeepBlueDetailPanel
+        entry={{ id: "new", type: "deepblue_chat", timestamp: new Date().toISOString(), title: "New Conversation", body: null, actor: null, metadata: {} }}
+        detail={detail}
+        caseId={caseId}
+        onUpdate={onUpdate}
+      />
     );
   }
 
@@ -1308,6 +1320,14 @@ export default function CaseDetailPage({
                     onClick={() => setAddingJob(true)}
                   >
                     <ClipboardList className="h-3 w-3 mr-0.5" /> Job
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] px-1.5"
+                    onClick={() => setSelectedItem({ type: "deepblue_chat", id: "new" })}
+                  >
+                    <Sparkles className="h-3 w-3 mr-0.5" /> DeepBlue
                   </Button>
                 </div>
               </div>

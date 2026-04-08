@@ -10,9 +10,10 @@ interface ChatMessageListProps {
   emptyStateVariant?: "page" | "sheet";
   /** If true, all confirmation cards are disabled (loaded from history). */
   historical?: boolean;
+  conversationId?: string | null;
 }
 
-export function ChatMessageList({ messages, streamingContent, emptyStateVariant = "page", historical = false }: ChatMessageListProps) {
+export function ChatMessageList({ messages, streamingContent, emptyStateVariant = "page", historical = false, conversationId }: ChatMessageListProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export function ChatMessageList({ messages, streamingContent, emptyStateVariant 
         const toolLastFlags = m.toolResults?.map((tr) =>
           confirmTools.has(tr.name) ? lastToolIndex[tr.name] === i : true
         );
-        return <MessageRow key={i} message={m} stale={historical || hasUserMsgAfter} toolLastFlags={toolLastFlags} />;
+        return <MessageRow key={i} message={m} stale={historical || hasUserMsgAfter} toolLastFlags={toolLastFlags} conversationId={conversationId} />;
       })}
       {streamingContent && (
         <MessageRow message={{ role: "assistant", content: streamingContent }} />

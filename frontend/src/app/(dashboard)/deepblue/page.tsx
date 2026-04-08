@@ -275,6 +275,7 @@ export default function DeepBluePage() {
                 streamingContent={streamingContent || undefined}
                 emptyStateVariant="page"
                 historical={historical}
+                conversationId={activeId}
               />
             </div>
           )}

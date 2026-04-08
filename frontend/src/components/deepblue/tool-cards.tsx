@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Mail, Send, Loader2, FolderOpen } from "lucide-react";
 import { api } from "@/lib/api";
+import { useRouter } from "next/navigation";
 
-export function ToolResultCard({ name, result, stale = false, isLastOfType = true }: { name: string; result: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
+export function ToolResultCard({ name, result, stale = false, isLastOfType = true, conversationId }: { name: string; result: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean; conversationId?: string | null }) {
   if (name === "chemical_dosing_calculator") {
     const dosing = result.dosing as Array<Record<string, unknown>> | undefined;
     if (!dosing?.length) return null;
@@ -187,17 +188,17 @@ export function ToolResultCard({ name, result, stale = false, isLastOfType = tru
   if (name === "create_case" && result.requires_confirmation) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
-    return <CreateCaseCard preview={preview} stale={stale} isLastOfType={isLastOfType} />;
+    return <CreateCaseCard preview={preview} stale={stale} isLastOfType={isLastOfType} conversationId={conversationId} />;
   }
 
   return null;
 }
 
-function CreateCaseCard({ preview, stale = false, isLastOfType = true }: { preview: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean }) {
+function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversationId }: { preview: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean; conversationId?: string | null }) {
+  const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [caseResult, setCaseResult] = useState<{ case_id: string; case_number: number } | null>(null);
-  const locked = saved || stale;
 
   const handleConfirm = async () => {
     setSaving(true);
@@ -208,6 +209,7 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true }: { previ
           title: preview.title,
           customer_id: preview.customer_id,
           priority: preview.priority || "normal",
+          conversation_id: conversationId || null,
         }
       );
       setCaseResult(res);
@@ -235,9 +237,20 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true }: { previ
         </p>
       </div>
       {saved && caseResult ? (
-        <p className="text-green-600 text-[10px] font-medium pt-1 border-t">
-          Case #{caseResult.case_number} created ✓
-        </p>
+        <div className="pt-1 border-t space-y-1.5">
+          <p className="text-green-600 text-[10px] font-medium">
+            Case #{caseResult.case_number} created ✓
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs w-full gap-1.5"
+            onClick={() => router.push(`/cases/${caseResult.case_id}`)}
+          >
+            <FolderOpen className="h-3 w-3" />
+            View Case #{caseResult.case_number}
+          </Button>
+        </div>
       ) : stale ? (
         <p className={`text-[10px] pt-1 border-t ${isLastOfType ? "text-green-600 font-medium" : "text-muted-foreground"}`}>
           {isLastOfType ? "Created ✓" : "Revised below"}

@@ -119,9 +119,10 @@ interface MessageRowProps {
   stale?: boolean;
   /** Per-tool-result flag: is this the last occurrence of that tool type in the conversation? */
   toolLastFlags?: boolean[];
+  conversationId?: string | null;
 }
 
-export function MessageRow({ message, stale = false, toolLastFlags }: MessageRowProps) {
+export function MessageRow({ message, stale = false, toolLastFlags, conversationId }: MessageRowProps) {
   const isUser = message.role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -132,7 +133,7 @@ export function MessageRow({ message, stale = false, toolLastFlags }: MessageRow
           <div className="whitespace-pre-wrap">{message.content}</div>
         )}
         {message.toolResults?.map((tr, i) => (
-          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} isLastOfType={toolLastFlags?.[i] ?? true} />
+          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} isLastOfType={toolLastFlags?.[i] ?? true} conversationId={conversationId} />
         ))}
         {message.toolCalls && message.toolCalls.length > (message.toolResults?.length || 0) && (
           <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">

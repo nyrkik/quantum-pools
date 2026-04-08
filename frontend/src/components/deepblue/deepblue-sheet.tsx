@@ -241,7 +241,7 @@ export function DeepBlueSheet() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
-          <ChatMessageList messages={messages} emptyStateVariant="sheet" historical={isHistorical} />
+          <ChatMessageList messages={messages} emptyStateVariant="sheet" historical={isHistorical} conversationId={conversationId} />
         </div>
       )}
 

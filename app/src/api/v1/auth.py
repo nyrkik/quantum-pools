@@ -40,10 +40,25 @@ def _branding(org) -> OrgBrandingResponse | None:
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    is_secure = settings.cookie_secure or settings.environment == "production"
-    domain = settings.cookie_domain  # e.g. ".quantumpoolspro.com" for cross-subdomain
-    samesite: str = "none" if is_secure else "lax"
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str, request: Request | None = None) -> None:
+    # Detect if request came via the tunnel domain (HTTPS) or local/Tailscale (HTTP)
+    is_tunnel = False
+    if request:
+        origin = request.headers.get("origin", "")
+        host = request.headers.get("host", "")
+        is_tunnel = "quantumpoolspro.com" in origin or "quantumpoolspro.com" in host
+
+    if is_tunnel:
+        # Tunnel: cross-subdomain cookies with Secure + SameSite=None
+        is_secure = True
+        domain = settings.cookie_domain  # ".quantumpoolspro.com"
+        samesite = "none"
+    else:
+        # Local/Tailscale: no domain restriction, no Secure flag
+        is_secure = False
+        domain = None
+        samesite = "lax"
+
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -66,14 +81,18 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
     )
 
 
-def _clear_auth_cookies(response: Response) -> None:
+def _clear_auth_cookies(response: Response, request: Request | None = None) -> None:
+    # Clear both tunnel-domain and local cookies to cover all access paths
     domain = settings.cookie_domain
     response.delete_cookie(key="access_token", path="/", domain=domain)
     response.delete_cookie(key="refresh_token", path="/api/v1/auth", domain=domain)
+    # Also clear without domain (covers local/Tailscale access)
+    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth")
 
 
 @router.post("/register", response_model=OrgUserResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     auth_service = AuthService(db)
     try:
         user, org = await auth_service.register(
@@ -87,7 +106,7 @@ async def register(body: RegisterRequest, response: Response, db: AsyncSession =
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"error": "registration_failed", "message": str(e)})
 
     _, access_token, refresh_token = await auth_service.login(email=body.email, password=body.password)
-    _set_auth_cookies(response, access_token, refresh_token)
+    _set_auth_cookies(response, access_token, refresh_token, request)
 
     # Resolve permissions for the new owner
     from src.models.organization_user import OrganizationUser
@@ -115,7 +134,7 @@ async def register(body: RegisterRequest, response: Response, db: AsyncSession =
 
 
 @router.post("/login", response_model=OrgUserResponse)
-async def login(body: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     auth_service = AuthService(db)
     try:
         user, access_token, refresh_token = await auth_service.login(
@@ -127,7 +146,7 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
             detail={"error": "login_failed", "message": str(e)},
         )
 
-    _set_auth_cookies(response, access_token, refresh_token)
+    _set_auth_cookies(response, access_token, refresh_token, request)
 
     # Get org context
     from src.models.organization_user import OrganizationUser
@@ -181,7 +200,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
             detail={"error": "refresh_failed", "message": str(e)},
         )
 
-    _set_auth_cookies(response, new_access, new_refresh)
+    _set_auth_cookies(response, new_access, new_refresh, request)
     return TokenResponse(
         access_token=new_access,
         expires_in=settings.jwt_access_token_expire_hours * 3600,

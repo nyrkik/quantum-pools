@@ -315,6 +315,62 @@ function EmailDetailPanel({
 
 // --- Detail Panel: Job Event ---
 
+function TaskChecklistItem({
+  task,
+  isSelected,
+  onUpdate,
+}: {
+  task: CaseJob;
+  isSelected: boolean;
+  onUpdate: () => void;
+}) {
+  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== "done";
+
+  const handleToggle = async () => {
+    const newStatus = task.status === "done" ? "open" : "done";
+    try {
+      await api.put(`/v1/admin/agent-actions/${task.id}`, { status: newStatus });
+      onUpdate();
+    } catch { /* ignore */ }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await api.put(`/v1/admin/agent-actions/${task.id}`, { status: "cancelled" });
+      onUpdate();
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <div className={`flex items-start gap-2 py-2 px-2 rounded-md ${isSelected ? "bg-primary/5 border border-primary/20" : "hover:bg-muted/30"}`}>
+      <button onClick={handleToggle} className="shrink-0 mt-0.5">
+        {task.status === "done"
+          ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+          : <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
+        }
+      </button>
+      <div className="flex-1 min-w-0">
+        <span className={`text-xs ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+          {task.description}
+        </span>
+        <div className="flex items-center gap-2 mt-0.5">
+          {task.assigned_to && <span className="text-[10px] text-muted-foreground">{task.assigned_to}</span>}
+          {task.due_date && (
+            <span className={`text-[10px] ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
+              {new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </span>
+          )}
+        </div>
+      </div>
+      {task.status !== "cancelled" && (
+        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" onClick={handleDelete}>
+          <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function JobEventDetailPanel({
   entry,
   detail,
@@ -338,34 +394,42 @@ function JobEventDetailPanel({
   const isCancelled = entry.metadata?.event === "cancelled";
   const isTask = !JOB_TYPES.has(linkedJob.action_type);
 
-  const handleToggle = async () => {
-    const newStatus = linkedJob.status === "done" ? "open" : "done";
-    try {
-      await api.put(`/v1/admin/agent-actions/${linkedJob.id}`, { status: newStatus });
-      onUpdate();
-    } catch { /* ignore */ }
-  };
+  // If it's a task, show ALL tasks as a checklist
+  if (isTask) {
+    const allTasks = detail.jobs.filter((j) => !JOB_TYPES.has(j.action_type) && j.status !== "cancelled");
+    const doneTasks = allTasks.filter((t) => t.status === "done").length;
 
-  const handleDelete = async () => {
-    try {
-      await api.put(`/v1/admin/agent-actions/${linkedJob.id}`, { status: "cancelled" });
-      onUpdate();
-    } catch { /* ignore */ }
-  };
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Tasks</span>
+            <span className="text-xs text-muted-foreground">{doneTasks}/{allTasks.length}</span>
+          </div>
+        </div>
+        <div className="space-y-0.5 group">
+          {allTasks.map((t) => (
+            <TaskChecklistItem
+              key={t.id}
+              task={t}
+              isSelected={t.id === linkedJob.id}
+              onUpdate={onUpdate}
+            />
+          ))}
+        </div>
+        {allTasks.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-4">No tasks</p>
+        )}
+      </div>
+    );
+  }
 
+  // Regular job detail
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        {isTask ? (
-          <button onClick={handleToggle} className="shrink-0">
-            {linkedJob.status === "done"
-              ? <CheckCircle2 className="h-4 w-4 text-green-500" />
-              : <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
-            }
-          </button>
-        ) : (
-          <ActionStatusIcon status={linkedJob.status} />
-        )}
+        <ActionStatusIcon status={linkedJob.status} />
         <ActionTypeBadge type={linkedJob.action_type} />
         {linkedJob.assigned_to && (
           <span className="text-xs text-muted-foreground">
@@ -388,17 +452,6 @@ function JobEventDetailPanel({
       >
         {linkedJob.description}
       </p>
-
-      {isTask && linkedJob.status !== "cancelled" && (
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleToggle}>
-            {linkedJob.status === "done" ? "Reopen" : "Mark Done"}
-          </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={handleDelete}>
-            <Trash2 className="h-3 w-3 mr-1" /> Delete
-          </Button>
-        </div>
-      )}
 
       {linkedJob.notes && (
         <p className="text-xs text-muted-foreground bg-muted/50 rounded-md p-3">

@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { ToolResultCard } from "./tool-cards";
 
 
-function MessageBubble({ msg }: { msg: DeepBlueMessage }) {
+function MessageBubble({ msg, stale = false }: { msg: DeepBlueMessage; stale?: boolean }) {
   const isUser = msg.role === "user";
 
   return (
@@ -25,7 +25,7 @@ function MessageBubble({ msg }: { msg: DeepBlueMessage }) {
         )}
         {/* Tool result cards */}
         {msg.toolResults?.map((tr, i) => (
-          <ToolResultCard key={i} name={tr.name} result={tr.result} />
+          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} />
         ))}
         {/* Loading indicator for tool calls without results yet */}
         {msg.toolCalls && msg.toolCalls.length > (msg.toolResults?.length || 0) && (
@@ -288,9 +288,10 @@ export function DeepBlueSheet() {
               <p className="text-xs mt-1 text-blue-600/50 dark:text-blue-400/50">Pool troubleshooting, dosing, parts, customer emails, broadcasts...</p>
             </div>
           )}
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} />
-          ))}
+          {messages.map((msg, i, arr) => {
+            const hasUserMsgAfter = arr.slice(i + 1).some((m) => m.role === "user");
+            return <MessageBubble key={msg.id} msg={msg} stale={hasUserMsgAfter} />;
+          })}
           <div ref={messagesEndRef} />
         </div>
       )}

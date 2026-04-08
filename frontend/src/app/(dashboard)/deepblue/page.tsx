@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Sparkles, Send, Loader2, Menu } from "lucide-react";
+import { Loader2, Menu } from "lucide-react";
 import { DeepBlueSidebar } from "@/components/deepblue/deepblue-sidebar";
-import { MessageRow } from "@/components/deepblue/message-row";
+import { ChatMessageList } from "@/components/deepblue/chat-message-list";
+import { ChatInput } from "@/components/deepblue/chat-input";
 import type { ChatMessage } from "@/components/deepblue/message-row";
 import type { ConversationListItem } from "@/components/deepblue/conversation-row";
 
@@ -39,8 +40,6 @@ export default function DeepBluePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
@@ -83,20 +82,14 @@ export default function DeepBluePage() {
     setActive(null);
     setActiveId(null);
     setSidebarOpen(false);
-    setTimeout(() => inputRef.current?.focus(), 100);
+    setSidebarOpen(false);
   };
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [active, streamingContent]);
 
   const handleSend = async () => {
     const text = input.trim();
     if (!text || sending) return;
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
     setSending(true);
-    setTimeout(() => inputRef.current?.focus(), 50);
     setStreamingContent("");
 
     const userMsg: ChatMessage = { role: "user", content: text, timestamp: new Date().toISOString() };
@@ -272,52 +265,26 @@ export default function DeepBluePage() {
         <div className="flex-1 overflow-y-auto">
           {loadingActive ? (
             <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-          ) : !active && !streamingContent ? (
-            <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-6">
-              <Sparkles className="h-12 w-12 opacity-30 mb-3" />
-              <p className="text-sm font-medium">How can I help?</p>
-              <p className="text-xs mt-1 max-w-md">
-                Pool troubleshooting, chemical dosing, parts lookup, customer emails, broadcasts, and more.
-              </p>
-            </div>
           ) : (
             <div className="max-w-3xl mx-auto p-4 space-y-4">
-              {active?.messages.map((m, i, arr) => {
-                const hasUserMsgAfter = arr.slice(i + 1).some((later) => later.role === "user");
-                return <MessageRow key={i} message={m} stale={hasUserMsgAfter} />;
-              })}
-              {streamingContent && (
-                <MessageRow message={{ role: "assistant", content: streamingContent }} />
-              )}
-              <div ref={messagesEndRef} />
+              <ChatMessageList
+                messages={active?.messages || []}
+                streamingContent={streamingContent || undefined}
+                emptyStateVariant="page"
+              />
             </div>
           )}
         </div>
 
         <div className="border-t bg-background p-3">
-          <div className="max-w-3xl mx-auto flex items-end gap-2">
-            <textarea
-              ref={inputRef}
+          <div className="max-w-3xl mx-auto">
+            <ChatInput
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                e.target.style.height = "auto";
-                e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
-              }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Ask DeepBlue..."
-              rows={1}
-              disabled={sending}
-              className="flex-1 min-h-[44px] max-h-[160px] px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+              onChange={setInput}
+              onSend={handleSend}
+              sending={sending}
+              autoFocus={!!active}
             />
-            <Button
-              size="icon"
-              className="h-11 w-11 shrink-0 rounded-lg"
-              onClick={handleSend}
-              disabled={!input.trim() || sending}
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
           </div>
         </div>
       </div>

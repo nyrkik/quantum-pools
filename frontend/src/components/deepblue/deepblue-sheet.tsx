@@ -1,43 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { useDeepBlue, type DeepBlueMessage } from "./deepblue-provider";
+import { useState, useEffect } from "react";
+import { useDeepBlue } from "./deepblue-provider";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Send, Loader2, Trash2, ChevronDown, FolderOpen, History, Pin, Users, Share2 } from "lucide-react";
+import { Sparkles, Loader2, Trash2, ChevronDown, FolderOpen, History, Pin, Users, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { ToolResultCard } from "./tool-cards";
+import { ChatMessageList } from "./chat-message-list";
+import { ChatInput } from "./chat-input";
 
-
-function MessageBubble({ msg, stale = false }: { msg: DeepBlueMessage; stale?: boolean }) {
-  const isUser = msg.role === "user";
-
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[85%] rounded-lg p-3 text-sm ${
-        isUser
-          ? "bg-primary text-primary-foreground"
-          : "bg-muted/70"
-      }`}>
-        {msg.content && (
-          <div className="whitespace-pre-wrap">{msg.content}</div>
-        )}
-        {/* Tool result cards */}
-        {msg.toolResults?.map((tr, i) => (
-          <ToolResultCard key={i} name={tr.name} result={tr.result} stale={stale} />
-        ))}
-        {/* Loading indicator for tool calls without results yet */}
-        {msg.toolCalls && msg.toolCalls.length > (msg.toolResults?.length || 0) && (
-          <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Looking up data...
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 interface ConversationListItem {
   id: string;
@@ -61,8 +33,6 @@ export function DeepBlueSheet() {
   const [historyScope, setHistoryScope] = useState<"mine" | "shared">("mine");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const loadHistory = async (scope: "mine" | "shared") => {
     setHistoryLoading(true);
@@ -130,21 +100,11 @@ export function DeepBlueSheet() {
     }
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [isOpen]);
 
   const handleSend = () => {
     const text = input.trim();
     if (!text || isLoading) return;
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
     sendMessage(text);
   };
 
@@ -281,52 +241,19 @@ export function DeepBlueSheet() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
-          {messages.length === 0 && (
-            <div className="text-center text-sm py-8">
-              <Sparkles className="h-8 w-8 mx-auto mb-2 text-blue-400/50" />
-              <p className="text-blue-700/70 dark:text-blue-300/70">How can I help?</p>
-              <p className="text-xs mt-1 text-blue-600/50 dark:text-blue-400/50">Pool troubleshooting, dosing, parts, customer emails, broadcasts...</p>
-            </div>
-          )}
-          {messages.map((msg, i, arr) => {
-            const hasUserMsgAfter = arr.slice(i + 1).some((m) => m.role === "user");
-            return <MessageBubble key={msg.id} msg={msg} stale={hasUserMsgAfter} />;
-          })}
-          <div ref={messagesEndRef} />
+          <ChatMessageList messages={messages} emptyStateVariant="sheet" />
         </div>
       )}
 
       {/* Input */}
       <div className="shrink-0 px-3 py-2.5 border-t border-blue-300 dark:border-blue-700">
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              // Auto-resize
-              e.target.style.height = "auto";
-              e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
-            }}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Ask DeepBlue..."
-            rows={1}
-            className="flex-1 min-h-[40px] max-h-[120px] px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-            disabled={isLoading}
-          />
-          <Button
-            size="icon"
-            className="h-10 w-10 shrink-0 rounded-lg"
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSend={handleSend}
+          sending={isLoading}
+          autoFocus={isOpen}
+        />
       </div>
     </div>
   );

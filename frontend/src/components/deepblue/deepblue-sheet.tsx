@@ -285,7 +285,7 @@ export function DeepBlueSheet() {
             <div className="text-center text-sm py-8">
               <Sparkles className="h-8 w-8 mx-auto mb-2 text-blue-400/50" />
               <p className="text-blue-700/70 dark:text-blue-300/70">How can I help?</p>
-              <p className="text-xs mt-1">Pool troubleshooting, dosing, parts, customer emails, broadcasts...</p>
+              <p className="text-xs mt-1 text-blue-600/50 dark:text-blue-400/50">Pool troubleshooting, dosing, parts, customer emails, broadcasts...</p>
             </div>
           )}
           {messages.map((msg) => (

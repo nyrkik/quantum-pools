@@ -60,6 +60,51 @@ import type {
 } from "@/components/cases/case-components";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 
+// --- Mobile detail sheet (only renders below lg breakpoint) ---
+
+function MobileDetailSheet({
+  selectedItem, onClose, mergedTimeline, detail, caseId, onReplyEmail, onUpdate,
+}: {
+  selectedItem: SelectedItem | null;
+  onClose: () => void;
+  mergedTimeline: TimelineEntry[];
+  detail: CaseDetail;
+  caseId: string;
+  onReplyEmail: () => void;
+  onUpdate: () => void;
+}) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  if (!isMobile || !selectedItem) return null;
+
+  return (
+    <Sheet open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent side="bottom" className="h-[85vh] p-0 flex flex-col rounded-t-xl">
+        <SheetHeader className="px-4 pt-3 pb-2 border-b shrink-0">
+          <SheetTitle className="text-sm">Detail</SheetTitle>
+        </SheetHeader>
+        <div className="flex-1 overflow-y-auto p-4">
+          <DetailPanel
+            selectedItem={selectedItem}
+            mergedTimeline={mergedTimeline}
+            detail={detail}
+            caseId={caseId}
+            onReplyEmail={onReplyEmail}
+            onUpdate={onUpdate}
+          />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // --- Selected item tracking ---
 
 interface SelectedItem {
@@ -1454,24 +1499,16 @@ export default function CaseDetailPage({
           </Card>
         </div>
 
-        {/* Detail panel — mobile sheet overlay */}
-        <Sheet open={!!selectedItem && true} onOpenChange={(open) => { if (!open) setSelectedItem(null); }}>
-          <SheetContent side="bottom" className="lg:hidden h-[85vh] p-0 flex flex-col rounded-t-xl">
-            <SheetHeader className="px-4 pt-3 pb-2 border-b shrink-0">
-              <SheetTitle className="text-sm">Detail</SheetTitle>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto p-4">
-              <DetailPanel
-                selectedItem={selectedItem}
-                mergedTimeline={mergedTimeline}
-                detail={detail}
-                caseId={id}
-                onReplyEmail={handleReplyEmail}
-                onUpdate={load}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
+        {/* Detail panel — mobile sheet overlay (only renders below lg breakpoint) */}
+        <MobileDetailSheet
+          selectedItem={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          mergedTimeline={mergedTimeline}
+          detail={detail}
+          caseId={id}
+          onReplyEmail={handleReplyEmail}
+          onUpdate={load}
+        />
       </div>
 
       <ComposeMessage

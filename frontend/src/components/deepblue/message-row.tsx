@@ -11,43 +11,106 @@ export interface ChatMessage {
   toolResults?: { name: string; result: Record<string, unknown> }[];
 }
 
-/** Parse stored messages (from API) into ChatMessage format, reconstructing tool data from blocks. */
+/**
+ * Parse stored messages (from API) into ChatMessage format.
+ *
+ * Anthropic stores tool interactions as:
+ *   assistant message → blocks: [text, tool_use]
+ *   user message → blocks: [tool_result]   (linked by tool_use_id)
+ *
+ * We merge tool_result user messages INTO the preceding assistant message
+ * as toolResults, so the UI shows tool cards on the assistant bubble.
+ * Pure tool_result user messages are hidden (they're infrastructure).
+ */
 export function parseStoredMessages(raw: Record<string, unknown>[], conversationId: string = ""): ChatMessage[] {
-  return raw.map((m, i) => {
+  // First pass: build a map of tool_use_id → tool name from assistant messages
+  const toolNameMap: Record<string, string> = {};
+  for (const m of raw) {
     const blocks = m.blocks as Array<Record<string, unknown>> | undefined;
-    let content = (m.content as string) || "";
-    const toolCalls: { name: string; input: Record<string, unknown> }[] = [];
-    const toolResults: { name: string; result: Record<string, unknown> }[] = [];
-
     if (blocks) {
-      for (const block of blocks) {
-        if (block.type === "text") {
-          content += (block.text as string) || "";
-        } else if (block.type === "tool_use") {
-          toolCalls.push({ name: block.name as string, input: (block.input as Record<string, unknown>) || {} });
-        } else if (block.type === "tool_result") {
-          const resultContent = block.content as string | undefined;
-          const toolId = block.tool_use_id as string;
-          const matchedCall = blocks.find((b) => b.type === "tool_use" && b.id === toolId);
-          const name = (matchedCall?.name as string) || "unknown";
-          try {
-            const parsed = resultContent ? JSON.parse(resultContent) : {};
-            toolResults.push({ name, result: parsed });
-          } catch {
-            toolResults.push({ name, result: { raw: resultContent } });
-          }
+      for (const b of blocks) {
+        if (b.type === "tool_use" && b.id && b.name) {
+          toolNameMap[b.id as string] = b.name as string;
         }
       }
     }
+  }
 
-    return {
-      role: (m.role as string) as "user" | "assistant",
-      content,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      toolResults: toolResults.length > 0 ? toolResults : undefined,
-      timestamp: (m.timestamp as string) || new Date().toISOString(),
-    };
-  });
+  // Second pass: build ChatMessages, merging tool results into assistant messages
+  const result: ChatMessage[] = [];
+  let lastAssistant: ChatMessage | null = null;
+
+  for (const m of raw) {
+    const role = m.role as string;
+    const blocks = m.blocks as Array<Record<string, unknown>> | undefined;
+
+    if (role === "assistant") {
+      let content = (m.content as string) || "";
+      const toolCalls: { name: string; input: Record<string, unknown> }[] = [];
+
+      if (blocks) {
+        for (const b of blocks) {
+          if (b.type === "text") content += (b.text as string) || "";
+          else if (b.type === "tool_use") {
+            toolCalls.push({ name: b.name as string, input: (b.input as Record<string, unknown>) || {} });
+          }
+        }
+      }
+
+      const msg: ChatMessage = {
+        role: "assistant",
+        content,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        toolResults: [],
+        timestamp: (m.timestamp as string) || new Date().toISOString(),
+      };
+      result.push(msg);
+      lastAssistant = msg;
+
+    } else if (role === "user") {
+      // Check if this is a pure tool_result message (infrastructure, hide from UI)
+      const hasToolResult = blocks?.some((b) => b.type === "tool_result");
+      const hasText = !!(m.content as string)?.trim() || blocks?.some((b) => b.type === "text" && (b.text as string)?.trim());
+
+      if (hasToolResult && !hasText) {
+        // Pure tool result — merge into preceding assistant message
+        if (lastAssistant && blocks) {
+          for (const b of blocks) {
+            if (b.type === "tool_result") {
+              const toolId = b.tool_use_id as string;
+              const name = toolNameMap[toolId] || "unknown";
+              const resultContent = b.content as string | undefined;
+              try {
+                const parsed = resultContent ? JSON.parse(resultContent) : {};
+                lastAssistant.toolResults = [...(lastAssistant.toolResults || []), { name, result: parsed }];
+              } catch {
+                lastAssistant.toolResults = [...(lastAssistant.toolResults || []), { name, result: { raw: resultContent } }];
+              }
+            }
+          }
+        }
+        // Don't add this as a visible message
+        continue;
+      }
+
+      // Regular user message
+      result.push({
+        role: "user",
+        content: (m.content as string) || "",
+        timestamp: (m.timestamp as string) || new Date().toISOString(),
+      });
+      lastAssistant = null;
+    }
+  }
+
+  // Clean up empty toolResults arrays
+  for (const msg of result) {
+    if (msg.toolResults && msg.toolResults.length === 0) {
+      msg.toolResults = undefined;
+    }
+  }
+
+  return result;
 }
 
 interface MessageRowProps {

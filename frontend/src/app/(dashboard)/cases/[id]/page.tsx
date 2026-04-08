@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   ArrowLeft,
   FolderOpen,
@@ -1437,8 +1438,8 @@ export default function CaseDetailPage({
           </Card>
         </div>
 
-        {/* Detail panel — right column (40%) */}
-        <div className="w-full lg:w-[40%] min-w-0 overflow-hidden">
+        {/* Detail panel — right column (40%), desktop only */}
+        <div className="hidden lg:block lg:w-[40%] min-w-0 overflow-hidden">
           <Card className="shadow-sm lg:sticky lg:top-4">
             <CardContent className="p-4 overflow-x-hidden">
               <DetailPanel
@@ -1452,6 +1453,25 @@ export default function CaseDetailPage({
             </CardContent>
           </Card>
         </div>
+
+        {/* Detail panel — mobile sheet overlay */}
+        <Sheet open={!!selectedItem && true} onOpenChange={(open) => { if (!open) setSelectedItem(null); }}>
+          <SheetContent side="bottom" className="lg:hidden h-[85vh] p-0 flex flex-col rounded-t-xl">
+            <SheetHeader className="px-4 pt-3 pb-2 border-b shrink-0">
+              <SheetTitle className="text-sm">Detail</SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto p-4">
+              <DetailPanel
+                selectedItem={selectedItem}
+                mergedTimeline={mergedTimeline}
+                detail={detail}
+                caseId={id}
+                onReplyEmail={handleReplyEmail}
+                onUpdate={load}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       <ComposeMessage

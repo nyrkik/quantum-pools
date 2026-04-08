@@ -10,7 +10,7 @@ import { Loader2, Menu } from "lucide-react";
 import { DeepBlueSidebar } from "@/components/deepblue/deepblue-sidebar";
 import { ChatMessageList } from "@/components/deepblue/chat-message-list";
 import { ChatInput } from "@/components/deepblue/chat-input";
-import type { ChatMessage } from "@/components/deepblue/message-row";
+import { parseStoredMessages, type ChatMessage } from "@/components/deepblue/message-row";
 import type { ConversationListItem } from "@/components/deepblue/conversation-row";
 
 interface ConversationDetail {
@@ -67,8 +67,8 @@ export default function DeepBluePage() {
   const loadConversation = useCallback(async (id: string) => {
     setLoadingActive(true);
     try {
-      const data = await api.get<ConversationDetail>(`/v1/deepblue/conversations/${id}`);
-      setActive(data);
+      const data = await api.get<ConversationDetail & { messages: Record<string, unknown>[] }>(`/v1/deepblue/conversations/${id}`);
+      setActive({ ...data, messages: parseStoredMessages(data.messages, id) });
       setActiveId(id);
       setSidebarOpen(false);
     } catch {

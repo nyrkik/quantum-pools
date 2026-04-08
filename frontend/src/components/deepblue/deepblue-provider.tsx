@@ -72,10 +72,11 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
       const resp = await fetch(`/api/v1/deepblue/conversations/${id}`, { credentials: "include" });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      const loaded: DeepBlueMessage[] = (data.messages || []).map((m: { role: string; content: string; timestamp?: string }, i: number) => ({
+      const { parseStoredMessages } = await import("./message-row");
+      const parsed = parseStoredMessages(data.messages || [], id);
+      const loaded: DeepBlueMessage[] = parsed.map((m, i) => ({
+        ...m,
         id: `loaded-${id}-${i}`,
-        role: m.role as "user" | "assistant",
-        content: m.content,
         timestamp: m.timestamp || new Date().toISOString(),
       }));
       setMessages(loaded);

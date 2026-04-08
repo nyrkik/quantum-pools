@@ -8,9 +8,11 @@ interface ChatMessageListProps {
   messages: ChatMessage[];
   streamingContent?: string;
   emptyStateVariant?: "page" | "sheet";
+  /** If true, all confirmation cards are disabled (loaded from history). */
+  historical?: boolean;
 }
 
-export function ChatMessageList({ messages, streamingContent, emptyStateVariant = "page" }: ChatMessageListProps) {
+export function ChatMessageList({ messages, streamingContent, emptyStateVariant = "page", historical = false }: ChatMessageListProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export function ChatMessageList({ messages, streamingContent, emptyStateVariant 
     <>
       {messages.map((m, i, arr) => {
         const hasUserMsgAfter = arr.slice(i + 1).some((later) => later.role === "user");
-        return <MessageRow key={i} message={m} stale={hasUserMsgAfter} />;
+        return <MessageRow key={i} message={m} stale={historical || hasUserMsgAfter} />;
       })}
       {streamingContent && (
         <MessageRow message={{ role: "assistant", content: streamingContent }} />

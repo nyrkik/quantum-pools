@@ -34,6 +34,7 @@ export default function DeepBluePage() {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingActive, setLoadingActive] = useState(false);
   const [sending, setSending] = useState(false);
+  const [historical, setHistorical] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
@@ -69,6 +70,7 @@ export default function DeepBluePage() {
     try {
       const data = await api.get<ConversationDetail & { messages: Record<string, unknown>[] }>(`/v1/deepblue/conversations/${id}`);
       setActive({ ...data, messages: parseStoredMessages(data.messages, id) });
+      setHistorical(true);
       setActiveId(id);
       setSidebarOpen(false);
     } catch {
@@ -81,7 +83,7 @@ export default function DeepBluePage() {
   const startNew = () => {
     setActive(null);
     setActiveId(null);
-    setSidebarOpen(false);
+    setHistorical(false);
     setSidebarOpen(false);
   };
 
@@ -90,6 +92,7 @@ export default function DeepBluePage() {
     if (!text || sending) return;
     setInput("");
     setSending(true);
+    setHistorical(false);
     setStreamingContent("");
 
     const userMsg: ChatMessage = { role: "user", content: text, timestamp: new Date().toISOString() };
@@ -271,6 +274,7 @@ export default function DeepBluePage() {
                 messages={active?.messages || []}
                 streamingContent={streamingContent || undefined}
                 emptyStateVariant="page"
+                historical={historical}
               />
             </div>
           )}

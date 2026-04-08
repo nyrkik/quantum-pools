@@ -22,6 +22,7 @@ export interface DeepBlueMessage {
 interface DeepBlueState {
   isOpen: boolean;
   isLoading: boolean;
+  isHistorical: boolean;
   messages: DeepBlueMessage[];
   conversationId: string | null;
   context: DeepBlueContextData;
@@ -42,6 +43,7 @@ let msgCounter = 0;
 export function DeepBlueProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isHistorical, setIsHistorical] = useState(false);
   const [messages, setMessages] = useState<DeepBlueMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
@@ -65,6 +67,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
     setMessages([]);
     setConversationId(null);
     conversationIdRef.current = null;
+    setIsHistorical(false);
   }, []);
 
   const loadConversation = useCallback(async (id: string): Promise<void> => {
@@ -82,6 +85,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
       setMessages(loaded);
       conversationIdRef.current = id;
       setConversationId(id);
+      setIsHistorical(true);
     } catch {
       // Silent fail
     }
@@ -111,6 +115,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
     };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
+    setIsHistorical(false);
 
     const assistantMsg: DeepBlueMessage = {
       id: `msg-${++msgCounter}`,
@@ -224,7 +229,7 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
   return (
     <DeepBlueContext.Provider
       value={{
-        isOpen, isLoading, messages, conversationId, context: contextRef.current,
+        isOpen, isLoading, isHistorical, messages, conversationId, context: contextRef.current,
         openDeepBlue, closeDeepBlue, toggleDeepBlue, setContext, sendMessage, clearConversation, saveToCase, loadConversation,
       }}
     >

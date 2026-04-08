@@ -26,7 +26,7 @@ export function DeepBlueSheet() {
   const { user } = useAuth();
   const currentUserId = user?.id || "";
   const {
-    isOpen, isLoading, messages, context, conversationId, closeDeepBlue, sendMessage, clearConversation, saveToCase, loadConversation,
+    isOpen, isLoading, isHistorical, messages, context, conversationId, closeDeepBlue, sendMessage, clearConversation, saveToCase, loadConversation,
   } = useDeepBlue();
   const [input, setInput] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -241,7 +241,7 @@ export function DeepBlueSheet() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
-          <ChatMessageList messages={messages} emptyStateVariant="sheet" />
+          <ChatMessageList messages={messages} emptyStateVariant="sheet" historical={isHistorical} />
         </div>
       )}
 

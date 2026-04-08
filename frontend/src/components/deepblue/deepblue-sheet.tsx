@@ -151,14 +151,14 @@ export function DeepBlueSheet() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[70] flex flex-col bg-blue-50/80 dark:bg-blue-950/40 border-t shadow-2xl ring-1 ring-blue-200/50 sm:right-4 sm:left-auto sm:bottom-4 sm:w-[420px] sm:rounded-xl sm:border sm:border-blue-200/60 dark:sm:border-blue-800/40 sm:max-h-[600px] sm:shadow-[0_8px_40px_-8px_rgba(30,64,175,0.15)]"
+    <div className="fixed inset-x-0 bottom-0 z-[70] flex flex-col bg-blue-50/80 dark:bg-blue-950/40 border-t border-blue-300 dark:border-blue-700 shadow-2xl ring-1 ring-blue-300/60 sm:right-4 sm:left-auto sm:bottom-4 sm:w-[420px] sm:rounded-xl sm:border sm:border-blue-300 dark:sm:border-blue-700 sm:max-h-[600px] sm:shadow-[0_8px_40px_-8px_rgba(30,64,175,0.15)]"
       style={{ maxHeight: "75vh" }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-blue-200/60 dark:border-blue-800/40 bg-blue-100/60 dark:bg-blue-900/30 shrink-0 sm:rounded-t-xl">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-blue-300 dark:border-blue-700 bg-blue-100/60 dark:bg-blue-900/30 shrink-0 sm:rounded-t-xl">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium">DeepBlue</span>
+          <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">DeepBlue</span>
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowHistory(!showHistory)} title="History">
@@ -282,9 +282,9 @@ export function DeepBlueSheet() {
       ) : (
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 min-h-0">
           {messages.length === 0 && (
-            <div className="text-center text-sm text-muted-foreground py-8">
-              <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
-              <p>How can I help?</p>
+            <div className="text-center text-sm py-8">
+              <Sparkles className="h-8 w-8 mx-auto mb-2 text-blue-400/50" />
+              <p className="text-blue-700/70 dark:text-blue-300/70">How can I help?</p>
               <p className="text-xs mt-1">Pool troubleshooting, dosing, parts, customer emails, broadcasts...</p>
             </div>
           )}
@@ -296,7 +296,7 @@ export function DeepBlueSheet() {
       )}
 
       {/* Input */}
-      <div className="shrink-0 px-3 py-2.5 border-t border-blue-200/60 dark:border-blue-800/40">
+      <div className="shrink-0 px-3 py-2.5 border-t border-blue-300 dark:border-blue-700">
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}

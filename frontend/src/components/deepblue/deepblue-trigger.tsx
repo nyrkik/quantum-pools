@@ -8,7 +8,8 @@ export function DeepBlueTrigger() {
   const { isOpen, toggleDeepBlue } = useDeepBlue();
   const pathname = usePathname();
 
-  if (isOpen || pathname === "/deepblue") return null;
+  // Hide on pages with their own DeepBlue integration
+  if (isOpen || pathname === "/deepblue" || pathname.startsWith("/cases/")) return null;
 
   return (
     <button

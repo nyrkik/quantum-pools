@@ -22,7 +22,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PageLayout } from "@/components/layout/page-layout";
-import { Loader2, FolderOpen, Search } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Loader2, FolderOpen, Search, Plus } from "lucide-react";
+import { toast } from "sonner";
 import type { ServiceCase } from "@/types/agent";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -66,6 +75,25 @@ export default function CasesPage() {
   const [statusFilter, setStatusFilter] = useState<string>("open");
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async () => {
+    if (!newTitle.trim()) return;
+    setCreating(true);
+    try {
+      const result = await api.post<{ id: string; case_number: number }>("/v1/cases", { title: newTitle.trim() });
+      toast.success(`Case #${result.case_number} created`);
+      setCreateOpen(false);
+      setNewTitle("");
+      router.push(`/cases/${result.id}`);
+    } catch {
+      toast.error("Failed to create case");
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,6 +134,12 @@ export default function CasesPage() {
     <PageLayout
       title="Cases"
       icon={<FolderOpen className="h-5 w-5 text-muted-foreground" />}
+      action={
+        <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          New Case
+        </Button>
+      }
     >
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-2 mb-4">
@@ -190,6 +224,33 @@ export default function CasesPage() {
           </Table>
         </div>
       )}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New Case</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="case-title" className="text-xs">Subject</Label>
+              <Input
+                id="case-title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="What is this case about?"
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={creating || !newTitle.trim()}>
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 }

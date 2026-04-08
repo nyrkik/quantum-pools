@@ -22,6 +22,33 @@ from src.presenters.case_presenter import CasePresenter
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
+class CreateCaseBody(BaseModel):
+    title: str
+    customer_id: Optional[str] = None
+    priority: str = "normal"
+
+
+@router.post("", status_code=201)
+async def create_case(
+    body: CreateCaseBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new case."""
+    svc = ServiceCaseService(db)
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+    case = await svc.create(
+        org_id=ctx.organization_id,
+        title=body.title,
+        source="manual",
+        customer_id=body.customer_id,
+        priority=body.priority,
+        created_by=user_name,
+    )
+    await db.commit()
+    return {"id": case.id, "case_number": case.case_number, "title": case.title}
+
+
 @router.get("")
 async def list_cases(
     status: Optional[str] = Query(None),

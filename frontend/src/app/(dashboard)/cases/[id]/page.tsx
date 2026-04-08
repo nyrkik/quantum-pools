@@ -318,9 +318,11 @@ function EmailDetailPanel({
 function JobEventDetailPanel({
   entry,
   detail,
+  onUpdate,
 }: {
   entry: TimelineEntry;
   detail: CaseDetail;
+  onUpdate: () => void;
 }) {
   const linkedJob = detail.jobs.find(
     (j) => j.id === entry.metadata?.action_id
@@ -334,11 +336,36 @@ function JobEventDetailPanel({
 
   const isCompleted = entry.metadata?.event === "completed";
   const isCancelled = entry.metadata?.event === "cancelled";
+  const isTask = !JOB_TYPES.has(linkedJob.action_type);
+
+  const handleToggle = async () => {
+    const newStatus = linkedJob.status === "done" ? "open" : "done";
+    try {
+      await api.put(`/v1/admin/agent-actions/${linkedJob.id}`, { status: newStatus });
+      onUpdate();
+    } catch { /* ignore */ }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await api.put(`/v1/admin/agent-actions/${linkedJob.id}`, { status: "cancelled" });
+      onUpdate();
+    } catch { /* ignore */ }
+  };
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <ActionStatusIcon status={linkedJob.status} />
+        {isTask ? (
+          <button onClick={handleToggle} className="shrink-0">
+            {linkedJob.status === "done"
+              ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+              : <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
+            }
+          </button>
+        ) : (
+          <ActionStatusIcon status={linkedJob.status} />
+        )}
         <ActionTypeBadge type={linkedJob.action_type} />
         {linkedJob.assigned_to && (
           <span className="text-xs text-muted-foreground">
@@ -361,6 +388,17 @@ function JobEventDetailPanel({
       >
         {linkedJob.description}
       </p>
+
+      {isTask && linkedJob.status !== "cancelled" && (
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleToggle}>
+            {linkedJob.status === "done" ? "Reopen" : "Mark Done"}
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={handleDelete}>
+            <Trash2 className="h-3 w-3 mr-1" /> Delete
+          </Button>
+        </div>
+      )}
 
       {linkedJob.notes && (
         <p className="text-xs text-muted-foreground bg-muted/50 rounded-md p-3">
@@ -671,7 +709,7 @@ function DetailPanel({
         />
       );
     case "job_event":
-      return <JobEventDetailPanel entry={entry} detail={detail} />;
+      return <JobEventDetailPanel entry={entry} detail={detail} onUpdate={onUpdate} />;
     case "invoice_event":
       return <InvoiceEventDetailPanel entry={entry} detail={detail} />;
     case "comment":
@@ -1053,258 +1091,6 @@ export default function CaseDetailPage({
           </div>
         </div>
       </div>
-
-      {/* Tasks — collapsible section between header and columns */}
-      {(tasks.length > 0 || addingTask) && (
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => setTasksCollapsed(!tasksCollapsed)}
-                className="flex items-center gap-1.5 hover:opacity-80"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                <CardTitle className="text-sm font-medium">
-                  Tasks
-                  {tasks.length > 0 && (
-                    <span className="text-muted-foreground font-normal ml-1.5">
-                      {doneTasks}/{tasks.length}
-                    </span>
-                  )}
-                </CardTitle>
-                {tasksCollapsed ? (
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                ) : (
-                  <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-                )}
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 text-[10px] px-1.5"
-                onClick={() => setAddingTask(!addingTask)}
-              >
-                + Add
-              </Button>
-            </div>
-          </CardHeader>
-          {!tasksCollapsed && (
-            <CardContent className="space-y-1">
-              {addingTask && (
-                <div className="space-y-1.5 p-2 border rounded-md bg-background">
-                  <Input
-                    value={newTaskDesc}
-                    onChange={(e) => setNewTaskDesc(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newTaskDesc.trim())
-                        handleAddTask();
-                      if (e.key === "Escape") setAddingTask(false);
-                    }}
-                    placeholder="What needs to be done?"
-                    className="h-7 text-xs"
-                    autoFocus
-                  />
-                  <div className="flex gap-1.5">
-                    <Select
-                      value={newTaskAssignee}
-                      onValueChange={setNewTaskAssignee}
-                    >
-                      <SelectTrigger className="h-7 text-xs flex-1">
-                        <SelectValue placeholder="Assign to..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {teamMembers.map((name) => (
-                          <SelectItem key={name} value={name} className="text-xs">
-                            {name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="date"
-                      value={newTaskDue}
-                      onChange={(e) => setNewTaskDue(e.target.value)}
-                      className="h-7 text-xs w-[130px]"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-[10px]"
-                      onClick={() => {
-                        setAddingTask(false);
-                        setNewTaskDesc("");
-                        setNewTaskAssignee("");
-                        setNewTaskDue("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="h-6 text-[10px]"
-                      onClick={handleAddTask}
-                      disabled={!newTaskDesc.trim()}
-                    >
-                      Add Task
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {tasks.map((t) => {
-                const isOverdue =
-                  t.due_date &&
-                  new Date(t.due_date) < new Date() &&
-                  t.status !== "done";
-                const isEditing = editingTaskId === t.id;
-                if (isEditing) {
-                  return (
-                    <div
-                      key={t.id}
-                      className="space-y-1.5 p-2 border rounded-md bg-background"
-                    >
-                      <Input
-                        value={editTaskDesc}
-                        onChange={(e) => setEditTaskDesc(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") setEditingTaskId(null);
-                        }}
-                        className="h-7 text-xs"
-                        autoFocus
-                      />
-                      <div className="flex gap-1.5">
-                        <Select
-                          value={editTaskAssignee}
-                          onValueChange={setEditTaskAssignee}
-                        >
-                          <SelectTrigger className="h-7 text-xs flex-1">
-                            <SelectValue placeholder="Assign to..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem
-                              value="__none__"
-                              className="text-xs text-muted-foreground"
-                            >
-                              Unassigned
-                            </SelectItem>
-                            {teamMembers.map((name) => (
-                              <SelectItem
-                                key={name}
-                                value={name}
-                                className="text-xs"
-                              >
-                                {name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Input
-                          type="date"
-                          value={editTaskDue}
-                          onChange={(e) => setEditTaskDue(e.target.value)}
-                          className="h-7 text-xs w-[130px]"
-                        />
-                      </div>
-                      <div className="flex justify-between">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-[10px] text-destructive"
-                          onClick={() => {
-                            handleDeleteTask(t.id);
-                            setEditingTaskId(null);
-                          }}
-                        >
-                          <Trash2 className="h-3 w-3 mr-1" /> Delete
-                        </Button>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-[10px]"
-                            onClick={() => setEditingTaskId(null)}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="h-6 text-[10px]"
-                            onClick={() =>
-                              handleUpdateTask(t.id, {
-                                description:
-                                  editTaskDesc.trim() || undefined,
-                                assigned_to:
-                                  editTaskAssignee === "__none__"
-                                    ? ""
-                                    : editTaskAssignee || undefined,
-                                due_date: editTaskDue || undefined,
-                              })
-                            }
-                          >
-                            Save
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-                return (
-                  <div
-                    key={t.id}
-                    className="flex items-start gap-2 py-1.5 group"
-                  >
-                    <button
-                      onClick={() => handleToggleTask(t.id, t.status)}
-                      className="shrink-0 mt-0.5"
-                    >
-                      {t.status === "done" ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
-                      )}
-                    </button>
-                    <div
-                      className="flex-1 min-w-0 cursor-pointer"
-                      onClick={() => {
-                        setEditingTaskId(t.id);
-                        setEditTaskDesc(t.description);
-                        setEditTaskAssignee(t.assigned_to || "");
-                        setEditTaskDue(
-                          t.due_date ? t.due_date.split("T")[0] : ""
-                        );
-                      }}
-                    >
-                      <span
-                        className={`text-xs ${t.status === "done" ? "line-through text-muted-foreground" : ""}`}
-                      >
-                        {t.description}
-                      </span>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {t.assigned_to && (
-                          <span className="text-[10px] text-muted-foreground">
-                            {t.assigned_to}
-                          </span>
-                        )}
-                        {t.due_date && (
-                          <span
-                            className={`text-[10px] ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}
-                          >
-                            {new Date(t.due_date).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          )}
-        </Card>
-      )}
 
       {/* Two-column layout: timeline left, detail right */}
       <div className="flex flex-col lg:flex-row gap-4">

@@ -45,7 +45,8 @@ export function parseStoredMessages(raw: Record<string, unknown>[], conversation
     const blocks = m.blocks as Array<Record<string, unknown>> | undefined;
 
     if (role === "assistant") {
-      let content = (m.content as string) || "";
+      // When blocks exist, extract text from blocks (not top-level content — it duplicates block text)
+      let content = blocks ? "" : ((m.content as string) || "");
       const toolCalls: { name: string; input: Record<string, unknown> }[] = [];
 
       if (blocks) {

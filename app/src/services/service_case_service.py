@@ -62,6 +62,7 @@ class ServiceCaseService:
         title: str,
         source: str,
         customer_id: str | None = None,
+        billing_name: str | None = None,
         status: str = "new",
         priority: str = "normal",
         created_by: str | None = None,
@@ -70,12 +71,15 @@ class ServiceCaseService:
             id=str(uuid.uuid4()),
             organization_id=org_id,
             customer_id=customer_id,
+            billing_name=billing_name if not customer_id else None,
             case_number=await self.next_case_number(org_id),
             title=title[:300],
             status=status,
             priority=priority,
             source=source,
             created_by=created_by,
+            manager_name=created_by,
+            current_actor_name=created_by,
         )
         self.db.add(case)
         await self.db.flush()
@@ -192,7 +196,7 @@ class ServiceCaseService:
         case.updated_at = datetime.now(timezone.utc)
 
     async def update_status_from_children(self, case_id: str) -> None:
-        """Auto-advance case status based on child entity states.
+        """Auto-advance case status, compute flags, and derive current actor.
 
         Called after any job status change, invoice send/pay, or estimate approval.
         """
@@ -200,31 +204,42 @@ class ServiceCaseService:
         if not case or case.status in ("cancelled",):
             return
 
-        # Load child states
-        jobs = (await self.db.execute(
-            select(AgentAction.status).where(AgentAction.case_id == case_id)
-        )).scalars().all()
+        # Load child states — jobs with assignees
+        job_rows = (await self.db.execute(
+            select(AgentAction.status, AgentAction.assigned_to)
+            .where(AgentAction.case_id == case_id)
+        )).all()
+        job_statuses = [r[0] for r in job_rows]
 
-        invoices = (await self.db.execute(
-            select(Invoice.status, Invoice.document_type).where(Invoice.case_id == case_id)
+        # Threads with assignment and pending status
+        thread_rows = (await self.db.execute(
+            select(AgentThread.has_pending, AgentThread.assigned_to_name, AgentThread.last_direction)
+            .where(AgentThread.case_id == case_id)
         )).all()
 
-        estimate_statuses = [i[0] for i in invoices if i[1] == "estimate"]
-        invoice_statuses = [i[0] for i in invoices if i[1] == "invoice"]
+        # Invoices and estimates
+        invoice_rows = (await self.db.execute(
+            select(Invoice.status, Invoice.document_type, Invoice.due_date, Invoice.amount_paid)
+            .where(Invoice.case_id == case_id)
+        )).all()
 
-        all_jobs_done = jobs and all(s in ("done", "cancelled") for s in jobs)
-        any_job_in_progress = any(s == "in_progress" for s in jobs)
+        estimate_statuses = [i[0] for i in invoice_rows if i[1] == "estimate"]
+        invoice_statuses = [i[0] for i in invoice_rows if i[1] == "invoice"]
+
+        # --- Status derivation (same logic as before) ---
+        all_jobs_done = job_statuses and all(s in ("done", "cancelled") for s in job_statuses)
+        any_job_in_progress = any(s == "in_progress" for s in job_statuses)
         has_sent_invoice = any(s in ("sent", "overdue") for s in invoice_statuses)
         all_invoices_paid = invoice_statuses and all(s in ("paid", "void", "written_off") for s in invoice_statuses)
         has_approved_estimate = "approved" in estimate_statuses
+        has_rejected_estimate = "rejected" in estimate_statuses
         has_sent_estimate = any(s in ("sent", "revised", "viewed") for s in estimate_statuses)
 
-        # Determine new status (priority order)
         if all_jobs_done and all_invoices_paid and invoice_statuses:
             new_status = "closed"
         elif all_jobs_done and has_sent_invoice:
             new_status = "pending_payment"
-        elif any_job_in_progress or (has_approved_estimate and jobs):
+        elif any_job_in_progress or (has_approved_estimate and job_statuses):
             new_status = "in_progress"
         elif has_approved_estimate:
             new_status = "approved"
@@ -232,7 +247,7 @@ class ServiceCaseService:
             new_status = "pending_approval"
         elif estimate_statuses:
             new_status = "scoping"
-        elif jobs:
+        elif job_statuses:
             new_status = "in_progress" if any_job_in_progress else case.status
         else:
             new_status = case.status
@@ -243,6 +258,66 @@ class ServiceCaseService:
                 case.closed_at = datetime.now(timezone.utc)
             elif case.closed_at:
                 case.closed_at = None
+
+        # --- Flags (all must be explicit bool) ---
+        # Estimate approved: cleared when a job exists for the approved work
+        case.flag_estimate_approved = bool(has_approved_estimate and not any_job_in_progress and not all_jobs_done)
+
+        # Estimate rejected
+        case.flag_estimate_rejected = bool(has_rejected_estimate)
+
+        # Payment received: any invoice fully paid but case not yet closed
+        case.flag_payment_received = bool(all_invoices_paid and invoice_statuses and new_status != "closed")
+
+        # Customer replied: thread has pending inbound message
+        case.flag_customer_replied = bool(any(
+            r[0] and r[2] == "inbound"  # has_pending and last_direction == inbound
+            for r in thread_rows
+        ))
+
+        # All jobs complete but case still open (need to invoice or close)
+        case.flag_jobs_complete = bool(all_jobs_done and job_statuses and new_status not in ("closed", "pending_payment"))
+
+        # Invoice overdue
+        now_date = datetime.now(timezone.utc).date()
+        case.flag_invoice_overdue = bool(any(
+            i[0] in ("sent", "overdue") and i[2] and i[2] < now_date
+            for i in invoice_rows if i[1] == "invoice"
+        ))
+
+        # Stale: no update in 7+ days on open case
+        case.flag_stale = bool(
+            case.updated_at is not None
+            and (datetime.now(timezone.utc) - case.updated_at) > timedelta(days=7)
+            and new_status not in ("closed", "cancelled")
+        )
+
+        # --- Current actor ---
+        # Priority: open job assignee > pending thread assignee > awaiting customer > manager
+        actor = None
+
+        # 1. Open/in-progress job with an assignee
+        for status, assigned_to in job_rows:
+            if status in ("open", "in_progress") and assigned_to:
+                actor = assigned_to
+                break
+
+        # 2. Pending thread with an assignee
+        if not actor:
+            for has_pending, assigned_name, _ in thread_rows:
+                if has_pending and assigned_name:
+                    actor = assigned_name
+                    break
+
+        # 3. Waiting on customer (estimate sent or invoice sent)
+        if not actor and (has_sent_estimate or has_sent_invoice):
+            actor = "Awaiting customer"
+
+        # 4. Fall back to manager
+        if not actor:
+            actor = case.manager_name
+
+        case.current_actor_name = actor
 
         await self.update_counts(case_id)
 

@@ -157,9 +157,12 @@ export interface ServiceCase {
   title: string;
   customer_id: string | null;
   customer_name: string | null;
+  billing_name: string | null;
   status: string;
   priority: string;
   assigned_to_name: string | null;
+  manager_name: string | null;
+  current_actor_name: string | null;
   source: string;
   job_count: number;
   open_job_count: number;
@@ -167,6 +170,15 @@ export interface ServiceCase {
   invoice_count: number;
   total_invoiced: number;
   total_paid: number;
+  flags: {
+    estimate_approved: boolean;
+    estimate_rejected: boolean;
+    payment_received: boolean;
+    customer_replied: boolean;
+    jobs_complete: boolean;
+    invoice_overdue: boolean;
+    stale: boolean;
+  };
   created_at: string;
   updated_at: string;
   closed_at: string | null;

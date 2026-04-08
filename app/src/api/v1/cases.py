@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from src.core.database import get_db
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/cases", tags=["cases"])
 class CreateCaseBody(BaseModel):
     title: str
     customer_id: Optional[str] = None
+    billing_name: Optional[str] = None
     priority: str = "normal"
 
 
@@ -42,6 +43,7 @@ async def create_case(
         title=body.title,
         source="manual",
         customer_id=body.customer_id,
+        billing_name=body.billing_name,
         priority=body.priority,
         created_by=user_name,
     )
@@ -335,7 +337,13 @@ async def update_case(
         case.priority = body["priority"]
     if "assigned_to_name" in body:
         case.assigned_to_name = body["assigned_to_name"]
+    if "manager_name" in body:
+        case.manager_name = body["manager_name"]
+        case.assigned_to_name = body.get("assigned_to_name", body["manager_name"])
+        case.assigned_to_user_id = body.get("assigned_to_user_id")
 
+    await db.flush()
+    await svc.update_status_from_children(case_id)
     await db.commit()
     presenter = CasePresenter(db)
     return await presenter.one(case)

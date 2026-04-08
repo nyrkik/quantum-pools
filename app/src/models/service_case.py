@@ -6,7 +6,7 @@ invoices/estimates (Invoice), and internal messages (InternalThread).
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey, Index
+from sqlalchemy import String, Integer, Float, Boolean, DateTime, Text, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -24,6 +24,11 @@ class ServiceCase(Base):
     assigned_to_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"))
     assigned_to_name: Mapped[str | None] = mapped_column(String(100))
     source: Mapped[str] = mapped_column(String(30))  # email, manual, internal_message, estimate_approval
+    billing_name: Mapped[str | None] = mapped_column(String(200))  # For non-DB customers (one-off jobs)
+
+    # Ownership
+    manager_name: Mapped[str | None] = mapped_column(String(100))  # Case coordinator
+    current_actor_name: Mapped[str | None] = mapped_column(String(100))  # Who needs to act next (derived)
 
     # Denormalized counts
     job_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -32,6 +37,15 @@ class ServiceCase(Base):
     invoice_count: Mapped[int] = mapped_column(Integer, default=0)
     total_invoiced: Mapped[float] = mapped_column(Float, default=0.0)
     total_paid: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Attention flags (computed by update_status_from_children)
+    flag_estimate_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    flag_estimate_rejected: Mapped[bool] = mapped_column(Boolean, default=False)
+    flag_payment_received: Mapped[bool] = mapped_column(Boolean, default=False)
+    flag_customer_replied: Mapped[bool] = mapped_column(Boolean, default=False)
+    flag_jobs_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    flag_invoice_overdue: Mapped[bool] = mapped_column(Boolean, default=False)
+    flag_stale: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_by: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

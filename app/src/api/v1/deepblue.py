@@ -1087,6 +1087,7 @@ async def confirm_customer_email(
 class ConfirmCreateCaseRequest(BaseModel):
     title: str
     customer_id: Optional[str] = None
+    billing_name: Optional[str] = None
     priority: str = "normal"
     conversation_id: Optional[str] = None
 
@@ -1108,6 +1109,7 @@ async def confirm_create_case(
         title=req.title,
         source="deepblue",
         customer_id=req.customer_id,
+        billing_name=req.billing_name,
         priority=req.priority,
         created_by=user_name,
     )

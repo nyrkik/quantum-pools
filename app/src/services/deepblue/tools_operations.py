@@ -250,13 +250,45 @@ async def _exec_create_case(inp: dict, ctx: ToolContext) -> dict:
 
     customer_id = inp.get("customer_id") or ctx.customer_id
     customer_name = None
+
+    from src.models.customer import Customer
+
     if customer_id:
-        from src.models.customer import Customer
         cust = (await ctx.db.execute(
             select(Customer).where(Customer.id == customer_id)
         )).scalar_one_or_none()
         if cust:
             customer_name = cust.display_name
+
+    # If no customer resolved, try fuzzy-matching from the title
+    if not customer_id:
+        try:
+            org_id = ctx.org_id
+            customers = (await ctx.db.execute(
+                select(Customer).where(
+                    Customer.organization_id == org_id,
+                    Customer.status == "active",
+                )
+            )).scalars().all()
+            title_lower = title.lower()
+            best_match = None
+            for c in customers:
+                # Check display_name, company_name, first+last
+                names = [
+                    (c.display_name or "").lower(),
+                    (c.company_name or "").lower(),
+                    f"{(c.first_name or '')} {(c.last_name or '')}".strip().lower(),
+                ]
+                for name in names:
+                    if name and len(name) >= 3 and name in title_lower:
+                        # Prefer longest match (more specific)
+                        if not best_match or len(name) > len(best_match[1]):
+                            best_match = (c, name)
+            if best_match:
+                customer_id = best_match[0].id
+                customer_name = best_match[0].display_name
+        except Exception:
+            pass  # Non-blocking — customer resolution is best-effort
 
     priority = inp.get("priority", "normal")
 

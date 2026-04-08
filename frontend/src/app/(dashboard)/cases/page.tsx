@@ -33,6 +33,8 @@ import { Label } from "@/components/ui/label";
 import { Loader2, FolderOpen, Search, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { ServiceCase } from "@/types/agent";
+import { CustomerPicker } from "@/components/cases/customer-picker";
+import { CaseOwner } from "@/components/cases/case-owner";
 
 const STATUS_LABELS: Record<string, string> = {
   new: "New",
@@ -78,15 +80,23 @@ export default function CasesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
+  const [newCustomerId, setNewCustomerId] = useState<string | null>(null);
+  const [newBillingName, setNewBillingName] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!newTitle.trim()) return;
     setCreating(true);
     try {
-      const result = await api.post<{ id: string; case_number: number }>("/v1/cases", { title: newTitle.trim() });
+      const result = await api.post<{ id: string; case_number: number }>("/v1/cases", {
+        title: newTitle.trim(),
+        customer_id: newCustomerId,
+        billing_name: newBillingName,
+      });
       toast.success(`Case #${result.case_number} created`);
       setCreateOpen(false);
       setNewTitle("");
+      setNewCustomerId(null);
+      setNewBillingName(null);
       router.push(`/cases/${result.id}`);
     } catch {
       toast.error("Failed to create case");
@@ -183,43 +193,85 @@ export default function CasesPage() {
             <TableHeader>
               <TableRow className="bg-slate-100 dark:bg-slate-800">
                 <TableHead className="text-xs font-medium uppercase tracking-wide">Case</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide">Customer</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide">Status</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide text-center">Jobs</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide text-center">Emails</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide text-right">Invoiced</TableHead>
-                <TableHead className="text-xs font-medium uppercase tracking-wide text-right">Updated</TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wide hidden sm:table-cell">Status</TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wide hidden sm:table-cell">Owner</TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wide text-right hidden sm:table-cell">Updated</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {cases.map((c, i) => (
-                <TableRow
-                  key={c.id}
-                  className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}
-                  onClick={() => router.push(`/cases/${c.id}`)}
-                >
-                  <TableCell>
-                    <div>
-                      <span className="text-xs font-mono text-muted-foreground">{c.case_number}</span>
-                      <p className="text-sm font-medium truncate max-w-[250px]">{c.title}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm">{c.customer_name || "—"}</TableCell>
-                  <TableCell><CaseStatusBadge status={c.status} /></TableCell>
-                  <TableCell className="text-center text-sm">
-                    {c.open_job_count > 0 ? (
-                      <span className="font-medium">{c.open_job_count}<span className="text-muted-foreground">/{c.job_count}</span></span>
-                    ) : (
-                      <span className="text-muted-foreground">{c.job_count}</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-center text-sm text-muted-foreground">{c.thread_count}</TableCell>
-                  <TableCell className="text-right text-sm">
-                    {c.total_invoiced > 0 ? `$${c.total_invoiced.toLocaleString("en-US", { minimumFractionDigits: 2 })}` : "—"}
-                  </TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground">{formatDate(c.updated_at)}</TableCell>
-                </TableRow>
-              ))}
+              {cases.map((c, i) => {
+                const flags = c.flags || {};
+                const activeFlags: { label: string; color: string }[] = [];
+                if (flags.estimate_approved) activeFlags.push({ label: "Estimate approved", color: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400" });
+                if (flags.estimate_rejected) activeFlags.push({ label: "Estimate rejected", color: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400" });
+                if (flags.customer_replied) activeFlags.push({ label: "Customer replied", color: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400" });
+                if (flags.jobs_complete) activeFlags.push({ label: "Jobs complete", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" });
+                if (flags.payment_received) activeFlags.push({ label: "Payment received", color: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400" });
+                if (flags.invoice_overdue) activeFlags.push({ label: "Invoice overdue", color: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400" });
+                if (flags.stale) activeFlags.push({ label: "Stale", color: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400" });
+
+                return (
+                  <TableRow
+                    key={c.id}
+                    className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}
+                    onClick={() => router.push(`/cases/${c.id}`)}
+                  >
+                    <TableCell>
+                      <div>
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {c.case_number}
+                          {(c.customer_name || c.billing_name) && (
+                            <span className="font-sans ml-1.5">({c.customer_name || c.billing_name})</span>
+                          )}
+                        </span>
+                        <p className="text-sm font-medium truncate max-w-[400px]">{c.title}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          {/* Mobile-only: status + owner inline */}
+                          <span className="sm:hidden"><CaseStatusBadge status={c.status} /></span>
+                          <span className="sm:hidden" onClick={(e) => e.stopPropagation()}>
+                            <CaseOwner
+                              caseId={c.id}
+                              managerName={c.manager_name}
+                              currentActor={c.current_actor_name}
+                              onReassigned={() => load()}
+                            />
+                          </span>
+                          {c.open_job_count > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                              {c.open_job_count} open job{c.open_job_count !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {c.thread_count > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                              {c.thread_count} email{c.thread_count !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {c.total_invoiced > 0 && (
+                            <span className="text-[10px] text-muted-foreground">
+                              ${c.total_invoiced.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </span>
+                          )}
+                          {activeFlags.map((f) => (
+                            <span key={f.label} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${f.color}`}>
+                              {f.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell"><CaseStatusBadge status={c.status} /></TableCell>
+                    <TableCell className="hidden sm:table-cell" onClick={(e) => e.stopPropagation()}>
+                      <CaseOwner
+                        caseId={c.id}
+                        managerName={c.manager_name}
+                        currentActor={c.current_actor_name}
+                        onReassigned={() => load()}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground hidden sm:table-cell">{formatDate(c.updated_at)}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -239,6 +291,12 @@ export default function CasesPage() {
                 placeholder="What is this case about?"
                 onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
                 autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Customer</Label>
+              <CustomerPicker
+                onChange={(cid, bn) => { setNewCustomerId(cid); setNewBillingName(bn); }}
               />
             </div>
           </div>

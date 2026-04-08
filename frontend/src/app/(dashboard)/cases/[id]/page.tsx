@@ -59,6 +59,7 @@ import type {
   TimelineEntry,
 } from "@/components/cases/case-components";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
+import { CaseOwner } from "@/components/cases/case-owner";
 
 // --- Mobile detail sheet (only renders below lg breakpoint) ---
 
@@ -325,6 +326,9 @@ function TaskChecklistItem({
   onUpdate: () => void;
 }) {
   const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== "done";
+  const teamMembers = useTeamMembers();
+  const [editing, setEditing] = useState(false);
+  const [desc, setDesc] = useState(task.description);
 
   const handleToggle = async () => {
     const newStatus = task.status === "done" ? "open" : "done";
@@ -341,31 +345,79 @@ function TaskChecklistItem({
     } catch { /* ignore */ }
   };
 
+  const handleFieldUpdate = async (field: string, value: string | null) => {
+    try {
+      await api.put(`/v1/admin/agent-actions/${task.id}`, { [field]: value });
+      onUpdate();
+    } catch { /* ignore */ }
+  };
+
+  const handleDescSave = async () => {
+    if (desc.trim() && desc.trim() !== task.description) {
+      await handleFieldUpdate("description", desc.trim());
+    }
+    setEditing(false);
+  };
+
   return (
-    <div className={`flex items-start gap-2 py-2 px-2 rounded-md ${isSelected ? "bg-primary/5 border border-primary/20" : "hover:bg-muted/30"}`}>
-      <button onClick={handleToggle} className="shrink-0 mt-0.5">
-        {task.status === "done"
-          ? <CheckCircle2 className="h-4 w-4 text-green-500" />
-          : <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
-        }
-      </button>
-      <div className="flex-1 min-w-0">
-        <span className={`text-xs ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-          {task.description}
-        </span>
-        <div className="flex items-center gap-2 mt-0.5">
-          {task.assigned_to && <span className="text-[10px] text-muted-foreground">{task.assigned_to}</span>}
-          {task.due_date && (
-            <span className={`text-[10px] ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
-              {new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            </span>
+    <div className={`py-2 px-2 rounded-md ${isSelected ? "bg-primary/5 border border-primary/20" : "hover:bg-muted/30"}`}>
+      <div className="flex items-start gap-2">
+        <button onClick={handleToggle} className="shrink-0 mt-0.5">
+          {task.status === "done"
+            ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+            : <Circle className="h-4 w-4 text-muted-foreground hover:text-green-500 transition-colors" />
+          }
+        </button>
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <Input
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              onBlur={handleDescSave}
+              onKeyDown={(e) => { if (e.key === "Enter") handleDescSave(); if (e.key === "Escape") { setDesc(task.description); setEditing(false); } }}
+              className="h-6 text-xs px-1"
+              autoFocus
+            />
+          ) : (
+            <button
+              type="button"
+              className={`text-left text-xs ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}
+              onClick={() => { if (task.status !== "done") setEditing(true); }}
+            >
+              {task.description}
+            </button>
           )}
+          <div className="flex items-center gap-2 mt-0.5">
+            {task.due_date && (
+              <span className={`text-[10px] ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
+                {new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+          </div>
         </div>
+        {task.status !== "cancelled" && (
+          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" onClick={handleDelete}>
+            <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+          </Button>
+        )}
       </div>
-      {task.status !== "cancelled" && (
-        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" onClick={handleDelete}>
-          <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-        </Button>
+      {isSelected && task.status !== "done" && (
+        <div className="ml-6 mt-1.5 flex items-center gap-2">
+          <Select
+            value={task.assigned_to || "__unassigned__"}
+            onValueChange={(v) => handleFieldUpdate("assigned_to", v === "__unassigned__" ? null : v)}
+          >
+            <SelectTrigger className="h-6 text-[10px] w-auto min-w-[80px] border-dashed px-1.5">
+              <SelectValue placeholder="Assign..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__unassigned__">Unassigned</SelectItem>
+              {teamMembers.map((name) => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
     </div>
   );
@@ -425,17 +477,44 @@ function JobEventDetailPanel({
     );
   }
 
-  // Regular job detail
+  // Regular job detail — editable
+  const [updatingJob, setUpdatingJob] = useState(false);
+  const teamMembers = useTeamMembers();
+
+  const handleJobFieldUpdate = async (field: string, value: string | null) => {
+    setUpdatingJob(true);
+    try {
+      await api.put(`/v1/admin/agent-actions/${linkedJob.id}`, { [field]: value });
+      onUpdate();
+    } catch { /* ignore */ }
+    setUpdatingJob(false);
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <ActionStatusIcon status={linkedJob.status} />
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          className="cursor-pointer"
+          onClick={() => handleJobFieldUpdate("status", linkedJob.status === "done" ? "open" : "done")}
+          disabled={updatingJob}
+        >
+          <ActionStatusIcon status={linkedJob.status} />
+        </button>
         <ActionTypeBadge type={linkedJob.action_type} />
-        {linkedJob.assigned_to && (
-          <span className="text-xs text-muted-foreground">
-            {linkedJob.assigned_to}
-          </span>
-        )}
+        <Select
+          value={linkedJob.assigned_to || "__unassigned__"}
+          onValueChange={(v) => handleJobFieldUpdate("assigned_to", v === "__unassigned__" ? null : v)}
+        >
+          <SelectTrigger className="h-6 text-xs w-auto min-w-[80px] border-none shadow-none px-1.5 bg-transparent">
+            <SelectValue placeholder="Assign..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__unassigned__">Unassigned</SelectItem>
+            {teamMembers.map((name) => (
+              <SelectItem key={name} value={name}>{name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {linkedJob.due_date && (
           <span className="text-xs text-muted-foreground ml-auto">
             Due{" "}
@@ -878,9 +957,9 @@ export default function CaseDetailPage({
     load();
   }, [load]);
 
-  // Auto-select most recent timeline item on first load
+  // Auto-select most recent timeline item on first load (desktop only)
   useEffect(() => {
-    if (mergedTimeline.length > 0 && !selectedItem) {
+    if (mergedTimeline.length > 0 && !selectedItem && window.innerWidth >= 1024) {
       const first = mergedTimeline[0];
       setSelectedItem({ type: first.type, id: first.id });
     }
@@ -1120,14 +1199,23 @@ export default function CaseDetailPage({
           )}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <CaseStatusBadge status={detail.status} />
-            {detail.customer_name && (
+            {detail.customer_name ? (
               <Link
                 href={`/customers/${detail.customer_id}`}
                 className="text-sm text-muted-foreground hover:underline"
               >
                 {detail.customer_name}
               </Link>
-            )}
+            ) : detail.billing_name ? (
+              <span className="text-sm text-muted-foreground">{detail.billing_name}</span>
+            ) : null}
+            <span className="text-muted-foreground text-xs">·</span>
+            <CaseOwner
+              caseId={id}
+              managerName={detail.manager_name}
+              currentActor={detail.current_actor_name}
+              onReassigned={() => load()}
+            />
             {detail.total_invoiced > 0 && (
               <span className="text-xs text-muted-foreground">
                 $
@@ -1151,8 +1239,8 @@ export default function CaseDetailPage({
         <div className="w-full lg:w-[60%] min-w-0">
           <Card className="shadow-sm">
             <CardHeader className="pb-0">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 shrink-0">
                   <Clock className="h-3.5 w-3.5" />
                   Timeline
                   {mergedTimeline.length > 0 && (
@@ -1161,11 +1249,11 @@ export default function CaseDetailPage({
                     </span>
                   )}
                 </CardTitle>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-wrap">
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 text-[10px] px-1.5"
+                    className="h-6 text-[10px] px-1.5 gap-0.5"
                     onClick={() =>
                       openCompose({
                         customerId: detail.customer_id || undefined,
@@ -1176,43 +1264,43 @@ export default function CaseDetailPage({
                       })
                     }
                   >
-                    <Mail className="h-3 w-3 mr-0.5" /> Email
+                    <Plus className="h-2.5 w-2.5" /><Mail className="h-3 w-3" /><span className="hidden sm:inline"> Email</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 text-[10px] px-1.5"
+                    className="h-6 text-[10px] px-1.5 gap-0.5"
                     onClick={() => setAddingTask(true)}
                   >
-                    <CheckCircle2 className="h-3 w-3 mr-0.5" /> Task
+                    <Plus className="h-2.5 w-2.5" /><CheckCircle2 className="h-3 w-3" /><span className="hidden sm:inline"> Task</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 text-[10px] px-1.5"
+                    className="h-6 text-[10px] px-1.5 gap-0.5"
                     onClick={() =>
                       router.push(
                         `/invoices/new?type=estimate&customer=${detail.customer_id}&case=${id}`
                       )
                     }
                   >
-                    <FileText className="h-3 w-3 mr-0.5" /> Estimate
+                    <Plus className="h-2.5 w-2.5" /><FileText className="h-3 w-3" /><span className="hidden sm:inline"> Estimate</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 text-[10px] px-1.5"
+                    className="h-6 text-[10px] px-1.5 gap-0.5"
                     onClick={() => setAddingJob(true)}
                   >
-                    <ClipboardList className="h-3 w-3 mr-0.5" /> Job
+                    <Plus className="h-2.5 w-2.5" /><ClipboardList className="h-3 w-3" /><span className="hidden sm:inline"> Job</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 text-[10px] px-1.5"
+                    className="h-6 text-[10px] px-1.5 gap-0.5"
                     onClick={() => setSelectedItem({ type: "deepblue_chat", id: "new" })}
                   >
-                    <Sparkles className="h-3 w-3 mr-0.5" /> DeepBlue
+                    <Sparkles className="h-3 w-3" /><span className="hidden sm:inline"> DeepBlue</span>
                   </Button>
                 </div>
               </div>

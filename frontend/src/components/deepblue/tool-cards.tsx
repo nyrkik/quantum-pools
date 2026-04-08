@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Mail, Send, Loader2, FolderOpen } from "lucide-react";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { CustomerPicker } from "@/components/cases/customer-picker";
 
 export function ToolResultCard({ name, result, stale = false, isLastOfType = true, conversationId }: { name: string; result: Record<string, unknown>; stale?: boolean; isLastOfType?: boolean; conversationId?: string | null }) {
   if (name === "chemical_dosing_calculator") {
@@ -199,6 +200,13 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversat
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [caseResult, setCaseResult] = useState<{ case_id: string; case_number: number } | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>((preview.customer_id as string) || null);
+  const [billingName, setBillingName] = useState<string | null>(null);
+
+  const handleCustomerChange = (cid: string | null, bn: string | null) => {
+    setCustomerId(cid);
+    setBillingName(bn);
+  };
 
   const handleConfirm = async () => {
     setSaving(true);
@@ -207,7 +215,8 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversat
         "/v1/deepblue/confirm-create-case",
         {
           title: preview.title,
-          customer_id: preview.customer_id,
+          customer_id: customerId,
+          billing_name: billingName,
           priority: preview.priority || "normal",
           conversation_id: conversationId || null,
         }
@@ -232,9 +241,7 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversat
       </div>
       <div>
         <p className="font-medium">{String(preview.title)}</p>
-        <p className="text-muted-foreground mt-0.5">
-          {String(preview.customer_name)} · {priorityLabel} priority
-        </p>
+        <p className="text-muted-foreground mt-0.5">{priorityLabel} priority</p>
       </div>
       {saved && caseResult ? (
         <div className="pt-1 border-t space-y-1.5">
@@ -256,8 +263,17 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversat
           {isLastOfType ? "Created ✓" : "Revised below"}
         </p>
       ) : (
-        <div className="flex gap-2">
-          <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
+        <div className="space-y-2">
+          <div className="pt-1 border-t">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Customer</p>
+            <CustomerPicker
+              initialCustomerId={(preview.customer_id as string) || null}
+              initialCustomerName={preview.customer_id ? (preview.customer_name as string) : null}
+              onChange={handleCustomerChange}
+              compact
+            />
+          </div>
+          <Button size="sm" className="h-8 w-full" onClick={handleConfirm} disabled={saving}>
             {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             Create Case
           </Button>

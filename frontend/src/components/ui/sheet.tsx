@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import * as SheetPrimitive from "@radix-ui/react-dialog"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronUpIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -76,7 +76,10 @@ function SheetContent({
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close className="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:outline-none disabled:pointer-events-none">
-            <ChevronRightIcon className="size-4" />
+            {side === "bottom" ? <ChevronDownIcon className="size-4" /> :
+             side === "top" ? <ChevronUpIcon className="size-4" /> :
+             side === "left" ? <ChevronLeftIcon className="size-4" /> :
+             <ChevronRightIcon className="size-4" />}
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
         )}

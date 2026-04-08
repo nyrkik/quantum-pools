@@ -392,6 +392,16 @@ class AgentActionService:
 
         await self.db.commit()
 
+        # Recompute case flags/actor if this action belongs to a case
+        if action.case_id:
+            try:
+                from src.services.service_case_service import ServiceCaseService
+                case_svc = ServiceCaseService(self.db)
+                await case_svc.update_status_from_children(action.case_id)
+                await self.db.commit()
+            except Exception as e:
+                logger.warning(f"Case recompute failed for {action.case_id}: {e}")
+
         # Notify new assignee on reassignment
         if assigned_to and assigned_to != old_assignee:
             target = await self._find_org_user(

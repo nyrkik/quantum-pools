@@ -221,6 +221,20 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleMarkHandled = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/dismiss`, {});
+      toast.success("Marked as handled");
+      onAction();
+      onClose();
+    } catch {
+      toast.error("Failed to update");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleArchive = async () => {
     setSending(true);
     try {
@@ -460,60 +474,69 @@ export function ThreadDetailSheet({
       </div>
 
       {/* Bottom action area */}
-      <div className="flex-shrink-0 border-t pt-4 space-y-3">
-        {/* Draft box — view or edit inline, no popup */}
+      <div className="flex-shrink-0 border-t pt-3 space-y-2">
+        {/* Draft box — collapsed by default for more message reading space */}
         {pendingMessage && pendingMessage.draft_response && (
-          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Draft Response</p>
-              {!editing ? (
-                <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-700" onClick={() => setEditing(true)}>
+          !editing ? (
+            /* Collapsed view: one-line preview + action buttons */
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-blue-700 dark:text-blue-400 flex-1 truncate">
+                  <span className="font-medium">Draft:</span> {pendingMessage.draft_response.split("\n")[0].slice(0, 80)}
+                </p>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-700 shrink-0" onClick={() => setEditing(true)}>
                   <Pencil className="h-3 w-3 mr-1" />Edit
                 </Button>
-              ) : (
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => handleApprove()} disabled={sending} size="sm" className="flex-1 h-8">
+                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+                  Approve & Send
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* Expanded view: full editing */
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Edit Draft</p>
                 <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-700" onClick={() => { setEditing(false); setEditText(pendingMessage.draft_response || ""); }}>
                   Cancel
                 </Button>
-              )}
-            </div>
+              </div>
 
-            {editing ? (
               <Textarea
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
-                className="text-sm min-h-[120px] bg-white dark:bg-background"
-                rows={6}
+                className="text-sm min-h-[100px] bg-white dark:bg-background"
+                rows={5}
                 autoFocus
               />
-            ) : (
-              <p className="text-sm whitespace-pre-wrap">{pendingMessage.draft_response}</p>
-            )}
 
-            <div className="flex gap-2 items-end">
-              <div className="flex-1">
-                <Textarea
-                  value={reviseInstruction}
-                  onChange={(e) => setReviseInstruction(e.target.value)}
-                  placeholder="Tell AI how to change it..."
-                  className="text-sm min-h-[2rem] bg-white dark:bg-background resize-none"
-                  rows={1}
-                  onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReviseDraft(); } }}
-                />
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <Textarea
+                    value={reviseInstruction}
+                    onChange={(e) => setReviseInstruction(e.target.value)}
+                    placeholder="Tell AI how to change it..."
+                    className="text-sm min-h-[2rem] bg-white dark:bg-background resize-none"
+                    rows={1}
+                    onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReviseDraft(); } }}
+                  />
+                </div>
+                <Button variant="outline" size="sm" className="h-8 bg-white dark:bg-background" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
+                  {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+                </Button>
               </div>
-              <Button variant="outline" size="sm" className="h-8 bg-white dark:bg-background" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
-                {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-              </Button>
-            </div>
 
-            <AttachmentPicker
-              attachments={approveAttachments}
-              onAttachmentsChange={setApproveAttachments}
-              sourceType="agent_message"
-            />
+              <AttachmentPicker
+                attachments={approveAttachments}
+                onAttachmentsChange={setApproveAttachments}
+                sourceType="agent_message"
+              />
 
-            <div className="flex gap-2">
-              {editing && (
+              <div className="flex gap-2">
                 <Button
                   variant="outline"
                   className="flex-1"
@@ -529,13 +552,13 @@ export function ThreadDetailSheet({
                 >
                   Save Draft
                 </Button>
-              )}
-              <Button onClick={() => handleApprove(editing ? editText : undefined)} disabled={sending} className="flex-1">
-                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                {editing ? "Send" : "Approve & Send"}
-              </Button>
+                <Button onClick={() => handleApprove(editText)} disabled={sending} className="flex-1">
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Send
+                </Button>
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {/* Follow-up area for handled threads */}
@@ -636,27 +659,13 @@ export function ThreadDetailSheet({
             )}
           </div>
 
-        {/* Actions: Dismiss, Archive, Delete */}
+        {/* Actions: Mark Handled, Archive, Delete */}
         <div className="flex justify-between items-center pt-2 border-t">
           <div className="flex gap-2">
-            {thread.has_pending && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={sending}>
-                    Dismiss
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Dismiss this thread?</AlertDialogTitle>
-                    <AlertDialogDescription>No reply will be sent for the pending message.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDismiss}>Dismiss</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+            {(thread.has_pending || thread.status !== "handled") && (
+              <Button variant="ghost" size="sm" className="text-xs" onClick={handleMarkHandled} disabled={sending}>
+                Mark Handled
+              </Button>
             )}
             <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={handleArchive} disabled={sending}>
               Archive

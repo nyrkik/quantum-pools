@@ -137,16 +137,6 @@ export function DeepBlueSheet() {
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 100);
-      // Auto-resume most recent conversation if none active
-      if (!conversationId && messages.length === 0) {
-        api.get<{ conversations: ConversationListItem[] }>("/v1/deepblue/conversations?scope=mine&limit=1")
-          .then((data) => {
-            if (data.conversations.length > 0) {
-              loadConversation(data.conversations[0].id);
-            }
-          })
-          .catch(() => {});
-      }
     }
   }, [isOpen]);
 

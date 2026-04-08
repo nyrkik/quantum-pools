@@ -48,7 +48,13 @@ export function DeepBlueProvider({ children }: { children: ReactNode }) {
   const contextRef = useRef<DeepBlueContextData>({});
 
   const openDeepBlue = useCallback(() => setIsOpen(true), []);
-  const closeDeepBlue = useCallback(() => setIsOpen(false), []);
+  const closeDeepBlue = useCallback(() => {
+    setIsOpen(false);
+    // Clear conversation on close — next open starts fresh
+    setMessages([]);
+    setConversationId(null);
+    conversationIdRef.current = null;
+  }, []);
   const toggleDeepBlue = useCallback(() => setIsOpen((p) => !p), []);
 
   const setContext = useCallback((ctx: DeepBlueContextData) => {

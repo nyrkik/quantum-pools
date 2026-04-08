@@ -5,20 +5,28 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Send, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
-import { ToolResultCard } from "./tool-cards";
+import { ChatMessageList } from "./chat-message-list";
+import { parseStoredMessages, type ChatMessage } from "./message-row";
 
-interface ConversationMessage {
-  role: string;
-  content: string;
-  timestamp: string;
-  toolResults?: { name: string; result: Record<string, unknown> }[];
+interface RawConversation {
+  id: string;
+  title: string;
+  messages: Record<string, unknown>[];
+  updated_at: string;
 }
 
 interface Conversation {
   id: string;
   title: string;
-  messages: ConversationMessage[];
+  messages: ChatMessage[];
   updated_at: string;
+}
+
+function parseConversations(raw: RawConversation[]): Conversation[] {
+  return raw.map((c) => ({
+    ...c,
+    messages: parseStoredMessages(c.messages, c.id),
+  }));
 }
 
 export function CaseDeepBlueCard({
@@ -29,30 +37,27 @@ export function CaseDeepBlueCard({
 }: {
   caseId: string;
   customerId: string | null;
-  conversations: Conversation[];
+  conversations: RawConversation[];
   onUpdate: () => void;
 }) {
-  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
+  const [conversations, setConversations] = useState<Conversation[]>(() => parseConversations(initialConversations));
   const [activeConvoId, setActiveConvoId] = useState<string | null>(
     initialConversations.length > 0 ? initialConversations[0].id : null
   );
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
-  const [expanded, setExpanded] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(initialConversations.length > 0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    setConversations(initialConversations);
-    if (!activeConvoId && initialConversations.length > 0) {
-      setActiveConvoId(initialConversations[0].id);
+    const parsed = parseConversations(initialConversations);
+    setConversations(parsed);
+    if (!activeConvoId && parsed.length > 0) {
+      setActiveConvoId(parsed[0].id);
     }
   }, [initialConversations]);
 
-  useEffect(() => {
-    if (expanded) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversations, streamingContent, expanded]);
 
   const activeConvo = conversations.find((c) => c.id === activeConvoId);
 
@@ -66,7 +71,7 @@ export function CaseDeepBlueCard({
     if (!expanded) setExpanded(true);
 
     // Optimistic user message
-    const tempUserMsg: ConversationMessage = { role: "user", content: text, timestamp: new Date().toISOString() };
+    const tempUserMsg: ChatMessage = { role: "user", content: text, timestamp: new Date().toISOString() };
     if (activeConvoId) {
       setConversations((prev) =>
         prev.map((c) =>
@@ -134,7 +139,7 @@ export function CaseDeepBlueCard({
       }
 
       // Finalize: add assistant message to conversation
-      const assistantMsg: ConversationMessage = {
+      const assistantMsg: ChatMessage = {
         role: "assistant",
         content: fullContent,
         timestamp: new Date().toISOString(),
@@ -214,31 +219,13 @@ export function CaseDeepBlueCard({
         {/* Messages */}
         {expanded && (
           <div className="max-h-[300px] overflow-y-auto space-y-2 mb-2">
-            {activeConvo?.messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs ${
-                  m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted/70"
-                }`}>
-                  {m.content && <div className="whitespace-pre-wrap">{m.content}</div>}
-                  {m.toolResults?.map((tr, j) => (
-                    <ToolResultCard key={j} name={tr.name} result={tr.result} />
-                  ))}
-                </div>
-              </div>
-            ))}
-            {streamingContent && (
-              <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs bg-muted/70">
-                  <div className="whitespace-pre-wrap">{streamingContent}</div>
-                </div>
-              </div>
-            )}
-            {!activeConvo?.messages.length && !streamingContent && (
-              <p className="text-xs text-muted-foreground text-center py-3">
-                Ask DeepBlue about this case...
-              </p>
-            )}
-            <div ref={messagesEndRef} />
+            <ChatMessageList
+              messages={activeConvo?.messages || []}
+              streamingContent={streamingContent || undefined}
+              emptyStateVariant="sheet"
+              historical={false}
+              conversationId={activeConvoId}
+            />
           </div>
         )}
 

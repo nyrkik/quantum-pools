@@ -230,7 +230,7 @@ export function ConfirmCard({
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : stale ? (
-        <p className="text-muted-foreground text-[10px] pt-1 border-t">Expired — conversation continued</p>
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Completed</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={saving}>
@@ -333,7 +333,7 @@ export function BroadcastPreviewCard({ preview, stale = false }: { preview: Reco
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : stale ? (
-        <p className="text-muted-foreground text-[10px] pt-1 border-t">Expired — conversation continued</p>
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Completed</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleConfirm} disabled={sending || !subject.trim() || !body.trim()}>
@@ -410,7 +410,7 @@ export function CustomerEmailPreviewCard({ preview, stale = false }: { preview: 
       ) : cancelled ? (
         <p className="text-muted-foreground text-[10px] pt-1 border-t">Cancelled</p>
       ) : stale ? (
-        <p className="text-muted-foreground text-[10px] pt-1 border-t">Expired — conversation continued</p>
+        <p className="text-muted-foreground text-[10px] pt-1 border-t">Completed</p>
       ) : (
         <div className="flex gap-2">
           <Button size="sm" className="h-8 flex-1" onClick={handleSend} disabled={sending || !subject.trim() || !body.trim()}>

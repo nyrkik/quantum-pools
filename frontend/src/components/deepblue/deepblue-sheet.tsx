@@ -151,7 +151,7 @@ export function DeepBlueSheet() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[70] flex flex-col bg-background border-t shadow-2xl ring-1 ring-black/5 sm:right-4 sm:left-auto sm:bottom-4 sm:w-[420px] sm:rounded-xl sm:border sm:border-primary/15 sm:max-h-[600px] sm:shadow-[0_8px_40px_-8px_rgba(0,0,0,0.2)]"
+    <div className="fixed inset-x-0 bottom-0 z-[70] flex flex-col bg-slate-50 dark:bg-slate-900 border-t shadow-2xl ring-1 ring-black/10 sm:right-4 sm:left-auto sm:bottom-4 sm:w-[420px] sm:rounded-xl sm:border sm:border-slate-200 dark:sm:border-slate-700 sm:max-h-[600px] sm:shadow-[0_8px_40px_-8px_rgba(0,0,0,0.25)]"
       style={{ maxHeight: "75vh" }}
     >
       {/* Header */}

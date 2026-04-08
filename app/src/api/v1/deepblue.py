@@ -1123,6 +1123,20 @@ async def confirm_create_case(
         if conv:
             conv.case_id = case.id
 
+    # Link email threads created during this conversation to the case
+    if req.conversation_id and conv and req.customer_id:
+        from src.models.agent_thread import AgentThread
+        from sqlalchemy import update
+        # Only link threads created after the conversation started
+        await db.execute(
+            update(AgentThread).where(
+                AgentThread.organization_id == ctx.organization_id,
+                AgentThread.matched_customer_id == req.customer_id,
+                AgentThread.case_id.is_(None),
+                AgentThread.created_at >= conv.created_at,
+            ).values(case_id=case.id)
+        )
+
     await db.commit()
     return {
         "case_id": case.id,

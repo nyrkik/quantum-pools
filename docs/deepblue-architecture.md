@@ -203,7 +203,7 @@ Max 5 tool-use rounds per turn prevents runaway loops. Per-turn counter in `Tool
 ### Action (requires preview + confirm)
 - `draft_broadcast_email` — bulk email with recipient filters (all_active, commercial, residential, custom, test)
 - `draft_customer_email` — single customer email with subject/body
-- `create_case` — create a service case, auto-links conversation + customer email threads to the case
+- `create_case` — create a service case, auto-links conversation + customer email threads to the case. Fuzzy-matches customer from title text when no customer_id in context. Confirmation card includes editable customer picker (search existing or enter non-DB name).
 - `add_equipment_to_pool` — adds equipment_items row
 - `log_chemical_reading` — adds chemical_readings row
 - `update_customer_note` — appends to customers.notes

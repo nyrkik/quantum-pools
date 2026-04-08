@@ -113,7 +113,7 @@ Unified case entity linking threads, jobs, and invoices.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| ServiceCase | `service_cases` | Parent case tying together threads, jobs, invoices, and internal threads for a customer issue |
+| ServiceCase | `service_cases` | Parent case tying together threads, jobs, invoices, and internal threads for a customer issue. Tracks `manager_name` (coordinator), `current_actor_name` (derived: who needs to act next), `billing_name` (non-DB customers), and 7 attention flags (`flag_estimate_approved`, `flag_estimate_rejected`, `flag_payment_received`, `flag_customer_replied`, `flag_jobs_complete`, `flag_invoice_overdue`, `flag_stale`) |
 
 ### AI Agents & Jobs
 

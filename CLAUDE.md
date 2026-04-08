@@ -197,6 +197,8 @@ After touching any email-sending path, send a test email to brian.parrotte@pm.me
 - **Old app reference**: `/mnt/Projects/quantum-pools` — original single-tenant app. SQL dump with all customer/driver data at `backups/backup_pre_saas.sql`. Migration script at `app/scripts/migrate_from_old.py`.
 - **Responsive layout**: Sidebar hidden on mobile, replaced with hamburger menu (Sheet). Main content uses `p-4 sm:p-6` padding, `pt-16` clears mobile top bar.
 - **Properties under Customers**: Properties are accessed via Customer detail page (vertical stacked layout, no tabs), not as a top-level nav item. `/properties` route still exists for direct links.
+- **Case ownership**: `manager_name` = coordinator (set at creation, reassignable via inline popover). `current_actor_name` = derived from open job assignees → pending thread assignees → "Awaiting customer" → manager fallback. Recomputed by `update_status_from_children()` on every job/thread mutation. 7 boolean flags auto-set from child state. Cases support `billing_name` for non-DB customers.
+- **Case detail**: Two-column (timeline left, detail right). Desktop auto-selects first timeline item. Mobile: detail opens as bottom sheet on tap only. Action buttons (+ Email, + Task, + Estimate, + Job, DeepBlue) are icon-only on mobile. Jobs and tasks are inline-editable in the detail panel (assignee dropdown, description edit, status toggle).
 - **Client detail layout**: Vertical stack — client card (with nested contact/billing tiles) → property tiles (with nested WF tiles) → collapsible invoices accordion. No tabs.
 - **WF progressive disclosure**: Water feature tiles have 3 levels — collapsed (name, gallons, minutes, service days), tech quick view (equipment, sanitizer, access, gate/dog), full manager details (dimensions, billing, pool info). Measure tool (Ruler button) is in the WF header row.
 - **Property override toggle**: Properties inherit client address/access info by default. "Different info for this property" toggle reveals address, gate code, access notes, dog, locked to day, notes fields.
@@ -343,7 +345,7 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 ### Systems Built Outside Original Phases
 - Email/Agent Pipeline: AI inbox with triage, classification, auto-drafting, customer matching, thread management
 - DeepBlue: Conversational AI assistant with 29 domain tools, eval suite, usage tracking
-- Service Cases: Unifying entity linking threads → jobs → invoices per customer issue
+- Service Cases: Unifying entity linking threads → jobs → invoices per customer issue. Manager/actor ownership tracking, 7 attention flags (estimate approved/rejected, customer replied, jobs complete, payment received, invoice overdue, stale), inline reassign, customer picker with non-DB support
 - Internal Messaging: Staff-to-staff messaging with threads, notifications, case linking
 - Real-Time Events: Redis Pub/Sub + WebSocket gateway for instant UI updates
 - Equipment & Parts: Catalog (114 entries), items per property, parts (434), vendor tracking

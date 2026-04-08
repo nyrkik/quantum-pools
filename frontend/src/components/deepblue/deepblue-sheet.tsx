@@ -151,11 +151,11 @@ export function DeepBlueSheet() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[70] flex flex-col bg-slate-50 dark:bg-slate-900 border-t shadow-2xl ring-1 ring-black/10 sm:right-4 sm:left-auto sm:bottom-4 sm:w-[420px] sm:rounded-xl sm:border sm:border-slate-200 dark:sm:border-slate-700 sm:max-h-[600px] sm:shadow-[0_8px_40px_-8px_rgba(0,0,0,0.25)]"
+    <div className="fixed inset-x-0 bottom-0 z-[70] flex flex-col bg-blue-50/80 dark:bg-blue-950/40 border-t shadow-2xl ring-1 ring-blue-200/50 sm:right-4 sm:left-auto sm:bottom-4 sm:w-[420px] sm:rounded-xl sm:border sm:border-blue-200/60 dark:sm:border-blue-800/40 sm:max-h-[600px] sm:shadow-[0_8px_40px_-8px_rgba(30,64,175,0.15)]"
       style={{ maxHeight: "75vh" }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-primary/5 shrink-0 sm:rounded-t-xl">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-blue-200/60 dark:border-blue-800/40 bg-blue-100/60 dark:bg-blue-900/30 shrink-0 sm:rounded-t-xl">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">DeepBlue</span>
@@ -296,7 +296,7 @@ export function DeepBlueSheet() {
       )}
 
       {/* Input */}
-      <div className="shrink-0 px-3 py-2.5 border-t">
+      <div className="shrink-0 px-3 py-2.5 border-t border-blue-200/60 dark:border-blue-800/40">
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}

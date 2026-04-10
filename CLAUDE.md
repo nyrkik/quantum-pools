@@ -25,7 +25,7 @@ Enterprise pool service management platform consolidating:
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
-| Email | Postmark (primary), SMTP (fallback) — see `docs/email-pipeline.md` |
+| Email | Postmark (outbound) + Cloudflare Email Workers (inbound, "managed mode"). Multi-mode plan: see `docs/email-strategy.md` |
 | Payments | Stripe Checkout (test mode), webhook for confirmation, verify-on-return fallback |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
@@ -359,7 +359,10 @@ Architecture docs live in `docs/`. Read these for system details beyond what CLA
 
 | Doc | Covers |
 |-----|--------|
-| `docs/email-pipeline.md` | Full email flow: inbound → triage → classify → thread → draft → send |
+| `docs/email-strategy.md` | Email vision: multi-mode integration (Gmail API, MS Graph, forwarding, managed). Why QP is email-aware, not an email server. |
+| `docs/email-integrations-plan.md` | Detailed phased build plan for multi-mode email support |
+| `docs/sapphire-gmail-hybrid.md` | Phase 0: Sapphire Pools hybrid setup (Cloudflare → Gmail + Worker) |
+| `docs/email-pipeline.md` | Current managed-mode architecture (Cloudflare Workers + Postmark) |
 | `docs/realtime-events.md` | WebSocket + Redis Pub/Sub, event types, frontend hooks, how to add events |
 | `docs/data-model.md` | All 78 models organized by domain, relationships, conventions, deprecated fields |
 | `docs/deepblue-architecture.md` | DeepBlue AI: engine, tools, eval suite, quota, knowledge gaps |

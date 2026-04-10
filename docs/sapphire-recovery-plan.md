@@ -11,7 +11,10 @@ This document is the plan to revert Sapphire to a normal customer email setup (G
 ## Decisions made (2026-04-10)
 
 - **Approach**: Choice 1 — build Phase 5b.2 (Gmail OAuth + API integration) properly, no interim BCC hacks. Sapphire will be the first customer on Gmail mode.
-- **Workspace plan**: Business Starter at $6/user/month, **3 paid seats** = $18/month
+- **Workspace plan**: **Business Starter at $6/user/month**, target = $18/month for 3 paid seats
+  - **GOTCHA**: Google's signup flow defaults to Business Plus ($19.80/user/month) and hides the Starter option. Brian signed up on Business Plus on 2026-04-10 because Starter wasn't visible at signup.
+  - **ACTION REQUIRED before 2026-04-24** (14 days from signup, end of free trial): downgrade from Business Plus → Business Starter via Admin Console → Billing → Subscriptions → Switch plan. Otherwise billing kicks in at $19.80/user instead of $6/user.
+  - The downgrade is reversible and doesn't affect data — just removes Vault, advanced features, and reduces storage from 2TB to 30GB/user (none of which Sapphire needs).
 - **Users**: `brian@`, `kim@`, `chance@` as paid seats
 - **Shared addresses**: Google Groups (free), routing to the appropriate users:
   - `contact@sapphire-pools.com` → brian + kim + chance

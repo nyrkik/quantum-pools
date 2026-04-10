@@ -1,13 +1,14 @@
 # QuantumPools — Production Build Plan
 
-## Current State (updated 2026-04-07)
+## Current State (updated 2026-04-10)
 - **78 database models**, **370+ API endpoints**, **39 frontend pages**
 - Phases 0-2 complete (auth, RBAC, customers, properties, techs, visits, routes, maps, OR-Tools)
 - Phase 3a complete (invoices, payments, estimates, approval workflows)
 - Phase 3b complete (profitability analysis, difficulty scoring, bather load, satellite detection)
-- Phase 3c partial (email service built with Postmark, PDF generation built, Stripe subscription management exists; AutoPay/recurring billing not started)
+- Phase 3c partial (Postmark outbound, PDF generation, Stripe subscriptions; AutoPay/recurring billing not started)
 - Phase 3d partial (dosing engine exists, service checklists built; guided workflows not started)
 - Phase 5 complete (inspection scraping, PDF extraction, 908 facilities, frontend dashboard)
+- **Phase 5b NEW:** Email integrations (multi-mode) — currently Sapphire on managed mode (Cloudflare Workers + Postmark). Plan: Gmail API, MS Graph, forwarding modes for SaaS. See `docs/email-strategy.md`.
 - **Additional systems built not in original plan:** email/agent pipeline, AI inbox with triage, DeepBlue conversational AI, service cases, internal messaging, equipment catalog + parts, visit experience, real-time WebSocket events, granular permissions (60 slugs), à la carte subscriptions
 - Running on MS-01 via systemd + Cloudflare Tunnel (quantumpoolspro.com)
 - No tests, no CI/CD, no platform admin
@@ -127,11 +128,17 @@ _Priority: CRITICAL — can't charge customers without this_
 - [ ] Customer self-service AutoPay management (in portal)
 
 ### 3c.2 Email Service
-- [x] `EmailService` with provider abstraction (Postmark primary, SMTP fallback)
+- [x] `EmailService` with provider abstraction
+- [x] **Postmark-only** for outbound (no SMTP fallback — fails loudly to Sentry/ntfy)
 - [x] HTML email templates (Jinja2 rendering)
 - [x] Invoice/estimate sending via email
-- [x] Delivery tracking (Postmark message IDs, sent_at)
+- [x] Delivery tracking (postmark_message_id stored on AgentMessage)
+- [x] Bounce/delivery webhooks (status updates AgentMessage)
+- [x] Cloudflare Email Workers for inbound (managed mode — Sapphire Pools)
+- [x] Provider-agnostic webhook ingestion (`inbound_email_service.py`)
+- [x] Sentry capture + ntfy alerts on all failures (no silent swallowing)
 - [ ] Opened_at tracking pixel (not yet implemented)
+- See `docs/email-pipeline.md` for current managed-mode architecture
 
 ### 3c.3 Service Email Reports ("Digital Door Hanger")
 - [ ] Auto-generate post-visit email per customer
@@ -264,6 +271,95 @@ _Completed 2026-03-25. 908 facilities, 1386 inspections, 8505 violations._
 - [x] Frontend: `/inspections` with full inspection browsing
 - [ ] AI-generated summaries and risk scores (planned for Inspection Intelligence agent)
 - [ ] Trend analysis (planned)
+
+---
+
+## PHASE 5b: Email Integrations (Multi-Mode)
+_Priority: CRITICAL — required before onboarding external customers with their own email_
+_See `docs/email-strategy.md` and `docs/email-integrations-plan.md` for full detail_
+
+**Strategy:** QP is an email-aware customer system, NOT an email server. Each org integrates with their existing email provider. Multi-mode architecture supports Gmail, Outlook, forwarding, managed (we host), and manual modes per organization.
+
+### 5b.0 Sapphire Hybrid (immediate, no code)
+- [ ] Cloudflare → forward to BOTH `sapphpools@gmail.com` AND our Worker
+- [ ] Verify dual delivery
+- [ ] Document in `docs/sapphire-gmail-hybrid.md` (done)
+- Restores Gmail's spam filtering, mobile push, search while keeping QP processing
+
+### 5b.1 EmailIntegration Foundation
+- [ ] New model: `EmailIntegration` (org_id, type, status, config JSONB, outbound_provider)
+- [ ] Refactor `EmailService.send_agent_reply()` to dispatch by org's `outbound_provider`
+- [ ] Refactor `inbound_email_service.py` to read org integration mode
+- [ ] Migration: backfill existing orgs (Sapphire = managed)
+- [ ] Encrypt `config` field at rest (Fernet or KMS)
+- [ ] Settings → Email read-only view
+
+### 5b.2 Gmail API Integration
+- [ ] Google Cloud project setup (OAuth credentials, Pub/Sub topic)
+- [ ] OAuth flow: `/v1/email-integrations/gmail/authorize`
+- [ ] `GmailSyncService.initial_sync(org_id, days=30)`
+- [ ] Pub/Sub push notifications → fetch and process
+- [ ] Two-way write: mark_read, mark_unread, add_label, send_reply, move_to_trash
+- [ ] Token refresh handler
+- [ ] New parser: `_parse_gmail_api()` in `inbound_email_service.py`
+- [ ] Settings → "Connect Gmail" UI with OAuth flow
+- [ ] Migrate Sapphire Pools from managed mode to Gmail mode
+
+### 5b.3 Inbox UI Redesign — Full Email Client
+- [ ] Folder/label sidebar (Inbox, Sent, Drafts, Trash, Spam, custom)
+- [ ] Multi-select with bulk actions
+- [ ] Threaded conversation view
+- [ ] Reply, Reply All, Forward
+- [ ] Compose new email to anyone
+- [ ] Drafts auto-save with Gmail sync
+- [ ] Attachment view/download/send
+- [ ] Search with filters (from:, to:, has:, dates)
+- [ ] Keyboard shortcuts
+- [ ] Two UI modes (full client vs customer-focused) — user preference
+- [ ] Same `AgentMessage` data model, different UI density
+
+### 5b.4 Microsoft Graph (Outlook) Integration
+- [ ] Microsoft Azure app registration
+- [ ] OAuth flow for Microsoft 365
+- [ ] `OutlookSyncService` mirroring Gmail pattern
+- [ ] Webhook subscriptions (Microsoft Graph change notifications)
+- [ ] Two-way write methods
+- [ ] New parser: `_parse_ms_graph()`
+
+### 5b.5 Forwarding Mode Polish
+- [ ] Wildcard MX for `inbound.quantumpoolspro.com`
+- [ ] Cloudflare Worker dispatcher (lookup org by recipient subdomain)
+- [ ] Generate unique inbound address per org during onboarding
+- [ ] Settings → Forwarding setup wizard with copy buttons + per-provider instructions
+
+### 5b.6 Onboarding Wizard
+- [ ] "How do you handle email?" step in signup
+- [ ] Mode-specific setup flows
+- [ ] Initial sync progress UI
+- [ ] Test email sender to verify config
+
+### 5b.7 Per-Domain Postmark Sender Verification
+- [ ] Postmark Account API integration
+- [ ] Add domain → display DKIM/Return-Path records
+- [ ] Verify button → poll Postmark API
+- [ ] Store verified domain on `EmailIntegration.config`
+
+### 5b.8 Permission UI Polish
+- [ ] Settings → Inbox Routing UI (visual rule builder)
+- [ ] Auto-detect aliases (Gmail Groups, Outlook shared mailboxes)
+- [ ] "Owners always see all" toggle
+- [ ] Per-user notification preferences
+- [ ] Audit log UI ("who viewed which thread when")
+
+### 5b.9 Compliance & Security
+- [ ] Encrypt OAuth tokens at rest
+- [ ] Audit logging of email access
+- [ ] GDPR data export for emails
+- [ ] GDPR data deletion (per-org and per-customer)
+- [ ] Privacy policy update
+- [ ] Security review of OAuth scopes
+- [ ] Rate limiting on email API calls
+- [ ] Monitoring for abnormal access patterns
 
 ---
 

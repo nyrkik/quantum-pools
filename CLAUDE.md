@@ -339,6 +339,7 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
+- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE (Sapphire on Cloudflare+Postmark). Gmail API, MS Graph, forwarding modes PLANNED. See `docs/email-strategy.md`.
 - [ ] Phase 6: Platform Admin (tenant management, subscriptions)
 - [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
 

@@ -280,11 +280,12 @@ _See `docs/email-strategy.md` and `docs/email-integrations-plan.md` for full det
 
 **Strategy:** QP is an email-aware customer system, NOT an email server. Each org integrates with their existing email provider. Multi-mode architecture supports Gmail, Outlook, forwarding, managed (we host), and manual modes per organization.
 
-### 5b.0 Sapphire Hybrid (immediate, no code)
-- [ ] Cloudflare → forward to BOTH `sapphpools@gmail.com` AND our Worker
-- [ ] Verify dual delivery
-- [ ] Document in `docs/sapphire-gmail-hybrid.md` (done)
-- Restores Gmail's spam filtering, mobile push, search while keeping QP processing
+### 5b.0 Sapphire Recovery (customer-side, not a QP build task)
+**Sapphire is a customer, not QP infrastructure.** See `docs/sapphire-recovery-plan.md`. The 2026-04-09 managed-mode setup was the wrong call for Sapphire and is being reverted. The managed-mode code stays as a future product feature for customers without existing email.
+- [ ] Sapphire upgrades to Google Workspace (~30 min, customer-side)
+- [ ] Sapphire DNS reverts to Google MX (~10 min, customer-side)
+- [ ] QP Cloudflare Worker rules decommissioned for sapphire-pools.com
+- [ ] Optional: Gmail filter bridge for customer emails until Phase 5b.2 ships
 
 ### 5b.1 EmailIntegration Foundation
 - [ ] New model: `EmailIntegration` (org_id, type, status, config JSONB, outbound_provider)

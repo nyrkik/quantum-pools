@@ -2,6 +2,22 @@
 
 **Repo**: `git@github.com:nyrkik/quantum-pools.git`
 
+## Business Context (CRITICAL — read before making any infrastructure decisions)
+
+**Quantum Pools** is a SaaS product. It is the codebase in this repo. It will become a standalone LLC (currently under VVG LLC, transition planned). Its domain is `quantumpoolspro.com`. Its email infrastructure (sales@, support@, billing@) is QP's own concern.
+
+**Sapphire Pool Service** is a pool service business — a DBA under BESC Enterprises Inc. (a ROBS C Corp with restrictive terms). Sapphire's domain is `sapphire-pools.com`. **Sapphire is a CUSTOMER of Quantum Pools**, not part of QP. It's the dogfood account because Brian owns both, but they are separate entities with separate concerns.
+
+### The conflation rule (mandatory)
+
+When making decisions about email, DNS, infrastructure, billing, or anything customer-facing, ALWAYS ask:
+- "Is this a Quantum Pools concern (the SaaS product) or a Sapphire concern (a customer)?"
+- "If a different customer onboarded today, would they configure this the same way?"
+
+If the answer is "Sapphire would do it differently because Brian owns both," that's wrong. Sapphire should be configured exactly like every other customer will be. Brian owns Sapphire as a separate business — Sapphire's choices belong to Sapphire.
+
+**Past mistake (2026-04-09):** Treated Sapphire's email as QP infrastructure, set up Cloudflare Workers + Postmark managed mode for Sapphire. The code is correct and reusable as a future managed-mode product feature, but Sapphire shouldn't be on it. Sapphire should be on Google Workspace like a normal customer. See `docs/sapphire-recovery-plan.md`.
+
 ## Project Overview
 Enterprise pool service management platform consolidating:
 - **BarkurrRX** (architecture reference): FastAPI + Next.js 16 + React 19 + TypeScript + Tailwind 4 + shadcn/ui
@@ -183,6 +199,21 @@ After ANY code change, deploy via `/srv/quantumpools/scripts/deploy.sh`. Never r
 ### Email Code Changes
 After touching any email-sending path, send a test email to brian.parrotte@pm.me and verify: (1) email arrives, (2) no 500 in logs, (3) AgentMessage record exists, (4) thread shows in inbox.
 
+### Documentation Alignment (MANDATORY for /cpu and any commit touching docs)
+
+**Whenever you create, rename, or delete a doc:** the change MUST be reflected in CLAUDE.md "Documentation Index" in the **same commit**. No orphaned docs.
+
+**Whenever `/cpu` runs:** before committing, perform this check:
+1. List actual files: `ls docs/*.md`
+2. Compare against entries in CLAUDE.md "Documentation Index"
+3. **Drift = error.** Either:
+   - A doc exists on disk but isn't in the index → add it to the index
+   - A doc is in the index but doesn't exist → remove from index, check for broken cross-references in other docs
+4. Also grep for stale doc references: `grep -rn 'docs/[a-z-]*\.md' docs/ CLAUDE.md` and ensure every reference resolves to a real file
+5. Only commit after the index and the filesystem agree
+
+**Why this exists:** Past sessions have created docs that the rest of the project never learned about. CLAUDE.md is the single entry point — every doc must be reachable from there.
+
 ## Dev Environment Notes
 
 - **Python venv**: `/home/brian/00_MyProjects/QuantumPools/venv` (NOT inside `app/`)
@@ -354,20 +385,43 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - À La Carte Subscriptions: Feature gating with tiers, trial support, Stripe customer IDs
 - Feedback System: In-app user feedback with screenshots and resolution tracking
 
-## Documentation
+## Documentation Index (SOURCE OF TRUTH)
 
-Architecture docs live in `docs/`. Read these for system details beyond what CLAUDE.md covers.
+This is the canonical index of all project documentation. **Whenever you create a new doc, add it here in the same commit.** Whenever `/cpu` runs, it must verify this index matches the actual contents of `/docs` and flag any drift.
 
-| Doc | Covers |
-|-----|--------|
-| `docs/email-strategy.md` | Email vision: multi-mode integration (Gmail API, MS Graph, forwarding, managed). Why QP is email-aware, not an email server. |
-| `docs/email-integrations-plan.md` | Detailed phased build plan for multi-mode email support |
-| `docs/sapphire-gmail-hybrid.md` | Phase 0: Sapphire Pools hybrid setup (Cloudflare → Gmail + Worker) |
-| `docs/email-pipeline.md` | Current managed-mode architecture (Cloudflare Workers + Postmark) |
-| `docs/realtime-events.md` | WebSocket + Redis Pub/Sub, event types, frontend hooks, how to add events |
-| `docs/data-model.md` | All 78 models organized by domain, relationships, conventions, deprecated fields |
-| `docs/deepblue-architecture.md` | DeepBlue AI: engine, tools, eval suite, quota, knowledge gaps |
-| `docs/ai-agents-plan.md` | 10 planned domain agents (product roadmap), current implementation status |
-| `docs/build-plan.md` | Full phase roadmap with completion status, feature priority tiers |
-| `docs/profitability-feature-plan.md` | Detailed spec for profitability (scoring weights, jurisdiction formulas) |
+### Strategy & Vision
+| Doc | Purpose |
+|-----|---------|
+| `docs/email-strategy.md` | Why QP is an email-aware customer system, NOT an email server. Multi-mode integration architecture. Decision log. |
 | `docs/competitive-research.md` | Market audit, competitor analysis, our differentiators (with build status) |
+
+### Build Plans (forward-looking, with checkboxes)
+| Doc | Purpose |
+|-----|---------|
+| `docs/build-plan.md` | Master phase roadmap with completion status. Phases 0-10, all sub-phases. |
+| `docs/email-integrations-plan.md` | Detailed Phase 5b plan: 9 sub-phases for multi-mode email support |
+| `docs/profitability-feature-plan.md` | Phase 3b spec (scoring weights, jurisdiction formulas) |
+| `docs/ai-agents-plan.md` | 10 planned AI agents (product roadmap), current implementation status |
+
+### Architecture Reference (current state, factual)
+| Doc | Purpose |
+|-----|---------|
+| `docs/data-model.md` | All 78 models organized by domain, relationships, conventions, deprecated fields |
+| `docs/email-pipeline.md` | Current managed-mode email architecture (Cloudflare Workers + Postmark) |
+| `docs/realtime-events.md` | WebSocket + Redis Pub/Sub, event types, frontend hooks |
+| `docs/deepblue-architecture.md` | DeepBlue AI engine, tools, eval suite, quota |
+
+### Operational / One-Off Plans
+| Doc | Purpose |
+|-----|---------|
+| `docs/sapphire-recovery-plan.md` | Plan to revert Sapphire from managed mode back to Google Workspace (Sapphire is a customer, not QP infra) |
+| `docs/audit-2026-04-07.md` | Code health audit findings |
+
+### Doc Maintenance Rules
+
+1. **New doc → must be added to this index in the same commit.** No orphaned docs.
+2. **Renamed/moved doc → update the index immediately.**
+3. **Deleted doc → remove from index and check for stale references in other docs.**
+4. **`/cpu` must verify alignment**: list `docs/*.md` and confirm every file is in this index, and every index entry exists. Flag drift before committing.
+5. **Cross-reference rule**: when a doc references another doc, use the path from this index. Don't invent new paths.
+6. **CLAUDE.md is the entry point** — every new contributor (or future Claude session) starts here. If something is important enough that future work depends on it, it must be reachable from CLAUDE.md within one click.

@@ -1,37 +1,22 @@
 # Email Integrations — Implementation Plan
 
-This is the detailed build plan to support multiple email integration modes per organization. See `email-strategy.md` for the high-level vision.
+This is the detailed build plan to support multiple email integration modes per organization. See `email-strategy.md` for the high-level vision and CLAUDE.md "Business Context" for the entity distinction (Sapphire is a customer, QP is the product).
 
 ## Current state (as of 2026-04-10)
 
-- **Sapphire Pools**: managed mode (Cloudflare Workers + Postmark). Working but lacks spam filtering.
+- **Sapphire Pools**: currently on managed mode (Cloudflare Workers + Postmark) — but this was a mistake. Sapphire is a customer, not QP infrastructure. Being reverted to Google Workspace per `docs/sapphire-recovery-plan.md`.
+- **Quantum Pools (the product)**: outbound sends via Postmark for transactional emails on `quantumpoolspro.com`. Inbound for QP-as-a-business not yet set up (will live under new QP LLC's Google Workspace).
 - **Architecture**: provider-agnostic webhook ingestion already exists. `AgentMessage` model is source-agnostic. Permission-based visibility already works.
 - **Outbound**: Postmark only, no SMTP fallback. Per-org sender via `agent_from_email`.
 - **Monitoring**: Sentry + ntfy alerts on failures.
 
-## Phase 0: Sapphire Hybrid (immediate, no code)
+## Phase 0: Sapphire Recovery (immediate, customer-side action)
 
-**Goal:** Get Gmail's spam filtering back for Sapphire Pools without breaking the current architecture.
+**This is not a QP build task** — it's a customer-side fix. Sapphire (the customer) upgrades to Google Workspace and reverts DNS to Google. QP doesn't change. See `docs/sapphire-recovery-plan.md` for the step-by-step.
 
-**Approach:** Cloudflare Email Routing currently sends emails directly to our Worker. We change it to forward to BOTH `sapphpools@gmail.com` AND our Worker. Brian/team uses Gmail as their email client (mobile, search, spam filtering), and the QP app continues to ingest emails for AI processing and case linking.
+**Why this happens before Phase 1**: Brian needs working email immediately for his pool service business. Waiting for the multi-mode build (Phases 1-2) would mean 3+ weeks of broken email. The recovery is ~30 minutes and unblocks Brian.
 
-**Tradeoffs:**
-- Pro: Gmail's spam filtering, mobile apps, search, calendar — all back
-- Pro: Zero code changes, ~10 minutes of config
-- Pro: QP app still gets every email for AI processing
-- Con: Two-way sync doesn't work — marking read in Gmail doesn't mark read in QP
-- Con: Replies sent from Gmail bypass QP's outbound logic, signature, tracking
-- Con: Replies sent from QP don't appear in Gmail's Sent folder
-
-**Implementation:**
-1. Cloudflare → Email Routing → Routing rules
-2. For each rule (`contact@`, `brian@`, `kim@`, `chance@`, catch-all):
-   - Add a second action: "Send to email" → `sapphpools@gmail.com`
-   - Keep the existing "Send to worker" action
-3. Verify by sending a test email — should arrive in both Gmail AND the QP inbox
-4. Done
-
-**OR** alternative without changing routing rules: have the Worker itself forward to Gmail after POSTing to webhook. Slightly more complex but keeps routing config simple.
+**What QP does in this phase**: nothing. Sapphire's email leaving managed mode means Sapphire emails stop flowing into QP for now. Manual entry or Gmail forwarding bridge until Phase 5b.2 ships.
 
 ## Phase 1: EmailIntegration foundation (1 week)
 
@@ -279,6 +264,16 @@ Toggle in Settings → Inbox. Same data model, different filter and UI density.
 
 ## Sapphire Pools migration timeline
 
-- **Today**: Phase 0 — set up Cloudflare to forward to Gmail in addition to Worker. ~10 min config.
-- **Phase 2 complete**: Sapphire switches to Gmail API mode. Disconnect managed mode. Cloudflare MX → Google MX.
-- **Until Phase 2**: Sapphire runs in hybrid (Cloudflare → Gmail + Worker). Best of both temporarily.
+See `docs/sapphire-recovery-plan.md` for full detail. Summary:
+
+- **Today**: Sapphire upgrades to Google Workspace. DNS reverts to Google MX. Sapphire becomes a normal customer with their own email infrastructure. QP-side managed mode is decommissioned for Sapphire.
+- **Until Phase 5b.2**: Sapphire emails do NOT flow into QP automatically (no integration yet). Optional Gmail filter bridge for high-priority customer emails.
+- **Phase 5b.2 ships**: Sapphire connects via Gmail OAuth like any other customer. Full integration restored, but now via the right architecture.
+
+## Quantum Pools (the SaaS) email infrastructure timeline
+
+Separate from Sapphire — this is QP-as-a-business, not QP-as-product:
+
+- **Soon**: Form Quantum Pools LLC (separate from VVG and BESC).
+- **After LLC formation**: Set up Google Workspace for `@quantumpoolspro.com` under the new LLC. Sales, support, billing aliases. Postmark account ownership transfers (or stays under VVG with billing reassigned).
+- **Phase 5b.2 ships**: QP itself can integrate its own Workspace into the QP product (eat our own dog food).

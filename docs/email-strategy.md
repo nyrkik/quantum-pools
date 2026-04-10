@@ -1,5 +1,7 @@
 # Email Strategy
 
+> **Read first:** CLAUDE.md "Business Context" section. Quantum Pools is a SaaS product. Sapphire Pool Service is one of its customers, not part of QP infrastructure. This distinction matters for every email decision below.
+
 ## Vision
 
 QuantumPools is **an email-aware customer system**, not an email server. Each organization has its own existing email infrastructure (Gmail, Outlook, custom domain) and QP integrates with that infrastructure to provide AI-powered customer intelligence on top of it.
@@ -106,4 +108,6 @@ These are why we want Gmail mode for Sapphire Pools, even though the managed mod
 ## Decision log
 
 - **2026-04-09**: Migrated Sapphire Pools off Gmail to Cloudflare Workers + Postmark. Solved the silent IMAP failures, gained Postmark deliverability for outbound, but lost Gmail's filtering. Marked as "managed mode" — one of several supported modes.
-- **2026-04-10**: Decided to add Gmail API integration (and eventually MS Graph) so customers can keep their existing email client AND get QP's customer intelligence. Sapphire Pools will switch to Gmail mode when built.
+- **2026-04-10 (morning)**: Decided to add Gmail API integration (and eventually MS Graph) so customers can keep their existing email client AND get QP's customer intelligence.
+- **2026-04-10 (later)**: Recognized the entity-conflation mistake. Sapphire is a CUSTOMER, not QP infrastructure. Sapphire's email belongs to Sapphire (BESC) and should be on Google Workspace like every other customer. The managed-mode setup remains as a future product feature for customers without existing email, but Sapphire is being reverted. See `docs/sapphire-recovery-plan.md`.
+- **2026-04-10 (later)**: Quantum Pools to be formed as its own LLC, separate from VVG. QP-as-business needs its own Google Workspace for `@quantumpoolspro.com` — separate from Sapphire's Workspace, separate from VVG's Workspace.

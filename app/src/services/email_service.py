@@ -225,22 +225,7 @@ class EmailService:
             logger.info(f"Email sent to {message.to}: {message.subject}")
             return result
 
-        # Fallback: if primary provider failed and it's Postmark, try SMTP
-        if isinstance(self._provider, PostmarkProvider):
-            logger.warning(f"Postmark failed for {message.to}: {result.error} — falling back to SMTP")
-            # If Postmark is pending approval, switch to SMTP for remaining sends this session
-            if "pending approval" in (result.error or ""):
-                logger.info("Postmark pending approval — switching to SMTP for this session")
-                self._provider = SmtpProvider()
-            try:
-                smtp_result = await SmtpProvider().send(message)
-                if smtp_result.success:
-                    logger.info(f"Email sent via SMTP fallback to {message.to}")
-                    return smtp_result
-                logger.error(f"SMTP fallback also failed for {message.to}: {smtp_result.error}")
-            except Exception as e:
-                logger.error(f"SMTP fallback exception for {message.to}: {e}")
-
+        # Log failure — no silent fallback. Postmark is the provider.
         logger.error(f"Email send failed to {message.to}: {result.error}")
         return result
 
@@ -388,6 +373,68 @@ class EmailService:
             to=to, subject=final_subject, text_body=full_body, html_body=html_body,
             from_email=from_address, from_name=from_name, attachments=attachments,
         )
+        return await self.send_email(org_id, msg)
+
+    async def send_payment_failed_email(
+        self, org_id: str, to: str, customer_name: str,
+        invoice_number: str, amount: float, pay_url: str,
+        attempt_number: int,
+    ) -> EmailResult:
+        """Send payment failure notification to customer."""
+        org = await self._get_org(org_id)
+        org_name = org.name if org else "QuantumPools"
+
+        if attempt_number >= 3:
+            subject = f"Action Required — Payment for Invoice {invoice_number}"
+            body = (
+                f"Hi {customer_name},\n\n"
+                f"We've been unable to process your payment of ${amount:.2f} for invoice {invoice_number} "
+                f"after multiple attempts.\n\n"
+                f"Please update your payment method or pay directly using the link below:\n"
+                f"{pay_url}\n\n"
+                f"If you have any questions, please don't hesitate to reach out.\n\n"
+                f"Thank you,\n{org_name}"
+            )
+        else:
+            subject = f"Payment Update — Invoice {invoice_number}"
+            body = (
+                f"Hi {customer_name},\n\n"
+                f"We were unable to process your automatic payment of ${amount:.2f} for invoice {invoice_number}. "
+                f"We'll try again in a few days.\n\n"
+                f"If you'd like to pay now, you can use this link:\n"
+                f"{pay_url}\n\n"
+                f"Thank you,\n{org_name}"
+            )
+
+        from src.services.email_templates import customer_email_template
+        color = getattr(org, "branding_color", None) or "#1a1a2e"
+        _, html_body = customer_email_template(org_name, body, branding_color=color)
+
+        msg = EmailMessage(to=to, subject=subject, text_body=body, html_body=html_body)
+        return await self.send_email(org_id, msg)
+
+    async def send_autopay_receipt(
+        self, org_id: str, to: str, customer_name: str,
+        invoice_number: str, amount: float,
+    ) -> EmailResult:
+        """Send autopay payment confirmation to customer."""
+        org = await self._get_org(org_id)
+        org_name = org.name if org else "QuantumPools"
+
+        subject = f"Payment Received — Invoice {invoice_number}"
+        body = (
+            f"Hi {customer_name},\n\n"
+            f"Your automatic payment of ${amount:.2f} for invoice {invoice_number} "
+            f"has been processed successfully.\n\n"
+            f"Thank you for your continued business.\n\n"
+            f"Best regards,\n{org_name}"
+        )
+
+        from src.services.email_templates import customer_email_template
+        color = getattr(org, "branding_color", None) or "#1a1a2e"
+        _, html_body = customer_email_template(org_name, body, branding_color=color)
+
+        msg = EmailMessage(to=to, subject=subject, text_body=body, html_body=html_body)
         return await self.send_email(org_id, msg)
 
 

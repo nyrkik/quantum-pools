@@ -243,6 +243,7 @@ async def approve_agent_message(
     msg.approved_by = sender_name
     msg.approved_at = now
     msg.sent_at = now
+    msg.postmark_message_id = send_result.message_id
 
     # Record correction for agent learning
     from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
@@ -455,10 +456,9 @@ async def send_followup(
 
     sender_name = f"{ctx.user.first_name} {ctx.user.last_name}"
     email_svc = EmailService(db)
-    from_addr = msg.delivered_to if hasattr(msg, "delivered_to") and msg.delivered_to else None
     send_result = await email_svc.send_agent_reply(
         ctx.organization_id, msg.from_email, msg.subject or "", response_text,
-        from_address=from_addr, sender_name=sender_name,
+        sender_name=sender_name,
     )
     if not send_result.success:
         raise HTTPException(status_code=500, detail="Failed to send email")
@@ -471,7 +471,7 @@ async def send_followup(
     outbound = AgentMessage(
         organization_id=ctx.organization_id,
         direction="outbound",
-        from_email=from_addr or msg.to_email or "",
+        from_email=msg.to_email or "",
         to_email=msg.from_email,
         subject=subject,
         body=response_text,
@@ -479,6 +479,7 @@ async def send_followup(
         thread_id=msg.thread_id,
         matched_customer_id=msg.matched_customer_id,
         customer_name=msg.customer_name,
+        postmark_message_id=send_result.message_id,
         sent_at=now,
         received_at=now,
     )

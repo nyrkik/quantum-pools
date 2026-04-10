@@ -1,0 +1,6 @@
+name = "sapphire-pools-email"
+main = "src/index.ts"
+compatibility_date = "2024-09-25"
+
+[vars]
+WEBHOOK_URL = "https://api.quantumpoolspro.com/api/v1/inbound-email/webhook/sapphire?provider=cloudflare"

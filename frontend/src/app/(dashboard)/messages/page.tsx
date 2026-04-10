@@ -151,7 +151,7 @@ export default function MessagesPage() {
         </Button>
       }
     >
-    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-12rem)]">
+    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100dvh-12rem)]">
       {/* Thread list — hidden on mobile when viewing a thread */}
       <div className={`lg:w-80 xl:w-96 shrink-0 border rounded-lg bg-background overflow-y-auto ${selectedThreadId ? "hidden lg:block" : ""}`}>
         <div className="p-3 border-b space-y-2">
@@ -270,29 +270,27 @@ export default function MessagesPage() {
             </div>
 
             {/* Reply */}
-            {(
-              <div className="p-3 border-t shrink-0 space-y-2">
-                <AttachmentPicker
-                  attachments={replyAttachments}
-                  onAttachmentsChange={setReplyAttachments}
-                  sourceType="internal_message"
+            <div className="p-3 border-t shrink-0">
+              <AttachmentPicker
+                attachments={replyAttachments}
+                onAttachmentsChange={setReplyAttachments}
+                sourceType="internal_message"
+              />
+              <div className="flex gap-2 items-end mt-2">
+                <Textarea
+                  ref={replyRef}
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                  placeholder="Type a message..."
+                  className="text-sm min-h-[2.25rem] max-h-32 resize-none"
+                  rows={1}
                 />
-                <div className="flex gap-2 items-end">
-                  <Textarea
-                    ref={replyRef}
-                    value={reply}
-                    onChange={(e) => setReply(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
-                    placeholder="Type a message..."
-                    className="text-sm min-h-[2.25rem] max-h-32 resize-none"
-                    rows={1}
-                  />
-                  <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleReply} disabled={!reply.trim() || sending}>
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
+                <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleReply} disabled={!reply.trim() || sending}>
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
               </div>
-            )}
+            </div>
           </>
         ) : null}
       </div>

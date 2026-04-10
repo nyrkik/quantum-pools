@@ -2,23 +2,21 @@
 """Email health check — runs every 10 minutes via cron.
 
 Checks:
-1. Agent poller is running and has polled recently
-2. No stuck pending emails in Gmail (ingested but not recorded)
-3. No outbound emails stuck in queued status
-4. SMTP credentials are working
+1. Agent background service is running
+2. Postmark API is reachable and sending works
+3. Webhook endpoint is responding
+4. No outbound emails stuck in queued status
+5. Backend API is healthy
 
-Sends alert email on failure. Uses direct SMTP (not the app) so it works
-even if the app is broken.
+Sends alerts via ntfy (primary) and Postmark email (secondary).
 """
 
 import asyncio
-import imaplib
 import logging
 import os
-import smtplib
 import sys
+import urllib.request
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
 from pathlib import Path
 
 # Add app to path
@@ -30,8 +28,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 NOTIFICATION_EMAIL = os.environ.get("NOTIFICATION_EMAIL", "")
-GMAIL_USER = os.environ.get("AGENT_GMAIL_USER", "")
-GMAIL_PASS = os.environ.get("AGENT_GMAIL_PASSWORD", "")
+POSTMARK_TOKEN = os.environ.get("POSTMARK_SERVER_TOKEN", "")
+NTFY_URL = os.environ.get("NTFY_URL", "http://localhost:7031")
+NTFY_TOPIC = "qp-alerts"
 ALERT_FILE = Path("/tmp/qp_email_health_last_alert")
 ALERT_COOLDOWN = 1800  # 30 min between alerts
 
@@ -45,73 +44,130 @@ def should_alert() -> bool:
     return True
 
 
-def send_alert(subject: str, body: str):
-    """Send alert via direct SMTP (bypasses app entirely)."""
-    if not NOTIFICATION_EMAIL or not GMAIL_USER or not GMAIL_PASS:
-        logger.error(f"Cannot send alert — missing credentials. Subject: {subject}")
+def send_ntfy_alert(subject: str, body: str):
+    """Send alert via ntfy push notification."""
+    try:
+        req = urllib.request.Request(
+            f"{NTFY_URL}/{NTFY_TOPIC}",
+            data=body.encode(),
+            headers={"Title": f"QP Health: {subject}", "Priority": "high", "Tags": "warning"},
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        logger.error(f"ntfy alert failed: {e}")
+
+
+def send_email_alert(subject: str, body: str):
+    """Send alert via Postmark (not Gmail SMTP)."""
+    if not NOTIFICATION_EMAIL or not POSTMARK_TOKEN:
         return
+    import json
+    try:
+        from_email = os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com")
+        data = json.dumps({
+            "From": from_email,
+            "To": NOTIFICATION_EMAIL,
+            "Subject": f"QP Email Health: {subject}",
+            "TextBody": body,
+            "MessageStream": "outbound",
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.postmarkapp.com/email",
+            data=data,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Postmark-Server-Token": POSTMARK_TOKEN,
+            },
+        )
+        urllib.request.urlopen(req, timeout=10)
+        logger.info(f"Email alert sent: {subject}")
+    except Exception as e:
+        logger.error(f"Email alert failed: {e}")
+
+
+def send_alert(subject: str, body: str):
+    """Send alert via ntfy (primary) and email (secondary)."""
     if not should_alert():
         logger.info(f"Alert suppressed (cooldown): {subject}")
         return
-
-    try:
-        msg = MIMEText(body)
-        msg["Subject"] = f"⚠ QP Email Health: {subject}"
-        msg["From"] = GMAIL_USER
-        msg["To"] = NOTIFICATION_EMAIL
-
-        with smtplib.SMTP("smtp.gmail.com", 587) as s:
-            s.starttls()
-            s.login(GMAIL_USER, GMAIL_PASS)
-            s.send_message(msg)
-
-        ALERT_FILE.write_text(str(datetime.now().timestamp()))
-        logger.info(f"Alert sent: {subject}")
-    except Exception as e:
-        logger.error(f"Failed to send alert: {e}")
+    send_ntfy_alert(subject, body)
+    send_email_alert(subject, body)
+    ALERT_FILE.write_text(str(datetime.now().timestamp()))
 
 
-def check_poller_running() -> list[str]:
-    """Check if agent poller service is active and has logged recently."""
+def check_agent_service() -> list[str]:
+    """Check if agent background service is active and healthy."""
     import subprocess
     issues = []
 
-    # Check systemd status
     result = subprocess.run(
         ["systemctl", "is-active", "quantumpools-agent"],
         capture_output=True, text=True
     )
     if result.stdout.strip() != "active":
-        issues.append("Agent poller service is NOT running")
+        issues.append("Agent background service is NOT running")
         return issues
 
-    # Check for recent activity (should log every 60s)
+    # Check for recent activity
     result = subprocess.run(
         ["journalctl", "-u", "quantumpools-agent", "--since", "5 min ago", "--no-pager", "-q"],
         capture_output=True, text=True
     )
     if not result.stdout.strip():
-        issues.append("Agent poller has no log output in the last 5 minutes — may be hung")
+        issues.append("Agent service has no log output in the last 5 minutes — may be hung")
 
-    # Check for recent errors
+    # Check for error loops
     lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
-    error_lines = [l for l in lines if "Error" in l or "Exception" in l or "Traceback" in l]
+    error_lines = [l for l in lines if " ERROR " in l or "Error" in l or "Exception" in l or "Traceback" in l]
     if len(error_lines) >= 3:
-        issues.append(f"Agent poller has {len(error_lines)} errors in last 5 min: {error_lines[-1][:120]}")
+        issues.append(f"Agent service has {len(error_lines)} errors in last 5 min: {error_lines[-1][:200]}")
+        # Detect same-error loops
+        msgs = []
+        for l in error_lines:
+            if " ERROR " in l:
+                msgs.append(l.split(" ERROR ", 1)[-1][:80])
+        if msgs and len(set(msgs)) == 1:
+            issues.append(f"Agent service stuck in error loop: {msgs[0]}")
 
     return issues
 
 
-def check_gmail_connectivity() -> list[str]:
-    """Verify we can connect to Gmail IMAP."""
+def check_postmark_api() -> list[str]:
+    """Verify Postmark API is reachable."""
+    issues = []
+    if not POSTMARK_TOKEN:
+        issues.append("POSTMARK_SERVER_TOKEN not configured")
+        return issues
+    try:
+        req = urllib.request.Request(
+            "https://api.postmarkapp.com/server",
+            headers={
+                "Accept": "application/json",
+                "X-Postmark-Server-Token": POSTMARK_TOKEN,
+            },
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        if resp.status != 200:
+            issues.append(f"Postmark API returned {resp.status}")
+    except Exception as e:
+        issues.append(f"Postmark API unreachable: {e}")
+    return issues
+
+
+def check_webhook_endpoint() -> list[str]:
+    """Verify webhook endpoint is responding."""
     issues = []
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
-        mail.login(GMAIL_USER, GMAIL_PASS)
-        mail.select("INBOX")
-        mail.logout()
+        req = urllib.request.Request(
+            "http://localhost:7061/api/v1/inbound-email/webhook/sapphire",
+            method="HEAD",
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        if resp.status not in (200, 405):  # 405 = method not allowed (POST only) is fine
+            issues.append(f"Webhook endpoint returned {resp.status}")
     except Exception as e:
-        issues.append(f"Gmail IMAP connection failed: {e}")
+        issues.append(f"Webhook endpoint unreachable: {e}")
     return issues
 
 
@@ -135,6 +191,16 @@ async def check_queued_emails() -> list[str]:
             if count > 0:
                 issues.append(f"{count} outbound email(s) stuck in 'queued' status for >10 min")
 
+            # Check for recent bounces
+            bounced = (await db.execute(
+                select(func.count(AgentMessage.id)).where(
+                    AgentMessage.status == "bounced",
+                    AgentMessage.received_at > cutoff,
+                )
+            )).scalar() or 0
+            if bounced > 0:
+                issues.append(f"{bounced} email(s) bounced in last 10 min")
+
             # Check for failed sends
             failed = (await db.execute(
                 select(func.count(AgentMessage.id)).where(
@@ -147,40 +213,6 @@ async def check_queued_emails() -> list[str]:
     except Exception as e:
         issues.append(f"Database check failed: {e}")
     return issues
-
-
-async def send_in_app_alert(issues: list[str]):
-    """Create in-app notification for owner/admin users."""
-    try:
-        from src.core.database import get_session_maker
-        from src.models.notification import Notification
-        from src.models.organization_user import OrganizationUser
-        from sqlalchemy import select
-
-        sm = get_session_maker()
-        async with sm() as db:
-            # Notify all owners and admins
-            result = await db.execute(
-                select(OrganizationUser).where(
-                    OrganizationUser.role.in_(("owner", "admin"))
-                )
-            )
-            org_users = result.scalars().all()
-
-            summary = "; ".join(issues)[:200]
-            for ou in org_users:
-                db.add(Notification(
-                    organization_id=ou.organization_id,
-                    user_id=ou.user_id,
-                    type="system_alert",
-                    title="Email system issue detected",
-                    body=summary,
-                    link="/settings",
-                ))
-            await db.commit()
-            logger.info(f"In-app alert sent to {len(org_users)} user(s)")
-    except Exception as e:
-        logger.error(f"Failed to send in-app alert: {e}")
 
 
 async def check_backend_health() -> list[str]:
@@ -212,16 +244,16 @@ async def check_backend_health() -> list[str]:
 async def main():
     all_issues = []
 
-    # Run all checks
-    all_issues.extend(check_poller_running())
-    all_issues.extend(check_gmail_connectivity())
+    all_issues.extend(check_agent_service())
+    all_issues.extend(check_postmark_api())
+    all_issues.extend(check_webhook_endpoint())
     all_issues.extend(await check_queued_emails())
     all_issues.extend(await check_backend_health())
 
     if all_issues:
         body = "Email system health check FAILED:\n\n"
         for issue in all_issues:
-            body += f"  • {issue}\n"
+            body += f"  - {issue}\n"
         body += f"\nTimestamp: {datetime.now().isoformat()}"
         body += "\nCheck: sudo journalctl -u quantumpools-agent -f"
         body += "\nCheck: sudo journalctl -u quantumpools-backend -f"
@@ -231,7 +263,6 @@ async def main():
             logger.error(f"  {issue}")
 
         send_alert(f"{len(all_issues)} issue(s) detected", body)
-        await send_in_app_alert(all_issues)
     else:
         logger.info("All checks passed")
 

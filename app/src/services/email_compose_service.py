@@ -62,23 +62,15 @@ class EmailComposeService:
         If send fails, records exist with queued status — no phantom emails.
         If send succeeds, update to sent — no lost tracking records.
         """
-        # Resolve FROM address
-        from_address_override = None
+        # FROM address: always use org config (Postmark-verified sender)
         action = None
         if job_id:
             from src.models.agent_action import AgentAction
             action = (await self.db.execute(
                 select(AgentAction).where(AgentAction.id == job_id, AgentAction.organization_id == org_id)
             )).scalar_one_or_none()
-            if action and action.thread_id:
-                row = (await self.db.execute(
-                    select(AgentThread.delivered_to).where(AgentThread.id == action.thread_id)
-                )).first()
-                if row and row[0]:
-                    from_address_override = row[0]
 
-        from_email = (from_address_override
-                      or os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"))
+        from_email = os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com")
 
         # Resolve customer info
         customer_name = None

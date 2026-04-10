@@ -47,12 +47,67 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis unavailable: {e}")
 
+    # APScheduler for recurring billing
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(_run_billing_cycle, CronTrigger(hour=6, minute=0), id="billing_cycle")
+    scheduler.add_job(_run_payment_retries, CronTrigger(hour=10, minute=0), id="payment_retries")
+    scheduler.start()
+    logger.info("Billing scheduler started (billing 6:00 UTC, retries 10:00 UTC)")
+
     yield
 
     # Shutdown
+    scheduler.shutdown(wait=False)
     await close_database()
     await close_redis()
     logger.info("Shutdown complete")
+
+
+async def _run_billing_cycle():
+    """APScheduler job: generate recurring invoices for all orgs."""
+    from src.core.database import get_db_context
+    from src.services.billing_service import BillingService
+    from sqlalchemy import select
+    from src.models.organization import Organization
+
+    try:
+        async with get_db_context() as db:
+            orgs = (await db.execute(select(Organization))).scalars().all()
+            for org in orgs:
+                try:
+                    svc = BillingService(db)
+                    await svc.generate_recurring_invoices(org.id)
+                except Exception as e:
+                    logger.error(f"Billing cycle failed for org {org.id}: {e}")
+                    sentry_sdk.capture_exception(e)
+    except Exception as e:
+        logger.error(f"Billing cycle error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_payment_retries():
+    """APScheduler job: retry failed autopay attempts."""
+    from src.core.database import get_db_context
+    from src.services.billing_service import BillingService
+    from sqlalchemy import select
+    from src.models.organization import Organization
+
+    try:
+        async with get_db_context() as db:
+            orgs = (await db.execute(select(Organization))).scalars().all()
+            for org in orgs:
+                try:
+                    svc = BillingService(db)
+                    await svc.retry_failed_payments(org.id)
+                except Exception as e:
+                    logger.error(f"Payment retry failed for org {org.id}: {e}")
+                    sentry_sdk.capture_exception(e)
+    except Exception as e:
+        logger.error(f"Payment retry error: {e}")
+        sentry_sdk.capture_exception(e)
 
 
 def create_app() -> FastAPI:

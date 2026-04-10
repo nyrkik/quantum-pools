@@ -15,7 +15,7 @@ router = APIRouter(prefix="/inbound-email", tags=["inbound-email"])
 
 _service = InboundEmailService()
 
-VALID_PROVIDERS = {"sendgrid", "postmark", "mailgun", "generic"}
+VALID_PROVIDERS = {"sendgrid", "postmark", "mailgun", "cloudflare", "generic"}
 
 
 @router.post("/webhook/{org_slug}")
@@ -25,6 +25,7 @@ async def receive_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
     provider: str = "generic",
+    type: str | None = None,
 ):
     """Receive inbound email from an email provider webhook.
 
@@ -35,10 +36,10 @@ async def receive_webhook(
     - Rate limited to 30/minute per IP
     - Org slug must exist and be active
     - Block rules applied before processing
-    - Provider-specific signature verification (future)
 
     Query params:
         provider: sendgrid | postmark | mailgun | generic (default: generic)
+        type: bounce | delivery (optional — for status webhooks)
     """
     if provider not in VALID_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
@@ -58,7 +59,9 @@ async def receive_webhook(
             body = await request.body()
             payload = {"raw": body.decode("utf-8", errors="replace")}
 
-    result = await _service.process_webhook(db, org_slug, payload, provider=provider)
+    result = await _service.process_webhook(
+        db, org_slug, payload, provider=provider, webhook_type=type,
+    )
 
     if result.get("status") == "error" and result.get("detail") == "Organization not found":
         raise HTTPException(status_code=404, detail="Organization not found")

@@ -32,6 +32,8 @@ class AgentMessage(Base):
     property_address: Mapped[str | None] = mapped_column(String(300))
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
     thread_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_threads.id"), index=True)
+    postmark_message_id: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    delivery_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

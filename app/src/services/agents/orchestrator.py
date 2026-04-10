@@ -14,7 +14,7 @@ from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction
 from src.models.customer import Customer
 
-from .mail_agent import poll_inbox, mark_processed, decode_email_header, extract_text_body
+from .mail_agent import decode_email_header, extract_text_body
 from .classifier import classify_and_draft, ANTHROPIC_KEY
 from .communicator import (
     send_email_response, send_approval_request, send_sms, notify_others,
@@ -28,9 +28,6 @@ logger = logging.getLogger(__name__)
 # Track pending approvals: message_id -> AgentMessage.id
 _pending_approvals: dict[str, str] = {}
 
-# Auto-close stale visits: only check every 30 minutes
-_last_auto_close_check: datetime | None = None
-AUTO_CLOSE_INTERVAL_MINUTES = 30
 
 # Flood protection: track recent SMS alerts per sender
 _recent_alerts: dict[str, datetime] = {}
@@ -224,31 +221,10 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
 
     from .triage_agent import ai_triage
     needs_response = await ai_triage(clean_body, subject, from_email)
-    if not needs_response and not sender_is_customer:
+    if not needs_response:
         logger.info(f"AI triage: no response needed — {subject[:50]}")
-        async with get_db_context() as db:
-            agent_msg = AgentMessage(
-                organization_id=organization_id,
-                email_uid=uid,
-                direction="inbound",
-                from_email=from_email,
-                to_email=to_header,
-                subject=subject,
-                body=body,
-                status="handled",
-                category="no_response",
-                delivered_to=delivered_to_addr,
-                thread_id=thread.id if thread else None,
-                matched_customer_id=thread.matched_customer_id if thread else None,
-                customer_name=thread.customer_name if thread else None,
-            )
-            db.add(agent_msg)
-            await db.commit()
-        if thread:
-            await update_thread_status(thread.id)
-        return
-    elif not needs_response and sender_is_customer:
-        logger.info(f"AI triage said no response, but sender is a customer — proceeding with classification: {subject[:50]}")
+        if sender_is_customer:
+            logger.info(f"  ...but sender is a customer — proceeding with classification")
 
     # Classify and draft
     result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
@@ -268,7 +244,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
             result["category"] = "general"
             result["needs_approval"] = True
         else:
-            logger.info(f"Skipping {category}: {subject}")
+            logger.info(f"Auto-handled {category}: {subject}")
             async with get_db_context() as db:
                 agent_msg = AgentMessage(
                     organization_id=organization_id,
@@ -280,7 +256,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                     body=body[:5000],
                     category=category,
                     urgency="low",
-                    status="ignored",
+                    status="handled",
                     customer_name=result.get("customer_name"),
                     received_at=email_date,
                     thread_id=thread.id,
@@ -562,50 +538,15 @@ async def _get_default_org_id() -> str:
     # _process_sent_emails extracted to sent_tracker.py
 
 
-async def run_poll_cycle():
-    """Single poll cycle — check for new emails and process them."""
+async def auto_close_stale_visits():
+    """Auto-close stale visits. Called from agent_poller on a schedule."""
     org_id = await _get_default_org_id()
     if not org_id:
-        logger.error("No organization found — cannot process emails")
-        return 0
-
-    messages = poll_inbox()
-    if messages:
-        logger.info(f"Found {len(messages)} new emails")
-        for uid, msg in messages:
-            try:
-                await process_incoming_email(uid, msg, organization_id=org_id)
-                mark_processed(uid)
-            except Exception as e:
-                logger.error(f"Error processing email {uid}: {e}", exc_info=True)
-
-    # Also track outbound emails sent via Gmail
-    try:
-        from .sent_tracker import process_sent_emails
-        sent_count = await process_sent_emails(org_id)
-        if sent_count:
-            logger.info(f"Tracked {sent_count} sent emails")
-    except Exception as e:
-        logger.error(f"Error tracking sent emails: {e}", exc_info=True)
-
-    # Auto-close stale visits (every 30 minutes, not every cycle)
-    global _last_auto_close_check
-    now = datetime.now(timezone.utc)
-    should_check = (
-        _last_auto_close_check is None
-        or (now - _last_auto_close_check).total_seconds() >= AUTO_CLOSE_INTERVAL_MINUTES * 60
-    )
-    if should_check:
-        _last_auto_close_check = now
-        try:
-            from src.services.visit_experience_service import VisitExperienceService
-            async with get_db_context() as db:
-                svc = VisitExperienceService(db)
-                closed = await svc.auto_close_stale_visits(org_id)
-                if closed:
-                    logger.info(f"Auto-closed {closed} stale visit(s)")
-                await db.commit()
-        except Exception as e:
-            logger.error(f"Error auto-closing stale visits: {e}", exc_info=True)
-
-    return len(messages)
+        return
+    from src.services.visit_experience_service import VisitExperienceService
+    async with get_db_context() as db:
+        svc = VisitExperienceService(db)
+        closed = await svc.auto_close_stale_visits(org_id)
+        if closed:
+            logger.info(f"Auto-closed {closed} stale visit(s)")
+        await db.commit()

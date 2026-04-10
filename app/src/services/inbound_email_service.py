@@ -1,4 +1,8 @@
-"""Provider-agnostic inbound email processing via webhooks."""
+"""Provider-agnostic inbound email processing via webhooks.
+
+Handles inbound emails from Postmark (primary), SendGrid, Mailgun, and generic webhooks.
+Also handles Postmark bounce and delivery webhooks for outbound tracking.
+"""
 
 import logging
 import re
@@ -19,6 +23,7 @@ class ParsedEmail:
     __slots__ = (
         "from_email", "from_name", "to_email", "subject",
         "body_plain", "body_html", "headers", "raw_payload",
+        "attachments",
     )
 
     def __init__(
@@ -31,6 +36,7 @@ class ParsedEmail:
         from_name: str = "",
         headers: dict | None = None,
         raw_payload: dict | None = None,
+        attachments: list[dict] | None = None,
     ):
         self.from_email = from_email
         self.from_name = from_name
@@ -40,6 +46,7 @@ class ParsedEmail:
         self.body_html = body_html
         self.headers = headers or {}
         self.raw_payload = raw_payload or {}
+        self.attachments = attachments or []
 
 
 class InboundEmailService:
@@ -49,6 +56,7 @@ class InboundEmailService:
         "sendgrid": "_parse_sendgrid",
         "postmark": "_parse_postmark",
         "mailgun": "_parse_mailgun",
+        "cloudflare": "_parse_generic",
         "generic": "_parse_generic",
     }
 
@@ -58,6 +66,7 @@ class InboundEmailService:
         org_slug: str,
         payload: dict,
         provider: str = "generic",
+        webhook_type: str | None = None,
     ) -> dict:
         """Process an inbound email webhook.
 
@@ -68,6 +77,10 @@ class InboundEmailService:
 
         Returns dict with status and details.
         """
+        # Handle bounce/delivery webhooks (Postmark)
+        if webhook_type in ("bounce", "delivery"):
+            return await self._handle_status_webhook(db, org_slug, payload, webhook_type)
+
         # 1. Look up org
         result = await db.execute(
             select(Organization).where(
@@ -101,25 +114,100 @@ class InboundEmailService:
         # 4. Build an email.message.EmailMessage to pass to process_incoming_email
         email_msg = self._build_email_message(parsed)
 
-        # Generate a stable UID from message headers or content
+        # Stable UID from Message-ID hash — must fit in 100 chars
+        import hashlib
         message_id = parsed.headers.get("Message-ID", parsed.headers.get("message-id", ""))
-        uid = f"webhook-{org_slug}-{hash(message_id or (parsed.from_email + parsed.subject))}"
+        if message_id:
+            uid = f"pm-{hashlib.sha256(message_id.encode()).hexdigest()[:32]}"
+        else:
+            content = f"{parsed.from_email}|{parsed.subject}|{parsed.headers.get('Date', '')}"
+            uid = f"pm-{hashlib.sha256(content.encode()).hexdigest()[:32]}"
 
         from src.services.agents.orchestrator import process_incoming_email
         try:
             await process_incoming_email(uid, email_msg, organization_id=org.id)
             logger.info(f"Webhook processed for {org_slug}: {parsed.from_email} -> {parsed.subject[:60]}")
+
+            # Store attachments if any
+            if parsed.attachments:
+                await self._store_attachments(db, uid, parsed.attachments, org.id)
+
             return {"status": "processed", "from": parsed.from_email, "subject": parsed.subject}
         except Exception as e:
             logger.error(f"Webhook processing failed for {org_slug}: {e}", exc_info=True)
             return {"status": "error", "detail": "Processing failed"}
 
-    def _parse_sendgrid(self, payload: dict) -> ParsedEmail:
-        """Parse SendGrid Inbound Parse webhook format.
+    async def _handle_status_webhook(
+        self, db: AsyncSession, org_slug: str, payload: dict, webhook_type: str,
+    ) -> dict:
+        """Handle Postmark bounce/delivery status webhooks."""
+        from src.models.agent_message import AgentMessage
 
-        SendGrid sends form-encoded data with fields:
-        from, to, subject, text, html, headers, envelope, etc.
-        """
+        message_id = payload.get("MessageID", "")
+        if not message_id:
+            return {"status": "ignored", "detail": "No MessageID in payload"}
+
+        # Find the outbound message by Postmark message ID
+        result = await db.execute(
+            select(AgentMessage).where(
+                AgentMessage.postmark_message_id == message_id,
+            )
+        )
+        msg = result.scalar_one_or_none()
+
+        if webhook_type == "bounce":
+            bounce_type = payload.get("Type", "")
+            description = payload.get("Description", "")
+            email_addr = payload.get("Email", "")
+            logger.warning(f"Bounce ({bounce_type}): {email_addr} — {description}")
+
+            if msg:
+                msg.status = "bounced"
+                msg.delivery_error = f"{bounce_type}: {description}"
+                await db.commit()
+                logger.info(f"Marked message {msg.id} as bounced")
+
+            return {"status": "processed", "type": "bounce", "email": email_addr}
+
+        elif webhook_type == "delivery":
+            if msg:
+                msg.status = "delivered"
+                await db.commit()
+
+            return {"status": "processed", "type": "delivery"}
+
+        return {"status": "ignored"}
+
+    async def _store_attachments(
+        self, db: AsyncSession, email_uid: str, attachments: list[dict], org_id: str,
+    ):
+        """Store inbound email attachments."""
+        import base64
+        from pathlib import Path
+        from src.core.config import settings
+
+        for att in attachments:
+            try:
+                content = att.get("Content", "")
+                if not content:
+                    continue
+
+                filename = att.get("Name", att.get("FileName", "attachment"))
+                content_bytes = base64.b64decode(content)
+
+                # Store to uploads/inbound/{org_id}/
+                upload_dir = Path(settings.upload_dir) / "inbound" / org_id
+                upload_dir.mkdir(parents=True, exist_ok=True)
+
+                filepath = upload_dir / f"{email_uid[:20]}_{filename}"
+                filepath.write_bytes(content_bytes)
+
+                logger.info(f"Stored inbound attachment: {filename} ({len(content_bytes)} bytes)")
+            except Exception as e:
+                logger.error(f"Failed to store attachment: {e}")
+
+    def _parse_sendgrid(self, payload: dict) -> ParsedEmail:
+        """Parse SendGrid Inbound Parse webhook format."""
         from_raw = payload.get("from", "")
         from_match = re.search(r"<(.+?)>", from_raw)
         from_email = from_match.group(1) if from_match else from_raw
@@ -146,16 +234,44 @@ class InboundEmailService:
         )
 
     def _parse_postmark(self, payload: dict) -> ParsedEmail:
-        """Parse Postmark Inbound webhook JSON format."""
+        """Parse Postmark Inbound webhook JSON format.
+
+        Postmark JSON includes: FromFull, ToFull, Subject, TextBody, HtmlBody,
+        Headers (list of {Name, Value}), Attachments (list of {Name, Content,
+        ContentType, ContentLength}), OriginalRecipient, MessageID, Date.
+        """
         from_email = payload.get("FromFull", {}).get("Email", payload.get("From", ""))
         from_name = payload.get("FromFull", {}).get("Name", "")
 
         to_recipients = payload.get("ToFull", [])
         to_email = to_recipients[0].get("Email", "") if to_recipients else payload.get("To", "")
 
+        # Parse headers from Postmark's list format
         headers = {}
         for h in payload.get("Headers", []):
             headers[h.get("Name", "")] = h.get("Value", "")
+
+        # Postmark provides OriginalRecipient at top level (the actual envelope recipient)
+        # This is the Delivered-To equivalent — critical for routing rules
+        original_recipient = payload.get("OriginalRecipient", "")
+        if original_recipient:
+            headers["Delivered-To"] = original_recipient
+
+        # Postmark provides MessageID and Date at top level too
+        if payload.get("MessageID") and "Message-ID" not in headers:
+            headers["Message-ID"] = f"<{payload['MessageID']}@inbound.postmarkapp.com>"
+        if payload.get("Date") and "Date" not in headers:
+            headers["Date"] = payload["Date"]
+
+        # Parse attachments
+        attachments = []
+        for att in payload.get("Attachments", []):
+            attachments.append({
+                "Name": att.get("Name", ""),
+                "Content": att.get("Content", ""),
+                "ContentType": att.get("ContentType", "application/octet-stream"),
+                "ContentLength": att.get("ContentLength", 0),
+            })
 
         return ParsedEmail(
             from_email=from_email,
@@ -166,6 +282,7 @@ class InboundEmailService:
             body_html=payload.get("HtmlBody", ""),
             headers=headers,
             raw_payload=payload,
+            attachments=attachments,
         )
 
     def _parse_mailgun(self, payload: dict) -> ParsedEmail:
@@ -211,7 +328,7 @@ class InboundEmailService:
         """Build a stdlib EmailMessage from parsed webhook data.
 
         This lets us pass webhook emails into the same process_incoming_email()
-        function used by the IMAP poller.
+        function used by the IMAP poller (during transition) and webhook handler.
         """
         msg = EmailMessage()
 
@@ -223,19 +340,23 @@ class InboundEmailService:
 
         msg["To"] = parsed.to_email
         msg["Subject"] = parsed.subject
-        msg["Delivered-To"] = parsed.to_email
 
-        # Copy relevant headers
-        if "Message-ID" in parsed.headers:
-            msg["Message-ID"] = parsed.headers["Message-ID"]
-        if "Date" in parsed.headers:
-            msg["Date"] = parsed.headers["Date"]
-        if "In-Reply-To" in parsed.headers:
-            msg["In-Reply-To"] = parsed.headers["In-Reply-To"]
-        if "References" in parsed.headers:
-            msg["References"] = parsed.headers["References"]
+        # Set Delivered-To from headers (OriginalRecipient for Postmark)
+        delivered_to = parsed.headers.get("Delivered-To", parsed.to_email)
+        msg["Delivered-To"] = delivered_to
 
-        # Set body — prefer plain text
-        msg.set_content(parsed.body_plain or parsed.body_html or "")
+        # Copy relevant headers for threading and dedup
+        for header in ("Message-ID", "Date", "In-Reply-To", "References"):
+            if header in parsed.headers:
+                msg[header] = parsed.headers[header]
+
+        # Set body — prefer plain text, fall back to HTML conversion
+        if parsed.body_plain:
+            msg.set_content(parsed.body_plain)
+        elif parsed.body_html:
+            from src.services.agents.mail_agent import _clean_html
+            msg.set_content(_clean_html(parsed.body_html))
+        else:
+            msg.set_content("")
 
         return msg

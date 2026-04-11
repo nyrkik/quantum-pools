@@ -11,7 +11,7 @@ from .job_manager import evaluate_next_action
 from .communicator import send_email_response, send_sms, send_approval_request, notify_others
 from .customer_matcher import match_customer
 from .classifier import classify_and_draft, get_correction_history, build_context_prompt, SYSTEM_PROMPT
-from .mail_agent import decode_email_header, extract_text_body, strip_quoted_reply, strip_email_signature, _clean_html
+from .mail_agent import decode_email_header, extract_text_body, strip_quoted_reply, strip_email_signature, _clean_html, _unwrap_embedded_mime
 from .comment_pipeline import CommentPipeline
 from .comment_classifier import classify_comment
 from .deepblue_responder import DeepBlueResponder
@@ -40,6 +40,7 @@ __all__ = [
     "strip_quoted_reply",
     "strip_email_signature",
     "_clean_html",
+    "_unwrap_embedded_mime",
     "CommentPipeline",
     "classify_comment",
     "DeepBlueResponder",

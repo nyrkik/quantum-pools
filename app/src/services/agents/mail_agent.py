@@ -251,6 +251,83 @@ def _clean_html(html: str) -> str:
     return text.strip()
 
 
+def _unwrap_embedded_mime(text: str) -> str:
+    """Extract inner text when a body is itself a raw MIME multipart envelope.
+
+    Some Outlook/Exchange senders relayed via Postmark arrive with a TextBody
+    that literally contains a multipart MIME structure (--boundary lines,
+    Content-Type / Content-Transfer-Encoding headers) instead of decoded plain
+    text. Re-parse it as a real MIME message and pull the text/plain part out.
+    Returns the original text if it doesn't look like an embedded envelope.
+    """
+    if not text:
+        return text
+
+    stripped = text.lstrip()
+    first_line = stripped.split("\n", 1)[0].rstrip("\r")
+
+    # Must look like an opening boundary (not a closing --boundary--)
+    if (
+        not first_line.startswith("--")
+        or first_line.endswith("--")
+        or len(first_line) < 4
+    ):
+        return text
+
+    boundary = first_line[2:]
+    # RFC 2046 boundary character set — bail if it doesn't look right
+    if not re.match(r"^[A-Za-z0-9'()+_,\-./:=?]+$", boundary):
+        return text
+
+    # Confirm a Content-Type header appears in the head of the body
+    head = "\n".join(stripped.split("\n")[:20])
+    if "Content-Type:" not in head:
+        return text
+
+    wrapper = (
+        f'Content-Type: multipart/mixed; boundary="{boundary}"\n'
+        "MIME-Version: 1.0\n\n" + stripped
+    )
+
+    try:
+        from email import message_from_string, policy
+
+        parsed = message_from_string(wrapper, policy=policy.default)
+        if not parsed.is_multipart():
+            return text
+
+        def _decode_part(part) -> str:
+            try:
+                content = part.get_content()
+                if isinstance(content, str):
+                    return content
+            except Exception:
+                pass
+            payload = part.get_payload(decode=True)
+            if isinstance(payload, bytes):
+                charset = part.get_content_charset() or "utf-8"
+                return payload.decode(charset, errors="replace")
+            return payload or ""
+
+        # Prefer text/plain
+        for part in parsed.walk():
+            if part.get_content_type() == "text/plain":
+                payload = _decode_part(part)
+                if payload and payload.strip():
+                    return payload.strip()
+
+        # Fallback: text/html
+        for part in parsed.walk():
+            if part.get_content_type() == "text/html":
+                payload = _decode_part(part)
+                if payload and payload.strip():
+                    return _clean_html(payload)
+    except Exception as e:
+        logger.warning(f"_unwrap_embedded_mime failed: {e}")
+
+    return text
+
+
 def extract_text_body(msg) -> str:
     """Extract plain text body from email message, stripping quoted reply chains."""
     raw = ""

@@ -33,18 +33,23 @@ class EMDPDFExtractor:
         lines = text.split("\n")
         fields = self._parse_labeled_fields(lines)
 
+        # Some older / alternate-format PDFs don't use labeled fields — values
+        # appear in a fixed sequence on consecutive lines. For those, fall
+        # back to regex (FA, PR, date) and position-based field extraction.
+        unlabeled = self._extract_unlabeled_fields(lines) if not fields else {}
+
         return {
             "inspection_date": self._find_date(text),
-            "program_identifier": self._extract_program_identifier(lines),
+            "program_identifier": self._extract_program_identifier(lines) or unlabeled.get("program_identifier"),
             "permit_id": self._extract_permit_id(text),
-            "facility_id": self._extract_field(fields, "Establishment ID"),
-            "permit_holder": self._extract_field(fields, "Permit Holder"),
-            "facility_name": self._extract_field(fields, "Facility Name"),
-            "facility_address": self._extract_field(fields, "Facility Address"),
-            "facility_city": self._extract_field(fields, "Facility City"),
-            "facility_zip": self._extract_field(fields, "Facility ZIP"),
-            "phone_number": self._extract_field(fields, "Phone Number"),
-            "inspection_type": self._extract_field(fields, "Type") or self._extract_field(fields, "Purpose"),
+            "facility_id": self._extract_field(fields, "Establishment ID") or self._extract_facility_id_regex(text),
+            "permit_holder": self._extract_field(fields, "Permit Holder") or unlabeled.get("permit_holder"),
+            "facility_name": self._extract_field(fields, "Facility Name") or unlabeled.get("facility_name"),
+            "facility_address": self._extract_field(fields, "Facility Address") or unlabeled.get("facility_address"),
+            "facility_city": self._extract_field(fields, "Facility City") or unlabeled.get("facility_city"),
+            "facility_zip": self._extract_field(fields, "Facility ZIP") or unlabeled.get("facility_zip"),
+            "phone_number": self._extract_field(fields, "Phone Number") or unlabeled.get("phone_number"),
+            "inspection_type": self._extract_field(fields, "Type") or self._extract_field(fields, "Purpose") or unlabeled.get("inspection_type"),
             # Inspector section
             "inspector_name": self._extract_field(fields, "Inspector"),
             "co_inspector": self._extract_field(fields, "Co-Inspector"),
@@ -170,9 +175,116 @@ class EMDPDFExtractor:
         match = re.search(r"\bPR\d{4,}\b", text)
         return match.group(0) if match else None
 
+    def _extract_facility_id_regex(self, text: str) -> Optional[str]:
+        """Regex fallback for the EMD Establishment ID (FA number).
+
+        Used when the PDF doesn't have labeled fields (older/alternate
+        layout where values appear in a fixed sequence without 'Establishment
+        ID:' labels). Picks the first FA######-style token in the text.
+        """
+        match = re.search(r"\bFA\d{4,8}\b", text)
+        return match.group(0) if match else None
+
+    def _extract_unlabeled_fields(self, lines: list[str]) -> dict:
+        """Position-based extraction for PDFs that lack 'Permit Holder',
+        'Facility Address', etc. labels.
+
+        Sample of a known unlabeled layout:
+            06/13/2024
+            LAUREL OAKS APARTMENTS         <- facility name
+            SR95 SMOKETREE LLC & LINCOLN   <- permit holder
+            3334 Smoketree Dr              <- street address
+            Sacramento                     <- city
+            95834                          <- zip
+            (916) 927-2200                 <- phone
+            FA0005982                      <- FA
+            PR0007458                      <- PR
+            1                              <- numeric noise
+            REINSPECTION                   <- inspection type
+            OFFICE MAIN SPA                <- program identifier
+
+        Anchors on the FA line: walks backwards to find the address block,
+        and forwards for the inspection type / program identifier.
+        """
+        out: dict = {}
+        # Find the FA line as the anchor
+        fa_idx = None
+        for i, line in enumerate(lines):
+            if re.match(r"^\s*FA\d{4,8}\s*$", line):
+                fa_idx = i
+                break
+        if fa_idx is None:
+            return out
+
+        # Walk backwards from FA: phone, zip, city, address, holder, name, date
+        slots = []
+        j = fa_idx - 1
+        while j >= 0 and len(slots) < 7:
+            stripped = lines[j].strip()
+            if stripped:
+                slots.append(stripped)
+            j -= 1
+        slots.reverse()
+        # We expect (most-recent → oldest):
+        #   [date, name, holder, address, city, zip, phone]
+        # Take the last 7 if we have at least that many
+        if len(slots) >= 7:
+            tail = slots[-7:]
+            out["facility_name"] = tail[1]
+            out["permit_holder"] = tail[2]
+            out["facility_address"] = tail[3]
+            out["facility_city"] = tail[4]
+            # ZIP often comes through as "95834" or "CA 95834"
+            zip_match = re.search(r"\b(\d{5}(?:-\d{4})?)\b", tail[5])
+            if zip_match:
+                out["facility_zip"] = zip_match.group(1)
+            phone_match = re.search(r"\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}", tail[6])
+            if phone_match:
+                out["phone_number"] = phone_match.group(0)
+
+        # Walk forwards from FA for: PR, count, inspection type, program identifier
+        forward = []
+        j = fa_idx + 1
+        while j < len(lines) and len(forward) < 5:
+            stripped = lines[j].strip()
+            if stripped:
+                forward.append(stripped)
+            j += 1
+        # forward should look like: ['PR0007458', '1', 'REINSPECTION', 'OFFICE MAIN SPA', ...]
+        # Skip items that are pure numbers (page indicators) and pure PR####
+        meaningful = [
+            f for f in forward
+            if not re.fullmatch(r"\d+", f) and not re.fullmatch(r"PR\d+", f)
+        ]
+        if meaningful:
+            # First non-numeric is the inspection type (REINSPECTION, ROUTINE, etc.)
+            out["inspection_type"] = meaningful[0]
+            # Next is the program identifier
+            if len(meaningful) > 1:
+                # Skip "Recreational Health" boilerplate
+                for m in meaningful[1:]:
+                    if m.lower() != "recreational health":
+                        out["program_identifier"] = m
+                        break
+
+        return out
+
     def _find_date(self, text: str) -> Optional[str]:
-        """Extract inspection date. Returns YYYY-MM-DD or None."""
+        """Extract inspection date. Returns YYYY-MM-DD or None.
+
+        Tries the labeled form first ("Date Entered MM/DD/YYYY"); falls back
+        to the first standalone MM/DD/YYYY token in the text for PDFs that
+        don't use labeled fields.
+        """
         match = re.search(r"Date\s+Entered\s+(\d{1,2}/\d{1,2}/\d{4})", text, re.I)
+        if match:
+            try:
+                from dateutil.parser import parse as parse_date
+                return parse_date(match.group(1)).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        # Fallback: first MM/DD/YYYY anywhere in the text
+        match = re.search(r"\b(\d{1,2}/\d{1,2}/20\d{2})\b", text)
         if match:
             try:
                 from dateutil.parser import parse as parse_date

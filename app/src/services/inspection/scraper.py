@@ -9,6 +9,7 @@ Default: Sacramento County EMD inspection portal.
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -17,11 +18,41 @@ from src.services.inspection.county_config import CountyConfig, SACRAMENTO
 logger = logging.getLogger(__name__)
 
 
+class PortalBlocked(Exception):
+    """Raised when the portal returns 403/429 or the circuit breaker is active.
+
+    Callers MUST treat this as a fatal abort signal — do not catch and retry.
+    Re-running the script later (after the circuit breaker expires or the
+    portal-side block lifts) is the correct recovery path.
+    """
+
+
+# How long to refuse all portal requests after we observe a block. Set high so
+# we don't retry into an active rate limit and extend the block.
+PORTAL_BLOCK_BACKOFF_SECONDS = 60 * 60  # 1 hour
+
+
 class InspectionScraper:
     """Playwright-based scraper for health department inspection portals.
 
     Accepts a CountyConfig to handle county-specific quirks (URL, selectors,
     date handling). Defaults to Sacramento County.
+
+    RATE-LIMIT DISCIPLINE — DO NOT BYPASS:
+
+    Every portal navigation MUST go through `self._request(page, url)`. That
+    method enforces a minimum interval between requests via an asyncio Lock,
+    so even concurrent callers cannot send parallel requests. It also detects
+    HTTP 403/429 responses and trips a process-wide circuit breaker that
+    raises `PortalBlocked` on every subsequent request for `PORTAL_BLOCK_BACKOFF_SECONDS`.
+
+    NEVER call `page.goto(...)` directly from a method on this class — that
+    bypasses the rate limit. NEVER spawn parallel `InspectionScraper`
+    instances against the same portal — they share the portal but each has
+    its own lock, defeating the protection.
+
+    Adding new methods that hit the portal: call `await self._request(page, url)`
+    instead of `page.goto(url)` and let `PortalBlocked` propagate to the caller.
     """
 
     def __init__(self, config: CountyConfig | None = None, rate_limit_seconds: int | None = None):
@@ -29,6 +60,51 @@ class InspectionScraper:
         self.rate_limit_seconds = rate_limit_seconds or self.config.default_rate_limit_seconds
         self._browser = None
         self._playwright = None
+        # Rate-limit + circuit-breaker state
+        self._request_lock = asyncio.Lock()
+        self._last_request_at: float = 0.0
+        self._blocked_until: float = 0.0
+
+    async def _request(self, page, url: str, *, wait_until: str = "domcontentloaded", timeout: int | None = None):
+        """Throttled portal navigation. ALL portal page loads must go through this.
+
+        - Serializes via asyncio.Lock so concurrent callers cannot send parallel requests.
+        - Sleeps to enforce `self.rate_limit_seconds` between any two requests.
+        - Raises `PortalBlocked` if the circuit breaker is active or the response is 403/429.
+        """
+        cfg = self.config
+        timeout = timeout or cfg.page_load_timeout_ms
+
+        async with self._request_lock:
+            now = time.monotonic()
+
+            # Circuit breaker check
+            if now < self._blocked_until:
+                wait = self._blocked_until - now
+                raise PortalBlocked(
+                    f"Circuit breaker active for {wait/60:.1f} more minutes (portal recently returned 403/429)"
+                )
+
+            # Rate limit: wait for the configured interval since the last request
+            since = now - self._last_request_at
+            if since < self.rate_limit_seconds:
+                await asyncio.sleep(self.rate_limit_seconds - since)
+
+            try:
+                response = await page.goto(url, wait_until=wait_until, timeout=timeout)
+            finally:
+                self._last_request_at = time.monotonic()
+
+            # Detect block in the response and trip the breaker
+            if response is not None and response.status in (403, 429):
+                self._blocked_until = time.monotonic() + PORTAL_BLOCK_BACKOFF_SECONDS
+                raise PortalBlocked(
+                    f"Portal returned HTTP {response.status} on {url}. "
+                    f"Circuit breaker engaged for {PORTAL_BLOCK_BACKOFF_SECONDS // 60} minutes. "
+                    f"Wait it out — re-running into an active block extends it."
+                )
+
+            return response
 
     async def _ensure_browser(self):
         """Launch browser if not already running."""
@@ -92,7 +168,7 @@ class InspectionScraper:
             date_range = f"{formatted_start}{cfg.date_range_separator}{formatted_end}"
 
             logger.info(f"Navigating to {cfg.county_name} portal for {start_date} to {end_date}")
-            await page.goto(cfg.portal_url, wait_until="domcontentloaded", timeout=cfg.page_load_timeout_ms)
+            await self._request(page, cfg.portal_url)
             await page.wait_for_selector(cfg.date_picker_selector, timeout=cfg.selector_timeout_ms)
             logger.info("Page loaded, date picker found")
 
@@ -176,11 +252,12 @@ class InspectionScraper:
                 return True
 
             logger.warning(f"Date filter didn't take (got '{current_val}'), retrying ({attempt + 1}/3)")
-            await asyncio.sleep(self.rate_limit_seconds)
             try:
-                await page.goto(cfg.portal_url, wait_until="domcontentloaded", timeout=cfg.page_load_timeout_ms)
+                await self._request(page, cfg.portal_url)
                 await page.wait_for_selector(cfg.date_picker_selector, timeout=cfg.selector_timeout_ms)
                 await asyncio.sleep(2)
+            except PortalBlocked:
+                raise
             except Exception as e:
                 logger.warning(f"Page reload failed on retry: {e}")
                 continue
@@ -338,7 +415,7 @@ class InspectionScraper:
         page = await context.new_page()
         try:
             logger.info(f"Navigating to inspection page: {full_url}")
-            await page.goto(full_url, timeout=cfg.page_load_timeout_ms, wait_until="domcontentloaded")
+            await self._request(page, full_url)
 
             try:
                 await page.wait_for_selector(cfg.pdf_link_selector, timeout=cfg.selector_timeout_ms)
@@ -406,13 +483,107 @@ class InspectionScraper:
             await page.close()
             await context.close()
 
+    async def get_inspection_permit_url(self, inspection_id: str) -> str | None:
+        """Navigate to an inspection's portal page and return its permit URL.
+
+        The inspection page has a back-link to the parent permit page —
+        critical for finding permit URLs of inspections that are HIDDEN from
+        the date-search listing (multi-BoW siblings collapsed by the listing).
+
+        Always creates its own context/page so callers cannot pass a managed
+        page object and bypass `_request`'s rate limit.
+        """
+        cfg = self.config
+        url = f"{cfg.base_url}/sacramento/program-rec-health/inspection/?inspectionID={inspection_id}"
+
+        await self._ensure_browser()
+        context = await self._browser.new_context(
+            user_agent=cfg.user_agent,
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        page = await context.new_page()
+        try:
+            await self._request(page, url)
+            await asyncio.sleep(0.3)
+
+            # Find the back-link to the permit page
+            try:
+                href = await page.eval_on_selector(
+                    'a[href*="permitID"]',
+                    "el => el.getAttribute('href')",
+                )
+            except Exception:
+                href = None
+            return href
+        finally:
+            await page.close()
+            await context.close()
+
+    async def get_permit_inspections(self, permit_url: str) -> list[dict]:
+        """Fetch a permit page and return all inspections listed on it.
+
+        Returns a list of dicts: {inspection_id, inspection_date, inspection_type, pdf_url}.
+
+        The portal's date-search listing collapses multiple inspections at the
+        same facility on the same day to one row. Walking the permit page
+        directly is the only way to find those hidden records.
+        """
+        cfg = self.config
+        full_url = (cfg.base_url + permit_url) if permit_url.startswith("/") else permit_url
+
+        await self._ensure_browser()
+        context = await self._browser.new_context(
+            user_agent=cfg.user_agent,
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        page = await context.new_page()
+        results: list[dict] = []
+        try:
+            await self._request(page, full_url)
+            await asyncio.sleep(2)
+
+            sections = await page.query_selector_all(".inspection-listing-section")
+            for section in sections:
+                header_el = await section.query_selector(".inspection-listing-header")
+                date_el = await section.query_selector(".inspection-listing-date")
+                view_el = await section.query_selector(".inspection-listing-view-button")
+
+                inspection_type = (await header_el.text_content() or "").strip() if header_el else None
+                date_text = (await date_el.text_content() or "").strip() if date_el else None
+                view_href = (await view_el.get_attribute("href") or "") if view_el else ""
+
+                inspection_id = self._extract_inspection_id(view_href) if view_href else None
+                inspection_date = self._parse_inspection_date(date_text or "")
+
+                if inspection_id:
+                    results.append({
+                        "inspection_id": inspection_id,
+                        "inspection_date": inspection_date,
+                        "inspection_type": inspection_type,
+                        "pdf_url": view_href,
+                    })
+
+            return results
+        except Exception as e:
+            logger.warning(f"Failed to walk permit {permit_url}: {e}")
+            return results
+        finally:
+            await page.close()
+            await context.close()
+
     async def get_facility_detail(self, facility_url: str) -> dict:
         """Navigate to a facility detail page and extract additional data."""
         cfg = self.config
         await self._ensure_browser()
         page = await self._browser.new_page()
         try:
-            await page.goto(facility_url, wait_until="domcontentloaded", timeout=30000)
+            await self._request(page, facility_url, timeout=30000)
             await asyncio.sleep(2)
 
             detail = {}

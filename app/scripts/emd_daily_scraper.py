@@ -57,10 +57,18 @@ def save_health(health: dict):
 
 
 async def send_alert(message: str, health: dict):
-    """Send alert notification. Currently logs — will integrate with notification system."""
+    """Send alert via ntfy + write a local marker file for off-device checks."""
     logger.critical(f"SCRAPER ALERT: {message}")
-    # TODO: integrate with email/SMS/Slack notification
-    # For now, write to a separate alert file that can be monitored
+    from _notify import alert_failure
+    body = (
+        f"{message}\n\n"
+        f"consecutive_failures: {health.get('consecutive_failures', 0)}\n"
+        f"last_success: {health.get('last_success')}\n"
+        f"last_attempt: {health.get('last_attempt')}\n"
+    )
+    alert_failure("inspection scraper", body, cooldown_seconds=3600)
+
+    # Also keep a local marker file for offline inspection
     alert_file = "/tmp/emd_scraper_alert.json"
     alert = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -75,6 +83,7 @@ async def scrape_day(target_date: date) -> dict:
     """Scrape a single day's inspections and download PDFs."""
     from src.core.database import get_db_context
     from src.services.emd.scraper import EMDScraper
+    from src.services.inspection.scraper import PortalBlocked
     from src.services.emd.service import EMDService
     from src.services.emd.pdf_extractor import EMDPDFExtractor
     from src.models.emd_inspection import EMDInspection
@@ -176,6 +185,86 @@ async def scrape_day(target_date: date) -> dict:
                 except Exception as e:
                     logger.warning(f"  Auto-match error: {e}")
 
+        # --- Walk every permit URL we just saw to catch multi-BoW siblings ---
+        # The portal's date-search listing collapses multiple inspections at the
+        # same facility on the same day to one row. The permit page lists every
+        # inspection. Walk each permit and ingest any sibling we don't have.
+        seen_permit_urls = {f.get("url") for f in facilities if f.get("url")}
+        result["sibling_new"] = 0
+        for permit_url in seen_permit_urls:
+            try:
+                listed = await scraper.get_permit_inspections(permit_url)
+            except PortalBlocked as e:
+                logger.error(f"  ABORTING permit walks: {e}")
+                result["errors"].append(f"PortalBlocked: {e}")
+                break
+            except Exception as e:
+                logger.warning(f"  permit walk failed for {permit_url}: {e}")
+                continue
+
+            for sibling in listed:
+                sib_iid = sibling.get("inspection_id")
+                sib_date = sibling.get("inspection_date")
+                if not sib_iid or sib_date != date_str:
+                    continue
+
+                async with get_db_context() as db:
+                    check = await db.execute(
+                        select(EMDInspection).where(EMDInspection.inspection_id == sib_iid)
+                    )
+                    if check.scalar_one_or_none():
+                        continue  # Already have it
+
+                # New sibling — download PDF and ingest
+                sib_pdf_path = None
+                sib_pdf_url = sibling.get("pdf_url")
+                if sib_pdf_url:
+                    try:
+                        year_dir = os.path.join(UPLOADS_DIR, target_date.strftime("%Y"))
+                        os.makedirs(year_dir, exist_ok=True)
+                        sib_pdf_path = os.path.join(year_dir, f"{sib_iid}.pdf")
+                        if not os.path.exists(sib_pdf_path):
+                            ok = await scraper.download_pdf(sib_pdf_url, sib_pdf_path)
+                            if ok and os.path.exists(sib_pdf_path) and os.path.getsize(sib_pdf_path) > 100:
+                                result["pdfs"] += 1
+                            else:
+                                sib_pdf_path = None
+                    except PortalBlocked as e:
+                        logger.error(f"  ABORTING permit walks: {e}")
+                        result["errors"].append(f"PortalBlocked: {e}")
+                        return result
+                    except Exception as e:
+                        logger.warning(f"  sibling PDF download failed for {sib_iid}: {e}")
+                        sib_pdf_path = None
+
+                async with get_db_context() as db:
+                    svc2 = EMDService(db)
+                    try:
+                        # Pull facility name from one of the original facilities sharing this permit URL
+                        fname = next((f.get("name", "") for f in facilities if f.get("url") == permit_url), "")
+                        sib_fdata = {
+                            "name": fname,
+                            "address": "",
+                            "url": permit_url,
+                            "pdf_url": sib_pdf_url,
+                            "inspection_id": sib_iid,
+                            "inspection_date": sib_date,
+                        }
+                        save_result = await svc2.process_facility(sib_fdata, pdf_path=sib_pdf_path)
+                        if save_result in ("new_inspection", "new_facility"):
+                            result["sibling_new"] += 1
+                            result["new"] += 1
+                        await db.commit()
+                    except Exception as e:
+                        logger.warning(f"  sibling process_facility failed for {sib_iid}: {e}")
+                        await db.rollback()
+                        result["errors"].append(f"sibling {sib_iid}: {e}")
+
+                # No manual sleep here — scraper._request enforces rate limit internally
+
+        if result["sibling_new"]:
+            logger.info(f"  {date_str}: caught {result['sibling_new']} multi-BoW siblings via permit walking")
+
     finally:
         await scraper.close()
 
@@ -186,7 +275,6 @@ async def run_daily_scrape():
     """Run the daily scrape cycle."""
     from src.core.database import get_db_context
     from src.models.scraper_run import ScraperRun
-    from src.services.email_service import send_scraper_alert
 
     health = load_health()
     health["state"] = "scraping"
@@ -243,15 +331,27 @@ async def run_daily_scrape():
                     duration_seconds=duration,
                 )
                 db.add(run)
-
-                # Send email
-                scrape_dates = [yesterday.strftime("%b %d"), today.strftime("%b %d")]
-                email_sent = await send_scraper_alert(total_found, total_new, total_pdfs, all_errors, duration, scrape_dates)
-                run.email_sent = email_sent
+                # email_sent is a vestigial column from the SMTP era — set to
+                # False since we now use ntfy for failures only (no per-run
+                # success email).
+                run.email_sent = False
 
                 await db.commit()
         except Exception as e:
             logger.error(f"Failed to log scraper run: {e}")
+
+        # Notify on partial failures (run succeeded overall but some
+        # inspections errored). The send_alert path is only for hard failures.
+        if all_errors:
+            from _notify import send_ntfy
+            send_ntfy(
+                title="QP inspection scraper: partial errors",
+                body=f"Daily scrape ran but {len(all_errors)} inspection(s) errored.\nFirst few:\n" + "\n".join(all_errors[:5]),
+                priority="default",
+                tags="warning",
+                cooldown_key="scraper_partial_errors",
+                cooldown_seconds=3600,
+            )
 
     except Exception as e:
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -277,7 +377,18 @@ async def run_daily_scrape():
         except Exception as db_err:
             logger.error(f"Failed to log scraper error: {db_err}")
 
-        if health["consecutive_failures"] >= MAX_CONSECUTIVE_FAILURES and not health["alert_sent"]:
+        # PortalBlocked is severe — alert IMMEDIATELY (with long cooldown so a
+        # multi-hour WAF window doesn't spam). Other generic errors wait for
+        # MAX_CONSECUTIVE_FAILURES so we don't alert on a single transient blip.
+        is_portal_blocked = "PortalBlocked" in type(e).__name__ or "Circuit breaker" in str(e) or "403" in str(e) or "429" in str(e)
+        if is_portal_blocked:
+            from _notify import alert_failure
+            alert_failure(
+                "inspection scraper",
+                f"Daily scraper blocked by portal WAF (403/429).\n{e}\n\nThe portal block typically clears within 24h. Investigate cumulative request volume if persistent across multiple runs.",
+                cooldown_seconds=6 * 3600,
+            )
+        elif health["consecutive_failures"] >= MAX_CONSECUTIVE_FAILURES and not health["alert_sent"]:
             await send_alert(
                 f"EMD scraper has failed {health['consecutive_failures']} consecutive times. "
                 f"Last error: {e}",

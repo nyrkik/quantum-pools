@@ -200,15 +200,19 @@ async def _exec_get_inspections(inp: dict, ctx: ToolContext) -> dict:
     if not property_id:
         return {"error": "No property in context. Specify a property_id."}
 
-    facility = (await ctx.db.execute(
+    # A property may be matched to multiple facilities (separate pool/spa
+    # permits). Pull inspections across all of them.
+    facilities = (await ctx.db.execute(
         select(InspectionFacility).where(InspectionFacility.matched_property_id == property_id)
-    )).scalar_one_or_none()
-    if not facility:
+    )).scalars().all()
+    if not facilities:
         return {"inspections": [], "message": "This property has no matched inspection facility."}
 
+    facility_ids = [f.id for f in facilities]
+    facility_names = {f.id: f.name for f in facilities}
     limit = inp.get("limit", 5)
     inspections = (await ctx.db.execute(
-        select(Inspection).where(Inspection.facility_id == facility.id)
+        select(Inspection).where(Inspection.facility_id.in_(facility_ids))
         .order_by(desc(Inspection.inspection_date)).limit(limit)
     )).scalars().all()
 
@@ -218,6 +222,7 @@ async def _exec_get_inspections(inp: dict, ctx: ToolContext) -> dict:
             select(InspectionViolation).where(InspectionViolation.inspection_id == i.id)
         )).scalars().all()
         result.append({
+            "facility_name": facility_names.get(i.facility_id),
             "date": i.inspection_date.isoformat() if i.inspection_date else None,
             "type": i.inspection_type,
             "inspector": i.inspector_name,
@@ -233,11 +238,15 @@ async def _exec_get_inspections(inp: dict, ctx: ToolContext) -> dict:
         })
 
     return {
-        "facility": {
-            "name": facility.name,
-            "address": f"{facility.street_address}, {facility.city}" if facility.street_address else None,
-            "permit_holder": facility.permit_holder,
-        },
+        "facilities": [
+            {
+                "name": f.name,
+                "address": f"{f.street_address}, {f.city}" if f.street_address else None,
+                "permit_holder": f.permit_holder,
+                "permit_id": f.facility_id,
+            }
+            for f in facilities
+        ],
         "inspections": result,
     }
 

@@ -81,7 +81,14 @@ SACRAMENTO = CountyConfig(
     upload_subdir="sacramento",
 )
 
-PLACER = CountyConfig(
+# NOTE (2026-04-11): Placer County does NOT publish pool inspection reports
+# online. As of this date, Sacramento County is the ONLY California county
+# that exposes a public inspection portal we can scrape. This config exists
+# as an aspirational placeholder in case Placer ever launches a portal — the
+# URL below is a guess and has never been verified to return real data.
+# DO NOT add this to COUNTY_CONFIGS or run the daily scraper against it
+# until you've confirmed the portal exists and the selectors still match.
+PLACER_PLACEHOLDER = CountyConfig(
     county_name="Placer",
     portal_url="https://inspections.myhealthdepartment.com/placer/program-rec-health",
     use_keyboard_date_input=True,
@@ -90,10 +97,11 @@ PLACER = CountyConfig(
     upload_subdir="placer",
 )
 
-# Registry — add new counties here
+# Registry of ACTIVE county scrapers. Sacramento is the only county whose
+# health department publishes inspection reports online. Other counties we
+# serve (Placer, El Dorado, etc.) require manual lookup or in-person requests.
 COUNTY_CONFIGS: dict[str, CountyConfig] = {
     "sacramento": SACRAMENTO,
-    "placer": PLACER,
 }
 
 

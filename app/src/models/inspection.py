@@ -24,6 +24,10 @@ class Inspection(Base):
     inspector_phone: Mapped[str | None] = mapped_column(String(50))
     program_identifier: Mapped[str | None] = mapped_column(String(100))
     permit_id: Mapped[str | None] = mapped_column(String(50), index=True)
+    # Portal permit page URL (e.g. /sacramento/program-rec-health/permit/?permitID=<UUID>)
+    # — captured from date scrapes so we can walk permits directly to find inspections
+    # the date-search listing collapses (multi-BoW per facility/day).
+    permit_url: Mapped[str | None] = mapped_column(String(500), index=True)
     total_violations: Mapped[int] = mapped_column(Integer, default=0)
     major_violations: Mapped[int] = mapped_column(Integer, default=0)
     pool_capacity_gallons: Mapped[int | None] = mapped_column(Integer)

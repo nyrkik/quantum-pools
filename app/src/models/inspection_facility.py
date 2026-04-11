@@ -22,9 +22,20 @@ class InspectionFacility(Base):
     state: Mapped[str] = mapped_column(String(50), default="CA")
     zip_code: Mapped[str | None] = mapped_column(String(20))
     phone: Mapped[str | None] = mapped_column(String(50))
-    facility_id: Mapped[str | None] = mapped_column(String(50), unique=True, index=True)
+    # Sacramento County's Establishment ID (e.g. FA0005473). NOT unique on
+    # its own — a single establishment can have multiple inspection_facilities
+    # rows distinguished by `program_identifier` (e.g. one establishment with
+    # buildings at two addresses, or with separate POOL and SPA permits).
+    # The composite uniqueness `(facility_id, program_identifier) NULLS NOT
+    # DISTINCT` is enforced by `ix_inspection_facilities_fa_program_unique`
+    # (see migration 3a8f1c7e2b40).
+    facility_id: Mapped[str | None] = mapped_column(String(50), index=True)
     permit_holder: Mapped[str | None] = mapped_column(String(255))
     facility_type: Mapped[str | None] = mapped_column(String(50))
+    # Program / building / body-of-water discriminator within an establishment.
+    # Set to the inspection's program_identifier value (e.g. "POOL", "SPA",
+    # "POOL @ 4440 OAK HOLLOW DR"). Multiple facility rows can share an FA
+    # only if their program_identifier values differ.
     program_identifier: Mapped[str | None] = mapped_column(String(100))
 
     # Link to our customer/property

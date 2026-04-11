@@ -1,6 +1,7 @@
 """EMD Service — orchestrates scraping, PDF extraction, facility matching, and lead generation."""
 
 import os
+import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
@@ -84,8 +85,6 @@ class InspectionService:
     async def process_facility(self, facility_data: dict, pdf_path: Optional[str] = None) -> str:
         """Process a single scraped facility. Returns 'new_facility', 'new_inspection', or 'skipped'."""
         name = facility_data.get("name", "").strip()
-        if not name:
-            return "skipped"
 
         inspection_id = facility_data.get("inspection_id")
 
@@ -97,8 +96,64 @@ class InspectionService:
             if existing.scalar_one_or_none():
                 return "skipped"
 
-        # Find or create facility
+        # Pre-extract PDF data BEFORE dedup so we can use the canonical
+        # Establishment ID (FA####) and the structured address fields, instead
+        # of relying on the scraper's brittle name+address. Cache the parsed
+        # data so _process_pdf doesn't have to parse the same PDF twice.
+        pdf_data: Optional[dict] = None
+        if pdf_path and os.path.exists(pdf_path):
+            from src.services.inspection.pdf_extractor import EMDPDFExtractor
+            try:
+                pdf_data = EMDPDFExtractor().extract_all(pdf_path)
+            except Exception as e:
+                logger.warning(f"PDF extraction failed for {pdf_path}: {e}")
+                pdf_data = None
+
+            if pdf_data:
+                # Merge PDF fields into facility_data only where missing.
+                # PDF is the canonical source for facility_id and address fields.
+                if not facility_data.get("facility_id") and pdf_data.get("facility_id"):
+                    facility_data["facility_id"] = pdf_data["facility_id"]
+                if not facility_data.get("permit_holder") and pdf_data.get("permit_holder"):
+                    facility_data["permit_holder"] = pdf_data["permit_holder"]
+                if not facility_data.get("phone") and pdf_data.get("phone_number"):
+                    facility_data["phone"] = pdf_data["phone_number"]
+                if pdf_data.get("facility_address"):
+                    facility_data.setdefault("street_address", pdf_data["facility_address"])
+                if pdf_data.get("facility_city"):
+                    facility_data.setdefault("city", pdf_data["facility_city"])
+                if pdf_data.get("facility_zip"):
+                    facility_data.setdefault("zip_code", pdf_data["facility_zip"])
+                # The program_identifier is the per-inspection discriminator
+                # used to route a multi-building / multi-BoW establishment to
+                # the right facility row. Always pull it from the PDF if
+                # present — this is what `_find_or_create_facility` keys on.
+                if pdf_data.get("program_identifier"):
+                    facility_data["program_identifier"] = pdf_data["program_identifier"]
+                # Use PDF facility_name as a fallback if scraper name is empty
+                if not name and pdf_data.get("facility_name"):
+                    name = pdf_data["facility_name"]
+
+        if not name:
+            return "skipped"
+
+        # Find or create facility (now with PDF-enriched data)
         facility, was_created = await self._find_or_create_facility(name, facility_data)
+
+        # If facility was found by name match but lacks the canonical FA####,
+        # backfill it from the PDF — but only if no other facility already
+        # owns that FA#### (the unique index would otherwise reject).
+        if not facility.facility_id and facility_data.get("facility_id"):
+            new_fid = facility_data["facility_id"]
+            check = await self.db.execute(
+                select(InspectionFacility.id).where(
+                    InspectionFacility.facility_id == new_fid,
+                    InspectionFacility.id != facility.id,
+                )
+            )
+            if not check.first():
+                facility.facility_id = new_fid
+
         result_type = "new_facility" if was_created else "new_inspection"
 
         # Create inspection record
@@ -116,48 +171,139 @@ class InspectionService:
             inspection_date=inspection_date,
             program_identifier="POOL",
             pdf_path=pdf_path,
+            permit_url=facility_data.get("url"),
         )
         self.db.add(inspection)
 
-        # If PDF provided, extract data
+        # If PDF provided, populate inspection fields and create violations/equipment.
+        # Pass the already-extracted data so we don't re-parse the PDF.
         if pdf_path and os.path.exists(pdf_path):
-            await self._process_pdf(inspection, facility, pdf_path)
+            await self._process_pdf(inspection, facility, pdf_path, pdf_data=pdf_data)
 
         return result_type
 
     async def _find_or_create_facility(self, name: str, data: dict) -> tuple[InspectionFacility, bool]:
-        """Find existing facility by name or facility_id, or create new one.
-        Returns (facility, was_created)."""
-        # Try matching by EMD facility_id first
+        """Find or create the inspection_facility row that owns this inspection.
+
+        Dedup key: (facility_id, program_identifier). One EMD establishment
+        (FA####) can have multiple facility rows distinguished by
+        program_identifier (e.g. POOL vs SPA, or "POOL @ 4407 OAK HOLLOW DR"
+        vs "POOL @ 4440 OAK HOLLOW DR" for one establishment with two
+        physical buildings — Arbor Ridge case).
+
+        Resolution order when an FA already has rows:
+          1. Exact (FA, program_identifier) match → use it
+          2. NULL-program row exists → AUTO-SPLIT: clone its address/metadata
+             into a new row with the new program_identifier so subsequent
+             inspections at this program land in the right place
+          3. No NULL row either → create a new row alongside the existing
+             ones, copying address/metadata from the first
+        """
         emd_fid = data.get("facility_id")
+        program_id = data.get("program_identifier")  # set by process_facility from PDF
+
         if emd_fid:
             result = await self.db.execute(
                 select(InspectionFacility).where(InspectionFacility.facility_id == emd_fid)
             )
-            facility = result.scalar_one_or_none()
+            candidates = result.scalars().all()
+
+            if candidates:
+                # 1. Exact match on (FA, program_identifier)
+                if program_id is not None:
+                    exact = next(
+                        (f for f in candidates if f.program_identifier == program_id),
+                        None,
+                    )
+                    if exact:
+                        return exact, False
+
+                    # 2. If the FA has only one row and it's a NULL-program
+                    # generic row, UPDATE it in place rather than splitting.
+                    # This avoids leaving orphaned NULL rows behind during
+                    # realignment, while still allowing future splits when
+                    # a third distinct program_id shows up.
+                    if len(candidates) == 1 and candidates[0].program_identifier is None:
+                        candidates[0].program_identifier = program_id
+                        await self.db.flush()
+                        return candidates[0], False
+
+                    # 3. Auto-split off a NULL-program row (or any existing row)
+                    generic = next(
+                        (f for f in candidates if f.program_identifier is None),
+                        None,
+                    )
+                    template = generic or candidates[0]
+                    # If the program_identifier has an "@ <address>" suffix
+                    # (the Arbor Ridge multi-building pattern), use that as
+                    # the new row's street_address so auto_match can link it
+                    # to the right customer property. Otherwise inherit.
+                    program_addr = self._extract_program_address(program_id)
+                    new_row = InspectionFacility(
+                        id=str(uuid.uuid4()),
+                        name=name or template.name,
+                        facility_id=emd_fid,
+                        program_identifier=program_id,
+                        street_address=program_addr or data.get("street_address") or template.street_address,
+                        city=data.get("city") or template.city,
+                        state=template.state or "CA",
+                        zip_code=data.get("zip_code") or template.zip_code,
+                        permit_holder=data.get("permit_holder") or template.permit_holder,
+                        phone=data.get("phone") or template.phone,
+                        facility_type=data.get("facility_type") or template.facility_type,
+                    )
+                    self.db.add(new_row)
+                    await self.db.flush()
+                    logger.info(
+                        f"Auto-split facility {emd_fid}: new row for program_identifier={program_id!r}"
+                    )
+                    return new_row, True
+                else:
+                    # No program_identifier — fall back to the existing
+                    # generic catch-all (NULL) or any existing row
+                    generic = next(
+                        (f for f in candidates if f.program_identifier is None),
+                        None,
+                    )
+                    return (generic or candidates[0]), False
+
+        # Fallback: case-insensitive name match. ONLY runs when we have no
+        # FA#### at all (e.g. PDF extraction failed). If FA was provided but
+        # didn't match an existing row, fall straight through to creation
+        # rather than risk colliding with a same-named facility at a different
+        # FA (real-world: multiple "In-Shape Fitness" locations).
+        if not emd_fid:
+            result = await self.db.execute(
+                select(InspectionFacility).where(func.lower(InspectionFacility.name) == name.lower())
+            )
+            # Use .first() not scalar_one_or_none() — same name can repeat
+            # across facility rows now that we allow multi-row per FA.
+            facility = result.scalars().first()
             if facility:
                 return facility, False
 
-        # Try matching by name (case-insensitive)
-        result = await self.db.execute(
-            select(InspectionFacility).where(func.lower(InspectionFacility.name) == name.lower())
-        )
-        facility = result.scalar_one_or_none()
-        if facility:
-            return facility, False
-
-        # Parse address
-        address = data.get("address", "")
-        street, city, state, zip_code = self._parse_address(address)
+        # Prefer structured address fields from PDF; fall back to parsing the
+        # scraper's address string.
+        street = data.get("street_address")
+        city = data.get("city")
+        zip_code = data.get("zip_code")
+        state = None
+        if not street or not city:
+            ps, pc, pst, pz = self._parse_address(data.get("address", ""))
+            street = street or ps
+            city = city or pc
+            state = pst
+            zip_code = zip_code or pz
 
         facility = InspectionFacility(
             id=str(uuid.uuid4()),
             name=name,
-            street_address=street,
-            city=city,
+            street_address=street or "",
+            city=city or "",
             state=state or "CA",
-            zip_code=zip_code,
+            zip_code=zip_code or "",
             facility_id=emd_fid,
+            program_identifier=program_id,
             permit_holder=data.get("permit_holder"),
             phone=data.get("phone"),
             facility_type=data.get("facility_type"),
@@ -166,12 +312,17 @@ class InspectionService:
         await self.db.flush()
         return facility, True
 
-    async def _process_pdf(self, inspection: Inspection, facility: InspectionFacility, pdf_path: str):
-        """Extract data from PDF and update inspection + create violations/equipment."""
-        from src.services.inspection.pdf_extractor import EMDPDFExtractor
+    async def _process_pdf(self, inspection: Inspection, facility: InspectionFacility, pdf_path: str, pdf_data: Optional[dict] = None):
+        """Extract data from PDF and update inspection + create violations/equipment.
 
-        extractor = EMDPDFExtractor()
-        data = extractor.extract_all(pdf_path)
+        If `pdf_data` is provided, uses it instead of re-parsing the PDF
+        (process_facility extracts early so dedup can use the canonical FA####).
+        """
+        if pdf_data is None:
+            from src.services.inspection.pdf_extractor import EMDPDFExtractor
+            pdf_data = EMDPDFExtractor().extract_all(pdf_path)
+
+        data = pdf_data
 
         # Update inspection from PDF data
         if data.get("inspection_date"):
@@ -291,8 +442,16 @@ class InspectionService:
         if removed > 0:
             await self.db.flush()
 
+        # Only consider facilities with a canonical Establishment ID (FA####).
+        # Orphan stubs without an FA#### are remnants from the broken-scraper
+        # era (see docs/inspection-scraper-recovery.md) and must never be
+        # auto-matched — they can't be reliably distinguished from real ones.
         result = await self.db.execute(
-            select(InspectionFacility).where(InspectionFacility.matched_property_id.is_(None))
+            select(InspectionFacility).where(
+                InspectionFacility.matched_property_id.is_(None),
+                InspectionFacility.facility_id.isnot(None),
+                InspectionFacility.facility_id != "",
+            )
         )
         unmatched = result.scalars().all()
 
@@ -314,11 +473,24 @@ class InspectionService:
             norm = self._normalize_address(prop.address)
             if norm:
                 prop_by_addr[norm] = prop
-            # Also index by street number + street name for fuzzy
+            # Index by street number + street name for fuzzy fallback. Build
+            # BOTH the single-word key (parts[1]) and the joined-words key
+            # (parts[1] + parts[2] without the space) so EMD facilities like
+            # "4440 OAK HOLLOW DR" can fuzzy-match against properties like
+            # "4440 Oakhollow Dr". (Real-world: Arbor Ridge II.)
             parts = norm.split()
             if len(parts) >= 2 and parts[0].isdigit():
+                # Single-word key
                 key = f"{parts[0]} {parts[1]}"
                 prop_by_street_key.setdefault(key, []).append(prop)
+                # Joined-words key (only if there's a third part that isn't
+                # a street type abbreviation like dr/st/ave)
+                if len(parts) >= 3 and parts[2] not in {
+                    "dr", "st", "ave", "blvd", "rd", "ln", "ct", "pl",
+                    "pkwy", "cir", "ter", "wy", "way", "hwy",
+                }:
+                    joined_key = f"{parts[0]} {parts[1]}{parts[2]}"
+                    prop_by_street_key.setdefault(joined_key, []).append(prop)
 
         matched = 0
         matches_detail = []
@@ -333,15 +505,29 @@ class InspectionService:
             if not prop:
                 parts = fac_addr.split()
                 if len(parts) >= 2 and parts[0].isdigit():
-                    key = f"{parts[0]} {parts[1]}"
-                    candidates = prop_by_street_key.get(key, [])
+                    # Try the single-word key first, then the joined-words
+                    # variant if the facility's address has multi-word street.
+                    candidates = list(prop_by_street_key.get(f"{parts[0]} {parts[1]}", []))
+                    if len(parts) >= 3 and parts[2] not in {
+                        "dr", "st", "ave", "blvd", "rd", "ln", "ct", "pl",
+                        "pkwy", "cir", "ter", "wy", "way", "hwy",
+                    }:
+                        joined_key = f"{parts[0]} {parts[1]}{parts[2]}"
+                        candidates.extend(prop_by_street_key.get(joined_key, []))
                     # Filter by city if available
                     if facility.city and candidates:
                         city_match = [p for p in candidates if p.city and p.city.lower() == facility.city.lower()]
                         if city_match:
                             candidates = city_match
-                    if len(candidates) == 1:
-                        prop = candidates[0]
+                    # Dedupe while preserving order
+                    seen_ids = set()
+                    unique_candidates = []
+                    for c in candidates:
+                        if c.id not in seen_ids:
+                            seen_ids.add(c.id)
+                            unique_candidates.append(c)
+                    if len(unique_candidates) == 1:
+                        prop = unique_candidates[0]
 
             if prop:
                 facility.matched_property_id = prop.id
@@ -384,16 +570,19 @@ class InspectionService:
 
         statuses = []
         for prop, cust in rows:
-            # Check for matched facility
+            # A property may legitimately be matched to >1 facility (separate
+            # pool/spa permits). Aggregate stats across all matched facilities.
             fac_result = await self.db.execute(
                 select(InspectionFacility).where(InspectionFacility.matched_property_id == prop.id)
             )
-            facility = fac_result.scalar_one_or_none()
+            facilities = fac_result.scalars().all()
 
-            # Get inspection stats if matched
             total_violations = 0
             last_date = None
-            if facility:
+            primary_facility = None
+
+            if facilities:
+                facility_ids = [f.id for f in facilities]
                 stats = await self.db.execute(
                     select(
                         func.count(InspectionViolation.id),
@@ -401,15 +590,31 @@ class InspectionService:
                     )
                     .select_from(Inspection)
                     .outerjoin(InspectionViolation, InspectionViolation.inspection_id == Inspection.id)
-                    .where(Inspection.facility_id == facility.id)
+                    .where(Inspection.facility_id.in_(facility_ids))
                 )
                 stat_row = stats.one()
                 total_violations = stat_row[0] or 0
                 last_date = stat_row[1]
 
+                # Pick the facility with the most recent inspection as the
+                # primary one for response shape (frontend expects scalar fields).
+                primary_result = await self.db.execute(
+                    select(InspectionFacility.id, func.max(Inspection.inspection_date).label("last"))
+                    .join(Inspection, Inspection.facility_id == InspectionFacility.id)
+                    .where(InspectionFacility.id.in_(facility_ids))
+                    .group_by(InspectionFacility.id)
+                    .order_by(desc("last"))
+                    .limit(1)
+                )
+                primary_row = primary_result.first()
+                if primary_row:
+                    primary_facility = next((f for f in facilities if f.id == primary_row[0]), facilities[0])
+                else:
+                    primary_facility = facilities[0]
+
             # Determine reason for unmatched
             unmatched_reason = None
-            if not facility:
+            if not facilities:
                 county = getattr(prop, "county", None) or ""
                 if county and county.lower() != "sacramento":
                     unmatched_reason = f"{county} County — not in Sacramento County database"
@@ -421,9 +626,10 @@ class InspectionService:
                 "property_address": prop.full_address,
                 "customer_name": cust.display_name_col,
                 "customer_id": cust.id,
-                "match_status": "matched" if facility else "unmatched",
-                "facility_id": facility.id if facility else None,
-                "facility_name": facility.name if facility else None,
+                "match_status": "matched" if facilities else "unmatched",
+                "facility_id": primary_facility.id if primary_facility else None,
+                "facility_name": primary_facility.name if primary_facility else None,
+                "matched_facility_count": len(facilities),
                 "last_inspection_date": last_date,
                 "total_violations": total_violations,
                 "unmatched_reason": unmatched_reason,
@@ -1161,30 +1367,69 @@ class InspectionService:
     # --- Helpers ---
 
     @staticmethod
+    @staticmethod
+    def _extract_program_address(prog_id: str | None) -> str | None:
+        """Pull the address suffix from a program_identifier like
+        'POOL @ 4440 OAK HOLLOW DR'. Returns None if no '@' delimiter or
+        if the suffix doesn't start with a digit (street number).
+        """
+        if not prog_id or "@" not in prog_id:
+            return None
+        suffix = prog_id.split("@", 1)[1].strip()
+        if not suffix or not suffix[0].isdigit():
+            return None
+        return suffix
+
+    @staticmethod
     def _parse_address(address: str) -> tuple[str, str, str, str]:
-        """Parse an address string into (street, city, state, zip)."""
+        """Parse an address string into (street, city, state, zip).
+
+        Handles two scraper output formats:
+          - 3-part legacy: "street, city, CA zip"
+          - 2-part current: "street  city, CA zip" (street and city joined by 2+ spaces)
+        """
         if not address or address == "Unknown":
             return ("", "", "CA", "")
 
         parts = [p.strip() for p in address.split(",")]
-        street = parts[0] if len(parts) > 0 else ""
-        city = parts[1] if len(parts) > 1 else ""
-        state_zip = parts[2] if len(parts) > 2 else ""
 
-        state = "CA"
-        zip_code = ""
-        if state_zip:
-            sz_parts = state_zip.strip().split()
+        # 3-part legacy format
+        if len(parts) >= 3:
+            street = parts[0]
+            city = parts[1]
+            sz_parts = parts[2].split()
+            state = "CA"
+            zip_code = ""
             if len(sz_parts) >= 2:
                 state = sz_parts[0]
                 zip_code = sz_parts[1]
             elif len(sz_parts) == 1:
-                if sz_parts[0].isdigit():
+                if sz_parts[0][0].isdigit():
                     zip_code = sz_parts[0]
                 else:
                     state = sz_parts[0]
+            return (street, city, state, zip_code)
 
-        return (street, city, state, zip_code)
+        # 2-part current format: "street  city, ST zip"
+        if len(parts) == 2:
+            sz_match = re.match(r"^([A-Z]{2})\s+([\d-]+)$", parts[1])
+            if sz_match:
+                state = sz_match.group(1)
+                zip_code = sz_match.group(2)
+                # Split parts[0] on the last run of 2+ spaces to separate street from city
+                sc_match = re.match(r"^(.+?)\s{2,}(\S.*)$", parts[0])
+                if sc_match:
+                    return (sc_match.group(1).strip(), sc_match.group(2).strip(), state, zip_code)
+                # No double-space delimiter — fall back to the last token as city
+                tokens = parts[0].split()
+                if len(tokens) >= 2:
+                    return (" ".join(tokens[:-1]), tokens[-1], state, zip_code)
+                return (parts[0], "", state, zip_code)
+            # parts[1] doesn't look like state+zip — assume it's the city
+            return (parts[0], parts[1], "CA", "")
+
+        # 1-part fallback
+        return (parts[0] if parts else "", "", "CA", "")
 
     @staticmethod
     def _normalize_address(address: str) -> str:

@@ -16,7 +16,11 @@ import {
   ChevronUp,
   Circle,
   ExternalLink,
+  ArrowRightLeft,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 
 // --- Types (shared with case detail page) ---
@@ -65,6 +69,7 @@ export interface CaseInvoice {
   total: number;
   balance: number;
   created_at: string;
+  approved_at: string | null;
   line_items: { description: string; quantity: number; unit_price: number; amount: number }[];
 }
 
@@ -399,9 +404,28 @@ export function JobCard({ job }: { job: CaseJob }) {
   );
 }
 
-export function InvoiceCard({ invoice }: { invoice: CaseInvoice }) {
+export function InvoiceCard({ invoice, onUpdate }: { invoice: CaseInvoice; onUpdate?: () => void }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
+  const [converting, setConverting] = useState(false);
+
+  // The backend allows convert only for approved estimates.
+  const canConvert = invoice.document_type === "estimate" && !!invoice.approved_at;
+
+  const handleConvert = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (converting) return;
+    setConverting(true);
+    try {
+      await api.post(`/v1/invoices/${invoice.id}/convert-to-invoice`, {});
+      toast.success("Estimate converted to invoice");
+      onUpdate?.();
+    } catch {
+      toast.error("Failed to convert to invoice");
+    } finally {
+      setConverting(false);
+    }
+  };
 
   return (
     <div className="border rounded-lg">
@@ -447,9 +471,22 @@ export function InvoiceCard({ invoice }: { invoice: CaseInvoice }) {
               </div>
             </div>
           )}
-          <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={(e) => { e.stopPropagation(); router.push(`/invoices/${invoice.id}`); }}>
-            <ExternalLink className="h-3 w-3 mr-1" /> Open Full View
-          </Button>
+          <div className="flex items-center gap-1">
+            {canConvert && (
+              <Button
+                size="sm"
+                className="h-6 text-[10px] px-1.5"
+                onClick={handleConvert}
+                disabled={converting}
+              >
+                {converting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <ArrowRightLeft className="h-3 w-3 mr-1" />}
+                Convert to Invoice
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" onClick={(e) => { e.stopPropagation(); router.push(`/invoices/${invoice.id}`); }}>
+              <ExternalLink className="h-3 w-3 mr-1" /> Open Full View
+            </Button>
+          </div>
         </div>
       )}
     </div>

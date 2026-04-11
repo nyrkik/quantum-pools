@@ -174,6 +174,9 @@ async def get_case(
             "total": float(inv.total or 0),
             "balance": float(inv.balance or 0),
             "created_at": presenter._iso(inv.created_at),
+            # `approved_at` gates the "convert estimate to invoice" affordance
+            # in the UI — backend rejects conversion when this is null.
+            "approved_at": presenter._iso(inv.approved_at),
             "line_items": [
                 {"description": li.description, "quantity": float(li.quantity), "unit_price": float(li.unit_price), "amount": float(li.amount or 0)}
                 for li in sorted(inv.line_items or [], key=lambda x: x.sort_order)

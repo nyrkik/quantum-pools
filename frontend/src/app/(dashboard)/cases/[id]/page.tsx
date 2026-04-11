@@ -7,7 +7,6 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   ArrowLeft,
   FolderOpen,
@@ -30,6 +29,7 @@ import {
   DollarSign,
   ChevronDown,
   ChevronUp,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -48,7 +48,6 @@ import {
 import {
   CaseStatusBadge,
   JobCard,
-  InvoiceCard,
   formatTime,
   JOB_TYPES,
 } from "@/components/cases/case-components";
@@ -60,51 +59,6 @@ import type {
 } from "@/components/cases/case-components";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { CaseOwner } from "@/components/cases/case-owner";
-
-// --- Mobile detail sheet (only renders below lg breakpoint) ---
-
-function MobileDetailSheet({
-  selectedItem, onClose, mergedTimeline, detail, caseId, onReplyEmail, onUpdate,
-}: {
-  selectedItem: SelectedItem | null;
-  onClose: () => void;
-  mergedTimeline: TimelineEntry[];
-  detail: CaseDetail;
-  caseId: string;
-  onReplyEmail: () => void;
-  onUpdate: () => void;
-}) {
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 1024);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
-
-  if (!isMobile || !selectedItem) return null;
-
-  return (
-    <Sheet open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent side="bottom" className="h-[85vh] p-0 flex flex-col rounded-t-xl">
-        <SheetHeader className="px-4 pt-3 pb-2 border-b shrink-0">
-          <SheetTitle className="text-sm">Detail</SheetTitle>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto p-4">
-          <DetailPanel
-            selectedItem={selectedItem}
-            mergedTimeline={mergedTimeline}
-            detail={detail}
-            caseId={caseId}
-            onReplyEmail={onReplyEmail}
-            onUpdate={onUpdate}
-          />
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}
 
 // --- Selected item tracking ---
 
@@ -599,11 +553,14 @@ function JobEventDetailPanel({
 function InvoiceEventDetailPanel({
   entry,
   detail,
+  onUpdate,
 }: {
   entry: TimelineEntry;
   detail: CaseDetail;
+  onUpdate: () => void;
 }) {
   const router = useRouter();
+  const [converting, setConverting] = useState(false);
   const linkedInvoice = detail.invoices.find(
     (i) => i.id === entry.metadata?.invoice_id
   );
@@ -615,6 +572,24 @@ function InvoiceEventDetailPanel({
       </div>
     );
   }
+
+  // Backend allows convert only for approved estimates
+  const canConvert =
+    linkedInvoice.document_type === "estimate" && !!linkedInvoice.approved_at;
+
+  const handleConvert = async () => {
+    if (converting) return;
+    setConverting(true);
+    try {
+      await api.post(`/v1/invoices/${linkedInvoice.id}/convert-to-invoice`, {});
+      toast.success("Estimate converted to invoice");
+      onUpdate();
+    } catch {
+      toast.error("Failed to convert to invoice");
+    } finally {
+      setConverting(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -636,6 +611,21 @@ function InvoiceEventDetailPanel({
               .replace(/_/g, " ")
               .replace(/\b\w/g, (c) => c.toUpperCase())}
           </Badge>
+          {canConvert && (
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleConvert}
+              disabled={converting}
+            >
+              {converting ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <ArrowRightLeft className="h-3 w-3 mr-1" />
+              )}
+              Convert to Invoice
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -843,7 +833,7 @@ function DetailPanel({
     case "job_event":
       return <JobEventDetailPanel entry={entry} detail={detail} onUpdate={onUpdate} />;
     case "invoice_event":
-      return <InvoiceEventDetailPanel entry={entry} detail={detail} />;
+      return <InvoiceEventDetailPanel entry={entry} detail={detail} onUpdate={onUpdate} />;
     case "comment":
       return <CommentDetailPanel entry={entry} />;
     case "internal_message":
@@ -957,9 +947,10 @@ export default function CaseDetailPage({
     load();
   }, [load]);
 
-  // Auto-select most recent timeline item on first load (desktop only)
+  // Auto-select most recent timeline item on first load. Safe on all screen
+  // sizes now that the detail panel renders inline (no overlay).
   useEffect(() => {
-    if (mergedTimeline.length > 0 && !selectedItem && window.innerWidth >= 1024) {
+    if (mergedTimeline.length > 0 && !selectedItem) {
       const first = mergedTimeline[0];
       setSelectedItem({ type: first.type, id: first.id });
     }
@@ -1410,8 +1401,8 @@ export default function CaseDetailPage({
           </Card>
         </div>
 
-        {/* Detail panel — right column (40%), desktop only */}
-        <div className="hidden lg:block lg:w-[40%] min-w-0 overflow-hidden">
+        {/* Detail panel — right column on desktop (40%), stacked below timeline on mobile */}
+        <div className="w-full lg:w-[40%] min-w-0">
           <Card className="shadow-sm lg:sticky lg:top-4">
             <CardContent className="p-4 overflow-x-hidden">
               <DetailPanel
@@ -1425,17 +1416,6 @@ export default function CaseDetailPage({
             </CardContent>
           </Card>
         </div>
-
-        {/* Detail panel — mobile sheet overlay (only renders below lg breakpoint) */}
-        <MobileDetailSheet
-          selectedItem={selectedItem}
-          onClose={() => setSelectedItem(null)}
-          mergedTimeline={mergedTimeline}
-          detail={detail}
-          caseId={id}
-          onReplyEmail={handleReplyEmail}
-          onUpdate={load}
-        />
       </div>
 
       <ComposeMessage

@@ -44,7 +44,6 @@ import {
   Code2,
   Bot,
   Mail,
-  Bell,
   ClipboardList,
   FolderOpen,
   Receipt,
@@ -293,12 +292,13 @@ export function Sidebar() {
   const perms = usePermissions();
   const mobileDisplayName = organizationName || "QuantumPools";
   const [mobilePending, setMobilePending] = useState(0);
-  const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [lastRoleVersion, setLastRoleVersion] = useState(roleVersion);
-  const [notifs, setNotifs] = useState<{ id: string; type: string; title: string; body: string | null; link: string | null; is_read: boolean; created_at: string }[]>([]);
-  const [notifOpen, setNotifOpen] = useState(false);
 
   useEffect(() => {
+    // Poll the inbox stats for the mobile-header pending badge, and the
+    // notifications endpoint for `role_version` (used to refresh permissions
+    // when an admin changes them). The unread count from notifications is
+    // not displayed — see FB-22: the menu badges already cover it.
     const poll = () => {
       if (perms.canViewInbox) {
         api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
@@ -307,7 +307,6 @@ export function Sidebar() {
       }
       api.get<{ unread: number; role_version?: number }>("/v1/notifications/count")
         .then((r) => {
-          setUnreadNotifs(r.unread);
           if (r.role_version !== undefined) {
             setLastRoleVersion((prev) => {
               if (prev !== r.role_version!) {
@@ -323,26 +322,6 @@ export function Sidebar() {
     const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
   }, [perms.canViewInbox, refreshUser]);
-
-  const loadNotifs = async () => {
-    try {
-      const data = await api.get<{ id: string; type: string; title: string; body: string | null; link: string | null; is_read: boolean; created_at: string }[]>("/v1/notifications");
-      setNotifs(data);
-    } catch { /* ignore */ }
-  };
-
-  const handleBellClick = () => {
-    if (!notifOpen) loadNotifs();
-    setNotifOpen(!notifOpen);
-  };
-
-  const markAllRead = async () => {
-    try {
-      await api.post("/v1/notifications/read-all", {});
-      setUnreadNotifs(0);
-      setNotifs(prev => prev.map(n => ({ ...n, is_read: true })));
-    } catch { /* ignore */ }
-  };
 
   return (
     <>
@@ -366,14 +345,6 @@ export function Sidebar() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {unreadNotifs > 0 && (
-            <button onClick={handleBellClick} className="relative">
-              <Bell className="h-5 w-5 text-muted-foreground" />
-              <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
-                {unreadNotifs}
-              </span>
-            </button>
-          )}
           {mobilePending > 0 && (
             <Link href="/inbox" className="relative">
               <Mail className="h-5 w-5 text-muted-foreground" />
@@ -385,59 +356,8 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Notification dropdown (mobile + desktop) */}
-      {notifOpen && (
-        <div className="fixed top-14 right-4 z-50 w-80 max-h-96 overflow-y-auto rounded-lg border bg-background shadow-lg sm:top-4 sm:right-4">
-          <div className="flex items-center justify-between px-3 py-2 border-b">
-            <p className="text-sm font-medium">Notifications</p>
-            {unreadNotifs > 0 && (
-              <button onClick={markAllRead} className="text-xs text-primary hover:underline">Mark all read</button>
-            )}
-          </div>
-          {notifs.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">No notifications</p>
-          ) : (
-            <div className="divide-y">
-              {notifs.map((n) => (
-                <div
-                  key={n.id}
-                  className={`px-3 py-2.5 text-sm cursor-pointer hover:bg-muted/50 ${!n.is_read ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
-                  onClick={async () => {
-                    if (!n.is_read) {
-                      await api.post(`/v1/notifications/${n.id}/read`, {}).catch(() => {});
-                      setUnreadNotifs(prev => Math.max(0, prev - 1));
-                      setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, is_read: true } : x));
-                    }
-                    if (n.link) { window.location.href = n.link; }
-                    setNotifOpen(false);
-                  }}
-                >
-                  <p className={`text-sm ${!n.is_read ? "font-medium" : ""}`}>{n.title}</p>
-                  {n.body && <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>}
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {new Date(n.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {notifOpen && <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />}
-
       {/* Desktop sidebar */}
       <aside className="hidden sm:flex h-screen w-64 flex-col border-r bg-background relative">
-        {unreadNotifs > 0 && (
-          <button
-            onClick={handleBellClick}
-            className="absolute top-4 right-4 z-10"
-          >
-            <Bell className="h-4 w-4 text-muted-foreground" />
-            <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-500 px-1 text-[8px] font-bold text-white">
-              {unreadNotifs}
-            </span>
-          </button>
-        )}
         <SidebarContent />
       </aside>
     </>

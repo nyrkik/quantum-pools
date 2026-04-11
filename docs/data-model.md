@@ -178,12 +178,12 @@ Satellite imagery and measurement tools.
 
 ### Inspections (Pool Scout Pro)
 
-Health department inspection intelligence.
+Health department inspection intelligence. Sacramento County is the **only** California county with an online portal we can scrape.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| InspectionFacility | `inspection_facilities` | Commercial pool facility from county records |
-| Inspection | `inspections` | Individual inspection record |
+| InspectionFacility | `inspection_facilities` | A `(EMD establishment FA####, program_identifier)` row. ONE EMD establishment can have multiple rows distinguished by `program_identifier` (POOL/SPA at the same address, or `POOL @ 4407 OAK HOLLOW DR` vs `POOL @ 4440 OAK HOLLOW DR` for one establishment with two physical buildings — the Arbor Ridge case). Composite unique `(facility_id, program_identifier) NULLS NOT DISTINCT`. |
+| Inspection | `inspections` | Individual inspection record. Has `permit_url` so the daily scraper's permit-walker can find multi-BoW siblings the date listing collapses. |
 | InspectionViolation | `inspection_violations` | Violations found during an inspection |
 | InspectionEquipment | `inspection_equipment` | Equipment recorded during an inspection |
 | InspectionLookup | `inspection_lookups` | Single-lookup purchase records (tier-gated) |
@@ -234,7 +234,7 @@ AgentAction ──?─ AgentAction  (parent_action_id self-ref)
 
 InspectionFacility ─1──*─ Inspection ─1──*─ InspectionViolation
 InspectionFacility ─1──*─ Inspection ─1──1─ InspectionEquipment
-InspectionFacility ──?─ Property  (matched via address)
+InspectionFacility ──?─ Property  (matched via address; one Property may have many facility rows for multi-BoW or multi-building cases)
 
 DeepBlueConversation ──1─ User
 DeepBlueConversation ──?─ ServiceCase

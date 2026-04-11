@@ -7,7 +7,7 @@
 - Phase 3b complete (profitability analysis, difficulty scoring, bather load, satellite detection)
 - Phase 3c partial (Postmark outbound, PDF generation, Stripe subscriptions; AutoPay/recurring billing not started)
 - Phase 3d partial (dosing engine exists, service checklists built; guided workflows not started)
-- Phase 5 complete (inspection scraping, PDF extraction, 908 facilities, frontend dashboard)
+- Phase 5 complete (inspection scraping, PDF extraction, ~1,288 facilities / 2,409 inspections post 2026-04-11 cleanup, frontend dashboard, multi-building support, audit/QC tooling)
 - **Phase 5b NEW:** Email integrations (multi-mode) — currently Sapphire on managed mode (Cloudflare Workers + Postmark). Plan: Gmail API, MS Graph, forwarding modes for SaaS. See `docs/email-strategy.md`.
 - **Additional systems built not in original plan:** email/agent pipeline, AI inbox with triage, DeepBlue conversational AI, service cases, internal messaging, equipment catalog + parts, visit experience, real-time WebSocket events, granular permissions (60 slugs), à la carte subscriptions
 - Running on MS-01 via systemd + Cloudflare Tunnel (quantumpoolspro.com)
@@ -251,18 +251,21 @@ _Priority: CRITICAL — required for self-service and reducing admin workload_
 
 ## PHASE 5: Inspection Intelligence (Pool Scout) — COMPLETE
 _Priority: CRITICAL differentiator — Sacramento regional moat_
-_Completed 2026-03-25. 908 facilities, 1386 inspections, 8505 violations._
+_Completed 2026-03-25. Major recovery + multi-building rework 2026-04-11._
+_Current state: ~1,288 facility rows, 2,409 inspections, full DB↔PDF alignment._
 
 ### 5.1 Scraping Infrastructure
-- [x] Playwright scraper (`inspection/scraper.py`) — Sac County + Placer County
-- [x] Rate limiting and retry logic
+- [x] Playwright scraper (`inspection/scraper.py`) — **Sacramento County only** (Placer has no online portal; PLACER_PLACEHOLDER in code is aspirational)
+- [x] Rate limiting + circuit breaker (`InspectionScraper._request()` with `asyncio.Lock` + `PortalBlocked` on 403/429)
 - [x] ScraperRun tracking model
 - [x] Backfill scripts for historical data
+- [x] Permit-walking added to daily scraper to catch multi-BoW siblings the date listing collapses
 
 ### 5.2 Data Extraction
 - [x] `InspectionFacility`, `Inspection`, `InspectionViolation`, `InspectionEquipment` models
-- [x] PyMuPDF PDF extractor (`inspection/pdf_extractor.py`)
-- [x] Facility-to-property address matching
+- [x] PyMuPDF PDF extractor (`inspection/pdf_extractor.py`) — handles both labeled and older unlabeled position-based PDF formats
+- [x] Facility-to-property address matching with abbreviation + joined-words fuzzy fallback
+- [x] **Multi-building / multi-BoW schema** — composite unique on `(facility_id, program_identifier) NULLS NOT DISTINCT`. One EMD establishment can have multiple facility rows distinguished by program_identifier (POOL/SPA, or "@ <building address>" for the Arbor Ridge multi-building case). Auto-split when scraper sees a new program_identifier at an existing FA.
 - [x] Backward-compat aliases (`emd_*.py` → `inspection_*.py`)
 
 ### 5.3 Intelligence
@@ -271,6 +274,13 @@ _Completed 2026-03-25. 908 facilities, 1386 inspections, 8505 violations._
 - [x] Frontend: `/inspections` with full inspection browsing
 - [ ] AI-generated summaries and risk scores (planned for Inspection Intelligence agent)
 - [ ] Trend analysis (planned)
+
+### 5.4 Audit + QC Tooling (added 2026-04-11)
+- [x] `audit_inspections.py` — read-only DB↔PDF audit. Reports WRONG_FA, WRONG_DATE, MULTI_BUILDING, ORPHAN_PDF, MISSING_FILE, PDF_NO_DATA. `--alert` pushes ntfy on actionable drift.
+- [x] `qc_inspections.py` — DB↔portal QC. Smart year default (current if in swim season, else previous), `--recent` mode walks back skipping empty days, alerts only on `portal_only` drift (the actionable kind).
+- [x] Cron entries: daily QC at 7pm + weekly full audit Sunday 7am, both with `--alert`.
+- [x] Daily scraper PortalBlocked → immediate ntfy alert (was waiting for 6 consecutive failures).
+- [x] Shared `_notify.py` helper, topic `qp-alerts` on self-hosted MS-01:7031.
 
 ---
 

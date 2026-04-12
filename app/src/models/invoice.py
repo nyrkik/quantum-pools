@@ -55,8 +55,11 @@ class Invoice(Base):
     amount_paid: Mapped[float] = mapped_column(Float, default=0.0)
     balance: Mapped[float] = mapped_column(Float, default=0.0)
 
-    # Recurring
+    # Recurring billing
     is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    generation_source: Mapped[str | None] = mapped_column(String(20))  # manual, recurring, autopay
+    billing_period_start: Mapped[date | None] = mapped_column(Date)
+    billing_period_end: Mapped[date | None] = mapped_column(Date)
 
     # Notes
     notes: Mapped[str | None] = mapped_column(Text)

@@ -36,6 +36,7 @@ import { WaterFeaturesTile } from "@/components/customers/tiles/water-features-t
 import { InspectionsTile } from "@/components/customers/tiles/inspections-tile";
 import { CommunicationsTile } from "@/components/customers/tiles/communications-tile";
 import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
+import { BillingTile } from "@/components/customers/tiles/billing-tile";
 import { VisitsTile } from "@/components/customers/tiles/visits-tile";
 import { ContactsTile } from "@/components/customers/tiles/contacts-tile";
 import type { Customer, Property } from "@/components/customers/customer-types";
@@ -221,6 +222,28 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
         id: "invoices",
         component: <InvoicesTile customerId={id} />,
         order: { tech: 99, manager: 99, admin: 6 },
+        column: "right",
+      });
+      all.push({
+        id: "billing",
+        component: (
+          <BillingTile
+            customerId={id}
+            autopayEnabled={customer.autopay_enabled}
+            hasPaymentMethod={customer.has_payment_method}
+            cardLast4={customer.stripe_card_last4}
+            cardBrand={customer.stripe_card_brand}
+            cardExpMonth={customer.stripe_card_exp_month}
+            cardExpYear={customer.stripe_card_exp_year}
+            nextBillingDate={customer.next_billing_date}
+            billingDayOfMonth={customer.billing_day_of_month}
+            billingFrequency={customer.billing_frequency}
+            monthlyRate={customer.monthly_rate}
+            autopayFailureCount={customer.autopay_failure_count}
+            onUpdate={load}
+          />
+        ),
+        order: { tech: 99, manager: 99, admin: 7 },
         column: "right",
       });
     }

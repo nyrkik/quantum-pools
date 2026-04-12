@@ -7,6 +7,7 @@ from src.core.database import get_db
 from src.api.deps import get_current_org_user, require_roles, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.services.feature_service import FeatureService
+from src.services.billing_service import BillingService
 from src.schemas.billing import (
     FeatureResponse,
     FeatureTierResponse,
@@ -83,3 +84,58 @@ async def get_subscription(
         feature_slugs=slugs,
         total_monthly_cents=total,
     )
+
+
+# ── Recurring Billing Admin Endpoints ─────────────────────────────
+
+
+@router.get("/stats")
+async def get_billing_stats(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Billing dashboard stats."""
+    svc = BillingService(db)
+    return await svc.get_billing_stats(ctx.organization_id)
+
+
+@router.get("/upcoming")
+async def get_upcoming_billing(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Customers due for billing in the next 7 days."""
+    svc = BillingService(db)
+    return await svc.get_upcoming_billing(ctx.organization_id)
+
+
+@router.get("/failed-payments")
+async def get_failed_payments(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent failed autopay attempts."""
+    svc = BillingService(db)
+    return await svc.get_failed_payments(ctx.organization_id)
+
+
+@router.post("/generate")
+async def trigger_billing_cycle(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger billing cycle for the org. Owner only."""
+    svc = BillingService(db)
+    result = await svc.generate_recurring_invoices(ctx.organization_id)
+    return result
+
+
+@router.post("/retry-payments")
+async def trigger_payment_retries(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger payment retries. Owner only."""
+    svc = BillingService(db)
+    result = await svc.retry_failed_payments(ctx.organization_id)
+    return result

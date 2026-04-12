@@ -2,8 +2,8 @@
 
 import uuid
 import enum
-from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, Integer, Float, ForeignKey, Enum, event
+from datetime import datetime, date, timezone
+from sqlalchemy import String, Boolean, DateTime, Date, Text, Integer, Float, ForeignKey, Enum, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -63,6 +63,25 @@ class Customer(Base):
     autopay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
 
+    # Billing cycle tracking
+    billing_day_of_month: Mapped[int] = mapped_column(Integer, default=1)  # 1-28
+    next_billing_date: Mapped[date | None] = mapped_column(Date)
+    last_billed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Saved payment method (Stripe)
+    stripe_payment_method_id: Mapped[str | None] = mapped_column(String(255))
+    stripe_card_last4: Mapped[str | None] = mapped_column(String(4))
+    stripe_card_brand: Mapped[str | None] = mapped_column(String(20))
+    stripe_card_exp_month: Mapped[int | None] = mapped_column(Integer)
+    stripe_card_exp_year: Mapped[int | None] = mapped_column(Integer)
+
+    # Card setup token (public link for customer to save card)
+    card_setup_token: Mapped[str | None] = mapped_column(String(64), unique=True)
+
+    # Dunning
+    autopay_failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    autopay_last_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Computed display name — single source of truth for all queries
     display_name_col: Mapped[str | None] = mapped_column("display_name", String(200), index=True)
 
@@ -79,6 +98,10 @@ class Customer(Base):
     properties = relationship("Property", back_populates="customer", lazy="noload")
     invoices = relationship("Invoice", back_populates="customer", lazy="noload")
     payments = relationship("Payment", back_populates="customer", lazy="noload")
+
+    @property
+    def has_payment_method(self) -> bool:
+        return bool(self.stripe_payment_method_id)
 
     @property
     def full_name(self) -> str:

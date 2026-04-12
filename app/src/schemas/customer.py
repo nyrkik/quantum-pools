@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 
 
 class CustomerCreate(BaseModel):
@@ -47,6 +47,8 @@ class CustomerUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    autopay_enabled: Optional[bool] = None
+    billing_day_of_month: Optional[int] = None
 
 
 class CustomerResponse(BaseModel):
@@ -73,6 +75,15 @@ class CustomerResponse(BaseModel):
     status: str
     notes: Optional[str] = None
     is_active: bool
+    autopay_enabled: bool = False
+    billing_day_of_month: int = 1
+    next_billing_date: Optional[date] = None
+    has_payment_method: bool = False
+    stripe_card_last4: Optional[str] = None
+    stripe_card_brand: Optional[str] = None
+    stripe_card_exp_month: Optional[int] = None
+    stripe_card_exp_year: Optional[int] = None
+    autopay_failure_count: int = 0
     created_at: datetime
     updated_at: datetime
     property_count: int = 0

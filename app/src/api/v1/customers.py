@@ -269,6 +269,70 @@ async def get_customer_alerts(
     }
 
 
+@router.post("/{customer_id}/setup-intent")
+async def create_customer_setup_intent(
+    customer_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a SetupIntent for a customer to save their card. Returns a shareable link."""
+    from src.core.config import settings as app_settings
+    from src.services.stripe_service import StripeService
+    from src.models.customer import Customer
+
+    if not app_settings.stripe_secret_key:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    customer = (await db.execute(
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not customer:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    svc = StripeService(db)
+    result = await svc.create_setup_intent(customer)
+    await db.commit()
+
+    card_url = f"{app_settings.frontend_url}/card/{result['card_setup_token']}"
+    return {
+        "card_setup_url": card_url,
+        "card_setup_token": result["card_setup_token"],
+        "client_secret": result["client_secret"],
+    }
+
+
+@router.delete("/{customer_id}/payment-method")
+async def remove_payment_method(
+    customer_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a customer's saved payment method."""
+    from src.services.stripe_service import StripeService
+    from src.models.customer import Customer
+
+    customer = (await db.execute(
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not customer:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    svc = StripeService(db)
+    await svc.detach_payment_method(customer)
+    await db.commit()
+
+    return {"status": "removed"}
+
+
 @router.delete("/{customer_id}", status_code=204)
 async def delete_customer(
     customer_id: str,

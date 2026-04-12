@@ -23,6 +23,15 @@ export interface Customer {
   status: string;
   notes: string | null;
   is_active: boolean;
+  autopay_enabled: boolean;
+  billing_day_of_month: number;
+  next_billing_date: string | null;
+  has_payment_method: boolean;
+  stripe_card_last4: string | null;
+  stripe_card_brand: string | null;
+  stripe_card_exp_month: number | null;
+  stripe_card_exp_year: number | null;
+  autopay_failure_count: number;
   property_count: number;
   created_at: string;
 }

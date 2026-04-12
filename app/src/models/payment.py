@@ -3,7 +3,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone, date
-from sqlalchemy import String, DateTime, Date, Text, Float, ForeignKey
+from sqlalchemy import String, Boolean, DateTime, Date, Text, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -40,6 +40,7 @@ class Payment(Base):
     # Stripe
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255))
     stripe_charge_id: Mapped[str | None] = mapped_column(String(255))
+    is_autopay: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Reference
     reference_number: Mapped[str | None] = mapped_column(String(100))

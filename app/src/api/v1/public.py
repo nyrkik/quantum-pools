@@ -402,10 +402,107 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 
     event_type = event.get("type") if isinstance(event, dict) else event.type
     data = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
+    data_dict = data if isinstance(data, dict) else data.to_dict()
 
-    if event_type == "checkout.session.completed":
-        svc = StripeService(db)
-        await svc.handle_checkout_completed(data if isinstance(data, dict) else data.to_dict())
-        logger.info(f"Stripe checkout.session.completed processed: {data.get('id') if isinstance(data, dict) else data.id}")
+    svc = StripeService(db)
+
+    handlers = {
+        "checkout.session.completed": svc.handle_checkout_completed,
+        "payment_intent.succeeded": svc.handle_payment_intent_succeeded,
+        "payment_intent.payment_failed": svc.handle_payment_intent_failed,
+        "setup_intent.succeeded": svc.handle_setup_intent_succeeded,
+        "charge.refunded": svc.handle_charge_refunded,
+    }
+
+    handler = handlers.get(event_type)
+    if handler:
+        await handler(data_dict)
+        logger.info(f"Stripe {event_type} processed: {data_dict.get('id')}")
+    else:
+        logger.debug(f"Unhandled Stripe event type: {event_type}")
 
     return {"received": True}
+
+
+# ── Public Card Setup ─────────────────────────────────────────────
+
+
+@router.get("/card/{token}")
+async def get_card_status(token: str, db: AsyncSession = Depends(get_db)):
+    """Public card setup page — check current saved card status."""
+    from src.models.customer import Customer
+
+    customer = (await db.execute(
+        select(Customer).where(Customer.card_setup_token == token)
+    )).scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Invalid or expired link")
+
+    org = (await db.execute(
+        select(Organization).where(Organization.id == customer.organization_id)
+    )).scalar_one_or_none()
+
+    return {
+        "customer_name": customer.display_name,
+        "org_name": org.name if org else None,
+        "org_color": getattr(org, "primary_color", None) if org else None,
+        "has_card": bool(customer.stripe_payment_method_id),
+        "card_last4": customer.stripe_card_last4,
+        "card_brand": customer.stripe_card_brand,
+        "card_exp_month": customer.stripe_card_exp_month,
+        "card_exp_year": customer.stripe_card_exp_year,
+        "autopay_enabled": customer.autopay_enabled,
+    }
+
+
+@router.post("/card/{token}/setup-intent")
+async def create_card_setup_intent(token: str, db: AsyncSession = Depends(get_db)):
+    """Create a SetupIntent for a customer to save their card (public, token-gated)."""
+    from src.models.customer import Customer
+    from src.services.stripe_service import StripeService
+
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    customer = (await db.execute(
+        select(Customer).where(Customer.card_setup_token == token)
+    )).scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Invalid or expired link")
+
+    svc = StripeService(db)
+    result = await svc.create_setup_intent(customer)
+    await db.commit()
+
+    return {
+        "client_secret": result["client_secret"],
+        "publishable_key": settings.stripe_publishable_key,
+    }
+
+
+class EnableAutopayRequest(BaseModel):
+    enable: bool = True
+
+
+@router.post("/card/{token}/autopay")
+async def toggle_autopay_public(
+    token: str,
+    body: EnableAutopayRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Customer toggles autopay on/off from the public card page."""
+    from src.models.customer import Customer
+
+    customer = (await db.execute(
+        select(Customer).where(Customer.card_setup_token == token)
+    )).scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Invalid or expired link")
+
+    if body.enable and not customer.stripe_payment_method_id:
+        raise HTTPException(status_code=400, detail="Save a card first before enabling autopay")
+
+    customer.autopay_enabled = body.enable
+    await db.commit()
+
+    return {"autopay_enabled": customer.autopay_enabled}

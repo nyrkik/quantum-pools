@@ -41,7 +41,7 @@ Enterprise pool service management platform consolidating:
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
-| Email | Postmark (outbound) + Cloudflare Email Workers (inbound, "managed mode"). Multi-mode plan: see `docs/email-strategy.md` |
+| Email | Multi-mode: Gmail API (OAuth, primary for connected orgs) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted token storage. Auto-send gated by org flag. See `docs/email-strategy.md` |
 | Payments | Stripe Checkout (test mode), webhook for confirmation, verify-on-return fallback |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
@@ -148,7 +148,9 @@ QuantumPools/
 │       │   ├── deepblue/              # DeepBlue AI (engine, tools, eval, quota)
 │       │   ├── inspection/            # Inspection scraper + PDF extractor
 │       │   ├── emd/                   # EMD service (backward-compat aliases)
+│       │   ├── gmail/                 # Gmail OAuth, sync, outbound (Phase 5b.2)
 │       │   ├── parts/                 # Parts catalog services
+│       │   ├── billing_service.py        # Recurring invoice generation, autopay scheduling
 │       │   ├── thread_action_service.py  # Thread email sending, approval, dismissal
 │       │   ├── thread_ai_service.py      # AI drafting, job extraction, estimate generation
 │       │   ├── estimate_workflow_service.py  # Estimate approval, snapshot, email sending
@@ -336,6 +338,8 @@ Organization 1──* OrganizationUser *──1 User
 Organization 1──* Customer 1──* Property
 Organization 1──* Tech
 Organization 1──1 OrgCostSettings
+Organization 1──* EmailIntegration (gmail_api, managed, etc.)
+Organization 1──* SuppressedEmailSender
 Customer 1──* Invoice 1──* InvoiceLineItem
 Customer 1──* Payment
 Property 1──* WaterFeature (pool, spa, fountain, etc.)
@@ -366,11 +370,11 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - [x] Phase 3b: Profitability Analysis (difficulty scoring, cost breakdown, bather load, satellite detection, whale curve)
 - [x] Pool Measurement: Ground-truth dimensions via tech photos + Claude Vision
 - [x] WaterFeature: Multi-body support (pool, spa, fountain per property)
-- [~] Phase 3c: Invoicing completion — email service (Postmark) DONE, PDF generation DONE, Stripe Checkout DONE, public invoice pay page DONE, non-client invoices DONE, webhook PARTIAL, AutoPay/recurring NOT STARTED
+- [~] Phase 3c: Invoicing completion — email service (Postmark) DONE, PDF generation DONE, Stripe Checkout DONE, public invoice pay page DONE, non-client invoices DONE, webhook PARTIAL, AutoPay/recurring DONE (billing_service + card-on-file flow)
 - [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
-- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE (Sapphire on Cloudflare+Postmark). Gmail API, MS Graph, forwarding modes PLANNED. See `docs/email-strategy.md`.
+- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected as first customer). Auto-send safety gate, cross-source dedup, org-wide sender suppression. MS Graph, forwarding modes PLANNED. See `docs/email-strategy.md`.
 - [ ] Phase 6: Platform Admin (tenant management, subscriptions)
 - [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
 

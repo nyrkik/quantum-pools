@@ -297,24 +297,26 @@ _See `docs/email-strategy.md` and `docs/email-integrations-plan.md` for full det
 - [ ] QP Cloudflare Worker rules decommissioned for sapphire-pools.com
 - [ ] Optional: Gmail filter bridge for customer emails until Phase 5b.2 ships
 
-### 5b.1 EmailIntegration Foundation
-- [ ] New model: `EmailIntegration` (org_id, type, status, config JSONB, outbound_provider)
-- [ ] Refactor `EmailService.send_agent_reply()` to dispatch by org's `outbound_provider`
-- [ ] Refactor `inbound_email_service.py` to read org integration mode
-- [ ] Migration: backfill existing orgs (Sapphire = managed)
-- [ ] Encrypt `config` field at rest (Fernet or KMS)
-- [ ] Settings → Email read-only view
+### 5b.1 EmailIntegration Foundation ✅ (2026-04-11)
+- [x] New model: `EmailIntegration` (org_id, type, status, config_encrypted, outbound_provider)
+- [x] Refactor `EmailService.send_agent_reply()` to dispatch by org's integration mode (Gmail → Postmark fallback)
+- [x] Migration: backfill existing orgs (Sapphire = managed)
+- [x] Encrypt `config` field at rest (Fernet via `core/encryption.py`)
+- [x] Settings → Email page with integration list
+- [x] `email_auto_send_enabled` org flag (default false) — gates all auto-replies during setup
+- [x] `SuppressedEmailSender` model — org-wide "don't ask again" for contact prompts
+- [x] `rfc_message_id` on AgentMessage — cross-source dedup (Gmail ↔ Postmark)
 
-### 5b.2 Gmail API Integration
-- [ ] Google Cloud project setup (OAuth credentials, Pub/Sub topic)
-- [ ] OAuth flow: `/v1/email-integrations/gmail/authorize`
-- [ ] `GmailSyncService.initial_sync(org_id, days=30)`
-- [ ] Pub/Sub push notifications → fetch and process
-- [ ] Two-way write: mark_read, mark_unread, add_label, send_reply, move_to_trash
-- [ ] Token refresh handler
-- [ ] New parser: `_parse_gmail_api()` in `inbound_email_service.py`
-- [ ] Settings → "Connect Gmail" UI with OAuth flow
-- [ ] Migrate Sapphire Pools from managed mode to Gmail mode
+### 5b.2 Gmail API Integration ✅ (2026-04-12)
+- [x] Google Cloud project setup (OAuth credentials)
+- [x] OAuth flow: `/v1/email-integrations/gmail/authorize` + callback with PKCE
+- [x] `GmailSyncService.initial_sync(org_id, days=30)` — historical flag suppresses auto-replies
+- [x] `GmailSyncService.incremental_sync()` — via history API, date fallback
+- [x] Outbound via Gmail API (`send_reply`) — threads in user's Sent folder
+- [x] Token refresh handler (auto-refresh in `gmail/client.py`)
+- [x] Settings → "Connect Gmail" UI with OAuth flow, disconnect, sync, backfill
+- [x] Sapphire Pools connected as first Gmail-mode customer
+- [ ] Pub/Sub push notifications → real-time (currently polling/manual sync)
 
 ### 5b.3 Inbox UI Redesign — Full Email Client
 - [ ] Folder/label sidebar (Inbox, Sent, Drafts, Trash, Spam, custom)

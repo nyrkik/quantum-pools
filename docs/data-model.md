@@ -89,6 +89,7 @@ Invoicing, payments, estimates, and charges.
 | VisitCharge | `visit_charges` | Ad-hoc charges from a visit |
 | EstimateApproval | `estimate_approvals` | Customer estimate with approval/rejection tracking |
 | JobInvoice | `job_invoices` | Links jobs (agent actions) to invoices |
+| AutopayAttempt | `autopay_attempts` | Tracks autopay charge attempts + retries per invoice |
 
 ### Email & Communication
 
@@ -103,6 +104,8 @@ Inbound/outbound email, internal messaging, notifications.
 | InboxRoutingRule | `inbox_routing_rules` | Rules for auto-routing inbound email |
 | BroadcastEmail | `broadcast_emails` | Bulk email campaigns |
 | EmailTemplate | `email_templates` | Reusable email templates |
+| EmailIntegration | `email_integrations` | Per-org email integration (gmail_api, managed, ms_graph, forwarding, manual). OAuth tokens Fernet-encrypted. |
+| SuppressedEmailSender | `suppressed_email_senders` | Org-wide suppressed sender list (no "Add Contact" prompt). Supports exact + domain patterns. |
 | InternalThread | `internal_threads` | Internal team discussion thread |
 | InternalMessage | `internal_messages` | Message within an internal thread |
 | Notification | `notifications` | In-app notification for a user |

@@ -1,6 +1,6 @@
 # Email Pipeline — Architecture
 
-The email pipeline handles all inbound and outbound email for QuantumPools. Inbound arrives via Cloudflare Email Workers (webhook), outbound goes through Postmark. The pipeline classifies emails with AI, matches senders to customers, threads conversations, extracts action items, drafts responses, and tracks delivery status.
+The email pipeline handles all inbound and outbound email for QuantumPools. **Multi-mode:** inbound arrives via Gmail API sync (OAuth-connected orgs) or Cloudflare Email Workers (managed mode). Outbound dispatches to Gmail API (connected orgs, appears in user's Sent folder) with Postmark as fallback. The pipeline classifies emails with AI, matches senders to customers, threads conversations, extracts action items, drafts responses, and tracks delivery status. **Safety:** `email_auto_send_enabled` org flag (default false) gates all auto-replies; `historical` sync flag suppresses outbound during backfill; `rfc_message_id` prevents cross-source duplicates.
 
 ## Infrastructure
 
@@ -101,13 +101,15 @@ Deploy: `CLOUDFLARE_API_KEY=... CLOUDFLARE_EMAIL=... npx wrangler deploy` from `
        |
        |--- Append signature (sender first name + org name + org block)
        |--- Add Re: prefix (unless is_new=True)
-       |--- From address: org's agent_from_email (Postmark-verified)
+       |--- From address: org's agent_from_email
+       |--- Check for gmail_api EmailIntegration (is_primary=True, status=connected)
        v
-  PostmarkProvider (ONLY provider — no SMTP fallback)
-       |
-       |--- Returns MessageID → stored as postmark_message_id
-       v
-  AgentMessage (direction=outbound, status=sent, postmark_message_id=...)
+  Gmail API (if connected)                    PostmarkProvider (fallback)
+       |                                            |
+       |--- users.messages.send()                   |--- Returns MessageID
+       |--- Appears in user's Sent folder           |
+       v                                            v
+  AgentMessage (direction=outbound, status=sent)
   update_thread_status()
 
 

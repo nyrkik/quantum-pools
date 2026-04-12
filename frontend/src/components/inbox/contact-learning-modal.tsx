@@ -177,11 +177,13 @@ export function ContactLearningPrompt({
         </Button>
         <Button
           variant="ghost"
-          size="icon"
-          className="h-5 w-5 text-muted-foreground hover:text-destructive"
+          size="sm"
+          className="h-6 text-xs text-muted-foreground hover:text-destructive"
           onClick={handleDismiss}
+          title="Suppress this sender org-wide — no one will be prompted again"
         >
-          <X className="h-3 w-3" />
+          <X className="h-3 w-3 mr-0.5" />
+          Don&apos;t ask again
         </Button>
       </div>
     );

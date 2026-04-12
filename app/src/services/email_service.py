@@ -369,6 +369,50 @@ class EmailService:
         color = getattr(org, "branding_color", None) or "#1a1a2e"
         _, html_body = customer_email_template(org_name or "QuantumPools", full_body, branding_color=color)
 
+        # --- Multi-mode dispatch (Phase 5b.1+) -------------------------------
+        # If the org has a connected gmail_api EmailIntegration, route this
+        # human reply through the Gmail API so it appears in the user's
+        # actual Gmail Sent folder. Otherwise fall through to Postmark.
+        # Transactional sends (invoices, estimates, notifications) always use
+        # Postmark via send_email() — they should NOT go through this path.
+        from src.models.email_integration import EmailIntegration, IntegrationStatus
+        integration_row = (await self.db.execute(
+            select(EmailIntegration).where(
+                EmailIntegration.organization_id == org_id,
+                EmailIntegration.type == "gmail_api",
+                EmailIntegration.status == IntegrationStatus.connected.value,
+                EmailIntegration.is_primary == True,  # noqa: E712
+            )
+        )).scalar_one_or_none()
+
+        if integration_row:
+            try:
+                from src.services.gmail.outbound import send_reply as gmail_send_reply
+                from src.services.gmail.client import GmailClientError
+                result = await gmail_send_reply(
+                    integration_row,
+                    to=to,
+                    subject=final_subject,
+                    body_text=full_body,
+                    html_body=html_body,
+                    from_address=from_address or integration_row.account_email,
+                    from_name=from_name,
+                )
+                # Persist any token-refresh side effects from build_gmail_client
+                await self.db.commit()
+                return EmailResult(
+                    success=True,
+                    message_id=result.get("id"),
+                    error=None,
+                )
+            except GmailClientError as e:
+                logger.error(f"Gmail send failed for org {org_id}, falling through to Postmark: {e}")
+                # Fall through to Postmark below — better to deliver via the
+                # transactional path than fail the user's reply outright.
+            except Exception as e:
+                logger.error(f"Unexpected error in Gmail send for org {org_id}: {e}", exc_info=True)
+                # Fall through
+
         msg = EmailMessage(
             to=to, subject=final_subject, text_body=full_body, html_body=html_body,
             from_email=from_address, from_name=from_name, attachments=attachments,

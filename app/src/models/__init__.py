@@ -76,6 +76,9 @@ from src.models.job_invoice import JobInvoice
 from src.models.message_attachment import MessageAttachment
 from src.models.service_case import ServiceCase
 from src.models.email_template import EmailTemplate
+from src.models.email_integration import EmailIntegration, IntegrationType, IntegrationStatus
+from src.models.suppressed_sender import SuppressedEmailSender
+from src.models.autopay_attempt import AutopayAttempt
 
 __all__ = [
     "Base",
@@ -138,4 +141,8 @@ __all__ = [
     "CustomerContact",
     "AgentCorrection",
     "EmailTemplate",
+    "EmailIntegration",
+    "IntegrationType",
+    "IntegrationStatus",
+    "AutopayAttempt",
 ]

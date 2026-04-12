@@ -92,7 +92,7 @@ def _should_throttle_alert(from_email: str) -> bool:
     return False
 
 
-async def process_incoming_email(uid: str, msg, organization_id: str = ""):
+async def process_incoming_email(uid: str, msg, organization_id: str = "", historical: bool = False):
     """Process a single incoming email."""
     from_header = decode_email_header(msg.get("From", ""))
     subject = decode_email_header(msg.get("Subject", ""))
@@ -146,14 +146,21 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
 
     logger.info(f"Processing email from {from_email}: {subject}")
 
-    # Check if already processed
+    # Check if already processed — by email_uid OR RFC Message-ID (cross-source dedup)
     async with get_db_context() as db:
         existing = await db.execute(
             select(AgentMessage).where(AgentMessage.email_uid == uid)
         )
         if existing.scalar_one_or_none():
-            logger.info(f"Already processed: {uid}")
+            logger.info(f"Already processed (uid): {uid}")
             return
+        if message_id_header:
+            existing_rfc = await db.execute(
+                select(AgentMessage).where(AgentMessage.rfc_message_id == message_id_header).limit(1)
+            )
+            if existing_rfc.scalar_one_or_none():
+                logger.info(f"Already processed (rfc_message_id): {message_id_header}")
+                return
 
     # --- Thread: get or create (with routing rule matching) ---
     # Match routing rules to set visibility on new threads
@@ -249,6 +256,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
                 agent_msg = AgentMessage(
                     organization_id=organization_id,
                     email_uid=uid,
+                    rfc_message_id=message_id_header or None,
                     direction="inbound",
                     from_email=from_email,
                     to_email=to_header,
@@ -285,6 +293,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         agent_msg = AgentMessage(
             organization_id=organization_id,
             email_uid=uid,
+            rfc_message_id=message_id_header or None,
             direction="inbound",
             from_email=from_email,
             to_email=to_header,
@@ -305,6 +314,15 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         )
         db.add(agent_msg)
         await db.flush()
+
+        # Historical sync: ingest + classify + thread, but no outbound actions
+        if historical:
+            agent_msg.status = "handled"
+            agent_msg.notes = (agent_msg.notes or "") + "\nHistorical sync — no actions or replies generated."
+            agent_msg.notes = agent_msg.notes.strip()
+            await db.commit()
+            await update_thread_status(thread.id)
+            return
 
         # Create action items — skip duplicates
         # Check both thread-level and org-wide open actions for same customer/property
@@ -384,6 +402,19 @@ async def process_incoming_email(uid: str, msg, organization_id: str = ""):
         await db.commit()
 
         needs_approval = result.get("needs_approval", True)
+
+        # Org-level auto-send gate — when disabled (default), ALL emails
+        # require human approval. This prevents rogue auto-replies during
+        # setup, backfill, or misconfiguration.
+        if not needs_approval and organization_id:
+            from src.models.organization import Organization
+            org = (await db.execute(
+                select(Organization.email_auto_send_enabled)
+                .where(Organization.id == organization_id)
+            )).scalar_one_or_none()
+            if not org:
+                needs_approval = True
+                logger.info(f"Auto-send blocked: org {organization_id} has email_auto_send_enabled=False")
 
         if needs_approval:
             # --- Flood protection: don't spam SMS for same sender ---

@@ -433,7 +433,23 @@ async def get_contact_prompt(
     )).scalar_one_or_none()
     learning_mode = org.email_contact_learning if org else True
 
-    # Check if this user dismissed this sender
+    # Check org-wide suppressed senders (exact match + domain wildcard)
+    from src.models.suppressed_sender import SuppressedEmailSender
+    sender_lower = sender_email.lower()
+    sender_domain = sender_lower.split("@")[-1] if "@" in sender_lower else ""
+    suppressed = (await db.execute(
+        select(SuppressedEmailSender).where(
+            SuppressedEmailSender.organization_id == ctx.organization_id,
+            func.lower(SuppressedEmailSender.email_pattern).in_(
+                [sender_lower, f"*@{sender_domain}"] if sender_domain else [sender_lower]
+            ),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if suppressed:
+        return {"show_prompt": False}
+
+    # Legacy: also check per-user dismissals (backward compat)
+    from src.models.organization_user import OrganizationUser
     org_user = (await db.execute(
         select(OrganizationUser).where(
             OrganizationUser.organization_id == ctx.organization_id,
@@ -446,7 +462,7 @@ async def get_contact_prompt(
             dismissed = json.loads(org_user.dismissed_sender_emails)
         except (json.JSONDecodeError, TypeError):
             dismissed = []
-    if sender_email.lower() in [d.lower() for d in dismissed]:
+    if sender_lower in [d.lower() for d in dismissed]:
         return {"show_prompt": False}
 
     # Pre-populate contact info from signature block (not email prefix — almost always wrong)
@@ -630,6 +646,7 @@ async def get_contact_learning(
 
 class DismissContactPromptBody(BaseModel):
     sender_email: str
+    reason: str | None = None  # automated, marketing, notification, other
 
 
 @router.post("/agent-threads/dismiss-contact-prompt")
@@ -638,28 +655,29 @@ async def dismiss_contact_prompt(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dismiss contact learning prompt for a sender email (per-user)."""
-    from src.models.organization_user import OrganizationUser
+    """Suppress contact learning prompt for a sender email — org-wide.
 
-    org_user = (await db.execute(
-        select(OrganizationUser).where(
-            OrganizationUser.organization_id == ctx.organization_id,
-            OrganizationUser.user_id == ctx.user.id,
-        )
+    Adds the sender to suppressed_email_senders so no user in this org
+    will see the 'Add Contact' prompt for this address again.
+    """
+    from src.models.suppressed_sender import SuppressedEmailSender
+
+    email_lower = body.sender_email.lower().strip()
+
+    # Check if already suppressed
+    existing = (await db.execute(
+        select(SuppressedEmailSender).where(
+            SuppressedEmailSender.organization_id == ctx.organization_id,
+            func.lower(SuppressedEmailSender.email_pattern) == email_lower,
+        ).limit(1)
     )).scalar_one_or_none()
-    if not org_user:
-        raise HTTPException(status_code=404, detail="User not found in organization")
-
-    dismissed = []
-    try:
-        dismissed = json.loads(org_user.dismissed_sender_emails or "[]")
-    except (json.JSONDecodeError, TypeError):
-        dismissed = []
-
-    email_lower = body.sender_email.lower()
-    if email_lower not in [d.lower() for d in dismissed]:
-        dismissed.append(email_lower)
-        org_user.dismissed_sender_emails = json.dumps(dismissed)
+    if not existing:
+        db.add(SuppressedEmailSender(
+            organization_id=ctx.organization_id,
+            email_pattern=email_lower,
+            reason=body.reason or "other",
+            created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
+        ))
         await db.commit()
 
     return {"dismissed": True}

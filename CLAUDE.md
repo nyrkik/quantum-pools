@@ -406,6 +406,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/email-integrations-plan.md` | Detailed Phase 5b plan: 9 sub-phases for multi-mode email support |
 | `docs/profitability-feature-plan.md` | Phase 3b spec (scoring weights, jurisdiction formulas) |
 | `docs/ai-agents-plan.md` | 10 planned AI agents (product roadmap), current implementation status |
+| `docs/inbox-folders-plan.md` | 3-phase inbox folders: folders + filter rules + Gmail label sync. **Remove when complete.** |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |

@@ -237,6 +237,36 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
     result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
 
     category = result.get("category", "general")
+
+    # Auto-handle general + no draft: the AI couldn't classify it specifically
+    # AND couldn't draft a response — it's informational (payment notifications,
+    # marketing, system alerts). Don't waste a human's time on it.
+    draft = result.get("draft_response", "")
+    if category == "general" and not draft and not sender_is_customer:
+        logger.info(f"Auto-handled general (no draft, not customer): {subject[:50]}")
+        async with get_db_context() as db:
+            agent_msg = AgentMessage(
+                organization_id=organization_id,
+                email_uid=uid,
+                rfc_message_id=message_id_header or None,
+                direction="inbound",
+                from_email=from_email,
+                to_email=to_header,
+                subject=subject,
+                body=body[:5000],
+                category=category,
+                urgency="low",
+                status="handled",
+                customer_name=result.get("customer_name"),
+                received_at=email_date,
+                thread_id=thread.id,
+                delivered_to=delivered_to_addr,
+            )
+            db.add(agent_msg)
+            await db.commit()
+        await update_thread_status(thread.id)
+        return
+
     if category in ("spam", "auto_reply", "no_response", "thank_you"):
         if sender_is_customer and category in ("spam", "auto_reply"):
             # Spam/auto-reply from a customer address is suspicious — override to pending

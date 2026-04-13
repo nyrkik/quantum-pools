@@ -52,11 +52,14 @@ async def lifespan(app: FastAPI):
     from apscheduler.triggers.cron import CronTrigger
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(_run_billing_cycle, CronTrigger(hour=6, minute=0), id="billing_cycle")
-    scheduler.add_job(_run_payment_retries, CronTrigger(hour=10, minute=0), id="payment_retries")
+    # Billing cycle + payment retries intentionally NOT scheduled — billing is
+    # mothballed until Brian's ready to turn it on. Code is retained but dormant.
+    # Re-enable by uncommenting below:
+    # scheduler.add_job(_run_billing_cycle, CronTrigger(hour=6, minute=0), id="billing_cycle")
+    # scheduler.add_job(_run_payment_retries, CronTrigger(hour=10, minute=0), id="payment_retries")
     scheduler.add_job(_send_auto_sent_digest, CronTrigger(day_of_week="mon", hour=14, minute=0), id="auto_sent_digest")
     scheduler.start()
-    logger.info("Scheduler started (billing, payment retries, weekly auto-sent digest)")
+    logger.info("Scheduler started (weekly auto-sent digest only; billing dormant)")
 
     yield
 

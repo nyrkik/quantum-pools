@@ -97,15 +97,16 @@ Inbound/outbound email, internal messaging, notifications.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| AgentThread | `agent_threads` | Email conversation thread (inbound via Postmark) |
-| AgentMessage | `agent_messages` | Individual email message in a thread |
+| AgentThread | `agent_threads` | Email conversation thread. `folder_id` → InboxFolder (null = Inbox). `folder_override` prevents rules from re-moving manual assignments. `gmail_thread_id` for Gmail read/unread sync. |
+| AgentMessage | `agent_messages` | Individual email message in a thread. Has `body` (stripped text), `body_html` (original HTML for rendering), `rfc_message_id` (cross-source dedup), `delivery_status` / `delivered_at` / `first_opened_at` / `open_count` (Postmark webhook tracking). |
 | MessageAttachment | `message_attachments` | File attachments on agent messages |
 | ThreadRead | `thread_reads` | Per-user read tracking for threads |
 | InboxRoutingRule | `inbox_routing_rules` | Rules for auto-routing inbound email |
 | BroadcastEmail | `broadcast_emails` | Bulk email campaigns |
 | EmailTemplate | `email_templates` | Reusable email templates |
 | EmailIntegration | `email_integrations` | Per-org email integration (gmail_api, managed, ms_graph, forwarding, manual). OAuth tokens Fernet-encrypted. |
-| SuppressedEmailSender | `suppressed_email_senders` | Org-wide suppressed sender list (no "Add Contact" prompt). Supports exact + domain patterns. |
+| SuppressedEmailSender | `suppressed_email_senders` | Org-wide sender tags (billing/vendor/notification/personal/marketing/other/spam) + optional `folder_id` for auto-routing. Supports exact + domain patterns (`*@scppool.com`). |
+| InboxFolder | `inbox_folders` | Org-level folders. System folders (is_system=True): Inbox, Sent, Spam. Custom folders nest under Inbox. Threads reference via `agent_threads.folder_id` (null = Inbox). |
 | InternalThread | `internal_threads` | Internal team discussion thread |
 | InternalMessage | `internal_messages` | Message within an internal thread |
 | Notification | `notifications` | In-app notification for a user |

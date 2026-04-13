@@ -1,6 +1,19 @@
 # Email Pipeline — Architecture
 
-The email pipeline handles all inbound and outbound email for QuantumPools. **Multi-mode:** inbound arrives via Gmail API sync (OAuth-connected orgs) or Cloudflare Email Workers (managed mode). Outbound dispatches to Gmail API (connected orgs, appears in user's Sent folder) with Postmark as fallback. The pipeline classifies emails with AI, matches senders to customers, threads conversations, extracts action items, drafts responses, and tracks delivery status. **Safety:** `email_auto_send_enabled` org flag (default false) gates all auto-replies; `historical` sync flag suppresses outbound during backfill; `rfc_message_id` prevents cross-source duplicates.
+The email pipeline handles all inbound and outbound email for QuantumPools. **Multi-mode:** inbound arrives via Gmail API sync (OAuth-connected orgs) or Cloudflare Email Workers (managed mode). Outbound dispatches to Gmail API (connected orgs, appears in user's Sent folder) with Postmark as fallback. The pipeline classifies emails with AI, matches senders to customers, threads conversations, extracts action items, drafts responses, tracks delivery status, and monitors auto-sends for trust calibration.
+
+**Safety layers** (3-deep, see "Auto-Send Safety" below):
+- Org flag `email_auto_send_enabled` (default false) gates all auto-replies
+- Commitment phrase guard blocks drafts with "follow up", "get back", "look into", etc.
+- First-contact ntfy alert when AI auto-sends to a new sender
+
+**Organization:** Threads live in folders (Inbox/Sent/Spam + custom). Senders can be tagged (billing/vendor/notification/personal/etc.) with optional auto-folder routing. Domain patterns supported (`*@scppool.com`). `rfc_message_id` prevents cross-source duplicates.
+
+**Rendering:** HTML bodies stored alongside stripped text, rendered client-side in a sandboxed iframe (no script execution, CSS isolated). Quoted text auto-detected and collapsed. Attachments render as image grid + type-colored file cards.
+
+**Deliverability:** Postmark webhook (`/api/v1/admin/postmark-webhook`) receives Delivery/Bounce/Open/SpamComplaint events. Outbound messages show status chips (Delivered, Opened Nx, Bounced, Spam). "Failed" filter surfaces bounced/errored sends across all folders.
+
+**Auto-send monitoring:** Threads with auto-sent replies get a sky-blue "Auto-Sent" chip. Reading pane shows a feedback banner (Yes/No — owner/admin only) that records `AgentCorrection` for learning. Weekly digest email to org owner summarizes auto-sends. First-contact auto-sends trigger ntfy push alert.
 
 ## Infrastructure
 

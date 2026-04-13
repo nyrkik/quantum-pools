@@ -2,6 +2,12 @@
 
 > **Removal note:** Delete this doc and its CLAUDE.md index entry when all 3 phases are shipped and verified.
 
+## Status (2026-04-12)
+
+- **Phase 1 (Folders + Backend + UI):** ✅ SHIPPED. System folders: Inbox, Sent, Spam (Automated folder killed — replaced with inline "Auto" badge). Custom folders indented under Inbox. Desktop sidebar + mobile pill bar.
+- **Phase 2 (Filter Rules):** ~PARTIAL. Tag-driven auto-routing works via `SuppressedEmailSender.folder_id` — tagging a sender (billing/vendor/etc.) can route all their threads to a folder, including domain patterns (`*@scppool.com`). Full rule builder UI not built.
+- **Phase 3 (Gmail Label Sync):** ~PARTIAL. Read/unread state syncs to Gmail via `users.threads.modify()`. Folder move → Gmail label push NOT built. `gmail_thread_id` stored on AgentThread during sync for identification.
+
 ## Overview
 
 Folders add organizational scaffolding to the inbox. Three independently shippable phases: basic folders, filter rules, Gmail label sync.
@@ -10,7 +16,7 @@ Folders are orthogonal to thread status (pending/handled/ignored). A thread in t
 
 ---
 
-## Phase 1: Folders Model + Backend + Basic UI
+## Phase 1: Folders Model + Backend + Basic UI ✅ SHIPPED
 
 ### 1a. Database
 

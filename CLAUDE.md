@@ -41,7 +41,7 @@ Enterprise pool service management platform consolidating:
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
-| Email | Multi-mode: Gmail API (OAuth, primary for connected orgs) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted token storage. Auto-send gated by org flag. See `docs/email-strategy.md` |
+| Email | Multi-mode: Gmail API (OAuth) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted tokens. Folders (Inbox/Sent/Spam + custom). Sender tags with auto-folder routing. HTML rendering in sandboxed iframe. Auto-send gated by org flag + commitment phrase guard. Postmark delivery webhooks. Gmail read/unread sync. See `docs/email-pipeline.md` |
 | Payments | Stripe Checkout (test mode), webhook for confirmation, verify-on-return fallback |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
@@ -339,7 +339,9 @@ Organization 1──* Customer 1──* Property
 Organization 1──* Tech
 Organization 1──1 OrgCostSettings
 Organization 1──* EmailIntegration (gmail_api, managed, etc.)
-Organization 1──* SuppressedEmailSender
+Organization 1──* SuppressedEmailSender (sender tags + optional folder routing)
+Organization 1──* InboxFolder (system: Inbox/Sent/Spam + custom)
+AgentThread *──1 InboxFolder (nullable = Inbox)
 Customer 1──* Invoice 1──* InvoiceLineItem
 Customer 1──* Payment
 Property 1──* WaterFeature (pool, spa, fountain, etc.)
@@ -374,7 +376,7 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
-- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected as first customer). Auto-send safety gate, cross-source dedup, org-wide sender suppression. MS Graph, forwarding modes PLANNED. See `docs/email-strategy.md`.
+- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected). Auto-send safety gate + commitment phrase guard, cross-source dedup, sender tags with folder routing, folders (Inbox/Sent/Spam + custom), HTML rendering in sandboxed iframe, quoted-text collapse, Postmark delivery webhooks (Delivered/Opened/Bounced), auto-sent monitoring + weekly digest, Gmail read/unread sync. MS Graph and forwarding modes PLANNED. See `docs/email-strategy.md`.
 - [ ] Phase 6: Platform Admin (tenant management, subscriptions)
 - [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
 

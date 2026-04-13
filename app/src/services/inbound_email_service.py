@@ -105,11 +105,8 @@ class InboundEmailService:
         if not parsed.from_email:
             return {"status": "error", "detail": "No sender email in payload"}
 
-        # 3. Check block rules
-        block_rule = await check_sender_blocked(db, org.id, parsed.from_email)
-        if block_rule:
-            logger.info(f"Webhook blocked by rule '{block_rule.address_pattern}': {parsed.from_email}")
-            return {"status": "blocked", "detail": f"Sender blocked by rule: {block_rule.address_pattern}"}
+        # 3. Block rules now route to Spam folder (handled by orchestrator),
+        # do NOT drop here. We let the message through so it's recoverable.
 
         # 4. Build an email.message.EmailMessage to pass to process_incoming_email
         email_msg = self._build_email_message(parsed)

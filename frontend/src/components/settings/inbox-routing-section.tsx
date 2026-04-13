@@ -199,7 +199,7 @@ export function InboxRoutingSection({ editMode }: { editMode: boolean }) {
       return (
         <p className="text-sm text-muted-foreground text-center py-6">
           {isBlockTab
-            ? "No block rules configured. All senders will be processed."
+            ? "No block rules configured. All senders will land in your Inbox."
             : "No routing rules configured. All emails will be visible to everyone with inbox access."}
         </p>
       );
@@ -230,19 +230,22 @@ export function InboxRoutingSection({ editMode }: { editMode: boolean }) {
                 idx % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""
               } hover:bg-blue-50 dark:hover:bg-blue-950`}
             >
-              <TableCell className="text-sm font-mono">
+              <TableCell className="text-sm font-mono align-top">
                 {editMode ? (
                   <Input
-                    className="h-7 text-sm font-mono"
+                    className="h-7 text-sm font-mono w-full min-w-[200px]"
                     defaultValue={rule.address_pattern}
                     onBlur={(e) => {
                       if (e.target.value !== rule.address_pattern) {
                         handleUpdate(rule.id, "address_pattern", e.target.value);
                       }
                     }}
+                    title={rule.address_pattern}
                   />
                 ) : (
-                  rule.address_pattern
+                  <span className="break-all" title={rule.address_pattern}>
+                    {rule.address_pattern}
+                  </span>
                 )}
               </TableCell>
               <TableCell className="text-sm">
@@ -381,8 +384,8 @@ export function InboxRoutingSection({ editMode }: { editMode: boolean }) {
           <div>
             <CardTitle className="text-base">Inbox Rules</CardTitle>
             <CardDescription>
-              Route emails to team members or block automated senders.
-              Rules match by priority (lower = first).
+              Route emails to team members or auto-route automated senders to Spam.
+              Rules match by priority (lower = first). <strong className="text-foreground">Block rules now route to Spam folder</strong> — emails are never silently dropped, always recoverable in All Mail.
             </CardDescription>
           </div>
           <Button size="sm" variant="outline" onClick={() => {

@@ -84,7 +84,55 @@ class AgentThreadService:
         """List conversation threads with filtering."""
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
 
-        # Non-inbox folders (sent, automated, spam, custom) show ALL threads in
+        # "All Mail" folder: show literally every thread — no folder, status, or
+        # category filtering. Use this when the user thinks an email is missing.
+        if folder_key == "all":
+            # Skip every other filter except visibility + search + assigned_to.
+            if assigned_to:
+                base = base.where(AgentThread.assigned_to_user_id == assigned_to)
+            if customer_id:
+                base = base.where(AgentThread.matched_customer_id == customer_id)
+            if user_permission_slugs is not None:
+                base = base.where(
+                    or_(
+                        AgentThread.visibility_permission.is_(None),
+                        AgentThread.visibility_permission.in_(user_permission_slugs),
+                    )
+                )
+            if search:
+                q = f"%{search}%"
+                body_match = select(AgentMessage.thread_id).where(AgentMessage.body.ilike(q))
+                base = base.where(
+                    AgentThread.contact_email.ilike(q)
+                    | AgentThread.subject.ilike(q)
+                    | AgentThread.customer_name.ilike(q)
+                    | AgentThread.property_address.ilike(q)
+                    | AgentThread.last_snippet.ilike(q)
+                    | AgentThread.id.in_(body_match)
+                )
+            total = (await self.db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+            result = await self.db.execute(
+                base.order_by(desc(AgentThread.last_message_at)).offset(offset).limit(limit)
+            )
+            threads = result.scalars().all()
+
+            read_map = {}
+            if current_user_id and threads:
+                from src.models.thread_read import ThreadRead
+                thread_ids = [t.id for t in threads]
+                reads = (await self.db.execute(
+                    select(ThreadRead.thread_id, ThreadRead.read_at).where(
+                        ThreadRead.user_id == current_user_id,
+                        ThreadRead.thread_id.in_(thread_ids),
+                    )
+                )).all()
+                read_map = {r.thread_id: r.read_at for r in reads}
+
+            presenter = ThreadPresenter(self.db)
+            items = await presenter.many(threads, read_map=read_map if current_user_id else None)
+            return {"items": items, "total": total}
+
+        # Non-inbox folders (sent, spam, custom) show ALL threads in
         # that folder without status/direction filtering — the folder IS the filter.
         is_non_inbox_folder = (folder_key and folder_key != "inbox") or (folder_id and not folder_key)
 
@@ -294,6 +342,23 @@ class AgentThreadService:
             )
         )).scalar() or 0
 
+        # Auto-handled today (status=ignored or status=handled with no human action)
+        # Surfaces email the AI hid from the inbox so the user knows what's not visible.
+        from datetime import timedelta
+        today_start = datetime.now(timezone.utc) - timedelta(hours=24)
+        auto_handled_today = (await self.db.execute(
+            _vis_filter(
+                select(func.count(AgentThread.id))
+                .where(
+                    thread_org,
+                    AgentThread.last_message_at >= today_start,
+                    AgentThread.last_direction == "inbound",
+                    AgentThread.status.in_(("ignored", "handled")),
+                    AgentThread.has_pending == False,  # noqa: E712
+                )
+            )
+        )).scalar() or 0
+
         # Failed sends (bounces + spam complaints + delivery errors on outbound)
         failed = (await self.db.execute(
             _vis_filter(
@@ -318,6 +383,7 @@ class AgentThreadService:
             "unread": unread,
             "auto_sent": auto_sent,
             "failed": failed,
+            "auto_handled_today": auto_handled_today,
         }
 
     async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None, user_id: str | None = None) -> dict | None:

@@ -140,14 +140,16 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
         logger.info(f"Skipping internal email: {from_email}: {subject}")
         return
 
-    # --- Check DB block rules (replaces hardcoded AUTO_SENDER_DOMAINS) ---
+    # --- Block rules now route to Spam folder instead of dropping the email ---
+    # The old "drop entirely" behavior was unsafe — emails couldn't be recovered
+    # or audited. Mark for spam routing here; folder assignment happens later.
+    block_rule = None
     if organization_id:
         from src.services.inbox_routing_service import check_sender_blocked
         async with get_db_context() as db:
             block_rule = await check_sender_blocked(db, organization_id, from_email)
         if block_rule:
-            logger.info(f"Blocked by rule '{block_rule.address_pattern}': {from_email}: {subject}")
-            return
+            logger.info(f"Block rule matched '{block_rule.address_pattern}' — routing to Spam folder: {from_email}")
 
     logger.info(f"Processing email from {from_email}: {subject}")
 
@@ -242,6 +244,22 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
     result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
 
     category = result.get("category", "general")
+
+    # Safety net: known billing/payment senders must never be classified as auto_reply.
+    # They look like auto-replies (bounce domains, no-reply) but contain critical financial info.
+    BILLING_SENDER_PATTERNS = (
+        "stripe.com", "bounce.stripe.com",
+        "paypal.com", "intuit.com", "quickbooks.com",
+        "bill.com", "square.com", "squareup.com",
+        "appfolio.com", "entrata.com", "coupahost.com",
+        "venmo.com", "wave.com",
+    )
+    sender_lower = from_email.lower()
+    if category == "auto_reply" and any(p in sender_lower for p in BILLING_SENDER_PATTERNS):
+        logger.info(f"Override: {from_email} is billing sender, not auto_reply — reclassifying as billing")
+        category = "billing"
+        result["category"] = "billing"
+        result["needs_approval"] = False  # info-only, but visible in inbox
 
     # Auto-handle general + no draft: the AI couldn't classify it specifically
     # AND couldn't draft a response — it's informational (payment notifications,
@@ -535,7 +553,10 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                 svc = InboxFolderService(db)
                 target_key = None
                 target_folder_id = None
-                if t.category in ("spam", "auto_reply"):
+                # Block rules: force to Spam folder (legacy "block" → soft block via folder)
+                if block_rule:
+                    target_key = "spam"
+                elif t.category in ("spam", "auto_reply"):
                     target_key = "spam"
                 elif t.last_direction == "outbound" and not t.has_pending:
                     target_key = "sent"

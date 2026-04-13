@@ -68,7 +68,8 @@ Guidelines:
   - "medium": reasonable interpretation but could be wrong, or email has some ambiguity. Examples: multi-topic email, unclear if they want a quote or just info, property reference but unsure which one.
   - "low": unclear intent, complex situation, multiple possible interpretations. Examples: forwarded chain with unclear context, legal/financial implications, complaint that could escalate.
 - Each action also gets its own confidence: "high" = clearly needed, "medium" = probably needed but check, "low" = might not be needed
-- category "auto_reply" means no-reply addresses, bounce notifications, marketing — ignore these
+- category "auto_reply" means generic no-reply/bounce/marketing notifications with no business value — ignore these
+- category "billing" — ANY transactional email from a payment processor or accounting system: Stripe (including bounce.stripe.com), PayPal, Square, QuickBooks, Bill.com, AppFolio, Entrata, payout notifications, invoice receipts, account activation, statements. These look like auto-replies because they come from no-reply/bounce addresses, but the content is critical financial information. NEVER classify these as auto_reply. needs_approval=false (info only) but status=handled (visible in inbox).
 - category "spam" — junk, ignore
 - category "no_response" — ONLY for truly empty acknowledgments with zero actionable content: "thank you", "thanks", "got it", "ok", "sounds good", "perfect", thumbs up, single-word replies. If the email contains ANY instructions, approvals, questions, requests, decisions, or new information — even brief ones — it is NOT no_response. When in doubt, classify as "general" with needs_approval=true. A short reply like "go ahead" or "you can replace it" IS actionable and needs a response.
 - needs_approval = false ONLY for: gate code confirmations where no action needed AND the reply is terminal (no follow-up promised or required)

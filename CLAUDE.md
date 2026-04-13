@@ -409,6 +409,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/profitability-feature-plan.md` | Phase 3b spec (scoring weights, jurisdiction formulas) |
 | `docs/ai-agents-plan.md` | 10 planned AI agents (product roadmap), current implementation status |
 | `docs/inbox-folders-plan.md` | 3-phase inbox folders: folders + filter rules + Gmail label sync. **Remove when complete.** |
+| `docs/inbox-rules-unification-plan.md` | **HIGH PRIORITY** — unify `inbox_routing_rules` + `suppressed_email_senders` into single `inbox_rules` table. Includes background on the scppool block incident and architectural lessons. **Remove when Phase E ships.** |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |

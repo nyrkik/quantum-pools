@@ -255,6 +255,7 @@ export default function InboxPage() {
           onSelectFolder={handleFolderSelect}
           className="hidden sm:flex w-40 shrink-0 border-r pr-3"
           refreshKey={folderRefreshKey}
+          autoHandledToday={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
         />
 
         {/* Thread list */}

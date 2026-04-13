@@ -48,3 +48,4 @@ htmlcov/
 # Alembic
 alembic/versions/*.pyc
 uploads/
+backups/

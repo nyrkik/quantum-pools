@@ -47,4 +47,5 @@ SYSTEM_FOLDERS = [
     {"system_key": "inbox", "name": "Inbox", "icon": "inbox", "sort_order": 0},
     {"system_key": "sent", "name": "Sent", "icon": "send", "sort_order": 1},
     {"system_key": "spam", "name": "Spam", "icon": "shield-alert", "sort_order": 2},
+    {"system_key": "all", "name": "All Mail", "icon": "mailbox", "sort_order": 3},
 ]

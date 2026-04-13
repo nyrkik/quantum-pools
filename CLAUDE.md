@@ -422,6 +422,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | Doc | Purpose |
 |-----|---------|
 | `docs/sapphire-recovery-plan.md` | Plan to revert Sapphire from managed mode back to Google Workspace (Sapphire is a customer, not QP infra) |
+| `docs/sapphire-gmail-migration.md` | Step-by-step DNS/MX migration to make Gmail the canonical store for all `*@sapphire-pools.com` mail. **Remove when complete.** |
 | `docs/audit-2026-04-07.md` | Code health audit findings |
 
 ### Doc Maintenance Rules

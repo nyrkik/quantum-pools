@@ -423,6 +423,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 |-----|---------|
 | `docs/sapphire-recovery-plan.md` | Plan to revert Sapphire from managed mode back to Google Workspace (Sapphire is a customer, not QP infra) |
 | `docs/sapphire-gmail-migration.md` | Step-by-step DNS/MX migration to make Gmail the canonical store for all `*@sapphire-pools.com` mail. **Remove when complete.** |
+| `docs/billing-dormant.md` | Inventory of the billing/Stripe code that's built but intentionally disabled. **Do NOT re-enable scheduler without explicit approval.** Includes Stripe Connect concern for multi-tenant. **Remove when billing is live + stable.** |
 | `docs/audit-2026-04-07.md` | Code health audit findings |
 
 ### Doc Maintenance Rules

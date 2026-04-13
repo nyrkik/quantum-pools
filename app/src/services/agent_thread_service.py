@@ -344,7 +344,6 @@ class AgentThreadService:
 
         # Auto-handled today (status=ignored or status=handled with no human action)
         # Surfaces email the AI hid from the inbox so the user knows what's not visible.
-        from datetime import timedelta
         today_start = datetime.now(timezone.utc) - timedelta(hours=24)
         auto_handled_today = (await self.db.execute(
             _vis_filter(

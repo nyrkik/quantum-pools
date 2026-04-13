@@ -109,6 +109,8 @@ export interface Thread {
   is_unread: boolean;
   visibility_permission: string | null;
   delivered_to: string | null;
+  sender_tag: string | null;
+  has_auto_sent: boolean;
 }
 
 export interface TimelineMessage {
@@ -118,6 +120,7 @@ export interface TimelineMessage {
   to_email: string;
   subject: string | null;
   body: string | null;
+  body_html?: string | null;
   category: string | null;
   urgency: string | null;
   status: string;
@@ -125,6 +128,10 @@ export interface TimelineMessage {
   received_at: string | null;
   sent_at: string | null;
   approved_by: string | null;
+  delivery_status?: string | null;
+  delivery_error?: string | null;
+  first_opened_at?: string | null;
+  open_count?: number;
   attachments?: { id: string; filename: string; url: string; mime_type: string; file_size: number }[];
 }
 
@@ -147,6 +154,10 @@ export interface ThreadDetail {
   visibility_permission: string | null;
   delivered_to: string | null;
   routing_rule_id: string | null;
+  folder_id: string | null;
+  is_unread: boolean;
+  sender_tag: string | null;
+  has_auto_sent: boolean;
   timeline: TimelineMessage[];
   actions: unknown[];
 }

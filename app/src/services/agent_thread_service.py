@@ -78,28 +78,51 @@ class AgentThreadService:
         customer_id: str | None = None,
         current_user_id: str | None = None,
         user_permission_slugs: set[str] | None = None,
+        folder_id: str | None = None,
+        folder_key: str | None = None,
     ) -> dict:
         """List conversation threads with filtering."""
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
-        if status == "pending":
-            base = base.where(AgentThread.has_pending == True)
-        elif status == "handled":
-            base = base.where(AgentThread.status == "handled")
-        elif status == "ignored":
-            base = base.where(AgentThread.status == "ignored")
-        elif status == "archived":
-            base = base.where(AgentThread.status == "archived")
-        else:
-            # Default: exclude archived and outbound-only threads (broadcasts, sent emails
-            # that never got a reply). These clutter the inbox — only show if customer responded.
-            base = base.where(
-                AgentThread.status != "archived",
-                or_(AgentThread.last_direction == "inbound", AgentThread.has_pending == True),
-            )
-        if exclude_spam:
-            base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
-        if exclude_ignored:
-            base = base.where(AgentThread.status != "ignored")
+
+        # Non-inbox folders (sent, automated, spam, custom) show ALL threads in
+        # that folder without status/direction filtering — the folder IS the filter.
+        is_non_inbox_folder = (folder_key and folder_key != "inbox") or (folder_id and not folder_key)
+
+        if not is_non_inbox_folder:
+            if status in ("stale", "pending"):
+                base = base.where(AgentThread.has_pending == True)
+            elif status == "auto_sent":
+                base = base.where(
+                    AgentThread.id.in_(
+                        select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
+                    )
+                )
+            elif status == "failed":
+                # Threads with bounced, spam complaints, or delivery errors
+                base = base.where(
+                    AgentThread.id.in_(
+                        select(AgentMessage.thread_id).where(
+                            AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
+                            | (AgentMessage.delivery_error.isnot(None) & (AgentMessage.direction == "outbound"))
+                        )
+                    )
+                )
+            elif status == "handled":
+                base = base.where(AgentThread.status == "handled")
+            elif status == "ignored":
+                base = base.where(AgentThread.status == "ignored")
+            elif status == "archived":
+                base = base.where(AgentThread.status == "archived")
+            else:
+                # Default inbox: exclude archived and outbound-only threads
+                base = base.where(
+                    AgentThread.status != "archived",
+                    or_(AgentThread.last_direction == "inbound", AgentThread.has_pending == True),
+                )
+            if exclude_spam:
+                base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
+            if exclude_ignored:
+                base = base.where(AgentThread.status != "ignored")
         if assigned_to:
             base = base.where(AgentThread.assigned_to_user_id == assigned_to)
         if customer_id:
@@ -112,12 +135,46 @@ class AgentThreadService:
                     AgentThread.visibility_permission.in_(user_permission_slugs),
                 )
             )
+        # Folder filtering (skip when showing stale, auto_sent, or failed — those search all folders)
+        if status in ("stale", "auto_sent", "failed"):
+            pass  # No folder filter for global searches
+        elif folder_key == "inbox" or (not folder_id and not folder_key):
+            # Inbox = NULL folder_id OR explicitly assigned to inbox system folder
+            from src.models.inbox_folder import InboxFolder
+            inbox_folder = (await self.db.execute(
+                select(InboxFolder.id).where(
+                    InboxFolder.organization_id == org_id,
+                    InboxFolder.system_key == "inbox",
+                )
+            )).scalar_one_or_none()
+            if inbox_folder:
+                base = base.where(or_(AgentThread.folder_id.is_(None), AgentThread.folder_id == inbox_folder))
+            else:
+                base = base.where(AgentThread.folder_id.is_(None))
+        elif folder_key:
+            from src.models.inbox_folder import InboxFolder
+            target = (await self.db.execute(
+                select(InboxFolder.id).where(
+                    InboxFolder.organization_id == org_id,
+                    InboxFolder.system_key == folder_key,
+                )
+            )).scalar_one_or_none()
+            if target:
+                base = base.where(AgentThread.folder_id == target)
+        elif folder_id:
+            base = base.where(AgentThread.folder_id == folder_id)
+
         if search:
             q = f"%{search}%"
+            # Subquery: thread_ids with any message body matching
+            body_match = select(AgentMessage.thread_id).where(AgentMessage.body.ilike(q))
             base = base.where(
                 AgentThread.contact_email.ilike(q)
                 | AgentThread.subject.ilike(q)
                 | AgentThread.customer_name.ilike(q)
+                | AgentThread.property_address.ilike(q)
+                | AgentThread.last_snippet.ilike(q)
+                | AgentThread.id.in_(body_match)
             )
         total = (await self.db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
         result = await self.db.execute(
@@ -185,9 +242,19 @@ class AgentThreadService:
         )).scalar() or 0
 
         # Per-user unread: threads with last_message_at > user's read_at (or never read)
+        # Scoped to Inbox folder only (NULL folder_id or inbox system folder) — don't count
+        # unread in Sent/Automated/Spam since users don't actively monitor those.
         unread = 0
         if user_id:
             from src.models.thread_read import ThreadRead
+            from src.models.inbox_folder import InboxFolder
+
+            inbox_folder_id = (await self.db.execute(
+                select(InboxFolder.id).where(
+                    InboxFolder.organization_id == org_id,
+                    InboxFolder.system_key == "inbox",
+                )
+            )).scalar_one_or_none()
 
             unread_q = (
                 select(func.count(AgentThread.id))
@@ -200,16 +267,48 @@ class AgentThreadService:
                 .where(
                     thread_org,
                     AgentThread.status.notin_(("closed", "ignored")),
-                    # Only count as unread if last message was inbound (from customer)
                     AgentThread.last_direction == "inbound",
                     or_(
                         ThreadRead.read_at.is_(None),
                         AgentThread.last_message_at > ThreadRead.read_at,
                     ),
+                    # Inbox folder only
+                    or_(
+                        AgentThread.folder_id.is_(None),
+                        AgentThread.folder_id == inbox_folder_id,
+                    ) if inbox_folder_id else AgentThread.folder_id.is_(None),
                 )
             )
             unread_q = _vis_filter(unread_q)
             unread = (await self.db.execute(unread_q)).scalar() or 0
+
+        # Auto-sent thread count (all-time)
+        auto_sent = (await self.db.execute(
+            _vis_filter(
+                select(func.count(func.distinct(AgentThread.id)))
+                .select_from(AgentThread.__table__.join(
+                    AgentMessage.__table__,
+                    AgentMessage.thread_id == AgentThread.id,
+                ))
+                .where(thread_org, AgentMessage.status == "auto_sent")
+            )
+        )).scalar() or 0
+
+        # Failed sends (bounces + spam complaints + delivery errors on outbound)
+        failed = (await self.db.execute(
+            _vis_filter(
+                select(func.count(func.distinct(AgentThread.id)))
+                .select_from(AgentThread.__table__.join(
+                    AgentMessage.__table__,
+                    AgentMessage.thread_id == AgentThread.id,
+                ))
+                .where(
+                    thread_org,
+                    AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
+                    | (AgentMessage.delivery_error.isnot(None) & (AgentMessage.direction == "outbound")),
+                )
+            )
+        )).scalar() or 0
 
         return {
             "total": total,
@@ -217,9 +316,11 @@ class AgentThreadService:
             "stale_pending": stale,
             "open_actions": open_actions,
             "unread": unread,
+            "auto_sent": auto_sent,
+            "failed": failed,
         }
 
-    async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None) -> dict | None:
+    async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None, user_id: str | None = None) -> dict | None:
         """Get thread with full conversation timeline.
 
         Returns None if thread doesn't exist or user lacks required visibility permission.
@@ -272,6 +373,11 @@ class AgentThreadService:
                 "subject": m.subject,
                 "body": strip_email_signature(strip_quoted_reply(m.body)) if m.body else None,
                 "body_full": m.body,
+                "body_html": m.body_html,
+                "delivery_status": m.delivery_status,
+                "delivery_error": m.delivery_error,
+                "first_opened_at": m.first_opened_at.isoformat() if m.first_opened_at else None,
+                "open_count": m.open_count,
                 "category": m.category,
                 "urgency": m.urgency,
                 "status": m.status,
@@ -299,7 +405,7 @@ class AgentThreadService:
                         "body": m.final_response,
                         "category": None,
                         "urgency": None,
-                        "status": "sent",
+                        "status": m.status,  # preserves "auto_sent" flag so UI can style differently
                         "draft_response": None,
                         "received_at": m.sent_at.isoformat() if m.sent_at else m.received_at.isoformat(),
                         "sent_at": m.sent_at.isoformat() if m.sent_at else None,
@@ -316,7 +422,7 @@ class AgentThreadService:
         actions = await ActionPresenter(self.db).many(list(actions_result.scalars().all()))
 
         presenter = ThreadPresenter(self.db)
-        d = await presenter.one(thread)
+        d = await presenter.one(thread, user_id=user_id)
         d["routing_rule_id"] = thread.routing_rule_id
         d["timeline"] = timeline
         d["actions"] = actions
@@ -476,6 +582,28 @@ class AgentThreadService:
                 self.db.add(ThreadRead(user_id=user_id, thread_id=thread_id))
 
         await self.db.flush()
+
+        # Sync to Gmail (non-blocking)
+        try:
+            thread_obj = thread if 'thread' in dir() else (await self.db.execute(
+                select(AgentThread).where(AgentThread.id == thread_id)
+            )).scalar_one_or_none()
+            if thread_obj and thread_obj.gmail_thread_id and org_id:
+                from src.models.email_integration import EmailIntegration, IntegrationStatus
+                integration = (await self.db.execute(
+                    select(EmailIntegration).where(
+                        EmailIntegration.organization_id == org_id,
+                        EmailIntegration.type == "gmail_api",
+                        EmailIntegration.status == IntegrationStatus.connected.value,
+                        EmailIntegration.is_primary == True,  # noqa: E712
+                    )
+                )).scalar_one_or_none()
+                if integration:
+                    from src.services.gmail.read_sync import sync_read_state
+                    import asyncio
+                    asyncio.create_task(sync_read_state(integration, thread_obj.gmail_thread_id, mark_read=True))
+        except Exception:
+            pass  # Non-blocking
 
     async def update_visibility(self, org_id: str, thread_id: str, visibility_permission: str | None) -> dict:
         """Admin override: change a thread's visibility permission."""

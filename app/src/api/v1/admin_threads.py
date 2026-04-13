@@ -49,6 +49,8 @@ async def list_threads(
     exclude_ignored: bool = Query(False),
     assigned_to: Optional[str] = Query(None),
     customer_id: Optional[str] = Query(None),
+    folder_id: Optional[str] = Query(None),
+    folder: Optional[str] = Query(None),  # system_key shortcut: "inbox", "sent", "automated", "spam"
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -67,6 +69,8 @@ async def list_threads(
         customer_id=customer_id,
         current_user_id=ctx.user.id,
         user_permission_slugs=perm_slugs,
+        folder_id=folder_id,
+        folder_key=folder,
     )
 
 
@@ -90,7 +94,7 @@ async def get_thread(
     """Get thread with full conversation timeline. Marks as read for current user."""
     perm_slugs = await _get_user_perm_slugs(ctx, db)
     service = AgentThreadService(db)
-    result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_permission_slugs=perm_slugs)
+    result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_permission_slugs=perm_slugs, user_id=ctx.user.id)
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
     # Mark as read — admins/owners broadcast to all users
@@ -646,7 +650,8 @@ async def get_contact_learning(
 
 class DismissContactPromptBody(BaseModel):
     sender_email: str
-    reason: str | None = None  # automated, marketing, notification, other
+    reason: str | None = None  # billing, vendor, notification, personal, marketing, other, spam
+    folder_id: str | None = None  # auto-move threads from this sender to this folder
 
 
 @router.post("/agent-threads/dismiss-contact-prompt")
@@ -664,20 +669,339 @@ async def dismiss_contact_prompt(
 
     email_lower = body.sender_email.lower().strip()
 
-    # Check if already suppressed
+    # Auto-match folder: if no folder_id provided, check if a custom folder
+    # exists whose name matches the tag (e.g., tag "billing" → folder "Billing")
+    from src.models.inbox_folder import InboxFolder
+    target_folder_id = body.folder_id
+    tag_reason = body.reason or "other"
+    if target_folder_id is None and tag_reason not in ("other", "spam"):
+        matching_folder = (await db.execute(
+            select(InboxFolder).where(
+                InboxFolder.organization_id == ctx.organization_id,
+                InboxFolder.is_system == False,  # noqa: E712
+                func.lower(InboxFolder.name).in_([
+                    tag_reason, tag_reason + "s",  # "billing" or "billings", "vendor" or "vendors"
+                ]),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if matching_folder:
+            target_folder_id = matching_folder.id
+
+    # Upsert: create or update tag + folder
     existing = (await db.execute(
         select(SuppressedEmailSender).where(
             SuppressedEmailSender.organization_id == ctx.organization_id,
             func.lower(SuppressedEmailSender.email_pattern) == email_lower,
         ).limit(1)
     )).scalar_one_or_none()
-    if not existing:
+    if existing:
+        existing.reason = tag_reason
+        existing.folder_id = target_folder_id
+    else:
         db.add(SuppressedEmailSender(
             organization_id=ctx.organization_id,
             email_pattern=email_lower,
-            reason=body.reason or "other",
+            reason=tag_reason,
+            folder_id=target_folder_id,
             created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
         ))
+    await db.commit()
+
+    # Move all existing threads from this sender/domain to the chosen folder
+    if target_folder_id is not None:
+        from src.models.agent_thread import AgentThread
+        if email_lower.startswith("*@"):
+            # Domain pattern: match all addresses at this domain
+            domain_suffix = email_lower[1:]  # "@scppool.com"
+            await db.execute(
+                AgentThread.__table__.update()
+                .where(
+                    AgentThread.organization_id == ctx.organization_id,
+                    func.lower(AgentThread.contact_email).like(f"%{domain_suffix}"),
+                )
+                .values(folder_id=target_folder_id)
+            )
+        else:
+            await db.execute(
+                AgentThread.__table__.update()
+                .where(
+                    AgentThread.organization_id == ctx.organization_id,
+                    func.lower(AgentThread.contact_email) == email_lower,
+                )
+                .values(folder_id=target_folder_id)
+            )
         await db.commit()
 
     return {"dismissed": True}
+
+
+# --- Bulk actions ---
+
+class BulkThreadAction(BaseModel):
+    thread_ids: list[str]
+
+
+@router.post("/agent-threads/bulk/mark-read")
+async def bulk_mark_read(
+    body: BulkThreadAction,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark multiple threads as read for all org users."""
+    service = AgentThreadService(db)
+    for tid in body.thread_ids:
+        await service.mark_thread_read(
+            thread_id=tid, user_id=ctx.user.id,
+            org_id=ctx.organization_id, user_role=ctx.org_user.role,
+        )
+    try:
+        await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
+    except Exception:
+        pass
+    return {"ok": True, "count": len(body.thread_ids)}
+
+
+@router.post("/agent-threads/bulk/mark-unread")
+async def bulk_mark_unread(
+    body: BulkThreadAction,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark multiple threads as unread by clearing read_at for all org users."""
+    from src.models.thread_read import ThreadRead
+    from src.models.agent_thread import AgentThread
+    gmail_thread_ids = []
+    for tid in body.thread_ids:
+        await db.execute(
+            ThreadRead.__table__.delete().where(
+                ThreadRead.thread_id == tid,
+            )
+        )
+        # Collect Gmail thread IDs for sync
+        t = (await db.execute(
+            select(AgentThread.gmail_thread_id).where(AgentThread.id == tid)
+        )).scalar_one_or_none()
+        if t:
+            gmail_thread_ids.append(t)
+    await db.commit()
+
+    # Sync unread to Gmail (non-blocking)
+    try:
+        if gmail_thread_ids:
+            from src.models.email_integration import EmailIntegration, IntegrationStatus
+            integration = (await db.execute(
+                select(EmailIntegration).where(
+                    EmailIntegration.organization_id == ctx.organization_id,
+                    EmailIntegration.type == "gmail_api",
+                    EmailIntegration.status == IntegrationStatus.connected.value,
+                    EmailIntegration.is_primary == True,  # noqa: E712
+                )
+            )).scalar_one_or_none()
+            if integration:
+                from src.services.gmail.read_sync import sync_read_state
+                import asyncio
+                for gtid in gmail_thread_ids:
+                    asyncio.create_task(sync_read_state(integration, gtid, mark_read=False))
+    except Exception:
+        pass
+
+    try:
+        await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
+    except Exception:
+        pass
+    return {"ok": True, "count": len(body.thread_ids)}
+
+
+class BulkMoveAction(BaseModel):
+    thread_ids: list[str]
+    folder_id: str | None = None  # null = Inbox
+
+
+@router.post("/agent-threads/bulk/move")
+async def bulk_move(
+    body: BulkMoveAction,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move multiple threads to a folder."""
+    from src.services.inbox_folder_service import InboxFolderService
+    svc = InboxFolderService(db)
+    moved = 0
+    for tid in body.thread_ids:
+        ok = await svc.move_thread(ctx.organization_id, tid, body.folder_id)
+        if ok:
+            moved += 1
+    try:
+        await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
+    except Exception:
+        pass
+    return {"ok": True, "moved": moved}
+
+
+class AutoSentFeedbackBody(BaseModel):
+    thread_id: str
+    was_correct: bool
+
+
+@router.post("/agent-threads/auto-sent-feedback")
+async def auto_sent_feedback(
+    body: AutoSentFeedbackBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record human feedback on an auto-sent AI reply. Feeds the agent learning system."""
+    from src.models.agent_message import AgentMessage
+
+    # Find the auto-sent message in this thread
+    msg = (await db.execute(
+        select(AgentMessage).where(
+            AgentMessage.thread_id == body.thread_id,
+            AgentMessage.organization_id == ctx.organization_id,
+            AgentMessage.status == "auto_sent",
+        ).order_by(desc(AgentMessage.sent_at)).limit(1)
+    )).scalar_one_or_none()
+    if not msg:
+        raise HTTPException(404, "No auto-sent message found in thread")
+
+    # Record correction via agent learning service
+    try:
+        from src.services.agents.agent_learning_service import AgentLearningService
+        learner = AgentLearningService(db)
+        await learner.record_correction(
+            organization_id=ctx.organization_id,
+            agent_type="email_drafter",
+            category=msg.category or "general",
+            customer_id=msg.matched_customer_id,
+            input_context=f"Subject: {msg.subject}\n\nBody: {(msg.body or '')[:500]}",
+            original_output=msg.final_response or msg.draft_response or "",
+            corrected_output=None,
+            correction_type="acceptance" if body.was_correct else "rejection",
+            correction_note="Human reviewed auto-sent reply",
+            reviewed_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
+        )
+    except Exception as e:
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(f"Failed to record auto-sent feedback: {e}")
+
+    return {"ok": True}
+
+
+@router.post("/agent-threads/bulk/spam")
+async def bulk_spam(
+    body: BulkThreadAction,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark threads as spam — sender-level: suppresses the sender org-wide
+    and moves ALL threads from those senders to the Spam folder."""
+    from src.models.agent_thread import AgentThread
+    from src.models.inbox_folder import InboxFolder
+    from src.models.suppressed_sender import SuppressedEmailSender
+
+    spam_folder = (await db.execute(
+        select(InboxFolder.id).where(
+            InboxFolder.organization_id == ctx.organization_id,
+            InboxFolder.system_key == "spam",
+        )
+    )).scalar_one_or_none()
+    if not spam_folder:
+        raise HTTPException(400, "Spam folder not found")
+
+    # Collect unique sender emails from selected threads
+    threads = (await db.execute(
+        select(AgentThread.contact_email).where(
+            AgentThread.id.in_(body.thread_ids),
+            AgentThread.organization_id == ctx.organization_id,
+        )
+    )).scalars().all()
+    sender_emails = set(e.lower() for e in threads if e)
+
+    # Suppress each sender org-wide
+    for email_addr in sender_emails:
+        existing = (await db.execute(
+            select(SuppressedEmailSender).where(
+                SuppressedEmailSender.organization_id == ctx.organization_id,
+                func.lower(SuppressedEmailSender.email_pattern) == email_addr,
+            ).limit(1)
+        )).scalar_one_or_none()
+        if not existing:
+            db.add(SuppressedEmailSender(
+                organization_id=ctx.organization_id,
+                email_pattern=email_addr,
+                reason="spam",
+                created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
+            ))
+
+    # Move ALL threads from those senders to Spam folder
+    moved = 0
+    if sender_emails:
+        result = await db.execute(
+            AgentThread.__table__.update()
+            .where(
+                AgentThread.organization_id == ctx.organization_id,
+                func.lower(AgentThread.contact_email).in_(sender_emails),
+            )
+            .values(folder_id=spam_folder, folder_override=True)
+        )
+        moved = result.rowcount
+
+    await db.commit()
+    try:
+        await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
+    except Exception:
+        pass
+    return {"ok": True, "senders_suppressed": len(sender_emails), "threads_moved": moved}
+
+
+@router.post("/agent-threads/bulk/not-spam")
+async def bulk_not_spam(
+    body: BulkThreadAction,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark threads as not spam — sender-level: removes suppression and moves
+    ALL threads from those senders back to Inbox."""
+    from src.models.agent_thread import AgentThread
+    from src.models.suppressed_sender import SuppressedEmailSender
+
+    # Collect unique sender emails from selected threads
+    threads = (await db.execute(
+        select(AgentThread.contact_email).where(
+            AgentThread.id.in_(body.thread_ids),
+            AgentThread.organization_id == ctx.organization_id,
+        )
+    )).scalars().all()
+    sender_emails = set(e.lower() for e in threads if e)
+
+    # Remove suppression for those senders
+    removed = 0
+    for email_addr in sender_emails:
+        existing = (await db.execute(
+            select(SuppressedEmailSender).where(
+                SuppressedEmailSender.organization_id == ctx.organization_id,
+                func.lower(SuppressedEmailSender.email_pattern) == email_addr,
+            )
+        )).scalars().all()
+        for s in existing:
+            await db.delete(s)
+            removed += 1
+
+    # Move ALL threads from those senders back to Inbox (NULL folder_id)
+    moved = 0
+    if sender_emails:
+        result = await db.execute(
+            AgentThread.__table__.update()
+            .where(
+                AgentThread.organization_id == ctx.organization_id,
+                func.lower(AgentThread.contact_email).in_(sender_emails),
+            )
+            .values(folder_id=None, folder_override=True)
+        )
+        moved = result.rowcount
+
+    await db.commit()
+    try:
+        await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
+    except Exception:
+        pass
+    return {"ok": True, "senders_unsuppressed": len(sender_emails), "suppressions_removed": removed, "threads_moved": moved}

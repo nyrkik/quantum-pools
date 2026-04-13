@@ -237,6 +237,23 @@ class GmailSyncService:
         from src.services.agents.orchestrator import process_incoming_email
         try:
             await process_incoming_email(uid, email_msg, organization_id=org_id, historical=historical)
+
+            # Store Gmail thread ID on the QP thread for read/unread sync
+            gmail_thread_id = msg_data.get("threadId")
+            if gmail_thread_id:
+                from src.models.agent_thread import AgentThread
+                async with get_db_context() as db:
+                    am = (await db.execute(
+                        select(AgentMessage.thread_id).where(AgentMessage.email_uid == uid)
+                    )).scalar_one_or_none()
+                    if am:
+                        thread = (await db.execute(
+                            select(AgentThread).where(AgentThread.id == am)
+                        )).scalar_one_or_none()
+                        if thread and not thread.gmail_thread_id:
+                            thread.gmail_thread_id = gmail_thread_id
+                            await db.commit()
+
             return True
         except Exception as e:
             logger.error(f"process_incoming_email failed for {uid}: {e}")

@@ -330,30 +330,43 @@ def _unwrap_embedded_mime(text: str) -> str:
 
 def extract_text_body(msg) -> str:
     """Extract plain text body from email message, stripping quoted reply chains."""
-    raw = ""
+    raw, _ = extract_bodies(msg)
+    return raw
+
+
+def extract_bodies(msg) -> tuple[str, str | None]:
+    """Extract both plain text AND original HTML body.
+
+    Returns (text_body, html_body). text_body is always populated (converted
+    from HTML if only HTML was available). html_body is the raw HTML if present,
+    None otherwise.
+    """
+    text_raw = ""
+    html_raw = None
     if msg.is_multipart():
         for part in msg.walk():
             content_type = part.get_content_type()
-            if content_type == "text/plain":
+            if content_type == "text/plain" and not text_raw:
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
-                    raw = payload.decode(charset, errors="replace")
-                    break
-        if not raw:
-            # Fallback to HTML if no plain text
-            for part in msg.walk():
-                if part.get_content_type() == "text/html":
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        charset = part.get_content_charset() or "utf-8"
-                        raw = _clean_html(payload.decode(charset, errors="replace"))
-                        break
+                    text_raw = payload.decode(charset, errors="replace")
+            elif content_type == "text/html" and html_raw is None:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    html_raw = payload.decode(charset, errors="replace")
+        if not text_raw and html_raw:
+            text_raw = _clean_html(html_raw)
     else:
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or "utf-8"
             text = payload.decode(charset, errors="replace")
-            raw = _clean_html(text) if msg.get_content_type() == "text/html" else text
+            if msg.get_content_type() == "text/html":
+                html_raw = text
+                text_raw = _clean_html(text)
+            else:
+                text_raw = text
 
-    return raw
+    return text_raw, html_raw

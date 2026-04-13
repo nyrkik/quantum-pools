@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 import anthropic
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from src.core.database import get_db_context
 from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
@@ -96,7 +96,12 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
     """Process a single incoming email."""
     from_header = decode_email_header(msg.get("From", ""))
     subject = decode_email_header(msg.get("Subject", ""))
-    body = extract_text_body(msg)
+    from src.services.agents.mail_agent import extract_bodies
+    body, body_html = extract_bodies(msg)
+    # Safety net: if body still looks like raw HTML, strip it now
+    if body and "<html" in body.lower()[:200]:
+        from src.services.agents.mail_agent import _clean_html
+        body = _clean_html(body)
     message_id_header = msg.get("Message-ID", "")
 
     # Parse actual email date
@@ -254,6 +259,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                 to_email=to_header,
                 subject=subject,
                 body=body[:5000],
+                body_html=body_html[:50000] if body_html else None,
                 category=category,
                 urgency="low",
                 status="handled",
@@ -292,6 +298,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                     to_email=to_header,
                     subject=subject,
                     body=body[:5000],
+                body_html=body_html[:50000] if body_html else None,
                     category=category,
                     urgency="low",
                     status="handled",
@@ -433,6 +440,23 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
 
         needs_approval = result.get("needs_approval", True)
 
+        # Commitment safety gate — never auto-send anything that promises a future action.
+        # Customers are left waiting for follow-ups no human is tracking.
+        if not needs_approval:
+            draft = (result.get("draft_response") or "").lower()
+            COMMITMENT_PHRASES = [
+                "follow up", "follow-up", "get back to you", "get back with you",
+                "reach out", "let you know", "will update", "will let you",
+                "look into", "look at", "check on", "investigate",
+                "schedule", "assign", "arrange", "send over",
+                "confirm with", "discuss with", "look into it",
+                "i'll check", "i will check", "we'll check", "we will check",
+                "we'll see", "we will see", "circle back",
+            ]
+            if any(p in draft for p in COMMITMENT_PHRASES):
+                needs_approval = True
+                logger.info(f"Auto-send blocked: draft contains commitment phrase — forcing approval for: {subject[:50]}")
+
         # Org-level auto-send gate — when disabled (default), ALL emails
         # require human approval. This prevents rogue auto-replies during
         # setup, backfill, or misconfiguration.
@@ -477,8 +501,70 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                     for number in APPROVAL_NUMBERS:
                         await send_sms(number, f"\U0001f4e4 Auto-replied to {from_email}: {result.get('summary', subject)[:100]}")
 
+                # High-risk alert: first contact with this sender (no prior messages from them)
+                try:
+                    prior = (await db.execute(
+                        select(func.count(AgentMessage.id)).where(
+                            AgentMessage.organization_id == organization_id,
+                            AgentMessage.from_email == from_email,
+                            AgentMessage.direction == "inbound",
+                            AgentMessage.id != agent_msg.id,
+                        )
+                    )).scalar() or 0
+                    if prior == 0:
+                        # First time we've heard from this sender — AI just replied automatically. Alert!
+                        import subprocess
+                        subprocess.Popen(
+                            ["/srv/quantumpools/app/scripts/_notify.py",
+                             "⚠ AI auto-sent to NEW sender",
+                             f"{from_email}: {subject[:80]}"],
+                            close_fds=True,
+                        )
+                except Exception as e:
+                    logger.warning(f"First-contact alert check failed: {e}")
+
     # Update thread status
     await update_thread_status(thread.id)
+
+    # Auto-assign folder (only if user hasn't manually moved the thread)
+    try:
+        async with get_db_context() as db:
+            t = (await db.execute(select(AgentThread).where(AgentThread.id == thread.id))).scalar_one_or_none()
+            if t and not t.folder_override:
+                from src.services.inbox_folder_service import InboxFolderService
+                svc = InboxFolderService(db)
+                target_key = None
+                target_folder_id = None
+                if t.category in ("spam", "auto_reply"):
+                    target_key = "spam"
+                elif t.last_direction == "outbound" and not t.has_pending:
+                    target_key = "sent"
+                else:
+                    # Check sender tag for folder routing (exact + domain pattern)
+                    from src.models.suppressed_sender import SuppressedEmailSender
+                    from sqlalchemy import or_
+                    if t.contact_email:
+                        sender_lower = t.contact_email.lower()
+                        sender_domain = sender_lower.split("@")[-1] if "@" in sender_lower else ""
+                        patterns = [sender_lower]
+                        if sender_domain:
+                            patterns.append(f"*@{sender_domain}")
+                        sender_rule = (await db.execute(
+                            select(SuppressedEmailSender).where(
+                                SuppressedEmailSender.organization_id == organization_id,
+                                func.lower(SuppressedEmailSender.email_pattern).in_(patterns),
+                                SuppressedEmailSender.folder_id.isnot(None),
+                            ).limit(1)
+                        )).scalar_one_or_none()
+                        if sender_rule:
+                            target_folder_id = sender_rule.folder_id
+                if target_key:
+                    target_folder_id = await svc.get_system_folder_id(organization_id, target_key)
+                if target_folder_id and t.folder_id != target_folder_id:
+                    t.folder_id = target_folder_id
+                    await db.commit()
+    except Exception as e:
+        logger.warning(f"Folder auto-assign failed for thread {thread.id}: {e}")
 
     # Push real-time event
     try:

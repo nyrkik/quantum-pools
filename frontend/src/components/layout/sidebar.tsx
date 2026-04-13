@@ -97,7 +97,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const fetchCounts = useCallback(() => {
     if (perms.canViewInbox) {
       api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
-        .then((s) => setPendingCount(s.unread ?? s.pending ?? 0))
+        .then((s) => setPendingCount(s.unread ?? 0))
         .catch(() => {});
     }
     api.get<{ unread: number }>("/v1/messages/stats")
@@ -302,7 +302,7 @@ export function Sidebar() {
     const poll = () => {
       if (perms.canViewInbox) {
         api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
-          .then((s) => setMobilePending(s.unread ?? s.pending ?? 0))
+          .then((s) => setMobilePending(s.unread ?? 0))
           .catch(() => {});
       }
       api.get<{ unread: number; role_version?: number }>("/v1/notifications/count")

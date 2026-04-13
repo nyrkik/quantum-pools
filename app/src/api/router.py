@@ -48,6 +48,7 @@ from src.api.v1.attachments import router as attachments_router
 from src.api.v1.cases import router as cases_router
 from src.api.v1.deepblue import router as deepblue_router
 from src.api.v1.email_integrations import router as email_integrations_router
+from src.api.v1.inbox_folders import router as inbox_folders_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -97,3 +98,4 @@ api_router.include_router(attachments_router)
 api_router.include_router(cases_router)
 api_router.include_router(deepblue_router)
 api_router.include_router(email_integrations_router)
+api_router.include_router(inbox_folders_router)

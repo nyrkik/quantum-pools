@@ -23,8 +23,8 @@ export function InboxMobileList({ threads, loading, currentUserId }: InboxMobile
         <a
           key={t.id}
           href={`/inbox/${t.id}`}
-          className={`block w-full text-left px-3 py-2.5 rounded-lg border bg-background active:bg-blue-50 transition-colors ${
-            t.has_pending ? "border-l-4 border-l-amber-400" : ""
+          className={`block w-full text-left px-3 py-2.5 rounded-lg border active:bg-blue-50 transition-colors ${
+            t.has_pending ? "bg-amber-50 dark:bg-amber-950/30 border-l-4 border-l-amber-500" : "bg-background"
           } ${t.is_unread ? "font-medium" : ""}`}
         >
           <div className="flex items-center justify-between gap-2">

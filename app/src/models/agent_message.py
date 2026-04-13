@@ -17,7 +17,8 @@ class AgentMessage(Base):
     from_email: Mapped[str] = mapped_column(String(255))
     to_email: Mapped[str] = mapped_column(String(255))
     subject: Mapped[str | None] = mapped_column(String(500))
-    body: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str | None] = mapped_column(Text)  # plain text body (stripped)
+    body_html: Mapped[str | None] = mapped_column(Text, nullable=True)  # original HTML body (rendered in iframe)
     category: Mapped[str | None] = mapped_column(String(50))  # schedule, complaint, billing, gate_code, general, spam
     urgency: Mapped[str | None] = mapped_column(String(20))  # low, medium, high
     draft_response: Mapped[str | None] = mapped_column(Text)
@@ -35,6 +36,10 @@ class AgentMessage(Base):
     postmark_message_id: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
     rfc_message_id: Mapped[str | None] = mapped_column(String(500), index=True, nullable=True)  # RFC 5322 Message-ID header — cross-source dedup key
     delivery_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    delivery_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # delivered, bounced, opened, spam_complaint
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    open_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

@@ -54,8 +54,9 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     scheduler.add_job(_run_billing_cycle, CronTrigger(hour=6, minute=0), id="billing_cycle")
     scheduler.add_job(_run_payment_retries, CronTrigger(hour=10, minute=0), id="payment_retries")
+    scheduler.add_job(_send_auto_sent_digest, CronTrigger(day_of_week="mon", hour=14, minute=0), id="auto_sent_digest")
     scheduler.start()
-    logger.info("Billing scheduler started (billing 6:00 UTC, retries 10:00 UTC)")
+    logger.info("Scheduler started (billing, payment retries, weekly auto-sent digest)")
 
     yield
 
@@ -107,6 +108,82 @@ async def _run_payment_retries():
                     sentry_sdk.capture_exception(e)
     except Exception as e:
         logger.error(f"Payment retry error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _send_auto_sent_digest():
+    """Weekly digest of auto-sent AI replies per org. Emails the owner."""
+    from src.core.database import get_db_context
+    from src.services.email_service import EmailService
+    from sqlalchemy import select, func, desc
+    from datetime import datetime, timedelta, timezone
+    from src.models.organization import Organization
+    from src.models.agent_message import AgentMessage
+    from src.models.agent_thread import AgentThread
+    from src.models.user import User
+    from src.models.organization_user import OrganizationUser
+
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+    try:
+        async with get_db_context() as db:
+            orgs = (await db.execute(select(Organization))).scalars().all()
+            for org in orgs:
+                try:
+                    # Count auto-sent in past 7 days
+                    messages = (await db.execute(
+                        select(AgentMessage, AgentThread)
+                        .join(AgentThread, AgentThread.id == AgentMessage.thread_id)
+                        .where(
+                            AgentMessage.organization_id == org.id,
+                            AgentMessage.status == "auto_sent",
+                            AgentMessage.sent_at >= week_ago,
+                        )
+                        .order_by(desc(AgentMessage.sent_at))
+                    )).all()
+
+                    if not messages:
+                        continue
+
+                    # Find org owner
+                    owner_user = (await db.execute(
+                        select(User)
+                        .join(OrganizationUser, OrganizationUser.user_id == User.id)
+                        .where(
+                            OrganizationUser.organization_id == org.id,
+                            OrganizationUser.role == "owner",
+                        ).limit(1)
+                    )).scalar_one_or_none()
+                    if not owner_user or not owner_user.email:
+                        continue
+
+                    # Build digest body
+                    lines = [f"Last week, AI auto-sent {len(messages)} {'reply' if len(messages) == 1 else 'replies'}:\n"]
+                    by_category = {}
+                    for msg, thread in messages:
+                        cat = msg.category or "general"
+                        by_category[cat] = by_category.get(cat, 0) + 1
+                        customer = thread.customer_name or msg.from_email
+                        lines.append(f"• [{cat}] {customer}: {msg.subject[:60] if msg.subject else '(no subject)'}")
+                    lines.append("\nBy category:")
+                    for cat, cnt in sorted(by_category.items(), key=lambda x: -x[1]):
+                        lines.append(f"  {cat}: {cnt}")
+                    lines.append("\nReview any of these at https://app.quantumpoolspro.com/inbox (click the Auto-Sent filter).")
+
+                    body = "\n".join(lines)
+
+                    from src.services.email_service import EmailMessage
+                    svc = EmailService(db)
+                    await svc.send_email(org.id, EmailMessage(
+                        to=owner_user.email,
+                        subject=f"Weekly AI auto-send digest — {len(messages)} replies",
+                        text_body=body,
+                    ))
+                    logger.info(f"Sent auto-send digest to {owner_user.email}: {len(messages)} replies")
+                except Exception as e:
+                    logger.error(f"Digest failed for org {org.id}: {e}")
+    except Exception as e:
+        logger.error(f"Auto-sent digest error: {e}")
         sentry_sdk.capture_exception(e)
 
 

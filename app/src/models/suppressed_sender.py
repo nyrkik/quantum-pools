@@ -22,7 +22,8 @@ class SuppressedEmailSender(Base):
     )
     # Exact email or domain pattern: "system@entrata.com" or "*@entrata.com"
     email_pattern: Mapped[str] = mapped_column(String(255), nullable=False)
-    reason: Mapped[str | None] = mapped_column(String(50))  # automated, marketing, notification, other
+    reason: Mapped[str | None] = mapped_column(String(50))  # billing, vendor, notification, personal, marketing, other, spam
+    folder_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("inbox_folders.id", ondelete="SET NULL"), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

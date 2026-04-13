@@ -32,6 +32,13 @@ class AgentThread(Base):
 
     case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
 
+    # Gmail sync
+    gmail_thread_id: Mapped[str | None] = mapped_column(String(100), nullable=True)  # Gmail's thread ID for read/unread sync
+
+    # Folder organization
+    folder_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("inbox_folders.id", ondelete="SET NULL"), nullable=True, index=True)
+    folder_override: Mapped[bool] = mapped_column(Boolean, default=False)  # True = user manually moved, rules won't re-assign
+
     # Inbox routing / visibility
     visibility_permission: Mapped[str | None] = mapped_column(String(80), nullable=True)  # permission slug required to view (null = everyone)
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email

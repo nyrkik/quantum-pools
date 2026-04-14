@@ -571,9 +571,48 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                     from_email,
                 )
         else:
-            # Auto-send
+            # Auto-send. Wrap in try/except so a crash doesn't leave the
+            # message stuck in 'pending' with no record of the attempted send.
+            # On any failure, persist a 'failed' outbound row via the shared
+            # helper so the user sees it in the Failed filter.
             draft = result.get("draft_response", "")
-            success = await send_email_response(from_email, subject, draft)
+            try:
+                success = await send_email_response(from_email, subject, draft)
+            except Exception as auto_send_exc:  # noqa: BLE001
+                logger.exception(f"auto-send raised for {from_email}: {auto_send_exc}")
+                success = False
+                # Capture the actual exception for the failed row below.
+                _auto_send_error = f"{type(auto_send_exc).__name__}: {auto_send_exc}"
+            else:
+                _auto_send_error = "auto-send returned False (provider rejected)"
+
+            if not success:
+                # Mark the inbound as failed-to-auto-handle and persist a failed
+                # outbound twin so the timeline shows what we tried to send.
+                agent_msg.status = "failed"
+                agent_msg.notes = (agent_msg.notes or "") + f"\nAuto-send failed: {_auto_send_error}"
+                agent_msg.notes = agent_msg.notes.strip()
+                try:
+                    await db.commit()
+                except Exception:
+                    pass
+                try:
+                    from src.services.agents.send_failure import record_outbound_send_failure
+                    await record_outbound_send_failure(
+                        db,
+                        org_id=organization_id,
+                        thread_id=agent_msg.thread_id,
+                        from_email=FROM_EMAIL or "",
+                        to_email=from_email,
+                        subject=subject,
+                        body=draft,
+                        matched_customer_id=agent_msg.matched_customer_id,
+                        customer_name=agent_msg.customer_name,
+                        error=_auto_send_error,
+                    )
+                except Exception as inner:
+                    logger.error(f"Failed to record auto-send failure: {inner}")
+
             if success:
                 agent_msg.status = "auto_sent"
                 agent_msg.final_response = draft

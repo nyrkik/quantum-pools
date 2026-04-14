@@ -230,46 +230,70 @@ async def approve_agent_message(
 
     sender_name = f"{ctx.user.first_name} {ctx.user.last_name}"
     email_svc = EmailService(db)
-    send_result = await email_svc.send_agent_reply(
-        ctx.organization_id, msg.from_email, msg.subject or "", response_text,
-        sender_name=sender_name,
-    )
-    if not send_result.success:
-        raise HTTPException(status_code=500, detail="Failed to send email")
-
-    now = datetime.now(timezone.utc)
-    msg.status = "sent"
-    msg.final_response = response_text
-    msg.approved_by = sender_name
-    msg.approved_at = now
-    msg.sent_at = now
-    msg.postmark_message_id = send_result.message_id
-
-    # Record correction for agent learning
-    from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
-    learner = AgentLearningService(db)
-    draft = msg.draft_response
-    if draft and response_text != draft:
-        await learner.record_correction(
-            ctx.organization_id, AGENT_EMAIL_CLASSIFIER, "edit",
-            original_output=draft, corrected_output=response_text,
-            input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
-            category=msg.category, customer_id=msg.matched_customer_id,
-            source_id=msg.id, source_type="agent_message",
+    from src.services.agents.send_failure import record_outbound_send_failure
+    try:
+        send_result = await email_svc.send_agent_reply(
+            ctx.organization_id, msg.from_email, msg.subject or "", response_text,
+            sender_name=sender_name,
         )
+        if not send_result.success:
+            await record_outbound_send_failure(
+                db, org_id=ctx.organization_id, thread_id=msg.thread_id,
+                from_email="", to_email=msg.from_email,
+                subject=msg.subject, body=response_text,
+                matched_customer_id=msg.matched_customer_id,
+                customer_name=msg.customer_name,
+                error=send_result.error or "send returned success=False",
+            )
+            raise HTTPException(status_code=500, detail=send_result.error or "Failed to send email")
 
-    await db.commit()
+        now = datetime.now(timezone.utc)
+        msg.status = "sent"
+        msg.final_response = response_text
+        msg.approved_by = sender_name
+        msg.approved_at = now
+        msg.sent_at = now
+        msg.postmark_message_id = send_result.message_id
 
-    # Recalculate thread status
-    if msg.thread_id:
-        from src.services.agents.thread_manager import update_thread_status
-        await update_thread_status(msg.thread_id)
+        # Record correction for agent learning
+        from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
+        learner = AgentLearningService(db)
+        draft = msg.draft_response
+        if draft and response_text != draft:
+            await learner.record_correction(
+                ctx.organization_id, AGENT_EMAIL_CLASSIFIER, "edit",
+                original_output=draft, corrected_output=response_text,
+                input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
+                category=msg.category, customer_id=msg.matched_customer_id,
+                source_id=msg.id, source_type="agent_message",
+            )
 
-    # Save discovered contact info to customer record
-    from src.services.agents.orchestrator import save_discovered_contact
-    await save_discovered_contact(message_id)
+        await db.commit()
 
-    return {"sent": True, "to": msg.from_email}
+        # Recalculate thread status
+        if msg.thread_id:
+            from src.services.agents.thread_manager import update_thread_status
+            await update_thread_status(msg.thread_id)
+
+        # Save discovered contact info to customer record
+        from src.services.agents.orchestrator import save_discovered_contact
+        await save_discovered_contact(message_id)
+
+        return {"sent": True, "to": msg.from_email}
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(f"approve_agent_message crashed for msg {message_id}: {exc}")
+        await record_outbound_send_failure(
+            db, org_id=ctx.organization_id, thread_id=msg.thread_id,
+            from_email="", to_email=msg.from_email,
+            subject=msg.subject, body=response_text,
+            matched_customer_id=msg.matched_customer_id,
+            customer_name=msg.customer_name,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
 
 
 @router.post("/agent-messages/{message_id}/reject")
@@ -456,36 +480,59 @@ async def send_followup(
 
     sender_name = f"{ctx.user.first_name} {ctx.user.last_name}"
     email_svc = EmailService(db)
-    send_result = await email_svc.send_agent_reply(
-        ctx.organization_id, msg.from_email, msg.subject or "", response_text,
-        sender_name=sender_name,
-    )
-    if not send_result.success:
-        raise HTTPException(status_code=500, detail="Failed to send email")
-
-    # Create outbound message record so the reply appears in the thread
-    now = datetime.now(timezone.utc)
     subject = msg.subject or ""
     if subject and not subject.startswith("Re:"):
         subject = f"Re: {subject}"
-    outbound = AgentMessage(
-        organization_id=ctx.organization_id,
-        direction="outbound",
-        from_email=msg.to_email or "",
-        to_email=msg.from_email,
-        subject=subject,
-        body=response_text,
-        status="sent",
-        thread_id=msg.thread_id,
-        matched_customer_id=msg.matched_customer_id,
-        customer_name=msg.customer_name,
-        postmark_message_id=send_result.message_id,
-        sent_at=now,
-        received_at=now,
-    )
-    db.add(outbound)
+    from src.services.agents.send_failure import record_outbound_send_failure
+    try:
+        send_result = await email_svc.send_agent_reply(
+            ctx.organization_id, msg.from_email, msg.subject or "", response_text,
+            sender_name=sender_name,
+        )
+        if not send_result.success:
+            await record_outbound_send_failure(
+                db, org_id=ctx.organization_id, thread_id=msg.thread_id,
+                from_email=msg.to_email or "", to_email=msg.from_email,
+                subject=subject, body=response_text,
+                matched_customer_id=msg.matched_customer_id,
+                customer_name=msg.customer_name,
+                error=send_result.error or "send returned success=False",
+            )
+            raise HTTPException(status_code=500, detail=send_result.error or "Failed to send email")
 
-    await db.commit()
+        # Create outbound message record so the reply appears in the thread
+        now = datetime.now(timezone.utc)
+        outbound = AgentMessage(
+            organization_id=ctx.organization_id,
+            direction="outbound",
+            from_email=msg.to_email or "",
+            to_email=msg.from_email,
+            subject=subject,
+            body=response_text,
+            status="sent",
+            thread_id=msg.thread_id,
+            matched_customer_id=msg.matched_customer_id,
+            customer_name=msg.customer_name,
+            postmark_message_id=send_result.message_id,
+            sent_at=now,
+            received_at=now,
+        )
+        db.add(outbound)
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(f"send_followup endpoint crashed for msg {message_id}: {exc}")
+        await record_outbound_send_failure(
+            db, org_id=ctx.organization_id, thread_id=msg.thread_id,
+            from_email=msg.to_email or "", to_email=msg.from_email,
+            subject=subject, body=response_text,
+            matched_customer_id=msg.matched_customer_id,
+            customer_name=msg.customer_name,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
 
     # Recalculate thread status via centralized function
     if msg.thread_id:

@@ -56,6 +56,13 @@ class ThreadActionService:
                 })
         return email_atts, list(rows)
 
+    async def _record_send_failure(self, **kwargs) -> None:
+        """Thin wrapper around the shared helper so callers in this service
+        don't have to thread `self.db` explicitly. See
+        `services/agents/send_failure.py` for the contract."""
+        from src.services.agents.send_failure import record_outbound_send_failure
+        await record_outbound_send_failure(self.db, **kwargs)
+
     async def _find_assignee_user(self, org_id: str, assigned_to_name: str) -> str | None:
         """Find user_id from assigned_to name string."""
         from src.models.organization_user import OrganizationUser
@@ -98,70 +105,94 @@ class ThreadActionService:
         if attachment_ids:
             email_atts, att_rows = await self._load_email_attachments(org_id, attachment_ids)
 
+        # Wrap the entire send + bookkeeping in try/except — same pattern as
+        # compose_and_send (FB-24). Without it, any exception (including the
+        # send call itself) leaves the inbound msg stuck in 'pending' with no
+        # record that the user attempted a reply.
         email_svc = EmailService(self.db)
-        send_result = await email_svc.send_agent_reply(
-            org_id, msg.from_email, msg.subject or "", final_text,
-            from_address=from_addr, sender_name=user_name,
-            attachments=email_atts or None,
-        )
-        if not send_result.success:
-            return {"error": "send_failed", "detail": "Failed to send email"}
-
-        now = datetime.now(timezone.utc)
-        msg.status = "sent"
-        msg.final_response = final_text
-        msg.approved_by = user_name
-        msg.approved_at = now
-        msg.sent_at = now
-
-        # Create outbound message row
-        outbound = AgentMessage(
-            organization_id=org_id,
-            direction="outbound",
-            from_email=from_addr or AGENT_FROM_EMAIL,
-            to_email=msg.from_email,
-            subject=f"Re: {msg.subject}" if msg.subject and not msg.subject.startswith("Re:") else msg.subject,
-            body=final_text,
-            status="sent",
-            thread_id=thread_id,
-            matched_customer_id=msg.matched_customer_id,
-            customer_name=msg.customer_name,
-            sent_at=now,
-            received_at=now,
-        )
-        self.db.add(outbound)
-        await self.db.flush()
-
-        # Claim attachments against outbound message
-        for a in att_rows:
-            a.source_id = outbound.id
-
-        # Record correction for agent learning
-        from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
-        learner = AgentLearningService(self.db)
-        draft = msg.draft_response
-        if draft and final_text != draft:
-            await learner.record_correction(
-                org_id, AGENT_EMAIL_CLASSIFIER, "edit",
-                original_output=draft, corrected_output=final_text,
-                input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
-                category=msg.category, customer_id=msg.matched_customer_id,
-                source_id=msg.id, source_type="agent_message",
+        outbound_subject = f"Re: {msg.subject}" if msg.subject and not msg.subject.startswith("Re:") else msg.subject
+        try:
+            send_result = await email_svc.send_agent_reply(
+                org_id, msg.from_email, msg.subject or "", final_text,
+                from_address=from_addr, sender_name=user_name,
+                attachments=email_atts or None,
             )
-        elif draft and final_text == draft:
-            await learner.record_correction(
-                org_id, AGENT_EMAIL_CLASSIFIER, "acceptance",
-                original_output=draft,
-                category=msg.category, customer_id=msg.matched_customer_id,
-                source_id=msg.id, source_type="agent_message",
+            if not send_result.success:
+                await self._record_send_failure(
+                    org_id=org_id, thread_id=thread_id,
+                    from_email=from_addr or AGENT_FROM_EMAIL, to_email=msg.from_email,
+                    subject=outbound_subject, body=final_text,
+                    matched_customer_id=msg.matched_customer_id,
+                    customer_name=msg.customer_name,
+                    error=send_result.error or "send returned success=False",
+                )
+                return {"error": "send_failed", "detail": send_result.error or "Failed to send email"}
+
+            now = datetime.now(timezone.utc)
+            msg.status = "sent"
+            msg.final_response = final_text
+            msg.approved_by = user_name
+            msg.approved_at = now
+            msg.sent_at = now
+
+            # Create outbound message row
+            outbound = AgentMessage(
+                organization_id=org_id,
+                direction="outbound",
+                from_email=from_addr or AGENT_FROM_EMAIL,
+                to_email=msg.from_email,
+                subject=outbound_subject,
+                body=final_text,
+                status="sent",
+                thread_id=thread_id,
+                matched_customer_id=msg.matched_customer_id,
+                customer_name=msg.customer_name,
+                sent_at=now,
+                received_at=now,
             )
+            self.db.add(outbound)
+            await self.db.flush()
 
-        await self.db.commit()
+            # Claim attachments against outbound message
+            for a in att_rows:
+                a.source_id = outbound.id
 
-        await update_thread_status(thread_id)
-        await save_discovered_contact(msg.id)
+            # Record correction for agent learning
+            from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
+            learner = AgentLearningService(self.db)
+            draft = msg.draft_response
+            if draft and final_text != draft:
+                await learner.record_correction(
+                    org_id, AGENT_EMAIL_CLASSIFIER, "edit",
+                    original_output=draft, corrected_output=final_text,
+                    input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
+                    category=msg.category, customer_id=msg.matched_customer_id,
+                    source_id=msg.id, source_type="agent_message",
+                )
+            elif draft and final_text == draft:
+                await learner.record_correction(
+                    org_id, AGENT_EMAIL_CLASSIFIER, "acceptance",
+                    original_output=draft,
+                    category=msg.category, customer_id=msg.matched_customer_id,
+                    source_id=msg.id, source_type="agent_message",
+                )
 
-        return {"sent": True, "to": msg.from_email}
+            await self.db.commit()
+            await update_thread_status(thread_id)
+            await save_discovered_contact(msg.id)
+
+            return {"sent": True, "to": msg.from_email}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(f"approve_thread crashed for thread {thread_id}: {exc}")
+            await self._record_send_failure(
+                org_id=org_id, thread_id=thread_id,
+                from_email=from_addr or AGENT_FROM_EMAIL, to_email=msg.from_email,
+                subject=outbound_subject, body=final_text,
+                matched_customer_id=msg.matched_customer_id,
+                customer_name=msg.customer_name,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return {"error": "send_failed", "detail": f"{type(exc).__name__}: {exc}"}
 
     async def dismiss_thread(self, org_id: str, thread_id: str, user_name: str) -> dict:
         """Dismiss all pending messages in a thread."""
@@ -211,44 +242,65 @@ class ThreadActionService:
             email_atts, att_rows = await self._load_email_attachments(org_id, attachment_ids)
 
         from_addr = thread.delivered_to if thread.delivered_to else None
+        outbound_subject = f"Re: {thread.subject}" if thread.subject and not thread.subject.startswith("Re:") else thread.subject
         email_svc = EmailService(self.db)
-        send_result = await email_svc.send_agent_reply(
-            org_id, thread.contact_email, thread.subject or "", text,
-            from_address=from_addr, sender_name=user_name,
-            attachments=email_atts or None,
-        )
-        if not send_result.success:
-            return {"error": "send_failed", "detail": "Failed to send"}
+        try:
+            send_result = await email_svc.send_agent_reply(
+                org_id, thread.contact_email, thread.subject or "", text,
+                from_address=from_addr, sender_name=user_name,
+                attachments=email_atts or None,
+            )
+            if not send_result.success:
+                await self._record_send_failure(
+                    org_id=org_id, thread_id=thread_id,
+                    from_email=from_addr or AGENT_FROM_EMAIL, to_email=thread.contact_email,
+                    subject=outbound_subject, body=text,
+                    matched_customer_id=thread.matched_customer_id,
+                    customer_name=thread.customer_name,
+                    error=send_result.error or "send returned success=False",
+                )
+                return {"error": "send_failed", "detail": send_result.error or "Failed to send"}
 
-        now = datetime.now(timezone.utc)
-        outbound = AgentMessage(
-            organization_id=org_id,
-            direction="outbound",
-            from_email=from_addr or AGENT_FROM_EMAIL,
-            to_email=thread.contact_email,
-            subject=f"Re: {thread.subject}" if thread.subject and not thread.subject.startswith("Re:") else thread.subject,
-            body=text,
-            status="sent",
-            thread_id=thread_id,
-            matched_customer_id=thread.matched_customer_id,
-            customer_name=thread.customer_name,
-            sent_at=now,
-            received_at=now,
-        )
-        self.db.add(outbound)
-        await self.db.flush()
+            now = datetime.now(timezone.utc)
+            outbound = AgentMessage(
+                organization_id=org_id,
+                direction="outbound",
+                from_email=from_addr or AGENT_FROM_EMAIL,
+                to_email=thread.contact_email,
+                subject=outbound_subject,
+                body=text,
+                status="sent",
+                thread_id=thread_id,
+                matched_customer_id=thread.matched_customer_id,
+                customer_name=thread.customer_name,
+                sent_at=now,
+                received_at=now,
+            )
+            self.db.add(outbound)
+            await self.db.flush()
 
-        # Claim attachments against outbound message
-        for a in att_rows:
-            a.source_id = outbound.id
+            # Claim attachments against outbound message
+            for a in att_rows:
+                a.source_id = outbound.id
 
-        await self.db.commit()
-        await update_thread_status(thread_id)
+            await self.db.commit()
+            await update_thread_status(thread_id)
 
-        # Evaluate if open jobs for this thread should be closed
-        closed_actions = await self._evaluate_followup_actions(org_id, thread_id, text, now)
+            # Evaluate if open jobs for this thread should be closed
+            closed_actions = await self._evaluate_followup_actions(org_id, thread_id, text, now)
 
-        return {"sent": True, "to": thread.contact_email, "closed_actions": closed_actions}
+            return {"sent": True, "to": thread.contact_email, "closed_actions": closed_actions}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(f"send_followup crashed for thread {thread_id}: {exc}")
+            await self._record_send_failure(
+                org_id=org_id, thread_id=thread_id,
+                from_email=from_addr or AGENT_FROM_EMAIL, to_email=thread.contact_email,
+                subject=outbound_subject, body=text,
+                matched_customer_id=thread.matched_customer_id,
+                customer_name=thread.customer_name,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return {"error": "send_failed", "detail": f"{type(exc).__name__}: {exc}"}
 
     async def _evaluate_followup_actions(self, org_id: str, thread_id: str, response_text: str, now: datetime) -> list[dict]:
         """Use Claude to evaluate if open jobs should be closed after a follow-up."""

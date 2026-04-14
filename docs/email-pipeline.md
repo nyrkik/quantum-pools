@@ -75,10 +75,16 @@ Both inbound and outbound (delivery/bounce) webhooks are gated by a shared secre
 
 **Why three webhooks all point at the inbound endpoint** (not the dedicated `/admin/postmark-webhook`): we use `?type=bounce` and `?type=delivery` query params on the inbound URL. The backend dispatches to `_handle_status_webhook` based on that. The dedicated `/admin/postmark-webhook` exists but is unused — kept for future where a single multi-event subscription is preferable. Spam Complaint webhook uses `?type=bounce` (cosmetic — backend doesn't have a separate spam handler yet, treats as bounce).
 
-**Known gaps in webhook handler coverage** (todo whenever someone adds these Postmark events):
-- `?type=opens` — backend currently only matches `bounce` and `delivery`. Open events would fall through to the inbound parsing path and fail. To enable open tracking, add an `opened` branch in `_handle_status_webhook` that bumps `open_count` and sets `first_opened_at` on the matching AgentMessage.
-- `?type=spam_complaint` — same. Currently spam complaints arrive via `?type=bounce` and get marked `bounced` — functional but the dashboard can't distinguish "bounce" from "user marked as spam." Add a dedicated branch that sets `delivery_status='spam_complaint'`.
-- `?type=subscription_change` — Postmark's unsubscribe events. Not handled. Lower priority since we don't currently honor unsubscribes (no marketing list).
+**Webhook handler coverage:** `?type=` accepts `bounce`, `delivery`, `opens`, `spam_complaint`. All four write to `AgentMessage.delivery_status` (delivery state), never to `msg.status` (workflow state — that stays `sent`/`auto_sent`).
+
+- `bounce`: `delivery_status='bounced'`, `delivery_error=<bounce type + description>`
+- `delivery`: `delivery_status='delivered'`, `delivered_at=now` (skipped if already bounced/spam — out-of-order events)
+- `opens`: bumps `open_count`, stamps `first_opened_at` once, sets `delivery_status='opened'` (skipped if already in terminal failure state)
+- `spam_complaint`: `delivery_status='spam_complaint'`, `delivery_error='Recipient marked as spam'`
+
+Not handled: `?type=subscription_change` (Postmark unsubscribe events) — we don't currently run a marketing list so opt-outs aren't relevant.
+
+**To enable any of these in Postmark dashboard:** edit the corresponding webhook → set URL to `https://api.quantumpoolspro.com/api/v1/inbound-email/webhook/sapphire?provider=postmark&type=<type>` → add the same `X-Webhook-Token` custom header.
 
 **What we do NOT use:** Postmark Inbound Stream (paid-plan only). Cloudflare Email Worker handles inbound.
 

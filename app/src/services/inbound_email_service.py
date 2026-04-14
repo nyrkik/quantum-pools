@@ -77,8 +77,10 @@ class InboundEmailService:
 
         Returns dict with status and details.
         """
-        # Handle bounce/delivery webhooks (Postmark)
-        if webhook_type in ("bounce", "delivery"):
+        # Handle bounce/delivery/opens/spam_complaint webhooks (Postmark).
+        # Routed by ?type= query param on the inbound webhook URL — see
+        # docs/email-pipeline.md → "Webhook authentication & deploy".
+        if webhook_type in ("bounce", "delivery", "opens", "spam_complaint"):
             return await self._handle_status_webhook(db, org_slug, payload, webhook_type)
 
         # 1. Look up org
@@ -166,15 +168,22 @@ class InboundEmailService:
         )
         msg = result.scalar_one_or_none()
 
+        # NOTE: every branch writes to msg.delivery_status (delivery state),
+        # NOT msg.status (workflow state). msg.status stays 'sent'/'auto_sent'
+        # for the workflow tracker; delivery_status tracks what happened after
+        # the send. Mixing the two (the old code did) breaks the Failed filter
+        # and confuses the timeline chip.
+        from datetime import datetime, timezone as _tz
+
         if webhook_type == "bounce":
             bounce_type = payload.get("Type", "")
             description = payload.get("Description", "")
             email_addr = payload.get("Email", "")
-            logger.warning(f"Bounce ({bounce_type}): {email_addr} — {description}")
+            logger.warning(f"Bounce ({bounce_type}): {email_addr} — {description[:120]}")
 
             if msg:
-                msg.status = "bounced"
-                msg.delivery_error = f"{bounce_type}: {description}"
+                msg.delivery_status = "bounced"
+                msg.delivery_error = f"{bounce_type}: {description}"[:500]
                 await db.commit()
                 logger.info(f"Marked message {msg.id} as bounced")
 
@@ -182,12 +191,41 @@ class InboundEmailService:
 
         elif webhook_type == "delivery":
             if msg:
-                msg.status = "delivered"
-                await db.commit()
+                # Don't downgrade an already-bounced/spam message back to delivered
+                # if Postmark sends events out-of-order.
+                if msg.delivery_status not in ("bounced", "spam_complaint"):
+                    msg.delivery_status = "delivered"
+                    msg.delivered_at = datetime.now(_tz.utc)
+                    await db.commit()
 
             return {"status": "processed", "type": "delivery"}
 
-        return {"status": "ignored"}
+        elif webhook_type == "opens":
+            # Open events fire each time a tracking pixel loads. We bump the
+            # counter and stamp first_opened_at the first time only. Don't
+            # touch delivery_status if it's already in a terminal failure
+            # state (bounced/spam) — opens after a bounce can happen if the
+            # bounce was a soft "deferred" that eventually delivered.
+            if msg:
+                msg.open_count = (msg.open_count or 0) + 1
+                if not msg.first_opened_at:
+                    msg.first_opened_at = datetime.now(_tz.utc)
+                if msg.delivery_status not in ("bounced", "spam_complaint"):
+                    msg.delivery_status = "opened"
+                await db.commit()
+
+            return {"status": "processed", "type": "opens"}
+
+        elif webhook_type == "spam_complaint":
+            email_addr = payload.get("Email", "")
+            logger.warning(f"Spam complaint from {email_addr} for message {message_id}")
+            if msg:
+                msg.delivery_status = "spam_complaint"
+                msg.delivery_error = "Recipient marked as spam"
+                await db.commit()
+            return {"status": "processed", "type": "spam_complaint", "email": email_addr}
+
+        return {"status": "ignored", "detail": f"unknown webhook_type: {webhook_type}"}
 
     def _parse_sendgrid(self, payload: dict) -> ParsedEmail:
         """Parse SendGrid Inbound Parse webhook format."""

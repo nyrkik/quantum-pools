@@ -452,11 +452,46 @@ async def reconcile_thread_state():
         )
 
 
+REDIS_HEALTH_CHECK_EVERY = 1  # every cycle = 60s
+
+
+async def redis_health_probe():
+    """Proactive Redis health probe. Resets the cached client if Redis is
+    unreachable so the next user-facing op gets a fresh connection attempt
+    instead of a stale broken client.
+
+    Without this, a Redis blip would silently break realtime events for
+    every connected client until either the backend restarts or someone
+    manually resets the cache.
+    """
+    from src.core.redis_client import redis_health_check
+    healthy = await redis_health_check()
+    if not healthy:
+        # Don't ntfy on every cycle — that would spam if Redis is down.
+        # Use _failure_counts so the existing alert-after-N-failures logic
+        # gives us a single notification, not 60+ per hour.
+        _failure_counts["redis_health"] = _failure_counts.get("redis_health", 0) + 1
+        if _failure_counts["redis_health"] == ALERT_THRESHOLD:
+            _send_ntfy(
+                title="QP Redis: unreachable",
+                message=(
+                    f"Redis health probe failed {ALERT_THRESHOLD} consecutive times.\n"
+                    f"Realtime events are degraded — UI falls back to polling.\n"
+                    f"Check: sudo docker ps | grep redis ; sudo docker logs quantumpools-redis"
+                ),
+                priority="high",
+                tags="warning",
+            )
+    else:
+        _clear_failures("redis_health")
+
+
 async def main():
     logger.info("Background agent service started (monitoring: Sentry + ntfy)")
     logger.info("Inbound email: Postmark webhooks + Gmail incremental sync (every 60s)")
     logger.info(f"Inbound freshness canary: every {INBOUND_FRESHNESS_EVERY} min")
     logger.info(f"Thread state reconciliation: every {RECONCILE_EVERY} min")
+    logger.info(f"Redis health probe: every {REDIS_HEALTH_CHECK_EVERY} min")
     cycle = 0
 
     while True:
@@ -469,6 +504,14 @@ async def main():
                 logger.info(f"Heartbeat: {cycle} cycles, active failures: {fails}")
             else:
                 logger.info(f"Heartbeat: {cycle} cycles, all healthy")
+
+        # --- Redis health probe (every cycle = 60s) ---
+        # Self-heals stale Redis clients so realtime events recover quickly
+        # after a Redis blip without waiting for a user request to fail.
+        try:
+            await redis_health_probe()
+        except Exception as e:
+            _handle_error("redis_health_probe", e)
 
         # --- Gmail incremental sync (every cycle = 60s) ---
         # Per-integration error handling lives inside this function.

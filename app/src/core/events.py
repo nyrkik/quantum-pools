@@ -19,7 +19,7 @@ from typing import Any, AsyncIterator, Optional
 
 import redis.asyncio as aioredis
 
-from src.core.redis_client import get_redis
+from src.core.redis_client import get_redis, reset_redis
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,10 @@ async def publish(
         return event.event_id
 
     except Exception:
-        logger.warning("Failed to publish event %s", event_type.value, exc_info=True)
+        logger.warning("Failed to publish event %s — resetting Redis client", event_type.value, exc_info=True)
+        # Reset so the next call retries the connection. Without this, a
+        # mid-runtime Redis death leaves a stale cached client forever.
+        await reset_redis()
         return None
 
 
@@ -172,7 +175,8 @@ async def get_missed_events(
         return events
 
     except Exception:
-        logger.warning("Failed to read event stream for org %s", org_id[:8], exc_info=True)
+        logger.warning("Failed to read event stream for org %s — resetting Redis client", org_id[:8], exc_info=True)
+        await reset_redis()
         return []
 
 

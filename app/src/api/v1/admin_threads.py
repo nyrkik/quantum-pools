@@ -443,19 +443,23 @@ async def get_contact_prompt(
     )).scalar_one_or_none()
     learning_mode = org.email_contact_learning if org else True
 
-    # Check org-wide suppressed senders (exact match + domain wildcard)
-    from src.models.suppressed_sender import SuppressedEmailSender
+    # Org-wide sender suppression is now expressed as an inbox_rule with a
+    # suppress_contact_prompt action. Any matching rule on the sender =>
+    # don't show the prompt.
+    from src.services.inbox_rules_service import (
+        ACTION_ASSIGN_TAG,
+        ACTION_SUPPRESS_CONTACT_PROMPT,
+        InboxRulesService,
+        build_context,
+    )
     sender_lower = sender_email.lower()
-    sender_domain = sender_lower.split("@")[-1] if "@" in sender_lower else ""
-    suppressed = (await db.execute(
-        select(SuppressedEmailSender).where(
-            SuppressedEmailSender.organization_id == ctx.organization_id,
-            func.lower(SuppressedEmailSender.email_pattern).in_(
-                [sender_lower, f"*@{sender_domain}"] if sender_domain else [sender_lower]
-            ),
-        ).limit(1)
-    )).scalar_one_or_none()
-    if suppressed:
+    suppress_actions = await InboxRulesService(db).evaluate(
+        build_context(sender_email=sender_lower), ctx.organization_id,
+    )
+    if any(
+        a.get("type") in (ACTION_SUPPRESS_CONTACT_PROMPT, ACTION_ASSIGN_TAG)
+        for a in suppress_actions
+    ):
         return {"show_prompt": False}
 
     # Legacy: also check per-user dismissals (backward compat)
@@ -668,10 +672,16 @@ async def dismiss_contact_prompt(
 ):
     """Suppress contact learning prompt for a sender email — org-wide.
 
-    Adds the sender to suppressed_email_senders so no user in this org
-    will see the 'Add Contact' prompt for this address again.
+    Writes an inbox_rule that tags the sender and optionally routes their
+    mail to a folder. Tag + folder + suppress-prompt all in one rule.
     """
-    from src.models.suppressed_sender import SuppressedEmailSender
+    from src.services.inbox_rules_service import (
+        ACTION_ASSIGN_FOLDER,
+        ACTION_ASSIGN_TAG,
+        ACTION_ROUTE_TO_SPAM,
+        ACTION_SUPPRESS_CONTACT_PROMPT,
+        InboxRulesService,
+    )
 
     email_lower = body.sender_email.lower().strip()
 
@@ -686,32 +696,34 @@ async def dismiss_contact_prompt(
                 InboxFolder.organization_id == ctx.organization_id,
                 InboxFolder.is_system == False,  # noqa: E712
                 func.lower(InboxFolder.name).in_([
-                    tag_reason, tag_reason + "s",  # "billing" or "billings", "vendor" or "vendors"
+                    tag_reason, tag_reason + "s",
                 ]),
             ).limit(1)
         )).scalar_one_or_none()
         if matching_folder:
             target_folder_id = matching_folder.id
 
-    # Upsert: create or update tag + folder
-    existing = (await db.execute(
-        select(SuppressedEmailSender).where(
-            SuppressedEmailSender.organization_id == ctx.organization_id,
-            func.lower(SuppressedEmailSender.email_pattern) == email_lower,
-        ).limit(1)
-    )).scalar_one_or_none()
-    if existing:
-        existing.reason = tag_reason
-        existing.folder_id = target_folder_id
-    else:
-        db.add(SuppressedEmailSender(
-            organization_id=ctx.organization_id,
-            email_pattern=email_lower,
-            reason=tag_reason,
-            folder_id=target_folder_id,
-            created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
-        ))
-    await db.commit()
+    actions: list[dict] = [{"type": ACTION_SUPPRESS_CONTACT_PROMPT}]
+    if tag_reason and tag_reason != "other":
+        actions.append({"type": ACTION_ASSIGN_TAG, "params": {"tag": tag_reason}})
+    if tag_reason == "spam":
+        actions.append({"type": ACTION_ROUTE_TO_SPAM})
+    elif target_folder_id:
+        actions.append({
+            "type": ACTION_ASSIGN_FOLDER,
+            "params": {"folder_id": target_folder_id},
+        })
+
+    created_by = (
+        f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email
+    )
+    await InboxRulesService(db).upsert_sender_rule(
+        ctx.organization_id,
+        email_lower,
+        actions,
+        name=f"Sender: {email_lower}",
+        created_by=created_by,
+    )
 
     # Move all existing threads from this sender/domain to the chosen folder
     if target_folder_id is not None:
@@ -852,11 +864,6 @@ async def bulk_move(
     return {"ok": True, "moved": moved}
 
 
-class AutoSentFeedbackBody(BaseModel):
-    thread_id: str
-    was_correct: bool
-
-
 class AutoHandledFeedbackBody(BaseModel):
     thread_id: str
     was_correct: bool  # True = correctly hidden, False = should have been visible
@@ -917,60 +924,21 @@ async def auto_handled_feedback(
     return {"ok": True}
 
 
-@router.post("/agent-threads/auto-sent-feedback")
-async def auto_sent_feedback(
-    body: AutoSentFeedbackBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Record human feedback on an auto-sent AI reply. Feeds the agent learning system."""
-    from src.models.agent_message import AgentMessage
-
-    # Find the auto-sent message in this thread
-    msg = (await db.execute(
-        select(AgentMessage).where(
-            AgentMessage.thread_id == body.thread_id,
-            AgentMessage.organization_id == ctx.organization_id,
-            AgentMessage.status == "auto_sent",
-        ).order_by(desc(AgentMessage.sent_at)).limit(1)
-    )).scalar_one_or_none()
-    if not msg:
-        raise HTTPException(404, "No auto-sent message found in thread")
-
-    # Record correction via agent learning service
-    try:
-        from src.services.agents.agent_learning_service import AgentLearningService
-        learner = AgentLearningService(db)
-        await learner.record_correction(
-            organization_id=ctx.organization_id,
-            agent_type="email_drafter",
-            category=msg.category or "general",
-            customer_id=msg.matched_customer_id,
-            input_context=f"Subject: {msg.subject}\n\nBody: {(msg.body or '')[:500]}",
-            original_output=msg.final_response or msg.draft_response or "",
-            corrected_output=None,
-            correction_type="acceptance" if body.was_correct else "rejection",
-            correction_note="Human reviewed auto-sent reply",
-            reviewed_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
-        )
-    except Exception as e:
-        logger = __import__("logging").getLogger(__name__)
-        logger.warning(f"Failed to record auto-sent feedback: {e}")
-
-    return {"ok": True}
-
-
 @router.post("/agent-threads/bulk/spam")
 async def bulk_spam(
     body: BulkThreadAction,
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark threads as spam — sender-level: suppresses the sender org-wide
-    and moves ALL threads from those senders to the Spam folder."""
+    """Mark threads as spam — sender-level: writes a route_to_spam inbox_rule
+    per sender and moves their existing threads to the Spam folder."""
     from src.models.agent_thread import AgentThread
     from src.models.inbox_folder import InboxFolder
-    from src.models.suppressed_sender import SuppressedEmailSender
+    from src.services.inbox_rules_service import (
+        ACTION_ROUTE_TO_SPAM,
+        ACTION_SUPPRESS_CONTACT_PROMPT,
+        InboxRulesService,
+    )
 
     spam_folder = (await db.execute(
         select(InboxFolder.id).where(
@@ -990,21 +958,21 @@ async def bulk_spam(
     )).scalars().all()
     sender_emails = set(e.lower() for e in threads if e)
 
-    # Suppress each sender org-wide
+    created_by = (
+        f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email
+    )
+    rules_svc = InboxRulesService(db)
     for email_addr in sender_emails:
-        existing = (await db.execute(
-            select(SuppressedEmailSender).where(
-                SuppressedEmailSender.organization_id == ctx.organization_id,
-                func.lower(SuppressedEmailSender.email_pattern) == email_addr,
-            ).limit(1)
-        )).scalar_one_or_none()
-        if not existing:
-            db.add(SuppressedEmailSender(
-                organization_id=ctx.organization_id,
-                email_pattern=email_addr,
-                reason="spam",
-                created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
-            ))
+        await rules_svc.upsert_sender_rule(
+            ctx.organization_id,
+            email_addr,
+            [
+                {"type": ACTION_ROUTE_TO_SPAM},
+                {"type": ACTION_SUPPRESS_CONTACT_PROMPT},
+            ],
+            name=f"Spam: {email_addr}",
+            created_by=created_by,
+        )
 
     # Move ALL threads from those senders to Spam folder
     moved = 0
@@ -1033,10 +1001,10 @@ async def bulk_not_spam(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark threads as not spam — sender-level: removes suppression and moves
-    ALL threads from those senders back to Inbox."""
+    """Mark threads as not spam — sender-level: deletes the per-sender
+    inbox_rule and moves the sender's threads back to Inbox."""
     from src.models.agent_thread import AgentThread
-    from src.models.suppressed_sender import SuppressedEmailSender
+    from src.services.inbox_rules_service import InboxRulesService
 
     # Collect unique sender emails from selected threads
     threads = (await db.execute(
@@ -1047,18 +1015,12 @@ async def bulk_not_spam(
     )).scalars().all()
     sender_emails = set(e.lower() for e in threads if e)
 
-    # Remove suppression for those senders
+    rules_svc = InboxRulesService(db)
     removed = 0
     for email_addr in sender_emails:
-        existing = (await db.execute(
-            select(SuppressedEmailSender).where(
-                SuppressedEmailSender.organization_id == ctx.organization_id,
-                func.lower(SuppressedEmailSender.email_pattern) == email_addr,
-            )
-        )).scalars().all()
-        for s in existing:
-            await db.delete(s)
-            removed += 1
+        removed += await rules_svc.delete_sender_rules(
+            ctx.organization_id, email_addr,
+        )
 
     # Move ALL threads from those senders back to Inbox (NULL folder_id)
     moved = 0

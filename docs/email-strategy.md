@@ -57,7 +57,7 @@ Each organization picks an integration mode during onboarding:
 - Permission-based inbox visibility
 - DeepBlue context awareness
 - Real-time updates via WebSocket
-- Routing rules (`inbox_routing_rules`)
+- Routing + tagging rules (`inbox_rules`)
 - Postmark for **transactional** outbound (invoices, estimates, notifications) regardless of mode
 
 ## What changes per mode

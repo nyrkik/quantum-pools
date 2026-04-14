@@ -40,8 +40,8 @@ BUSINESS_HOUR_END = 20   # 8 PM
 # Reply loop detection patterns
 LOOP_PATTERNS = ["noreply@", "no-reply@", "mailer-daemon@", "postmaster@"]
 
-# Block rules are now in DB (inbox_routing_rules with action='block', match_field='from').
-# See migration seed for the full list of blocked sender domains/patterns.
+# Block / route / tag / mark-as-read rules live in `inbox_rules`.
+# See docs/inbox-rules-unification-plan.md for the unified schema.
 
 # Internal team addresses — skip (handled by sent folder tracking)
 INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.com"]
@@ -124,6 +124,31 @@ def _is_own_email(from_email: str) -> bool:
     return False
 
 
+def _extract_delivered_to(msg) -> str | None:
+    """Extract the recipient address from an inbound email.
+
+    Prefers the RFC Delivered-To header (Gmail aliases, Postmark includes
+    it), falling back to the first parseable address in the To header.
+    """
+    import re as _re
+
+    delivered_to = msg.get("Delivered-To", "")
+    if delivered_to:
+        delivered_to = decode_email_header(delivered_to).strip()
+        match = _re.search(r"<(.+?)>", delivered_to)
+        if match:
+            return match.group(1).lower()
+        if "@" in delivered_to:
+            return delivered_to.lower()
+
+    to_header = decode_email_header(msg.get("To", ""))
+    if to_header:
+        addresses = _re.findall(r"[\w.+-]+@[\w.-]+", to_header)
+        for addr in addresses:
+            return addr.lower()
+    return None
+
+
 def _is_business_hours() -> bool:
     """Check if current time is within business hours (Pacific)."""
     try:
@@ -183,8 +208,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
     to_header = decode_email_header(msg.get("To", ""))
 
     # --- Extract Delivered-To for routing ---
-    from src.services.inbox_routing_service import extract_delivered_to
-    delivered_to_addr = extract_delivered_to(msg)
+    delivered_to_addr = _extract_delivered_to(msg)
 
     # --- Reply loop prevention ---
     if _is_own_email(from_email):
@@ -198,16 +222,11 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
         logger.info(f"Skipping internal email: {from_email}: {subject}")
         return
 
-    # --- Block rules now route to Spam folder instead of dropping the email ---
-    # The old "drop entirely" behavior was unsafe — emails couldn't be recovered
-    # or audited. Mark for spam routing here; folder assignment happens later.
-    block_rule = None
-    if organization_id:
-        from src.services.inbox_routing_service import check_sender_blocked
-        async with get_db_context() as db:
-            block_rule = await check_sender_blocked(db, organization_id, from_email)
-        if block_rule:
-            logger.info(f"Block rule matched '{block_rule.address_pattern}' — routing to Spam folder: {from_email}")
+    # Block rules (route_to_spam) are now evaluated in the folder-assign
+    # block below via InboxRulesService.evaluate(). `block_rule` is kept
+    # as a compatibility flag so legacy callers of update_thread_status
+    # still behave — but its value is derived down there, not here.
+    block_rule = False
 
     logger.info(f"Processing email from {from_email}: {(subject or '')[:60]}")
 
@@ -228,21 +247,39 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                 return
 
     # --- Thread: get or create (with routing rule matching) ---
-    # Match routing rules to set visibility on new threads
+    # Pre-evaluate inbox_rules on the recipient address so the new thread
+    # is born with the right visibility + category. The post-ingest folder-
+    # assign block (below) re-runs the full evaluation against the final
+    # thread state and applies folder/tag/mark-as-read actions.
     routing_kwargs: dict = {}
     if delivered_to_addr and organization_id:
-        from src.services.inbox_routing_service import match_routing_rule
+        from src.services.inbox_rules_service import (
+            ACTION_ASSIGN_CATEGORY,
+            ACTION_SET_VISIBILITY,
+            InboxRulesService,
+            build_context,
+        )
         async with get_db_context() as db:
-            rule = await match_routing_rule(db, organization_id, delivered_to_addr)
-        if rule:
-            routing_kwargs["visibility_permission"] = rule.required_permission
-            routing_kwargs["delivered_to"] = delivered_to_addr
-            routing_kwargs["routing_rule_id"] = rule.id
-            if rule.category:
-                routing_kwargs["category"] = rule.category
-            logger.info(f"Routing rule matched: {rule.address_pattern} -> perm={rule.required_permission}")
-        else:
-            routing_kwargs["delivered_to"] = delivered_to_addr
+            actions = await InboxRulesService(db).evaluate(
+                build_context(
+                    sender_email=from_email,
+                    recipient_email=delivered_to_addr,
+                    subject=subject,
+                ),
+                organization_id,
+            )
+        for action in actions:
+            atype = action.get("type")
+            params = action.get("params") or {}
+            if atype == ACTION_SET_VISIBILITY:
+                slug = params.get("permission_slug") or params.get("slug")
+                if slug:
+                    routing_kwargs["visibility_permission"] = slug
+            elif atype == ACTION_ASSIGN_CATEGORY:
+                cat = params.get("category")
+                if cat:
+                    routing_kwargs["category"] = cat
+        routing_kwargs["delivered_to"] = delivered_to_addr
 
     thread = await get_or_create_thread(from_email, subject, organization_id=organization_id, **routing_kwargs)
     thread_context = ""
@@ -521,37 +558,11 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
 
         await db.commit()
 
+        # Auto-send removed 2026-04-14 — see docs/auto-send-removal-plan.md
+        # All AI-drafted replies now require human approval; the draft lives on
+        # agent_msg.draft_response and is sent via one-click approve from the UI.
+        # The classifier's `needs_approval` flag still gates SMS urgency pings.
         needs_approval = result.get("needs_approval", True)
-
-        # Commitment safety gate — never auto-send anything that promises a future action.
-        # Customers are left waiting for follow-ups no human is tracking.
-        if not needs_approval:
-            draft = (result.get("draft_response") or "").lower()
-            COMMITMENT_PHRASES = [
-                "follow up", "follow-up", "get back to you", "get back with you",
-                "reach out", "let you know", "will update", "will let you",
-                "look into", "look at", "check on", "investigate",
-                "schedule", "assign", "arrange", "send over",
-                "confirm with", "discuss with", "look into it",
-                "i'll check", "i will check", "we'll check", "we will check",
-                "we'll see", "we will see", "circle back",
-            ]
-            if any(p in draft for p in COMMITMENT_PHRASES):
-                needs_approval = True
-                logger.info(f"Auto-send blocked: draft contains commitment phrase — forcing approval for: {subject[:50]}")
-
-        # Org-level auto-send gate — when disabled (default), ALL emails
-        # require human approval. This prevents rogue auto-replies during
-        # setup, backfill, or misconfiguration.
-        if not needs_approval and organization_id:
-            from src.models.organization import Organization
-            org = (await db.execute(
-                select(Organization.email_auto_send_enabled)
-                .where(Organization.id == organization_id)
-            )).scalar_one_or_none()
-            if not org:
-                needs_approval = True
-                logger.info(f"Auto-send blocked: org {organization_id} has email_auto_send_enabled=False")
 
         if needs_approval:
             # --- Flood protection: don't spam SMS for same sender ---
@@ -570,124 +581,82 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                     result.get("draft_response", ""),
                     from_email,
                 )
-        else:
-            # Auto-send. Wrap in try/except so a crash doesn't leave the
-            # message stuck in 'pending' with no record of the attempted send.
-            # On any failure, persist a 'failed' outbound row via the shared
-            # helper so the user sees it in the Failed filter.
-            draft = result.get("draft_response", "")
-            try:
-                success = await send_email_response(from_email, subject, draft)
-            except Exception as auto_send_exc:  # noqa: BLE001
-                logger.exception(f"auto-send raised for {from_email}: {auto_send_exc}")
-                success = False
-                # Capture the actual exception for the failed row below.
-                _auto_send_error = f"{type(auto_send_exc).__name__}: {auto_send_exc}"
-            else:
-                _auto_send_error = "auto-send returned False (provider rejected)"
-
-            if not success:
-                # Mark the inbound as failed-to-auto-handle and persist a failed
-                # outbound twin so the timeline shows what we tried to send.
-                agent_msg.status = "failed"
-                agent_msg.notes = (agent_msg.notes or "") + f"\nAuto-send failed: {_auto_send_error}"
-                agent_msg.notes = agent_msg.notes.strip()
-                try:
-                    await db.commit()
-                except Exception:
-                    pass
-                try:
-                    from src.services.agents.send_failure import record_outbound_send_failure
-                    await record_outbound_send_failure(
-                        db,
-                        org_id=organization_id,
-                        thread_id=agent_msg.thread_id,
-                        from_email=FROM_EMAIL or "",
-                        to_email=from_email,
-                        subject=subject,
-                        body=draft,
-                        matched_customer_id=agent_msg.matched_customer_id,
-                        customer_name=agent_msg.customer_name,
-                        error=_auto_send_error,
-                    )
-                except Exception as inner:
-                    logger.error(f"Failed to record auto-send failure: {inner}")
-
-            if success:
-                agent_msg.status = "auto_sent"
-                agent_msg.final_response = draft
-                agent_msg.sent_at = datetime.now(timezone.utc)
-                await db.commit()
-                # Notify team (respect business hours + throttle)
-                if _is_business_hours() and not _should_throttle_alert(f"auto_{from_email}"):
-                    for number in APPROVAL_NUMBERS:
-                        await send_sms(number, f"\U0001f4e4 Auto-replied to {from_email}: {result.get('summary', subject)[:100]}")
-
-                # High-risk alert: first contact with this sender (no prior messages from them)
-                try:
-                    prior = (await db.execute(
-                        select(func.count(AgentMessage.id)).where(
-                            AgentMessage.organization_id == organization_id,
-                            AgentMessage.from_email == from_email,
-                            AgentMessage.direction == "inbound",
-                            AgentMessage.id != agent_msg.id,
-                        )
-                    )).scalar() or 0
-                    if prior == 0:
-                        # First time we've heard from this sender — AI just replied automatically. Alert!
-                        import subprocess
-                        subprocess.Popen(
-                            ["/srv/quantumpools/app/scripts/_notify.py",
-                             "⚠ AI auto-sent to NEW sender",
-                             f"{from_email}: {subject[:80]}"],
-                            close_fds=True,
-                        )
-                except Exception as e:
-                    logger.warning(f"First-contact alert check failed: {e}")
 
     # Update thread status
     await update_thread_status(thread.id)
 
-    # Auto-assign folder (only if user hasn't manually moved the thread)
+    # Auto-assign folder + apply rule-driven thread mutations (mark-as-read,
+    # category, visibility) via InboxRulesService. User-moved threads
+    # (folder_override=True) skip folder reassignment but still receive
+    # mark-as-read so the read state stays accurate.
     try:
         async with get_db_context() as db:
             t = (await db.execute(select(AgentThread).where(AgentThread.id == thread.id))).scalar_one_or_none()
-            if t and not t.folder_override:
+            if t:
                 from src.services.inbox_folder_service import InboxFolderService
+                from src.services.inbox_rules_service import (
+                    ACTION_ASSIGN_FOLDER,
+                    ACTION_ASSIGN_TAG,
+                    ACTION_ROUTE_TO_SPAM,
+                    ACTION_SUPPRESS_CONTACT_PROMPT,
+                    InboxRulesService,
+                    build_context,
+                )
                 svc = InboxFolderService(db)
-                target_key = None
-                target_folder_id = None
-                # Block rules: force to Spam folder (legacy "block" → soft block via folder)
-                if block_rule:
-                    target_key = "spam"
-                elif t.category in ("spam", "auto_reply"):
-                    target_key = "spam"
-                elif t.last_direction == "outbound" and not t.has_pending:
-                    target_key = "sent"
-                else:
-                    # Check sender tag for folder routing (exact + domain pattern)
-                    from src.models.suppressed_sender import SuppressedEmailSender
-                    from sqlalchemy import or_
-                    if t.contact_email:
-                        sender_lower = t.contact_email.lower()
-                        sender_domain = sender_lower.split("@")[-1] if "@" in sender_lower else ""
-                        patterns = [sender_lower]
-                        if sender_domain:
-                            patterns.append(f"*@{sender_domain}")
-                        sender_rule = (await db.execute(
-                            select(SuppressedEmailSender).where(
-                                SuppressedEmailSender.organization_id == organization_id,
-                                func.lower(SuppressedEmailSender.email_pattern).in_(patterns),
-                                SuppressedEmailSender.folder_id.isnot(None),
-                            ).limit(1)
-                        )).scalar_one_or_none()
-                        if sender_rule:
-                            target_folder_id = sender_rule.folder_id
-                if target_key:
-                    target_folder_id = await svc.get_system_folder_id(organization_id, target_key)
-                if target_folder_id and t.folder_id != target_folder_id:
-                    t.folder_id = target_folder_id
-                    await db.commit()
+                rules_svc = InboxRulesService(db)
+
+                rule_actions = await rules_svc.evaluate(
+                    build_context(
+                        sender_email=t.contact_email,
+                        recipient_email=t.delivered_to,
+                        subject=t.subject,
+                        category=t.category,
+                        customer_id=t.matched_customer_id,
+                    ),
+                    organization_id,
+                ) if organization_id else []
+
+                # Apply non-folder rule actions (mark_as_read, assign_category,
+                # set_visibility). Folder assignment is handled below so the
+                # legacy "block/spam/sent" heuristics still take precedence.
+                non_folder_actions = [
+                    a for a in rule_actions
+                    if a.get("type") not in {
+                        ACTION_ASSIGN_FOLDER,
+                        ACTION_ROUTE_TO_SPAM,
+                        ACTION_ASSIGN_TAG,
+                        ACTION_SUPPRESS_CONTACT_PROMPT,
+                    }
+                ]
+                if non_folder_actions:
+                    await rules_svc.apply(non_folder_actions, t)
+
+                if not t.folder_override:
+                    target_key = None
+                    target_folder_id = None
+                    if block_rule:
+                        target_key = "spam"
+                    elif t.category in ("spam", "auto_reply"):
+                        target_key = "spam"
+                    elif t.last_direction == "outbound" and not t.has_pending:
+                        target_key = "sent"
+                    else:
+                        # Folder routing from the rule engine. route_to_spam
+                        # short-circuits to the Spam system folder.
+                        for action in rule_actions:
+                            atype = action.get("type")
+                            params = action.get("params") or {}
+                            if atype == ACTION_ROUTE_TO_SPAM:
+                                target_key = "spam"
+                                break
+                            if atype == ACTION_ASSIGN_FOLDER and params.get("folder_id"):
+                                target_folder_id = params["folder_id"]
+                                break
+                    if target_key:
+                        target_folder_id = await svc.get_system_folder_id(organization_id, target_key)
+                    if target_folder_id and t.folder_id != target_folder_id:
+                        t.folder_id = target_folder_id
+                await db.commit()
     except Exception as e:
         logger.warning(f"Folder auto-assign failed for thread {thread.id}: {e}")
 

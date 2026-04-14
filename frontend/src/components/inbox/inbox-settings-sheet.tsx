@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Settings2 } from "lucide-react";
+
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { FeatureSettingsSheet } from "@/components/ui/feature-settings-sheet";
-import { InboxRoutingSection } from "@/components/settings/inbox-routing-section";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
@@ -40,12 +43,11 @@ export function InboxSettingsSheet({ open, onOpenChange }: InboxSettingsSheetPro
   return (
     <FeatureSettingsSheet
       title="Inbox Settings"
-      description="Route emails to team members or block automated senders."
+      description="Tune how inbound email is routed, tagged, and displayed."
       open={open}
       onOpenChange={onOpenChange}
     >
-      {/* Contact Learning Toggle */}
-      <div className="flex items-center justify-between py-3 border-b mb-4">
+      <div className="flex items-center justify-between py-3 border-b">
         <div className="space-y-0.5">
           <Label className="text-sm font-medium">Contact Learning Mode</Label>
           <p className="text-xs text-muted-foreground">
@@ -61,7 +63,20 @@ export function InboxSettingsSheet({ open, onOpenChange }: InboxSettingsSheetPro
         />
       </div>
 
-      <InboxRoutingSection editMode={true} />
+      <div className="flex items-center justify-between py-3 border-b">
+        <div className="space-y-0.5">
+          <Label className="text-sm font-medium">Inbox Rules</Label>
+          <p className="text-xs text-muted-foreground">
+            Route, tag, and mark-as-read inbound email by sender or recipient.
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Link href="/inbox/rules">
+            <Settings2 className="h-3.5 w-3.5 mr-1.5" />
+            Manage rules
+          </Link>
+        </Button>
+      </div>
     </FeatureSettingsSheet>
   );
 }

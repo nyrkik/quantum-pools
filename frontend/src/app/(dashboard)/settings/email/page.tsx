@@ -24,8 +24,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import {
   Loader2,
   Mail,
@@ -35,7 +33,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  ShieldAlert,
 } from "lucide-react";
 
 interface EmailIntegration {
@@ -118,40 +115,17 @@ function EmailSettingsContent() {
   const [connecting, setConnecting] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<EmailIntegration | null>(null);
-  const [autoSendEnabled, setAutoSendEnabled] = useState(false);
-  const [autoSendLoading, setAutoSendLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [intData, settingsData] = await Promise.all([
-        api.get<ListResponse>("/v1/email-integrations"),
-        api.get<{ email_auto_send_enabled: boolean }>("/v1/email-integrations/settings"),
-      ]);
+      const intData = await api.get<ListResponse>("/v1/email-integrations");
       setIntegrations(intData.integrations || []);
-      setAutoSendEnabled(settingsData.email_auto_send_enabled);
     } catch (e) {
       toast.error("Failed to load email integrations");
     } finally {
       setLoading(false);
     }
   }, []);
-
-  const toggleAutoSend = async (enabled: boolean) => {
-    setAutoSendLoading(true);
-    try {
-      const result = await api.put<{ email_auto_send_enabled: boolean }>(
-        "/v1/email-integrations/settings",
-        { email_auto_send_enabled: enabled }
-      );
-      setAutoSendEnabled(result.email_auto_send_enabled);
-      toast.success(enabled ? "Auto-send enabled" : "Auto-send disabled — all replies require approval");
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to update";
-      toast.error(msg);
-    } finally {
-      setAutoSendLoading(false);
-    }
-  };
 
   useEffect(() => {
     load();
@@ -373,38 +347,6 @@ function EmailSettingsContent() {
           </CardContent>
         </Card>
 
-        {/* Auto-send safeguard */}
-        <Card className="shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-primary" />
-              Auto-Reply Safety
-            </CardTitle>
-            <CardDescription>
-              Controls whether AI-drafted replies can be sent automatically without human approval.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-start gap-4">
-              <Switch
-                id="auto-send"
-                checked={autoSendEnabled}
-                onCheckedChange={toggleAutoSend}
-                disabled={autoSendLoading}
-              />
-              <div className="space-y-1">
-                <Label htmlFor="auto-send" className="text-sm font-medium cursor-pointer">
-                  {autoSendEnabled ? "Enabled" : "Disabled"}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {autoSendEnabled
-                    ? "High-confidence AI replies will be sent automatically. Other replies still require approval."
-                    : "All AI-drafted replies require human approval before sending. Enable only after verifying your email integration is working correctly."}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>

@@ -1,11 +1,6 @@
 # Email Pipeline — Architecture
 
-The email pipeline handles all inbound and outbound email for QuantumPools. **Multi-mode:** inbound arrives via Gmail API sync (OAuth-connected orgs) or Cloudflare Email Workers (managed mode). Outbound dispatches to Gmail API (connected orgs, appears in user's Sent folder) with Postmark as fallback. The pipeline classifies emails with AI, matches senders to customers, threads conversations, extracts action items, drafts responses, tracks delivery status, and monitors auto-sends for trust calibration.
-
-**Safety layers** (3-deep, see "Auto-Send Safety" below):
-- Org flag `email_auto_send_enabled` (default false) gates all auto-replies
-- Commitment phrase guard blocks drafts with "follow up", "get back", "look into", etc.
-- First-contact ntfy alert when AI auto-sends to a new sender
+The email pipeline handles all inbound and outbound email for QuantumPools. **Multi-mode:** inbound arrives via Gmail API sync (OAuth-connected orgs) or Cloudflare Email Workers (managed mode). Outbound dispatches to Gmail API (connected orgs, appears in user's Sent folder) with Postmark as fallback. The pipeline classifies emails with AI, matches senders to customers, threads conversations, extracts action items, drafts responses, and tracks delivery status. **QP never auto-sends customer email** — AI drafts every reply; humans always approve from the inbox timeline. See `memory/feedback_no_auto_send.md` for the rationale.
 
 **Organization:** Threads live in folders (Inbox/Sent/Spam + custom). Senders can be tagged (billing/vendor/notification/personal/etc.) with optional auto-folder routing. Domain patterns supported (`*@scppool.com`). `rfc_message_id` prevents cross-source duplicates.
 
@@ -13,7 +8,7 @@ The email pipeline handles all inbound and outbound email for QuantumPools. **Mu
 
 **Deliverability:** Postmark webhook (`/api/v1/admin/postmark-webhook`) receives Delivery/Bounce/Open/SpamComplaint events. Outbound messages show status chips (Delivered, Opened Nx, Bounced, Spam, **Send failed**, **Sending…**). The "Failed" filter surfaces ALL outbound failure modes — bounces and spam complaints from the recipient, plus our-side `delivery_error`/`status=failed`/`status=queued` (sender path crashed before delivery).
 
-**Send-failure hardening (post FB-24):** Every outbound send path — compose, reply approval (service + admin endpoint), follow-up (service + admin endpoint), AI auto-send — is wrapped in try/except. On any exception the shared helper `services/agents/send_failure.py:record_outbound_send_failure` rolls back the crashed transaction, persists a `failed` outbound `AgentMessage` with the actual error in `delivery_error`, and recomputes thread state. The Failed filter counts threads only by their LATEST outbound attempt, so a successful retry resolves the thread (no false-positive failure inflation from retry storms). An APScheduler `_run_outbound_send_janitor` runs every 2 minutes, flips outbound messages stuck in `queued` >5 min to `failed` ("timed out in queue"), recomputes thread state, and fires a high-priority ntfy alert. When Gmail OAuth fails, `send_agent_reply` marks the integration `status='error'` with `last_error_at` so the inbox page shows a "Reconnect" banner instead of silently falling through to Postmark indefinitely. Backend 500s alert via ntfy (was email — chicken-and-egg when the email path itself is broken).
+**Send-failure hardening (post FB-24):** Every outbound send path — compose, reply approval (service + admin endpoint), follow-up (service + admin endpoint) — is wrapped in try/except. On any exception the shared helper `services/agents/send_failure.py:record_outbound_send_failure` rolls back the crashed transaction, persists a `failed` outbound `AgentMessage` with the actual error in `delivery_error`, and recomputes thread state. The Failed filter counts threads only by their LATEST outbound attempt, so a successful retry resolves the thread (no false-positive failure inflation from retry storms). An APScheduler `_run_outbound_send_janitor` runs every 2 minutes, flips outbound messages stuck in `queued` >5 min to `failed` ("timed out in queue"), recomputes thread state, and fires a high-priority ntfy alert. When Gmail OAuth fails, `send_agent_reply` marks the integration `status='error'` with `last_error_at` so the inbox page shows a "Reconnect" banner instead of silently falling through to Postmark indefinitely. Backend 500s alert via ntfy (was email — chicken-and-egg when the email path itself is broken).
 
 **Pipeline health monitoring (`agent_poller`):**
 - **Gmail incremental sync** every 60s for every connected `gmail_api` integration. After 3 consecutive failures the integration auto-flips to `status='error'` with `last_error` populated and ntfy fires.
@@ -21,9 +16,7 @@ The email pipeline handles all inbound and outbound email for QuantumPools. **Mu
 - **Thread state reconciliation** every 30 min. Detects drift between `AgentThread.message_count` and the actual count, runs `update_thread_status` on any mismatched thread. Alerts ops if it has to fix more than 5 in a single pass.
 - **Last-synced indicator** in inbox header (refetched on a 60 s tick) goes amber if `last_sync_at` is older than 5 min.
 
-**Auto-send monitoring:** Threads with auto-sent replies get a sky-blue "Auto-Sent" chip. Reading pane shows a feedback banner (Yes/No — owner/admin only) that records `AgentCorrection` for learning. Weekly digest email to org owner summarizes auto-sends. First-contact auto-sends trigger ntfy push alert.
-
-**Auto-handled review loop:** When the AI hides an email from the Inbox without sending a reply (moves to Spam, Auto folder, custom folder via tag, or just marks ignored), the thread is flagged `is_auto_handled`. The reading pane shows a purple banner naming exactly what the AI did ("AI moved this to '<folder>', tagged sender '<tag>', category '<category>'. Was that right?"). Owner/admin clicks Yes (acceptance correction → AI keeps doing it) or No (rejection correction + thread restored to Inbox + marked pending). Both feed `AgentLearningService` (`agent_type=email_classifier`). Endpoint: `POST /api/v1/admin/agent-threads/auto-handled-feedback`. Filter button "Auto-Handled" + Inbox folder count chip surface the backlog. `is_auto_handled` is derived in `thread_presenter` from `(last_direction=inbound AND status IN (ignored, handled) AND NOT has_pending AND NOT has_auto_sent)`.
+**Auto-handled review loop:** When the AI hides an email from the Inbox without sending a reply (moves to Spam, Auto folder, custom folder via tag, or just marks ignored), the thread is flagged `is_auto_handled`. The reading pane shows a purple banner naming exactly what the AI did ("AI moved this to '<folder>', tagged sender '<tag>', category '<category>'. Was that right?"). Owner/admin clicks Yes (acceptance correction → AI keeps doing it) or No (rejection correction + thread restored to Inbox + marked pending). Both feed `AgentLearningService` (`agent_type=email_classifier`). Endpoint: `POST /api/v1/admin/agent-threads/auto-handled-feedback`. Filter button "Auto-Handled" + Inbox folder count chip surface the backlog. `is_auto_handled` is derived in `thread_presenter` from `(last_direction=inbound AND status IN (ignored, handled) AND NOT has_pending)`.
 
 **Manual refresh:** Inbox header has a refresh button (`POST /api/v1/email-integrations/sync-all`) that triggers incremental sync across all connected Gmail integrations in the org and returns aggregate stats. Used when the user wants to pull new mail without waiting for the polling cycle.
 
@@ -153,7 +146,7 @@ Cloudflare account: `brian.e.parrotte@gmail.com` (account ID `4f5794507b55069e37
        |--- 8. Save AgentMessage (status=pending or handled)
        |--- 9. Extract action items (max 3, dedup via word overlap)
        |--- 10. Create AgentAction records
-       |--- 11. Send approval SMS (business hours + throttle) OR auto-send
+       |--- 11. Send approval SMS (business hours + throttle) for urgent drafts
        |--- 12. Publish SSE event (THREAD_NEW / THREAD_MESSAGE_NEW)
        |--- 13. Post-verify customer match (verify_customer_match)
        v

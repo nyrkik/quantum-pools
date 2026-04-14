@@ -287,11 +287,6 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                         <span className={`truncate ${t.is_unread ? "font-semibold" : ""}`}>
                           {t.customer_name || t.contact_email}
                         </span>
-                        {t.has_auto_sent && (
-                          <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-medium bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 flex-shrink-0" title="AI auto-sent a reply in this thread">
-                            Auto-Sent
-                          </span>
-                        )}
                         {t.visibility_permission && (
                           <span title={`Restricted: ${t.visibility_permission}`}>
                             <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" />

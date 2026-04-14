@@ -87,39 +87,6 @@ async def list_integrations(
     return {"integrations": [_to_response(r) for r in rows]}
 
 
-@router.get("/settings")
-async def get_email_settings(
-    ctx: OrgUserContext = Depends(get_current_org_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get org-level email settings."""
-    org = (await db.execute(
-        select(Organization).where(Organization.id == ctx.organization_id)
-    )).scalar_one()
-    return {"email_auto_send_enabled": org.email_auto_send_enabled}
-
-
-class EmailSettingsBody(BaseModel):
-    email_auto_send_enabled: bool
-
-
-@router.put("/settings")
-async def update_email_settings(
-    body: EmailSettingsBody,
-    ctx: OrgUserContext = Depends(get_current_org_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Update org-level email settings. Owner/admin only."""
-    if ctx.role not in ("owner", "admin"):
-        raise HTTPException(403, "Only owner or admin can change email settings")
-    org = (await db.execute(
-        select(Organization).where(Organization.id == ctx.organization_id)
-    )).scalar_one()
-    org.email_auto_send_enabled = body.email_auto_send_enabled
-    await db.commit()
-    return {"email_auto_send_enabled": org.email_auto_send_enabled}
-
-
 @router.get("/{integration_id}")
 async def get_integration(
     integration_id: str,

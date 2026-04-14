@@ -9,7 +9,6 @@ interface ThreadStats {
   pending: number;
   stale_pending: number;
   open_actions: number;
-  auto_sent?: number;
   failed?: number;
 }
 
@@ -26,14 +25,12 @@ interface InboxFiltersProps {
   onGroupByClientChange?: (v: boolean) => void;
   staleFilter?: boolean;
   onStaleFilterChange?: (v: boolean) => void;
-  autoSentFilter?: boolean;
-  onAutoSentFilterChange?: (v: boolean) => void;
   failedFilter?: boolean;
   onFailedFilterChange?: (v: boolean) => void;
   autoHandledFilter?: boolean;
   onAutoHandledFilterChange?: (v: boolean) => void;
   autoHandledTodayCount?: number;  // for chip-style count
-  // Ops chips (Failed, Auto-Sent, Auto-Handled, Stale) are owner/admin only —
+  // Ops chips (Failed, Auto-Handled, Stale) are owner/admin only —
   // billing/ops triage is not a manager concern. Backend stats also zero these
   // out for non-managers as defense in depth.
   canManageInbox?: boolean;
@@ -50,8 +47,6 @@ export function InboxFilters({
   onGroupByClientChange,
   staleFilter,
   onStaleFilterChange,
-  autoSentFilter,
-  onAutoSentFilterChange,
   failedFilter,
   onFailedFilterChange,
   autoHandledFilter,
@@ -90,17 +85,6 @@ export function InboxFilters({
         >
           <MailX className="h-3.5 w-3.5" />
           {stats.failed} Failed
-        </Button>
-      )}
-      {canManageInbox && stats && (stats.auto_sent ?? 0) > 0 && onAutoSentFilterChange && (
-        <Button
-          variant={autoSentFilter ? "default" : "outline"}
-          size="sm"
-          className={`h-7 px-2.5 text-xs gap-1 ${!autoSentFilter ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-400" : ""}`}
-          onClick={() => onAutoSentFilterChange(!autoSentFilter)}
-        >
-          <Bot className="h-3.5 w-3.5" />
-          Auto-Sent
         </Button>
       )}
       {canManageInbox && onAutoHandledFilterChange && (

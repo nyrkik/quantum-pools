@@ -101,11 +101,10 @@ Inbound/outbound email, internal messaging, notifications.
 | AgentMessage | `agent_messages` | Individual email message in a thread. Has `body` (stripped text), `body_html` (original HTML for rendering), `rfc_message_id` (cross-source dedup), `delivery_status` / `delivered_at` / `first_opened_at` / `open_count` (Postmark webhook tracking). |
 | MessageAttachment | `message_attachments` | File attachments on agent messages |
 | ThreadRead | `thread_reads` | Per-user read tracking for threads |
-| InboxRoutingRule | `inbox_routing_rules` | Rules for auto-routing inbound email |
+| InboxRule | `inbox_rules` | Unified sender/recipient rules — JSONB conditions + actions (assign_folder, assign_tag, assign_category, set_visibility, route_to_spam, mark_as_read, suppress_contact_prompt). Evaluated in priority order per message. Replaced both `inbox_routing_rules` and `suppressed_email_senders` (dropped 2026-04-14). |
 | BroadcastEmail | `broadcast_emails` | Bulk email campaigns |
 | EmailTemplate | `email_templates` | Reusable email templates |
 | EmailIntegration | `email_integrations` | Per-org email integration (gmail_api, managed, ms_graph, forwarding, manual). OAuth tokens Fernet-encrypted. |
-| SuppressedEmailSender | `suppressed_email_senders` | Org-wide sender tags (billing/vendor/notification/personal/marketing/other/spam) + optional `folder_id` for auto-routing. Supports exact + domain patterns (`*@scppool.com`). |
 | InboxFolder | `inbox_folders` | Org-level folders. System folders (is_system=True): Inbox, Sent, Spam. Custom folders nest under Inbox. Threads reference via `agent_threads.folder_id` (null = Inbox). |
 | InternalThread | `internal_threads` | Internal team discussion thread |
 | InternalMessage | `internal_messages` | Message within an internal thread |

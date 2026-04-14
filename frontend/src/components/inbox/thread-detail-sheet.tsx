@@ -47,6 +47,7 @@ import type { ThreadDetail } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "./inbox-badges";
 import { CollapsibleBody } from "./collapsible-body";
 import { ContactLearningPrompt, SENDER_TAG_STYLES } from "./contact-learning-modal";
+import { RuleEditorDialog, type RuleDraft } from "./rule-editor-dialog";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 import { AttachmentDisplay } from "@/components/ui/attachment-display";
 import {
@@ -520,12 +521,14 @@ function HtmlEmailBody({ html }: { html: string }) {
 
 function AutoHandledFeedbackBanner({
   threadId,
+  senderEmail,
   category,
   senderTag,
   folderId,
   onFeedback,
 }: {
   threadId: string;
+  senderEmail: string | null;
   category: string | null;
   senderTag: string | null;
   folderId: string | null;
@@ -536,17 +539,19 @@ function AutoHandledFeedbackBanner({
   const [reviewed, setReviewed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [folderName, setFolderName] = useState<string | null>(null);
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [showRuleEditor, setShowRuleEditor] = useState(false);
 
-  // Look up folder name for the message
   useEffect(() => {
-    if (!folderId) {
-      setFolderName("Inbox");
-      return;
-    }
     api.get<{ folders: { id: string; name: string }[] }>("/v1/inbox-folders")
       .then((d) => {
-        const f = d.folders.find((x) => x.id === folderId);
-        setFolderName(f?.name || "Inbox");
+        setFolders(d.folders || []);
+        if (!folderId) {
+          setFolderName("Inbox");
+        } else {
+          const f = d.folders.find((x) => x.id === folderId);
+          setFolderName(f?.name || "Inbox");
+        }
       })
       .catch(() => setFolderName(null));
   }, [folderId]);
@@ -570,104 +575,119 @@ function AutoHandledFeedbackBanner({
     }
   };
 
-  if (reviewed || !canReview) return null;
+  const initialRuleDraft = (): RuleDraft => {
+    const sender = (senderEmail || "").toLowerCase();
+    const actions: RuleDraft["actions"] = [];
+    if (folderId) {
+      actions.push({ type: "assign_folder", params: { folder_id: folderId } });
+    }
+    if (senderTag) {
+      actions.push({ type: "assign_tag", params: { tag: senderTag } });
+    }
+    if (category && category !== "general") {
+      actions.push({ type: "assign_category", params: { category } });
+    }
+    if (actions.length === 0) {
+      actions.push({ type: "assign_folder", params: {} });
+    }
+    return {
+      name: sender ? `Auto-handle ${sender}` : "New rule from inbox",
+      priority: 100,
+      conditions: sender
+        ? [{ field: "sender_email", operator: "equals", value: sender }]
+        : [],
+      actions,
+      is_active: true,
+    };
+  };
 
-  return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-800">
-      <Bot className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
-      <span className="text-xs text-purple-800 dark:text-purple-300 flex-1">
-        AI {(() => {
-          const parts: string[] = [];
-          if (folderName && folderName !== "Inbox") parts.push(`moved this to "${folderName}"`);
-          else parts.push("auto-handled this");
-          if (senderTag) parts.push(`tagged sender "${senderTag}"`);
-          if (category && category !== "general") parts.push(`category "${category}"`);
-          return parts.join(", ");
-        })()}. Was that right?
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 text-xs text-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/30"
-        onClick={() => submit(true)}
-        disabled={submitting}
-      >
-        <Check className="h-3 w-3 mr-1" />
-        Yes
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 text-xs text-destructive hover:bg-destructive/10"
-        onClick={() => submit(false)}
-        disabled={submitting}
-        title="Move to Inbox + AI learns"
-      >
-        <X className="h-3 w-3 mr-1" />
-        No, move to Inbox
-      </Button>
-    </div>
-  );
-}
-
-function AutoSentFeedbackBanner({ threadId, onFeedback }: { threadId: string; onFeedback: () => void }) {
-  const { role } = useAuth();
-  const canReview = role === "owner" || role === "admin";
-  const [reviewed, setReviewed] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async (correct: boolean) => {
-    setSubmitting(true);
+  const handleSaveRule = async (draft: RuleDraft) => {
     try {
-      await api.post("/v1/admin/agent-threads/auto-sent-feedback", {
-        thread_id: threadId,
-        was_correct: correct,
+      await api.post("/v1/inbox-rules", {
+        name: draft.name || null,
+        priority: draft.priority,
+        conditions: draft.conditions,
+        actions: draft.actions,
+        is_active: draft.is_active,
       });
+      // Record acceptance as well so the learning signal isn't lost.
+      try {
+        await api.post("/v1/admin/agent-threads/auto-handled-feedback", {
+          thread_id: threadId,
+          was_correct: true,
+        });
+      } catch {
+        /* banner still proceeds to dismiss */
+      }
+      toast.success("Rule saved — AI will handle future matches automatically");
       setReviewed(true);
-      onFeedback();
-    } catch {
-      toast.error("Failed to save feedback");
-    } finally {
-      setSubmitting(false);
+      onFeedback(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create rule");
+      throw e;
     }
   };
 
-  if (reviewed) return null;
+  if (reviewed || !canReview) return null;
 
-  // Info-only banner for non-admins; interactive for owner/admin
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-sky-50 dark:bg-sky-950/30 border-b border-sky-200 dark:border-sky-800">
-      <Bot className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
-      <span className="text-xs text-sky-800 dark:text-sky-300 flex-1">
-        {canReview
-          ? "AI auto-sent a reply in this thread. Was it correct?"
-          : "AI auto-sent a reply in this thread."}
-      </span>
-      {canReview && (
-        <>
+    <>
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-800">
+        <Bot className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+        <span className="text-xs text-purple-800 dark:text-purple-300 flex-1">
+          AI {(() => {
+            const parts: string[] = [];
+            if (folderName && folderName !== "Inbox") parts.push(`moved this to "${folderName}"`);
+            else parts.push("auto-handled this");
+            if (senderTag) parts.push(`tagged sender "${senderTag}"`);
+            if (category && category !== "general") parts.push(`category "${category}"`);
+            return parts.join(", ");
+          })()}. Was that right?
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 text-xs text-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/30"
+          onClick={() => submit(true)}
+          disabled={submitting}
+        >
+          <Check className="h-3 w-3 mr-1" />
+          Yes
+        </Button>
+        {senderEmail && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 text-xs text-sky-700 hover:bg-sky-100 dark:hover:bg-sky-900/30"
-            onClick={() => submit(true)}
+            className="h-6 text-xs text-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/30"
+            onClick={() => setShowRuleEditor(true)}
             disabled={submitting}
+            title="Turn this into a permanent rule so future matches are auto-handled"
           >
-            <Check className="h-3 w-3 mr-1" />
-            Yes
+            Create rule
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs text-destructive hover:bg-destructive/10"
-            onClick={() => submit(false)}
-            disabled={submitting}
-          >
-            <X className="h-3 w-3 mr-1" />
-            No
-          </Button>
-        </>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 text-xs text-destructive hover:bg-destructive/10"
+          onClick={() => submit(false)}
+          disabled={submitting}
+          title="Move to Inbox + AI learns"
+        >
+          <X className="h-3 w-3 mr-1" />
+          No, move to Inbox
+        </Button>
+      </div>
+      {showRuleEditor && (
+        <RuleEditorDialog
+          open={showRuleEditor}
+          onOpenChange={setShowRuleEditor}
+          initialDraft={initialRuleDraft()}
+          folders={folders}
+          onSave={handleSaveRule}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -1328,15 +1348,11 @@ export function ThreadDetailSheet({
         </div>
       </div>
 
-      {/* Auto-sent feedback banner */}
-      {thread.has_auto_sent && (
-        <AutoSentFeedbackBanner threadId={threadId} onFeedback={() => { loadThread(); onAction(); }} />
-      )}
-
       {/* Auto-handled feedback banner (AI hid from inbox without sending a reply) */}
-      {thread.is_auto_handled && !thread.has_auto_sent && (
+      {thread.is_auto_handled && (
         <AutoHandledFeedbackBanner
           threadId={threadId}
+          senderEmail={thread.contact_email}
           category={thread.category}
           senderTag={thread.sender_tag}
           folderId={thread.folder_id}

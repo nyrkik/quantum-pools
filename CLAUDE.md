@@ -41,7 +41,7 @@ Enterprise pool service management platform consolidating:
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
-| Email | Multi-mode: Gmail API (OAuth) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted tokens. Folders (Inbox/Sent/Spam + custom). Sender tags with auto-folder routing. HTML rendering in sandboxed iframe. Auto-send gated by org flag + commitment phrase guard. Postmark delivery webhooks. Gmail read/unread sync. See `docs/email-pipeline.md` |
+| Email | Multi-mode: Gmail API (OAuth) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted tokens. Folders (Inbox/Sent/Spam + custom). Sender tags with auto-folder routing. HTML rendering in sandboxed iframe. AI drafts every reply; humans always send via one-click approve (no auto-send). Postmark delivery webhooks. Gmail read/unread sync. See `docs/email-pipeline.md` |
 | Payments | Stripe Checkout (test mode), webhook for confirmation, verify-on-return fallback |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
@@ -350,7 +350,7 @@ Organization 1──* Customer 1──* Property
 Organization 1──* Tech
 Organization 1──1 OrgCostSettings
 Organization 1──* EmailIntegration (gmail_api, managed, etc.)
-Organization 1──* SuppressedEmailSender (sender tags + optional folder routing)
+Organization 1──* InboxRule (sender/recipient rules: tag + folder + spam + mark-as-read)
 Organization 1──* InboxFolder (system: Inbox/Sent/Spam + custom)
 AgentThread *──1 InboxFolder (nullable = Inbox)
 Customer 1──* Invoice 1──* InvoiceLineItem
@@ -387,7 +387,7 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
-- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected). Auto-send safety gate + commitment phrase guard, cross-source dedup, sender tags with folder routing, folders (Inbox/Sent/Spam + custom), HTML rendering in sandboxed iframe, quoted-text collapse, Postmark delivery webhooks (Delivered/Opened/Bounced), auto-sent monitoring + weekly digest, auto-handled review loop (purple Yes/No banner → AgentLearningService), Auto-Handled filter + Inbox count chip (owner/admin), manual refresh button (sync-all), click-to-read optimistic update, selected-thread highlight, Gmail read/unread sync. MS Graph and forwarding modes PLANNED. See `docs/email-strategy.md`.
+- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected). AI drafts every customer reply; humans approve from the timeline (auto-send rejected + removed 2026-04-14, see `memory/feedback_no_auto_send.md`). Cross-source dedup, sender tags with folder routing, folders (Inbox/Sent/Spam + custom), HTML rendering in sandboxed iframe, quoted-text collapse, Postmark delivery webhooks (Delivered/Opened/Bounced), auto-handled review loop (purple Yes/No banner → AgentLearningService), Auto-Handled filter + Inbox count chip (owner/admin), manual refresh button (sync-all), click-to-read optimistic update, selected-thread highlight, Gmail read/unread sync. MS Graph and forwarding modes PLANNED. See `docs/email-strategy.md`.
 - [ ] Phase 6: Platform Admin (tenant management, subscriptions)
 - [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
 
@@ -420,7 +420,6 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/profitability-feature-plan.md` | Phase 3b spec (scoring weights, jurisdiction formulas) |
 | `docs/ai-agents-plan.md` | 10 planned AI agents (product roadmap), current implementation status |
 | `docs/inbox-folders-plan.md` | 3-phase inbox folders: folders + filter rules + Gmail label sync. **Remove when complete.** |
-| `docs/inbox-rules-unification-plan.md` | **HIGH PRIORITY** — unify `inbox_routing_rules` + `suppressed_email_senders` into single `inbox_rules` table. Includes background on the scppool block incident and architectural lessons. **Remove when Phase E ships.** |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |
@@ -439,7 +438,6 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/audit-2026-04-07.md` | Code health audit findings |
 | `docs/inbox-security-audit-2026-04-13.md` | **HIGH PRIORITY** — security audit found 3 CRITICAL + 4 HIGH + 4 MEDIUM issues in inbox/email subsystem (cross-org leakage, unsigned webhooks, unauth attachment access). Each item has file:line + status. **Remove when every CRITICAL/HIGH is closed.** |
 | `docs/backup-and-restore.md` | DB backup + restore-verification runbook. Cron schedule, retention (GFS 7d/4w/12m), restore commands with safety snapshots, ntfy signaling, follow-up gaps (off-host, off-site, WAL archiving). |
-| `docs/auto-send-removal-plan.md` | **HIGH PRIORITY** — plan to remove the auto-send-customer-email feature entirely. AI keeps drafting, humans always send. Phased deletion order, risk analysis, memory entry text. **Do this before onboarding any non-Sapphire customer.** |
 
 ### Doc Maintenance Rules
 

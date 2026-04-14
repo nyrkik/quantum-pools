@@ -62,14 +62,6 @@ class Organization(Base):
     deepblue_org_monthly_output_tokens: Mapped[int] = mapped_column(Integer, default=10000000)
     deepblue_rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=30)
 
-    # Auto-send gate — when False (default), ALL AI-drafted replies require human
-    # approval before sending. Must be explicitly enabled by an admin after
-    # verifying the email integration is working correctly. This prevents the
-    # system from sending rogue auto-replies during setup, backfill, or
-    # misconfiguration. Even when True, only emails classified with high
-    # confidence and needs_approval=False are auto-sent.
-    email_auto_send_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-
     # Contact learning — show modal/banner for unknown email senders
     email_contact_learning: Mapped[bool] = mapped_column(Boolean, default=True)
 

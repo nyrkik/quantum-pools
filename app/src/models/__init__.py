@@ -41,7 +41,7 @@ from src.models.org_subscription import OrgSubscription
 from src.models.inspection_lookup import InspectionLookup
 from src.models.scraper_run import ScraperRun
 from src.models.estimate_approval import EstimateApproval
-from src.models.inbox_routing_rule import InboxRoutingRule
+from src.models.inbox_rule import InboxRule
 from src.models.agent_thread import AgentThread
 from src.models.agent_message import AgentMessage
 from src.models.agent_action import AgentAction, AgentActionComment
@@ -77,7 +77,6 @@ from src.models.message_attachment import MessageAttachment
 from src.models.service_case import ServiceCase
 from src.models.email_template import EmailTemplate
 from src.models.email_integration import EmailIntegration, IntegrationType, IntegrationStatus
-from src.models.suppressed_sender import SuppressedEmailSender
 from src.models.autopay_attempt import AutopayAttempt
 from src.models.inbox_folder import InboxFolder, SYSTEM_FOLDERS
 
@@ -134,7 +133,7 @@ __all__ = [
     "EquipmentCatalog",
     "EquipmentItem",
     "EquipmentEvent",
-    "InboxRoutingRule",
+    "InboxRule",
     "FeedbackItem",
     "PropertyAccessCode",
     "InternalThread",

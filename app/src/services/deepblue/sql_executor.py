@@ -35,7 +35,7 @@ ORG_SCOPED_TABLES = {
     "property_difficulties", "property_jurisdictions", "satellite_analyses",
     "pool_measurements", "notifications",
     "org_cost_settings", "service_tiers", "job_invoices",
-    "email_templates", "inbox_routing_rules", "visit_charges", "charge_templates",
+    "email_templates", "inbox_rules", "visit_charges", "charge_templates",
     "internal_threads", "internal_messages",
     "org_chemical_prices", "vendors", "visit_photos",
     "org_subscriptions", "message_attachments",

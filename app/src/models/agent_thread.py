@@ -30,6 +30,15 @@ class AgentThread(Base):
     has_pending: Mapped[bool] = mapped_column(Boolean, default=True)
     has_open_actions: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Rule-driven "mark as read" stamp. When a mark_as_read rule fires we set
+    # this to the message's received_at so the thread doesn't appear unread
+    # for any user. If a later message arrives without the rule firing (rule
+    # disabled/modified), last_message_at advances past auto_read_at and the
+    # thread re-unreads naturally.
+    auto_read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
     case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
 
     # Gmail sync
@@ -42,7 +51,6 @@ class AgentThread(Base):
     # Inbox routing / visibility
     visibility_permission: Mapped[str | None] = mapped_column(String(80), nullable=True)  # permission slug required to view (null = everyone)
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
-    routing_rule_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("inbox_routing_rules.id"), nullable=True)
 
     # Thread assignment
     assigned_to_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)

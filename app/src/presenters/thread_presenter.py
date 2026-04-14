@@ -20,39 +20,19 @@ class ThreadPresenter(Presenter):
         customers = await self._load_customers(cust_ids)
         addresses = await self._load_customer_addresses(cust_ids)
 
-        # Batch-load auto_sent status per thread
-        auto_sent_threads: set[str] = set()
+        # Batch-resolve sender tags via InboxRulesService (unified rule engine).
+        # Each unique sender is looked up once; thread-level assignment happens
+        # in the per-thread loop below.
+        sender_tag_by_email: dict[str, str] = {}
         if threads:
-            from sqlalchemy import select
-            from src.models.agent_message import AgentMessage
-            thread_ids = [t.id for t in threads]
-            rows = (await self.db.execute(
-                select(AgentMessage.thread_id)
-                .where(AgentMessage.thread_id.in_(thread_ids), AgentMessage.status == "auto_sent")
-                .distinct()
-            )).all()
-            auto_sent_threads = {r[0] for r in rows}
-
-        # Batch-load sender tags from suppressed_email_senders
-        sender_tags: dict[str, str] = {}
-        if threads:
-            from sqlalchemy import select, func
-            from src.models.suppressed_sender import SuppressedEmailSender
+            from src.services.inbox_rules_service import InboxRulesService
             org_id = threads[0].organization_id
-            sender_emails = {t.contact_email.lower() for t in threads if t.contact_email}
-            if sender_emails:
-                # Check exact matches + domain patterns
-                sender_domains = {f"*@{e.split('@')[-1]}" for e in sender_emails if "@" in e}
-                all_patterns = sender_emails | sender_domains
-                rows = (await self.db.execute(
-                    select(SuppressedEmailSender.email_pattern, SuppressedEmailSender.reason)
-                    .where(
-                        SuppressedEmailSender.organization_id == org_id,
-                        func.lower(SuppressedEmailSender.email_pattern).in_(all_patterns),
-                    )
-                )).all()
-                for pattern, reason in rows:
-                    sender_tags[pattern.lower()] = reason or "other"
+            svc = InboxRulesService(self.db)
+            unique_senders = {t.contact_email.lower() for t in threads if t.contact_email}
+            for sender in unique_senders:
+                tag = await svc.get_sender_tag(sender, org_id)
+                if tag:
+                    sender_tag_by_email[sender] = tag
 
         results = []
         for t in threads:
@@ -69,23 +49,24 @@ class ThreadPresenter(Presenter):
                 d["contact_name"] = None
                 d["customer_address"] = None
 
-            # Sender tag (exact match, then domain pattern)
-            if t.contact_email:
-                email_lower = t.contact_email.lower()
-                d["sender_tag"] = sender_tags.get(email_lower)
-                if not d["sender_tag"] and "@" in email_lower:
-                    d["sender_tag"] = sender_tags.get(f"*@{email_lower.split('@')[-1]}")
-            else:
-                d["sender_tag"] = None
+            # Sender tag — already resolved via the rule engine above.
+            d["sender_tag"] = (
+                sender_tag_by_email.get(t.contact_email.lower())
+                if t.contact_email
+                else None
+            )
 
-            # Auto-sent
-            d["has_auto_sent"] = t.id in auto_sent_threads
-
-            # Unread status
+            # Unread status — rule-driven auto_read_at silences threads that
+            # matched a mark_as_read rule up to last_message_at. A later
+            # message without the rule firing re-unreads the thread naturally.
             if read_map is not None:
+                user_read = read_map.get(t.id)
+                effective_read = max(
+                    x for x in [user_read, t.auto_read_at] if x is not None
+                ) if (user_read or t.auto_read_at) else None
                 d["is_unread"] = (
-                    t.last_message_at > read_map[t.id]
-                    if t.id in read_map and t.last_message_at
+                    (t.last_message_at > effective_read)
+                    if effective_read and t.last_message_at
                     else t.last_message_at is not None
                 )
             else:
@@ -111,7 +92,7 @@ class ThreadPresenter(Presenter):
         else:
             d["customer_name"] = thread.customer_name
 
-        # Unread status
+        # Unread status — honor rule-driven auto_read_at alongside ThreadRead.
         if user_id:
             from sqlalchemy import select
             from src.models.thread_read import ThreadRead
@@ -121,41 +102,30 @@ class ThreadPresenter(Presenter):
                     ThreadRead.user_id == user_id,
                 )
             )).scalar_one_or_none()
+            effective_read = max(
+                x for x in [read, thread.auto_read_at] if x is not None
+            ) if (read or thread.auto_read_at) else None
             d["is_unread"] = (
-                thread.last_message_at > read if read and thread.last_message_at else thread.last_message_at is not None
+                (thread.last_message_at > effective_read)
+                if effective_read and thread.last_message_at
+                else thread.last_message_at is not None
             )
         else:
             d["is_unread"] = False
 
-        # Auto-sent
-        from src.models.agent_message import AgentMessage
-        auto = (await self.db.execute(
-            select(AgentMessage.id).where(
-                AgentMessage.thread_id == thread.id,
-                AgentMessage.status == "auto_sent",
-            ).limit(1)
-        )).scalar_one_or_none()
-        d["has_auto_sent"] = auto is not None
-
-        # Auto-handled (AI hid this from inbox without human action — and there's no auto-sent reply)
+        # Auto-handled (AI hid this from inbox without human action)
         d["is_auto_handled"] = (
             thread.last_direction == "inbound"
             and thread.status in ("ignored", "handled")
             and not thread.has_pending
-            and not d["has_auto_sent"]
         )
 
-        # Sender tag
+        # Sender tag via the unified rule engine
         if thread.contact_email:
-            from sqlalchemy import select, func
-            from src.models.suppressed_sender import SuppressedEmailSender
-            tag = (await self.db.execute(
-                select(SuppressedEmailSender.reason).where(
-                    SuppressedEmailSender.organization_id == thread.organization_id,
-                    func.lower(SuppressedEmailSender.email_pattern) == thread.contact_email.lower(),
-                ).limit(1)
-            )).scalar_one_or_none()
-            d["sender_tag"] = tag
+            from src.services.inbox_rules_service import InboxRulesService
+            d["sender_tag"] = await InboxRulesService(self.db).get_sender_tag(
+                thread.contact_email, thread.organization_id
+            )
         else:
             d["sender_tag"] = None
 

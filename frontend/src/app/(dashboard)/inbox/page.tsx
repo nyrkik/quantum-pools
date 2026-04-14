@@ -71,7 +71,6 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [assignFilter, setAssignFilter] = useState<AssignFilter>("all");
   const [staleFilter, setStaleFilter] = useState(false);
-  const [autoSentFilter, setAutoSentFilter] = useState(false);
   const [failedFilter, setFailedFilter] = useState(false);
   const [autoHandledFilter, setAutoHandledFilter] = useState(false);
   const [search, setSearch] = useState("");
@@ -156,12 +155,9 @@ export default function InboxPage() {
       offset: String(page * PAGE_SIZE),
     });
 
-    // Stale / Auto-Sent / Auto-Handled / Failed filters: search across ALL folders
+    // Stale / Auto-Handled / Failed filters: search across ALL folders
     if (staleFilter) {
       params.set("status", "stale");
-      params.set("exclude_spam", "false");
-    } else if (autoSentFilter) {
-      params.set("status", "auto_sent");
       params.set("exclude_spam", "false");
     } else if (autoHandledFilter) {
       params.set("status", "auto_handled");
@@ -197,7 +193,7 @@ export default function InboxPage() {
       })
       .catch(() => toast.error("Failed to load threads"))
       .finally(() => setLoading(false));
-  }, [search, page, assignFilter, staleFilter, autoSentFilter, autoHandledFilter, failedFilter, user?.id, selectedFolderId, selectedFolderKey]);
+  }, [search, page, assignFilter, staleFilter, autoHandledFilter, failedFilter, user?.id, selectedFolderId, selectedFolderKey]);
 
   const loadStats = useCallback(() => {
     api.get<ThreadStats>("/v1/admin/agent-threads/stats")
@@ -429,13 +425,11 @@ export default function InboxPage() {
             groupByClient={groupByClient}
             onGroupByClientChange={setGroupByClient}
             staleFilter={staleFilter}
-            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoSentFilter(false); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
-            autoSentFilter={autoSentFilter}
-            onAutoSentFilterChange={(v) => { setAutoSentFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
+            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
             failedFilter={failedFilter}
-            onFailedFilterChange={(v) => { setFailedFilter(v); setStaleFilter(false); setAutoSentFilter(false); setAutoHandledFilter(false); setPage(0); }}
+            onFailedFilterChange={(v) => { setFailedFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setPage(0); }}
             autoHandledFilter={autoHandledFilter}
-            onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setAutoSentFilter(false); setFailedFilter(false); setPage(0); }}
+            onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setFailedFilter(false); setPage(0); }}
             autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
             canManageInbox={perms.can("inbox.manage")}
           />

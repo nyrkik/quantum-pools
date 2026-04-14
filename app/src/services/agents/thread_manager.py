@@ -23,12 +23,11 @@ async def get_or_create_thread(
     urgency: str | None = None,
     visibility_permission: str | None = None,
     delivered_to: str | None = None,
-    routing_rule_id: str | None = None,
 ) -> "AgentThread":
     """Find existing thread or create new one.
 
-    Routing fields (visibility_permission, delivered_to, routing_rule_id) are only
-    set on NEW threads — existing threads keep their original visibility.
+    Routing fields (visibility_permission, delivered_to) are only set on
+    NEW threads — existing threads keep their original visibility.
     """
     from src.models.agent_thread import AgentThread
 
@@ -89,7 +88,6 @@ async def get_or_create_thread(
                 message_count=0,
                 visibility_permission=visibility_permission,
                 delivered_to=delivered_to,
-                routing_rule_id=routing_rule_id,
             )
             db.add(thread)
             await db.commit()

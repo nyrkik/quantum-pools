@@ -12,7 +12,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.organization import Organization
-from src.services.inbox_routing_service import check_sender_blocked
 
 logger = logging.getLogger(__name__)
 

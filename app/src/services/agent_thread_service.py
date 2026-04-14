@@ -281,7 +281,7 @@ class AgentThreadService:
     async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_permission_slugs: set[str] | None = None, can_manage_inbox: bool = False) -> dict:
         """Thread-level stats. If user_permission_slugs provided, counts only visible threads.
 
-        Ops counts (failed, auto_sent, auto_handled_today, stale_pending) are
+        Ops counts (failed, auto_handled_today, stale_pending) are
         zeroed out for users without inbox.manage — they're a billing/ops concern,
         not a manager-level dashboard. Defense-in-depth alongside the frontend
         chip-rendering gate; if either layer is misconfigured the count never
@@ -338,6 +338,9 @@ class AgentThreadService:
                 )
             )).scalar_one_or_none()
 
+            # Rule-driven auto_read_at silences threads a mark_as_read rule
+            # already handled. A thread is unread only if last_message_at
+            # exceeds BOTH the user's own read timestamp AND the rule stamp.
             unread_q = (
                 select(func.count(AgentThread.id))
                 .select_from(
@@ -354,6 +357,10 @@ class AgentThreadService:
                         ThreadRead.read_at.is_(None),
                         AgentThread.last_message_at > ThreadRead.read_at,
                     ),
+                    or_(
+                        AgentThread.auto_read_at.is_(None),
+                        AgentThread.last_message_at > AgentThread.auto_read_at,
+                    ),
                     # Inbox folder only
                     or_(
                         AgentThread.folder_id.is_(None),
@@ -363,18 +370,6 @@ class AgentThreadService:
             )
             unread_q = _vis_filter(unread_q)
             unread = (await self.db.execute(unread_q)).scalar() or 0
-
-        # Auto-sent thread count (all-time)
-        auto_sent = (await self.db.execute(
-            _vis_filter(
-                select(func.count(func.distinct(AgentThread.id)))
-                .select_from(AgentThread.__table__.join(
-                    AgentMessage.__table__,
-                    AgentMessage.thread_id == AgentThread.id,
-                ))
-                .where(thread_org, AgentMessage.status == "auto_sent")
-            )
-        )).scalar() or 0
 
         # Auto-handled today (status=ignored or status=handled with no human action)
         # Surfaces email the AI hid from the inbox so the user knows what's not visible.
@@ -448,7 +443,6 @@ class AgentThreadService:
             # Ops counts: only exposed to inbox-managers (owner/admin). Lower
             # roles see 0 even if data exists, so the chips never render.
             "stale_pending": stale if can_manage_inbox else 0,
-            "auto_sent": auto_sent if can_manage_inbox else 0,
             "failed": failed if can_manage_inbox else 0,
             "auto_handled_today": auto_handled_today if can_manage_inbox else 0,
         }
@@ -556,7 +550,6 @@ class AgentThreadService:
 
         presenter = ThreadPresenter(self.db)
         d = await presenter.one(thread, user_id=user_id)
-        d["routing_rule_id"] = thread.routing_rule_id
         d["timeline"] = timeline
         d["actions"] = actions
         return d

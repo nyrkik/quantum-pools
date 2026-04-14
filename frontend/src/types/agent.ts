@@ -73,7 +73,6 @@ export interface AgentStats {
   total: number;
   pending: number;
   sent: number;
-  auto_sent: number;
   rejected: number;
   ignored: number;
   by_category: Record<string, number>;
@@ -110,7 +109,6 @@ export interface Thread {
   visibility_permission: string | null;
   delivered_to: string | null;
   sender_tag: string | null;
-  has_auto_sent: boolean;
 }
 
 export interface TimelineMessage {
@@ -153,11 +151,9 @@ export interface ThreadDetail {
   assigned_at: string | null;
   visibility_permission: string | null;
   delivered_to: string | null;
-  routing_rule_id: string | null;
   folder_id: string | null;
   is_unread: boolean;
   sender_tag: string | null;
-  has_auto_sent: boolean;
   is_auto_handled?: boolean;
   timeline: TimelineMessage[];
   actions: unknown[];

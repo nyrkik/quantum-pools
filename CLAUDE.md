@@ -376,7 +376,7 @@ EquipmentCatalog 1──* EquipmentItem *──1 Property
 - [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
 - [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
 - [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
-- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected). Auto-send safety gate + commitment phrase guard, cross-source dedup, sender tags with folder routing, folders (Inbox/Sent/Spam + custom), HTML rendering in sandboxed iframe, quoted-text collapse, Postmark delivery webhooks (Delivered/Opened/Bounced), auto-sent monitoring + weekly digest, Gmail read/unread sync. MS Graph and forwarding modes PLANNED. See `docs/email-strategy.md`.
+- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected). Auto-send safety gate + commitment phrase guard, cross-source dedup, sender tags with folder routing, folders (Inbox/Sent/Spam + custom), HTML rendering in sandboxed iframe, quoted-text collapse, Postmark delivery webhooks (Delivered/Opened/Bounced), auto-sent monitoring + weekly digest, auto-handled review loop (purple Yes/No banner → AgentLearningService), Auto-Handled filter + Inbox count chip (owner/admin), manual refresh button (sync-all), click-to-read optimistic update, selected-thread highlight, Gmail read/unread sync. MS Graph and forwarding modes PLANNED. See `docs/email-strategy.md`.
 - [ ] Phase 6: Platform Admin (tenant management, subscriptions)
 - [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
 

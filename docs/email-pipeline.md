@@ -15,6 +15,10 @@ The email pipeline handles all inbound and outbound email for QuantumPools. **Mu
 
 **Auto-send monitoring:** Threads with auto-sent replies get a sky-blue "Auto-Sent" chip. Reading pane shows a feedback banner (Yes/No — owner/admin only) that records `AgentCorrection` for learning. Weekly digest email to org owner summarizes auto-sends. First-contact auto-sends trigger ntfy push alert.
 
+**Auto-handled review loop:** When the AI hides an email from the Inbox without sending a reply (moves to Spam, Auto folder, custom folder via tag, or just marks ignored), the thread is flagged `is_auto_handled`. The reading pane shows a purple banner naming exactly what the AI did ("AI moved this to '<folder>', tagged sender '<tag>', category '<category>'. Was that right?"). Owner/admin clicks Yes (acceptance correction → AI keeps doing it) or No (rejection correction + thread restored to Inbox + marked pending). Both feed `AgentLearningService` (`agent_type=email_classifier`). Endpoint: `POST /api/v1/admin/agent-threads/auto-handled-feedback`. Filter button "Auto-Handled" + Inbox folder count chip surface the backlog. `is_auto_handled` is derived in `thread_presenter` from `(last_direction=inbound AND status IN (ignored, handled) AND NOT has_pending AND NOT has_auto_sent)`.
+
+**Manual refresh:** Inbox header has a refresh button (`POST /api/v1/email-integrations/sync-all`) that triggers incremental sync across all connected Gmail integrations in the org and returns aggregate stats. Used when the user wants to pull new mail without waiting for the polling cycle.
+
 ## Infrastructure
 
 | Concern | Provider | Cost |

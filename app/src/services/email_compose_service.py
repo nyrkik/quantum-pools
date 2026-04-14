@@ -193,7 +193,6 @@ class EmailComposeService:
         email_svc = EmailService(self.db)
         result = await email_svc.send_agent_reply(
             org_id, to, subject, body,
-            from_address=from_address_override,
             sender_name=sender_name,
             is_new=True,
             attachments=email_atts or None,

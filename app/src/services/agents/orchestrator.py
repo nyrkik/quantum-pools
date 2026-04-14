@@ -50,6 +50,64 @@ INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.co
 # Gratitude patterns removed — AI triage handles all edge cases now
 
 
+async def _persist_inbound_attachments(db, msg, agent_message_id: str, organization_id: str) -> None:
+    """Walk an email.message.EmailMessage and persist any attachments as
+    MessageAttachment rows + files on disk.
+
+    Stores files at uploads/attachments/{org_id}/<uuid.ext> to match the same
+    layout outbound attachments use, so the URL the inbox builds resolves.
+    """
+    if not msg or not organization_id:
+        return
+    import uuid as _uuid
+    from pathlib import Path
+    from src.core.config import settings
+    from src.models.message_attachment import MessageAttachment
+
+    upload_root = Path(settings.upload_dir) / "attachments" / organization_id
+    upload_root.mkdir(parents=True, exist_ok=True)
+
+    # Use walk() so we work with both legacy email.message.Message (returned
+    # by email.message_from_bytes for Gmail raw) and the modern EmailMessage
+    # (returned by stdlib EmailMessage() for webhook payloads).
+    walk = getattr(msg, "walk", None)
+    if walk is None:
+        return
+    for part in walk():
+        try:
+            if part.is_multipart():
+                continue
+            disposition = (part.get_content_disposition() or "").lower()
+            filename = part.get_filename()
+            # Treat anything explicitly attached, OR any inline part with a
+            # filename and a non-text content type, as an attachment worth saving.
+            mime_type = (part.get_content_type() or "application/octet-stream").lower()
+            is_text_body = mime_type in ("text/plain", "text/html") and not filename
+            if disposition not in ("attachment", "inline") and is_text_body:
+                continue
+            if disposition not in ("attachment", "inline") and not filename:
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            filename = filename or f"attachment{Path(mime_type.replace('/', '.')).suffix or ''}"
+            ext = Path(filename).suffix
+            stored_filename = f"{_uuid.uuid4().hex}{ext}"
+            (upload_root / stored_filename).write_bytes(payload)
+
+            db.add(MessageAttachment(
+                organization_id=organization_id,
+                source_type="agent_message",
+                source_id=agent_message_id,
+                filename=filename[:255],
+                stored_filename=stored_filename,
+                mime_type=mime_type[:100],
+                file_size=len(payload),
+            ))
+        except Exception as e:
+            logger.warning(f"Skipping unparseable attachment on message {agent_message_id}: {e}")
+
+
 def _is_own_email(from_email: str) -> bool:
     """Check if the email is from one of our own addresses (reply loop prevention)."""
     addr = from_email.lower().strip()
@@ -369,6 +427,13 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
         )
         db.add(agent_msg)
         await db.flush()
+
+        # Persist any inbound attachments as MessageAttachment rows so the inbox
+        # reading pane can render images/docs the customer sent us.
+        try:
+            await _persist_inbound_attachments(db, msg, agent_msg.id, organization_id)
+        except Exception as e:
+            logger.warning(f"Failed to persist attachments for {uid}: {e}")
 
         # Historical sync: ingest + classify + thread, but no outbound actions
         if historical:

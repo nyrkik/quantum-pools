@@ -122,12 +122,10 @@ class InboundEmailService:
 
         from src.services.agents.orchestrator import process_incoming_email
         try:
+            # Attachments are added to email_msg in _build_email_message —
+            # the orchestrator persists them via MessageAttachment rows.
             await process_incoming_email(uid, email_msg, organization_id=org.id)
             logger.info(f"Webhook processed for {org_slug}: {parsed.from_email} -> {parsed.subject[:60]}")
-
-            # Store attachments if any
-            if parsed.attachments:
-                await self._store_attachments(db, uid, parsed.attachments, org.id)
 
             return {"status": "processed", "from": parsed.from_email, "subject": parsed.subject}
         except Exception as e:
@@ -174,34 +172,6 @@ class InboundEmailService:
             return {"status": "processed", "type": "delivery"}
 
         return {"status": "ignored"}
-
-    async def _store_attachments(
-        self, db: AsyncSession, email_uid: str, attachments: list[dict], org_id: str,
-    ):
-        """Store inbound email attachments."""
-        import base64
-        from pathlib import Path
-        from src.core.config import settings
-
-        for att in attachments:
-            try:
-                content = att.get("Content", "")
-                if not content:
-                    continue
-
-                filename = att.get("Name", att.get("FileName", "attachment"))
-                content_bytes = base64.b64decode(content)
-
-                # Store to uploads/inbound/{org_id}/
-                upload_dir = Path(settings.upload_dir) / "inbound" / org_id
-                upload_dir.mkdir(parents=True, exist_ok=True)
-
-                filepath = upload_dir / f"{email_uid[:20]}_{filename}"
-                filepath.write_bytes(content_bytes)
-
-                logger.info(f"Stored inbound attachment: {filename} ({len(content_bytes)} bytes)")
-            except Exception as e:
-                logger.error(f"Failed to store attachment: {e}")
 
     def _parse_sendgrid(self, payload: dict) -> ParsedEmail:
         """Parse SendGrid Inbound Parse webhook format."""
@@ -361,5 +331,27 @@ class InboundEmailService:
             msg.set_content(_clean_html(parsed.body_html))
         else:
             msg.set_content("")
+
+        # Attach files so the orchestrator's unified attachment path picks them up.
+        # Webhook payloads (Postmark/Mailgun/SendGrid) deliver attachments out-of-band;
+        # we re-attach them here so they live on the EmailMessage like a Gmail raw fetch.
+        import base64
+        for att in (parsed.attachments or []):
+            content_b64 = att.get("Content", "")
+            if not content_b64:
+                continue
+            try:
+                content_bytes = base64.b64decode(content_b64)
+            except Exception:
+                continue
+            filename = att.get("Name", att.get("FileName", "attachment"))
+            ctype = att.get("ContentType", "application/octet-stream")
+            maintype, _, subtype = ctype.partition("/")
+            if not subtype:
+                maintype, subtype = "application", "octet-stream"
+            try:
+                msg.add_attachment(content_bytes, maintype=maintype, subtype=subtype, filename=filename)
+            except Exception as e:
+                logger.warning(f"Failed to attach {filename}: {e}")
 
         return msg

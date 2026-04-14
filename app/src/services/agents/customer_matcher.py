@@ -98,8 +98,24 @@ def _extract_sender_name(from_header: str) -> str | None:
     return None
 
 
-async def match_customer(from_email: str, subject: str, body: str, from_header: str = "") -> dict | None:
-    """Match an incoming email to a customer in the database. Returns context dict or None."""
+async def match_customer(
+    from_email: str,
+    subject: str,
+    body: str,
+    from_header: str = "",
+    *,
+    skip_previous_match: bool = False,
+) -> dict | None:
+    """Match an incoming email to a customer in the database. Returns context dict or None.
+
+    ``skip_previous_match`` — when True, bypass step 2 (the "reuse the
+    customer we matched last time we saw this sender" shortcut). Used for
+    regional / corporate / shared senders (e.g. a property-management
+    executive assistant covering multiple customer properties) where each
+    thread may concern a different customer, so pinning to the first match
+    would silently misattribute future mail. Callers set this based on
+    inbox rules with the ``skip_customer_match`` action.
+    """
     match_method = None
 
     async with get_db_context() as db:
@@ -137,8 +153,9 @@ async def match_customer(from_email: str, subject: str, body: str, from_header: 
                 if customer:
                     match_method = "contact_email"
 
-        # 2. Check previous messages — if we've matched this email before, reuse it
-        if not customer:
+        # 2. Check previous messages — if we've matched this email before, reuse it.
+        # Skipped when ``skip_previous_match`` is True (shared/regional sender).
+        if not customer and not skip_previous_match:
             prev = await db.execute(
                 select(AgentMessage).where(
                     AgentMessage.from_email == from_email,

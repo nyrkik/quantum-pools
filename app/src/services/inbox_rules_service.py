@@ -46,6 +46,12 @@ ACTION_SET_VISIBILITY = "set_visibility"
 ACTION_SUPPRESS_CONTACT_PROMPT = "suppress_contact_prompt"
 ACTION_ROUTE_TO_SPAM = "route_to_spam"
 ACTION_MARK_AS_READ = "mark_as_read"
+# Advisory flag — NOT a thread mutation. Tells customer_matcher to skip its
+# "previous match reuse" shortcut for this sender. Used for regional /
+# corporate / shared senders (e.g. a property management executive assistant
+# covering multiple customer properties) where step 2 would incorrectly pin
+# them to whichever customer their last thread happened to reference.
+ACTION_SKIP_CUSTOMER_MATCH = "skip_customer_match"
 
 ALL_ACTION_TYPES = {
     ACTION_ASSIGN_FOLDER,
@@ -55,6 +61,7 @@ ALL_ACTION_TYPES = {
     ACTION_SUPPRESS_CONTACT_PROMPT,
     ACTION_ROUTE_TO_SPAM,
     ACTION_MARK_AS_READ,
+    ACTION_SKIP_CUSTOMER_MATCH,
 }
 
 # Fields a condition can match against. Keep in sync with the UI.
@@ -65,6 +72,10 @@ ALL_CONDITION_FIELDS = {
     "subject",
     "category",
     "customer_id",
+    # Virtual field derived from the matcher: "yes" when the thread has a
+    # matched_customer_id, "no" when unmatched. Lets a rule say "any client
+    # → Clients folder" as a sibling of the explicit customer_id=<uuid> form.
+    "customer_matched",
     "body",
 }
 
@@ -146,7 +157,13 @@ class InboxRulesService:
         return matched_actions
 
     def _matches(self, conditions: Iterable[dict], context: dict) -> bool:
-        """Return True iff every condition in the rule matches the context."""
+        """Return True iff every condition in the rule matches the context.
+
+        A condition's ``value`` can be a scalar string or a list of strings.
+        List values match when ANY element satisfies the operator — the
+        equivalent of "sender contains any of [foo, bar, baz]". This lets
+        one rule collapse what used to require N parallel rules.
+        """
         for cond in conditions:
             field = (cond.get("field") or "").strip()
             operator = (cond.get("operator") or "").strip()
@@ -158,8 +175,12 @@ class InboxRulesService:
             if haystack is None or value is None:
                 return False
             haystack_lower = str(haystack).lower()
-            needle_lower = str(value).lower()
-            if not _OPERATORS[operator](haystack_lower, needle_lower):
+            candidates = value if isinstance(value, list) else [value]
+            if not any(
+                _OPERATORS[operator](haystack_lower, str(v).lower())
+                for v in candidates
+                if v is not None and str(v) != ""
+            ):
                 return False
         return True
 
@@ -310,6 +331,180 @@ class InboxRulesService:
         return None
 
     # ------------------------------------------------------------------
+    # Auto-handled banner support — "Yes, add to existing rule" promotion
+    # ------------------------------------------------------------------
+
+    async def preview_append_match(
+        self,
+        org_id: str,
+        sender_email: str,
+        folder_id: str | None,
+        spam_folder_id: str | None = None,
+    ) -> dict:
+        """Look for a rule this auto-handled thread could be appended to.
+
+        Return one of three states:
+
+        * ``covered`` — an existing active rule already catches this sender.
+          The user clicking "Yes" is redundant; banner just acknowledges.
+        * ``promotable`` — exactly one active rule has an action matching
+          where the thread landed (same assign_folder id, or route_to_spam
+          when the thread is in Spam), has a single sender-based condition,
+          and doesn't yet cover this sender. Safe to append with one click.
+        * ``unclear`` — no matching rule, ambiguous (2+ matches), or the
+          sender can't be normalized. Banner falls back to Create-rule.
+
+        Returns ``{state, rule_id?, rule_name?, append_value?}``.
+        """
+        sender = (sender_email or "").lower().strip()
+        if not sender or "@" not in sender:
+            return {"state": "unclear"}
+
+        rules = (await self.db.execute(
+            select(InboxRule).where(
+                InboxRule.organization_id == org_id,
+                InboxRule.is_active.is_(True),
+            )
+        )).scalars().all()
+
+        covered_rule: InboxRule | None = None
+        candidates: list[InboxRule] = []
+
+        for rule in rules:
+            conds = rule.conditions or []
+            if len(conds) != 1:
+                continue
+            cond = conds[0]
+            field = cond.get("field")
+            operator = cond.get("operator")
+            if field not in ("sender_email", "sender_domain"):
+                continue
+            if operator not in _OPERATORS:
+                continue
+
+            # Does this rule's action match where the AI put the thread?
+            action_matches = False
+            for action in (rule.actions or []):
+                atype = action.get("type")
+                if atype == ACTION_ASSIGN_FOLDER:
+                    target = (action.get("params") or {}).get("folder_id")
+                    if target and target == folder_id:
+                        action_matches = True
+                        break
+                elif atype == ACTION_ROUTE_TO_SPAM:
+                    if spam_folder_id and folder_id == spam_folder_id:
+                        action_matches = True
+                        break
+            if not action_matches:
+                continue
+
+            # Does this rule already catch this sender?
+            value = cond.get("value")
+            values = value if isinstance(value, list) else ([value] if value else [])
+            haystack = sender if field == "sender_email" else sender.split("@", 1)[-1]
+            already_covered = any(
+                v is not None
+                and str(v) != ""
+                and _OPERATORS[operator](haystack, str(v).lower())
+                for v in values
+            )
+            if already_covered:
+                covered_rule = rule
+                break  # first-match wins for the covered state
+            candidates.append(rule)
+
+        if covered_rule is not None:
+            return {
+                "state": "covered",
+                "rule_id": covered_rule.id,
+                "rule_name": covered_rule.name,
+            }
+
+        if len(candidates) != 1:
+            return {"state": "unclear"}
+
+        rule = candidates[0]
+        cond = (rule.conditions or [])[0]
+        field = cond.get("field")
+        operator = cond.get("operator")
+        domain = sender.split("@", 1)[-1]
+
+        # Pick the value to append based on the rule's own operator/field so
+        # the appended value has the same semantics as the existing ones.
+        if field == "sender_domain":
+            append = domain
+        elif operator == "equals":
+            append = sender
+        elif operator in ("contains", "ends_with"):
+            append = f"@{domain}" if operator == "ends_with" else domain
+        elif operator == "starts_with":
+            append = sender  # rare; safest to use full address
+        else:
+            append = sender
+
+        return {
+            "state": "promotable",
+            "rule_id": rule.id,
+            "rule_name": rule.name,
+            "append_value": append,
+        }
+
+    async def append_sender_to_rule(
+        self,
+        org_id: str,
+        rule_id: str,
+        value: str,
+    ) -> dict:
+        """Append ``value`` to the first sender-based condition of ``rule_id``.
+
+        No-op if value is already present (covered). Promotes a scalar value
+        to an array when needed. Returns ``{rule_id, appended, already}``.
+        """
+        value_clean = (value or "").strip().lower()
+        if not value_clean:
+            raise ValueError("value is required")
+
+        rule = (await self.db.execute(
+            select(InboxRule).where(
+                InboxRule.id == rule_id,
+                InboxRule.organization_id == org_id,
+            )
+        )).scalar_one_or_none()
+        if rule is None:
+            raise ValueError("rule not found")
+
+        conds = list(rule.conditions or [])
+        target_idx: int | None = None
+        for i, c in enumerate(conds):
+            if c.get("field") in ("sender_email", "sender_domain"):
+                target_idx = i
+                break
+        if target_idx is None:
+            raise ValueError("rule has no sender-based condition")
+
+        cond = dict(conds[target_idx])
+        existing = cond.get("value")
+        values: list[str] = (
+            [str(v) for v in existing if v is not None]
+            if isinstance(existing, list)
+            else ([str(existing)] if existing else [])
+        )
+
+        if value_clean in [v.lower() for v in values]:
+            return {"rule_id": rule.id, "appended": False, "already": True}
+
+        values.append(value_clean)
+        cond["value"] = values if len(values) > 1 else values[0]
+        conds[target_idx] = cond
+        rule.conditions = conds
+        # Force SQLAlchemy JSONB mutation flag — assigning a new list does
+        # this in practice but be explicit to survive future ORM quirks.
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(rule, "conditions")
+        await self.db.commit()
+        return {"rule_id": rule.id, "appended": True, "already": False}
+
+    # ------------------------------------------------------------------
     # Application
     # ------------------------------------------------------------------
 
@@ -366,9 +561,10 @@ class InboxRulesService:
                 ):
                     thread.auto_read_at = thread.last_message_at
 
-            # ACTION_ASSIGN_TAG + ACTION_SUPPRESS_CONTACT_PROMPT don't mutate
-            # the thread directly — they're surfaced via `get_sender_tag`
-            # (for display) and callers of `evaluate` respectively.
+            # ACTION_ASSIGN_TAG + ACTION_SUPPRESS_CONTACT_PROMPT +
+            # ACTION_SKIP_CUSTOMER_MATCH don't mutate the thread directly —
+            # they're advisory flags surfaced via get_sender_tag (for display)
+            # and callers of `evaluate` respectively.
 
 
 # ---------------------------------------------------------------------------
@@ -410,5 +606,8 @@ def build_context(
         "subject": subject or "",
         "category": category or "",
         "customer_id": customer_id or "",
+        # Virtual field: "yes" if the matcher pinned a customer, "no" otherwise.
+        # Lets rules route by "any client" without naming specific customer ids.
+        "customer_matched": "yes" if customer_id else "no",
         "body": body or "",
     }

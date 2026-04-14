@@ -43,12 +43,18 @@ _OPERATORS = Literal[
 class Condition(BaseModel):
     field: str
     operator: _OPERATORS
-    value: str
+    # Scalar string OR a list of strings. A list matches when ANY element
+    # satisfies the operator — lets a single rule collapse what previously
+    # required N parallel rules (e.g., one "sender contains [mailchimp,
+    # sendgrid, hubspot, ...]" rule instead of one per domain).
+    value: str | list[str]
 
 
 class Action(BaseModel):
     type: str
     params: dict[str, Any] = Field(default_factory=dict)
+
+
 
 
 def _validate_rule_body(conditions: list[Condition], actions: list[Action]) -> None:
@@ -119,6 +125,116 @@ def _to_response(rule: InboxRule) -> RuleResponse:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+class MatchPreviewResponse(BaseModel):
+    state: Literal["covered", "promotable", "unclear"]
+    rule_id: str | None = None
+    rule_name: str | None = None
+    append_value: str | None = None
+
+
+@router.get("/match-preview")
+async def match_preview(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+) -> MatchPreviewResponse:
+    """For the auto-handled banner: does an existing active rule already
+    cover this sender, or is there a clean rule to append the sender to?
+
+    Backs the three-state banner (covered / promotable / unclear) — see
+    ``InboxRulesService.preview_append_match`` for the semantics.
+    """
+    from src.models.agent_thread import AgentThread
+    from src.models.inbox_folder import InboxFolder
+    from src.services.inbox_rules_service import InboxRulesService
+
+    thread = (await db.execute(
+        select(AgentThread).where(
+            AgentThread.id == thread_id,
+            AgentThread.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+
+    spam_folder_id = (await db.execute(
+        select(InboxFolder.id).where(
+            InboxFolder.organization_id == ctx.organization_id,
+            InboxFolder.system_key == "spam",
+        )
+    )).scalar_one_or_none()
+
+    result = await InboxRulesService(db).preview_append_match(
+        ctx.organization_id,
+        thread.contact_email or "",
+        thread.folder_id,
+        spam_folder_id,
+    )
+    return MatchPreviewResponse(**result)
+
+
+class AppendSenderBody(BaseModel):
+    value: str
+
+
+@router.post("/{rule_id}/append-sender")
+async def append_sender(
+    rule_id: str,
+    body: AppendSenderBody,
+    thread_id: str | None = None,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Append a sender value to an existing rule's sender-based condition.
+
+    Called from the auto-handled banner's "Add to rule" button. Also fires
+    the AgentLearningService acceptance signal for the thread so the
+    classifier stays in sync with the user's deterministic choice.
+    """
+    from src.services.inbox_rules_service import InboxRulesService
+
+    try:
+        result = await InboxRulesService(db).append_sender_to_rule(
+            ctx.organization_id, rule_id, body.value,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Best-effort: fire the learning-acceptance signal so the classifier
+    # also learns from the human-confirmed outcome.
+    if thread_id:
+        try:
+            from src.models.agent_message import AgentMessage
+            from src.services.agents.agent_learning_service import AgentLearningService
+            from sqlalchemy import desc
+
+            msg = (await db.execute(
+                select(AgentMessage).where(
+                    AgentMessage.thread_id == thread_id,
+                    AgentMessage.organization_id == ctx.organization_id,
+                    AgentMessage.direction == "inbound",
+                ).order_by(desc(AgentMessage.received_at)).limit(1)
+            )).scalar_one_or_none()
+            if msg:
+                learner = AgentLearningService(db)
+                await learner.record_correction(
+                    organization_id=ctx.organization_id,
+                    agent_type="email_classifier",
+                    category=msg.category or "general",
+                    customer_id=msg.matched_customer_id,
+                    input_context=f"Subject: {msg.subject}\n\nBody: {(msg.body or '')[:500]}",
+                    original_output=f"category={msg.category}, status={msg.status}",
+                    corrected_output=None,
+                    correction_type="acceptance",
+                    correction_note=f"User promoted to rule {rule_id}",
+                    reviewed_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
+                )
+        except Exception:
+            pass  # never block the promotion on a learning-signal failure
+
+    return result
 
 
 @router.get("")

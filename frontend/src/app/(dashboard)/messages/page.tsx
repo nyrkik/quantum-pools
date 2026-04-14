@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { usePermissions } from "@/lib/permissions";
-import { useWSRefetch } from "@/lib/ws";
+import { useWSEvent, useWSRefetch } from "@/lib/ws";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -83,6 +83,7 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadThreads = useCallback(() => {
     setLoading(true);
@@ -97,6 +98,16 @@ export default function MessagesPage() {
   // Real-time: refresh when new internal messages arrive
   useWSRefetch(["message.new", "message.read"], loadThreads, 500);
 
+  // Refresh the OPEN thread when a message lands on it. Without this, the
+  // left pane (thread list) shows the new reply but the right pane still
+  // renders the old message list until the user clicks away and back.
+  useWSEvent("message.new", (event) => {
+    const tid = event.data?.thread_id as string | undefined;
+    if (tid && tid === selectedThreadId) {
+      loadDetail(selectedThreadId);
+    }
+  });
+
   const loadDetail = useCallback((threadId: string) => {
     setDetailLoading(true);
     api.get<ThreadDetail>(`/v1/messages/${threadId}`)
@@ -109,6 +120,15 @@ export default function MessagesPage() {
     if (selectedThreadId) loadDetail(selectedThreadId);
     else setDetail(null);
   }, [selectedThreadId, loadDetail]);
+
+  // Scroll to the most recent message when a thread opens or new messages
+  // arrive. Chat-app convention: reading pane starts at the bottom.
+  useEffect(() => {
+    if (!detail?.messages?.length) return;
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ block: "end" });
+    });
+  }, [detail?.id, detail?.messages?.length]);
 
   const handleReply = async () => {
     if (!reply.trim() || !selectedThreadId) return;
@@ -268,6 +288,7 @@ export default function MessagesPage() {
                   </div>
                 );
               })}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Reply */}

@@ -24,7 +24,9 @@ import {
   Folder,
   Loader2,
   Mailbox,
+  PenSquare,
 } from "lucide-react";
+import { useCompose } from "@/components/email/compose-provider";
 
 export interface InboxFolderItem {
   id: string;
@@ -55,6 +57,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 };
 
 export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className, refreshKey, autoHandledToday }: Props) {
+  const { openCompose } = useCompose();
   const perms = usePermissions();
   const canSeeAllMail = perms.can("inbox.see_all_mail");
   const [folders, setFolders] = useState<InboxFolderItem[]>([]);
@@ -150,6 +153,16 @@ export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className
 
   return (
     <div className={cn("flex flex-col gap-0.5", className)}>
+      {/* Compose — top of the inbox sidebar, above folders. Gmail pattern. */}
+      <Button
+        className="w-full gap-2 mb-2 shadow-sm"
+        size="sm"
+        onClick={() => openCompose()}
+      >
+        <PenSquare className="h-3.5 w-3.5" />
+        Compose
+      </Button>
+
       {/* Inbox + custom folders nested underneath */}
       {inboxFolder && renderFolder(inboxFolder)}
       {customFolders.map((f) => renderFolder(f, true))}

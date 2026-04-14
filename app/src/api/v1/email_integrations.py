@@ -191,11 +191,11 @@ async def gmail_callback(
     is prevented by the `state` parameter (must match what we issued in
     /authorize).
 
-    Returns a redirect to the frontend Settings → Email page with a status
+    Returns a redirect to the frontend Inbox Settings page with a status
     query param so the UI can show success/failure.
     """
     frontend_base = os.environ.get("APP_BASE_URL", "https://app.quantumpoolspro.com").rstrip("/")
-    settings_url = f"{frontend_base}/settings/email"
+    settings_url = f"{frontend_base}/inbox/integrations"
 
     if error:
         logger.warning(f"Gmail OAuth user denied / error: {error}")

@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, Search, User, Users, Bot, MailX } from "lucide-react";
+import { AlertTriangle, Search, User, Users, Bot, MailX, UserCheck, CheckCheck } from "lucide-react";
 
 interface ThreadStats {
   total: number;
@@ -23,6 +23,10 @@ interface InboxFiltersProps {
   stats: ThreadStats | null;
   groupByClient?: boolean;
   onGroupByClientChange?: (v: boolean) => void;
+  clientsOnlyFilter?: boolean;
+  onClientsOnlyFilterChange?: (v: boolean) => void;
+  handledFilter?: boolean;
+  onHandledFilterChange?: (v: boolean) => void;
   staleFilter?: boolean;
   onStaleFilterChange?: (v: boolean) => void;
   failedFilter?: boolean;
@@ -45,6 +49,10 @@ export function InboxFilters({
   stats,
   groupByClient,
   onGroupByClientChange,
+  clientsOnlyFilter,
+  onClientsOnlyFilterChange,
+  handledFilter,
+  onHandledFilterChange,
   staleFilter,
   onStaleFilterChange,
   failedFilter,
@@ -65,6 +73,30 @@ export function InboxFilters({
         <User className="h-3.5 w-3.5 mr-1" />
         Mine
       </Button>
+      {onClientsOnlyFilterChange && (
+        <Button
+          variant={clientsOnlyFilter ? "default" : "outline"}
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          onClick={() => onClientsOnlyFilterChange(!clientsOnlyFilter)}
+          title="Only show threads matched to a customer"
+        >
+          <UserCheck className="h-3.5 w-3.5 mr-1" />
+          Clients
+        </Button>
+      )}
+      {onHandledFilterChange && (
+        <Button
+          variant={handledFilter ? "default" : "outline"}
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          onClick={() => onHandledFilterChange(!handledFilter)}
+          title="Show threads already marked handled"
+        >
+          <CheckCheck className="h-3.5 w-3.5 mr-1" />
+          Handled
+        </Button>
+      )}
       {onGroupByClientChange && (
         <Button
           variant={groupByClient ? "default" : "outline"}

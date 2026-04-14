@@ -76,12 +76,18 @@ class AgentThreadService:
         offset: int,
         assigned_to: str | None = None,
         customer_id: str | None = None,
+        has_customer: bool = False,
         current_user_id: str | None = None,
         user_permission_slugs: set[str] | None = None,
         folder_id: str | None = None,
         folder_key: str | None = None,
     ) -> dict:
-        """List conversation threads with filtering."""
+        """List conversation threads with filtering.
+
+        ``has_customer`` — when True, filter to threads whose sender was
+        matched to any customer record (``matched_customer_id IS NOT NULL``).
+        Orthogonal to ``customer_id`` which scopes to a specific customer.
+        """
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
 
         # "All Mail" folder: show literally every thread — no folder, status, or
@@ -92,6 +98,8 @@ class AgentThreadService:
                 base = base.where(AgentThread.assigned_to_user_id == assigned_to)
             if customer_id:
                 base = base.where(AgentThread.matched_customer_id == customer_id)
+            if has_customer:
+                base = base.where(AgentThread.matched_customer_id.isnot(None))
             if user_permission_slugs is not None:
                 base = base.where(
                     or_(
@@ -202,6 +210,8 @@ class AgentThreadService:
             base = base.where(AgentThread.assigned_to_user_id == assigned_to)
         if customer_id:
             base = base.where(AgentThread.matched_customer_id == customer_id)
+        if has_customer:
+            base = base.where(AgentThread.matched_customer_id.isnot(None))
         # Visibility filtering: only show threads the user has permission to see
         if user_permission_slugs is not None:
             base = base.where(

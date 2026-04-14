@@ -62,8 +62,11 @@ async def lifespan(app: FastAPI):
     # Flip to `failed` so it surfaces in the Failed filter and the user knows.
     from apscheduler.triggers.interval import IntervalTrigger
     scheduler.add_job(_run_outbound_send_janitor, IntervalTrigger(minutes=2), id="outbound_send_janitor")
+    # Spam retention: purge category='spam' threads older than 30 days.
+    # Keeps synced Gmail spam actionable without letting it grow unbounded.
+    scheduler.add_job(_run_spam_retention, CronTrigger(hour=4, minute=30), id="spam_retention")
     scheduler.start()
-    logger.info("Scheduler started (outbound send janitor; billing dormant; auto-send removed)")
+    logger.info("Scheduler started (outbound send janitor; spam retention; billing dormant; auto-send removed)")
 
     yield
 
@@ -172,6 +175,64 @@ async def _run_outbound_send_janitor():
                 pass  # ntfy is best-effort
     except Exception as e:
         logger.error(f"Outbound send janitor error: {e}")
+
+
+async def _run_spam_retention():
+    """Purge spam threads older than 30 days.
+
+    Gmail's own 30-day spam auto-purge eventually removes the upstream copy;
+    we mirror that policy locally so synced spam doesn't accumulate. Only
+    threads with ``category='spam'`` are affected — QP-classified + Gmail-
+    synced spam both fall under this. Manual-override threads (someone
+    rescued the thread from Spam in QP) are excluded because the rescue
+    path clears ``category`` already.
+
+    AgentMessage.thread_id has no ON DELETE cascade, so we delete messages
+    first, then threads. ThreadRead does cascade. Threads with attached
+    AgentAction rows (shouldn't exist for spam, but if a rule ever fires
+    on a misclassified thread) are skipped to avoid FK violations.
+    """
+    from datetime import datetime, timedelta, timezone
+    from src.core.database import get_db_context
+    from src.models.agent_action import AgentAction
+    from src.models.agent_message import AgentMessage
+    from src.models.agent_thread import AgentThread
+    from sqlalchemy import delete, select
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    try:
+        async with get_db_context() as db:
+            candidates = (await db.execute(
+                select(AgentThread.id).where(
+                    AgentThread.category == "spam",
+                    AgentThread.last_message_at < cutoff,
+                )
+            )).scalars().all()
+            if not candidates:
+                return
+
+            # Exclude any thread that unexpectedly has actions attached
+            blocked = set((await db.execute(
+                select(AgentAction.thread_id).where(AgentAction.thread_id.in_(candidates))
+            )).scalars().all())
+            targets = [tid for tid in candidates if tid not in blocked]
+            if not targets:
+                return
+
+            await db.execute(
+                delete(AgentMessage).where(AgentMessage.thread_id.in_(targets))
+            )
+            result = await db.execute(
+                delete(AgentThread).where(AgentThread.id.in_(targets))
+            )
+            await db.commit()
+            logger.info(
+                f"Spam retention: purged {result.rowcount} spam threads older than 30 days "
+                f"(skipped {len(blocked)} with attached actions)"
+            )
+    except Exception as e:
+        logger.error(f"Spam retention error: {e}")
+        sentry_sdk.capture_exception(e)
 
 
 def create_app() -> FastAPI:

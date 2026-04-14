@@ -293,18 +293,15 @@ class InboundEmailService:
                 "ContentLength": att.get("ContentLength", 0),
             })
 
-        # Some Outlook/Exchange senders relayed via Postmark arrive with TextBody
-        # containing a raw multipart MIME envelope instead of decoded text.
-        # Unwrap it before storing.
-        from src.services.agents.mail_agent import _unwrap_embedded_mime
-        text_body = _unwrap_embedded_mime(payload.get("TextBody", ""))
-
+        # Raw-MIME-in-TextBody unwrap is now handled centrally inside
+        # extract_bodies (src/services/agents/mail_agent.py), so every
+        # ingest path benefits without provider-specific patching.
         return ParsedEmail(
             from_email=from_email,
             from_name=from_name,
             to_email=to_email,
             subject=payload.get("Subject", ""),
-            body_plain=text_body,
+            body_plain=payload.get("TextBody", ""),
             body_html=payload.get("HtmlBody", ""),
             headers=headers,
             raw_payload=payload,

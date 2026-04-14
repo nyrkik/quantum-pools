@@ -340,6 +340,12 @@ def extract_bodies(msg) -> tuple[str, str | None]:
     Returns (text_body, html_body). text_body is always populated (converted
     from HTML if only HTML was available). html_body is the raw HTML if present,
     None otherwise.
+
+    Safety net: if the extracted text_body still looks like a raw MIME
+    multipart envelope (the Outlook/Exchange quirk some webhook providers
+    surface in TextBody fields), unwrap it. This runs regardless of the
+    ingest source (Postmark, Gmail, future MS Graph, etc.) so we don't
+    need to remember which providers have the quirk.
     """
     text_raw = ""
     html_raw = None
@@ -368,5 +374,8 @@ def extract_bodies(msg) -> tuple[str, str | None]:
                 text_raw = _clean_html(text)
             else:
                 text_raw = text
+
+    if text_raw:
+        text_raw = _unwrap_embedded_mime(text_raw)
 
     return text_raw, html_raw

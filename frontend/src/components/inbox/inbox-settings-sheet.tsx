@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Settings2 } from "lucide-react";
+import { Plug, Settings2 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,21 @@ export function InboxSettingsSheet({ open, onOpenChange }: InboxSettingsSheetPro
           <Link href="/inbox/rules">
             <Settings2 className="h-3.5 w-3.5 mr-1.5" />
             Manage rules
+          </Link>
+        </Button>
+      </div>
+
+      <div className="flex items-center justify-between py-3 border-b">
+        <div className="space-y-0.5">
+          <Label className="text-sm font-medium">Email Integrations</Label>
+          <p className="text-xs text-muted-foreground">
+            Connect Gmail or another mailbox so QP can send and receive customer email.
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Link href="/inbox/integrations">
+            <Plug className="h-3.5 w-3.5 mr-1.5" />
+            Manage
           </Link>
         </Button>
       </div>

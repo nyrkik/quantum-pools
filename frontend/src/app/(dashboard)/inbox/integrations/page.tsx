@@ -143,7 +143,7 @@ function EmailSettingsContent() {
       toast.error(`Gmail connection failed: ${reason}`);
     }
     // Clean the query string so the toast doesn't fire again on re-renders
-    router.replace("/settings/email");
+    router.replace("/inbox/integrations");
   }, [searchParams, router]);
 
   const handleConnectGmail = async (reauthIntegrationId?: string) => {

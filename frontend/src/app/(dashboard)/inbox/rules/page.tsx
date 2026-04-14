@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   DndContext,
@@ -30,28 +31,36 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { PageLayout } from "@/components/layout/page-layout";
 import {
   RuleEditorDialog,
   type RuleDraft,
 } from "@/components/inbox/rule-editor-dialog";
 import { api } from "@/lib/api";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface InboxFolder {
   id: string;
   name: string;
+}
+
+interface PermissionItem {
+  slug: string;
+  action: string;
+  description: string | null;
+}
+
+interface PermissionCatalog {
+  resources: Record<string, PermissionItem[]>;
 }
 
 interface RuleRow extends RuleDraft {
@@ -68,18 +77,77 @@ const EMPTY_DRAFT: RuleDraft = {
   is_active: true,
 };
 
-function summarizeConditions(c: RuleDraft["conditions"]): string {
-  if (c.length === 0) return "(always)";
-  return c
-    .map((cc) => `${cc.field} ${cc.operator} "${cc.value}"`)
-    .join(" AND ");
+const FIELD_LABEL: Record<string, string> = {
+  sender_email: "sender",
+  sender_domain: "sender domain",
+  subject: "subject",
+  category: "category",
+  customer_id: "customer",
+  customer_matched: "matched-customer",
+  delivered_to: "recipient",
+};
+
+const OPERATOR_LABEL: Record<string, string> = {
+  equals: "is",
+  contains: "contains",
+  starts_with: "starts with",
+  ends_with: "ends with",
+  matches: "matches",
+};
+
+function humanizeConditions(conditions: RuleDraft["conditions"]): string {
+  if (conditions.length === 0) return "always";
+  return conditions
+    .map((c) => {
+      // Special: customer_matched reads more naturally as a whole phrase.
+      if (c.field === "customer_matched") {
+        const v = Array.isArray(c.value) ? c.value[0] : c.value;
+        return v === "yes" ? "sender is a matched customer" : "sender is not a matched customer";
+      }
+      const field = FIELD_LABEL[c.field] ?? c.field;
+      const op = OPERATOR_LABEL[c.operator] ?? c.operator;
+      if (Array.isArray(c.value)) {
+        if (c.value.length === 0) return `${field} ${op} (none)`;
+        if (c.value.length === 1) return `${field} ${op} "${c.value[0]}"`;
+        if (c.value.length <= 3) {
+          return `${field} ${op} any of "${c.value.join('", "')}"`;
+        }
+        return `${field} ${op} any of ${c.value.length} values`;
+      }
+      return `${field} ${op} "${c.value}"`;
+    })
+    .join(" and ");
 }
 
-function summarizeActions(a: RuleDraft["actions"]): string {
-  return a
-    .map((aa) => {
-      const key = Object.values(aa.params || {})[0];
-      return key ? `${aa.type}(${key})` : aa.type;
+function humanizeActions(
+  actions: RuleDraft["actions"],
+  folderNameById: Map<string, string>,
+): string {
+  return actions
+    .map((a) => {
+      switch (a.type) {
+        case "route_to_spam":
+          return "→ Spam folder";
+        case "assign_folder": {
+          const fid = a.params?.folder_id;
+          const name = fid ? folderNameById.get(fid) : null;
+          return name ? `→ ${name} folder` : "→ folder";
+        }
+        case "assign_tag":
+          return `tag as ${a.params?.tag ?? "?"}`;
+        case "assign_category":
+          return `category: ${a.params?.category ?? "?"}`;
+        case "set_visibility":
+          return `visibility: ${a.params?.permission_slug ?? a.params?.slug ?? "?"}`;
+        case "mark_as_read":
+          return "mark read";
+        case "suppress_contact_prompt":
+          return "skip contact prompt";
+        case "skip_customer_match":
+          return "don't auto-match to past customer";
+        default:
+          return a.type;
+      }
     })
     .join(", ");
 }
@@ -106,76 +174,69 @@ function SortableRuleRow({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const actionsForDisplay = rule.actions.map((a) => {
-    if (a.type === "assign_folder") {
-      const fid = a.params?.folder_id;
-      const name = fid ? folderNameById.get(fid) : null;
-      return { ...a, params: name ? { folder: name } : a.params };
-    }
-    return a;
-  });
+  const summary = `${humanizeConditions(rule.conditions)} ${humanizeActions(rule.actions, folderNameById)}`;
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="grid grid-cols-[auto,1fr,2fr,2fr,auto,auto] items-center gap-3 rounded-md border bg-card px-3 py-2 shadow-sm"
+      className="flex items-center gap-2 border-b px-2 py-1.5 hover:bg-muted/40"
     >
       <button
         {...attributes}
         {...listeners}
-        className="cursor-grab text-muted-foreground hover:text-foreground"
+        className="cursor-grab text-muted-foreground hover:text-foreground shrink-0"
         aria-label="Drag to reorder"
       >
         <GripVertical className="h-4 w-4" />
       </button>
-      <div className="min-w-0">
-        <div className="text-sm truncate">
-          {rule.name || (
-            <span className="text-muted-foreground italic">(unnamed)</span>
-          )}
-        </div>
-        {rule.created_by === "migration" && (
-          <Badge variant="outline" className="mt-1 text-[10px]">
-            migrated
-          </Badge>
-        )}
-      </div>
-      <div className="text-xs text-muted-foreground truncate">
-        {summarizeConditions(rule.conditions)}
-      </div>
-      <div className="text-xs text-muted-foreground truncate">
-        {summarizeActions(actionsForDisplay)}
-      </div>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex-1 min-w-0 text-sm truncate">
+              {rule.name && (
+                <span className="font-medium mr-2">{rule.name}</span>
+              )}
+              <span className="text-muted-foreground">{summary}</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="start" className="max-w-md">
+            <p className="text-xs">
+              {rule.name ? `${rule.name} — ${summary}` : summary}
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <Switch
         checked={rule.is_active}
         onCheckedChange={(v) => onToggleActive(rule, v)}
+        className="shrink-0"
       />
-      <div className="flex items-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => onEdit(rule)}
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-destructive"
-          onClick={() => onDelete(rule)}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0"
+        onClick={() => onEdit(rule)}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={() => onDelete(rule)}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }
 
 export default function InboxRulesPage() {
+  const router = useRouter();
   const [rules, setRules] = useState<RuleRow[]>([]);
   const [folders, setFolders] = useState<InboxFolder[]>([]);
+  const [permissions, setPermissions] = useState<PermissionCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<RuleDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RuleRow | null>(null);
@@ -187,12 +248,14 @@ export default function InboxRulesPage() {
 
   const load = useCallback(async () => {
     try {
-      const [rulesData, foldersData] = await Promise.all([
+      const [rulesData, foldersData, permsData] = await Promise.all([
         api.get<RuleRow[]>("/v1/inbox-rules"),
         api.get<{ folders: InboxFolder[] }>("/v1/inbox-folders"),
+        api.get<PermissionCatalog>("/v1/permissions/catalog").catch(() => null),
       ]);
       setRules(rulesData);
       setFolders(foldersData.folders || []);
+      setPermissions(permsData);
     } catch {
       toast.error("Failed to load inbox rules");
     } finally {
@@ -272,73 +335,60 @@ export default function InboxRulesPage() {
       });
     } catch {
       toast.error("Failed to save new order");
-      // Reload from server to get back to a known-good state.
       load();
     }
   };
 
   return (
-    <PageLayout title="Inbox Rules">
-      <div className="space-y-4 max-w-6xl">
-        <Card className="shadow-sm">
-          <CardHeader>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>Rules</CardTitle>
-                <CardDescription>
-                  Every inbound email runs through these rules in order.
-                  Drag <GripVertical className="inline h-3.5 w-3.5" /> to
-                  reorder. All conditions in a rule must match (AND).
-                </CardDescription>
-              </div>
-              <Button onClick={() => setEditing({ ...EMPTY_DRAFT })}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Add rule
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : rules.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No rules yet. Create one above to route or tag inbound email.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                <div className="grid grid-cols-[auto,1fr,2fr,2fr,auto,auto] gap-3 px-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  <span className="w-4" aria-hidden />
-                  <span>Name</span>
-                  <span>Conditions</span>
-                  <span>Actions</span>
-                  <span>Active</span>
-                  <span className="w-14 text-right">Edit</span>
-                </div>
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleDragEnd}
-                >
-                  <SortableContext
-                    items={rules.map((r) => r.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    {rules.map((r) => (
-                      <SortableRuleRow
-                        key={r.id}
-                        rule={r}
-                        folderNameById={folderNameById}
-                        onEdit={(rule) => setEditing({ ...rule })}
-                        onToggleActive={handleToggleActive}
-                        onDelete={(rule) => setConfirmDelete(rule)}
-                      />
-                    ))}
-                  </SortableContext>
-                </DndContext>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+    <PageLayout
+      title="Inbox Rules"
+      secondaryActions={
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => router.push("/inbox")}
+          aria-label="Back to inbox"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+      }
+      action={
+        <Button size="sm" onClick={() => setEditing({ ...EMPTY_DRAFT })}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Add rule
+        </Button>
+      }
+    >
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : rules.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No rules yet. Click <span className="font-medium">Add rule</span> to route or tag inbound email.
+        </p>
+      ) : (
+        <div className="rounded-md border">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={rules.map((r) => r.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {rules.map((r) => (
+                <SortableRuleRow
+                  key={r.id}
+                  rule={r}
+                  folderNameById={folderNameById}
+                  onEdit={(rule) => setEditing({ ...rule })}
+                  onToggleActive={handleToggleActive}
+                  onDelete={(rule) => setConfirmDelete(rule)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        </div>
+      )}
 
       {editing && (
         <RuleEditorDialog
@@ -346,7 +396,14 @@ export default function InboxRulesPage() {
           onOpenChange={(open) => !open && setEditing(null)}
           initialDraft={editing}
           folders={folders}
+          permissions={permissions}
           onSave={handleSave}
+          onFolderCreated={(f) =>
+            setFolders((current) => {
+              if (current.some((existing) => existing.id === f.id)) return current;
+              return [...current, f];
+            })
+          }
         />
       )}
 

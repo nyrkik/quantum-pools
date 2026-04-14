@@ -9,6 +9,15 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      {
+        source: "/settings/email",
+        destination: "/inbox/integrations",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

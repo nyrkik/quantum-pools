@@ -306,6 +306,8 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                         <p className="text-[10px] text-muted-foreground truncate">{t.contact_email}</p>
                       )}
                       <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                        {/* Standard order: sender tag → category → status → stale warning.
+                            Reading flow: "who is this?" → "what kind?" → "what state?" → "needs attention?" */}
                         {(() => {
                           const effectiveTag = t.matched_customer_id ? "client" : t.sender_tag;
                           if (!effectiveTag) return null;
@@ -317,8 +319,14 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                             </span>
                           );
                         })()}
-                        {!compact && <CategoryBadge category={t.category} />}
-                        {!compact && <StatusBadge status={t.status} />}
+                        <CategoryBadge category={t.category} />
+                        <StatusBadge status={t.status} />
+                        {t.has_pending && t.last_message_at &&
+                          (Date.now() - new Date(t.last_message_at).getTime()) > 30 * 60 * 1000 && (
+                          <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                            Stale
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 sm:hidden mt-0.5">
                         {t.last_direction === "outbound" ? (

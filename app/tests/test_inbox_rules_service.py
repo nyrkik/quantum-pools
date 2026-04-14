@@ -332,3 +332,361 @@ async def test_apply_mark_as_read_stamps_auto_read_at(db_session, org_a):
     t = T()
     await svc.apply([{"type": ACTION_MARK_AS_READ}], t)
     assert t.auto_read_at == t.last_message_at
+
+
+# ---------------------------------------------------------------------------
+# Array value — the any-of collapse (many rules → one rule)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_value_as_list_matches_any(db_session, org_a):
+    """A list-valued condition matches when the haystack matches ANY element.
+
+    This is what lets a single rule stand in for N parallel rules — the
+    cleanup pattern for migrated per-domain routing rules.
+    """
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="marketing bundle → spam",
+        conditions=[{
+            "field": "sender_email",
+            "operator": "contains",
+            "value": ["mailchimp.com", "sendgrid.net", "hubspot.com"],
+        }],
+        actions=[{"type": ACTION_ROUTE_TO_SPAM}],
+    )
+    svc = InboxRulesService(db_session)
+
+    for sender in [
+        "news@mailchimp.com",
+        "bounce@sendgrid.net",
+        "updates@hubspot.com",
+    ]:
+        actions = await svc.evaluate(build_context(sender_email=sender), org_a.id)
+        assert len(actions) == 1, f"expected match for {sender}"
+        assert actions[0]["type"] == ACTION_ROUTE_TO_SPAM
+
+    # A sender NOT in the list must not match.
+    actions = await svc.evaluate(
+        build_context(sender_email="customer@example.com"), org_a.id
+    )
+    assert actions == []
+
+
+@pytest.mark.asyncio
+async def test_value_as_list_with_equals_operator(db_session, org_a):
+    """equals also works with list values — used for exact-address bundles."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="scp vendor addresses",
+        conditions=[{
+            "field": "sender_email",
+            "operator": "equals",
+            "value": ["ecom34@scppool.com", "ecom652@scppool.com"],
+        }],
+        actions=[{"type": ACTION_ASSIGN_TAG, "params": {"tag": "vendor"}}],
+    )
+    svc = InboxRulesService(db_session)
+
+    actions = await svc.evaluate(
+        build_context(sender_email="ecom34@scppool.com"), org_a.id
+    )
+    assert len(actions) == 1
+    actions = await svc.evaluate(
+        build_context(sender_email="other@scppool.com"), org_a.id
+    )
+    assert actions == []
+
+
+@pytest.mark.asyncio
+async def test_empty_list_value_fails_closed(db_session, org_a):
+    """[] matches nothing — safer than matching everything."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="empty bundle",
+        conditions=[{"field": "sender_email", "operator": "contains", "value": []}],
+        actions=[{"type": ACTION_ROUTE_TO_SPAM}],
+    )
+    svc = InboxRulesService(db_session)
+    actions = await svc.evaluate(
+        build_context(sender_email="anything@example.com"), org_a.id
+    )
+    assert actions == []
+
+
+@pytest.mark.asyncio
+async def test_scalar_value_still_works(db_session, org_a):
+    """Backward compat: non-list value keeps current behavior."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="single domain",
+        conditions=[{"field": "sender_email", "operator": "contains", "value": "mailchimp.com"}],
+        actions=[{"type": ACTION_ROUTE_TO_SPAM}],
+    )
+    svc = InboxRulesService(db_session)
+    actions = await svc.evaluate(
+        build_context(sender_email="news@mailchimp.com"), org_a.id
+    )
+    assert len(actions) == 1
+
+
+@pytest.mark.asyncio
+async def test_skip_customer_match_action_fires(db_session, org_a):
+    """Rule with `skip_customer_match` emits an advisory action the
+    orchestrator checks to bypass the matcher's previous-match shortcut."""
+    from src.services.inbox_rules_service import ACTION_SKIP_CUSTOMER_MATCH
+
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="regional PM — shared sender",
+        conditions=[{
+            "field": "sender_email",
+            "operator": "equals",
+            "value": "regional@pm.example",
+        }],
+        actions=[{"type": ACTION_SKIP_CUSTOMER_MATCH}],
+    )
+    svc = InboxRulesService(db_session)
+    actions = await svc.evaluate(
+        build_context(sender_email="regional@pm.example"), org_a.id
+    )
+    assert any(a.get("type") == ACTION_SKIP_CUSTOMER_MATCH for a in actions)
+
+
+@pytest.mark.asyncio
+async def test_skip_customer_match_action_is_noop_in_apply(db_session, org_a):
+    """apply() on a skip_customer_match action must not mutate anything —
+    it's advisory, handled by the caller (orchestrator)."""
+    from src.services.inbox_rules_service import ACTION_SKIP_CUSTOMER_MATCH
+
+    class T:
+        folder_id = "original-folder"
+        category = "general"
+        visibility_permission = None
+        auto_read_at = None
+        last_message_at = None
+
+    svc = InboxRulesService(db_session)
+    t = T()
+    await svc.apply([{"type": ACTION_SKIP_CUSTOMER_MATCH}], t)
+    assert t.folder_id == "original-folder"
+    assert t.category == "general"
+    assert t.visibility_permission is None
+    assert t.auto_read_at is None
+
+
+# ---------------------------------------------------------------------------
+# customer_matched virtual field — routes by "any matched customer"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_customer_matched_yes_when_customer_id_present(db_session, org_a):
+    """Rule on customer_matched=yes fires when the thread was matched."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="clients default folder",
+        conditions=[{
+            "field": "customer_matched",
+            "operator": "equals",
+            "value": "yes",
+        }],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "clients-folder"}}],
+    )
+    svc = InboxRulesService(db_session)
+
+    # Matched thread — fires
+    actions = await svc.evaluate(
+        build_context(sender_email="a@customer.com", customer_id="cust-123"),
+        org_a.id,
+    )
+    assert any(a.get("type") == ACTION_ASSIGN_FOLDER for a in actions)
+
+    # Unmatched thread — does NOT fire
+    actions = await svc.evaluate(
+        build_context(sender_email="a@random.com"),
+        org_a.id,
+    )
+    assert actions == []
+
+
+@pytest.mark.asyncio
+async def test_customer_matched_no_matches_unmatched_senders(db_session, org_a):
+    """Inverse rule: customer_matched=no catches cold senders."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="tag unknown senders",
+        conditions=[{
+            "field": "customer_matched",
+            "operator": "equals",
+            "value": "no",
+        }],
+        actions=[{"type": ACTION_ASSIGN_TAG, "params": {"tag": "unknown"}}],
+    )
+    svc = InboxRulesService(db_session)
+
+    actions = await svc.evaluate(
+        build_context(sender_email="stranger@nowhere.com"),
+        org_a.id,
+    )
+    assert any(a.get("type") == ACTION_ASSIGN_TAG for a in actions)
+
+    actions = await svc.evaluate(
+        build_context(sender_email="a@known.com", customer_id="cust-1"),
+        org_a.id,
+    )
+    assert actions == []
+
+
+# ---------------------------------------------------------------------------
+# Auto-handled banner support — preview_append_match + append_sender_to_rule
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_preview_returns_covered_when_existing_rule_catches_sender(db_session, org_a):
+    """If a rule already catches this sender, banner shows 'covered' — no
+    promotion needed, just acknowledge."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="promotions",
+        conditions=[{
+            "field": "sender_email",
+            "operator": "contains",
+            "value": ["mailchimp.com", "sendgrid.net"],
+        }],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "promo-folder"}}],
+    )
+    svc = InboxRulesService(db_session)
+    result = await svc.preview_append_match(
+        org_a.id,
+        sender_email="news@mailchimp.com",
+        folder_id="promo-folder",
+    )
+    assert result["state"] == "covered"
+    assert result["rule_name"] == "promotions"
+
+
+@pytest.mark.asyncio
+async def test_preview_returns_promotable_for_sibling_domain(db_session, org_a):
+    """New sender, AI moved it to the same folder an existing rule targets
+    → banner offers one-click append."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="promotions",
+        conditions=[{
+            "field": "sender_email",
+            "operator": "contains",
+            "value": ["mailchimp.com"],
+        }],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "promo-folder"}}],
+    )
+    svc = InboxRulesService(db_session)
+    result = await svc.preview_append_match(
+        org_a.id,
+        sender_email="newsletter@mail.bubble.io",
+        folder_id="promo-folder",
+    )
+    assert result["state"] == "promotable"
+    # operator=contains → append the domain, not the full email
+    assert result["append_value"] == "mail.bubble.io"
+
+
+@pytest.mark.asyncio
+async def test_preview_ambiguous_when_two_rules_match_same_folder(db_session, org_a):
+    """2+ rules with the same action → don't guess; fall back to unclear."""
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="rule A",
+        conditions=[{"field": "sender_email", "operator": "contains", "value": "mailchimp.com"}],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "promo-folder"}}],
+    )
+    await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="rule B",
+        conditions=[{"field": "sender_email", "operator": "contains", "value": "hubspot.com"}],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "promo-folder"}}],
+    )
+    svc = InboxRulesService(db_session)
+    result = await svc.preview_append_match(
+        org_a.id,
+        sender_email="x@new-domain.com",
+        folder_id="promo-folder",
+    )
+    assert result["state"] == "unclear"
+
+
+@pytest.mark.asyncio
+async def test_preview_unclear_when_no_matching_rule(db_session, org_a):
+    """No active rule with a matching action → unclear; Create-rule fallback."""
+    svc = InboxRulesService(db_session)
+    result = await svc.preview_append_match(
+        org_a.id,
+        sender_email="anything@example.com",
+        folder_id="unknown-folder",
+    )
+    assert result["state"] == "unclear"
+
+
+@pytest.mark.asyncio
+async def test_append_sender_converts_scalar_to_list(db_session, org_a):
+    """Appending to a rule with a scalar value upgrades the value to a list."""
+    rule = await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="single",
+        conditions=[{"field": "sender_email", "operator": "contains", "value": "mailchimp.com"}],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "promo-folder"}}],
+    )
+    svc = InboxRulesService(db_session)
+    result = await svc.append_sender_to_rule(org_a.id, rule.id, "mail.bubble.io")
+    assert result["appended"] is True
+    await db_session.refresh(rule)
+    assert rule.conditions[0]["value"] == ["mailchimp.com", "mail.bubble.io"]
+
+
+@pytest.mark.asyncio
+async def test_append_sender_noop_when_already_present(db_session, org_a):
+    """Appending a value already in the list is a no-op, not an error."""
+    rule = await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="bundle",
+        conditions=[{
+            "field": "sender_email",
+            "operator": "contains",
+            "value": ["mailchimp.com", "hubspot.com"],
+        }],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "promo-folder"}}],
+    )
+    svc = InboxRulesService(db_session)
+    result = await svc.append_sender_to_rule(org_a.id, rule.id, "mailchimp.com")
+    assert result["already"] is True
+    assert result["appended"] is False
+
+
+@pytest.mark.asyncio
+async def test_append_sender_rejects_rule_without_sender_condition(db_session, org_a):
+    """Rules with subject/body-only conditions shouldn't silently gain senders."""
+    rule = await _add_rule(
+        db_session,
+        org_id=org_a.id,
+        name="subject-only",
+        conditions=[{"field": "subject", "operator": "contains", "value": "invoice"}],
+        actions=[{"type": ACTION_ASSIGN_FOLDER, "params": {"folder_id": "f"}}],
+    )
+    svc = InboxRulesService(db_session)
+    with pytest.raises(ValueError):
+        await svc.append_sender_to_rule(org_a.id, rule.id, "x@example.com")

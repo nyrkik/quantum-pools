@@ -45,6 +45,14 @@ interface PageLayoutProps {
   context?: ReactNode;
   children: ReactNode;
   className?: string;
+  /**
+   * When true, the layout becomes a flex column filling its parent: header
+   * + tabs + context stay as fixed-height rows and the children region grows
+   * to fill remaining space. Use for pages like the inbox where the content
+   * area needs to own its own scroll (no outer page scroll that hides the
+   * header's action buttons).
+   */
+  fullHeight?: boolean;
 }
 
 export function PageLayout({
@@ -59,11 +67,24 @@ export function PageLayout({
   context,
   children,
   className,
+  fullHeight,
 }: PageLayoutProps) {
   return (
-    <div className={cn("space-y-6", className)}>
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+    <div
+      className={cn(
+        fullHeight ? "flex flex-col h-full min-h-0" : "space-y-6",
+        className,
+      )}
+    >
+      {/* Header — sticky at top of main's scroll container so action
+          buttons (sync, settings, compose) stay reachable even if the
+          content below overflows and the page scrolls. */}
+      <div
+        className={cn(
+          "flex items-start justify-between gap-4 sticky top-0 z-20 bg-muted/40 py-2",
+          fullHeight && "shrink-0 mb-2",
+        )}
+      >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             {icon}
@@ -85,14 +106,20 @@ export function PageLayout({
 
       {/* Tabs */}
       {tabs && tabs.length > 0 && (
-        <PageTabs tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} />
+        <div className={cn(fullHeight && "shrink-0")}>
+          <PageTabs tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} />
+        </div>
       )}
 
       {/* Context section — stats, charts, filters */}
-      {context}
+      {context && <div className={cn(fullHeight && "shrink-0")}>{context}</div>}
 
-      {/* Content */}
-      {children}
+      {/* Content — grows to fill when fullHeight, else normal flow. */}
+      {fullHeight ? (
+        <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+      ) : (
+        children
+      )}
     </div>
   );
 }

@@ -90,7 +90,11 @@ class GmailSyncService:
 
         def _list_page(page_token=None):
             req = client.users().messages().list(
-                userId="me", q=query, maxResults=100, pageToken=page_token
+                userId="me",
+                q=query,
+                maxResults=100,
+                pageToken=page_token,
+                includeSpamTrash=True,
             )
             return req.execute()
 
@@ -148,14 +152,21 @@ class GmailSyncService:
         return stats
 
     async def _sync_history(self, client, org_id: str, start_history_id: str) -> dict:
-        """Use users.history.list to find changes since start_history_id."""
+        """Use users.history.list to find changes since start_history_id.
+
+        Subscribes to messageAdded + labelAdded + labelRemoved so that:
+          * mail that lands in Gmail (inbox or spam) gets ingested
+          * SPAM label transitions on existing messages mirror into QP's
+            Spam folder and category — including Gmail auto-moves and
+            user-initiated moves from Gmail's own UI
+        """
         stats = {"fetched": 0, "ingested": 0, "skipped": 0, "errors": 0}
 
         def _hist_page(page_token=None):
             req = client.users().history().list(
                 userId="me",
                 startHistoryId=start_history_id,
-                historyTypes=["messageAdded"],
+                historyTypes=["messageAdded", "labelAdded", "labelRemoved"],
                 pageToken=page_token,
             )
             return req.execute()
@@ -184,6 +195,24 @@ class GmailSyncService:
                     except Exception as e:
                         logger.warning(f"Gmail history ingest failed for {msg_id}: {e}")
                         stats["errors"] += 1
+
+                for la in h.get("labelsAdded", []):
+                    msg_id = (la.get("message") or {}).get("id")
+                    labels = la.get("labelIds") or []
+                    if msg_id and "SPAM" in labels:
+                        try:
+                            await self._apply_spam_label_change(org_id, msg_id, is_spam=True)
+                        except Exception as e:
+                            logger.warning(f"Gmail labelsAdded SPAM handling failed for {msg_id}: {e}")
+
+                for lr in h.get("labelsRemoved", []):
+                    msg_id = (lr.get("message") or {}).get("id")
+                    labels = lr.get("labelIds") or []
+                    if msg_id and "SPAM" in labels:
+                        try:
+                            await self._apply_spam_label_change(org_id, msg_id, is_spam=False)
+                        except Exception as e:
+                            logger.warning(f"Gmail labelsRemoved SPAM handling failed for {msg_id}: {e}")
 
             page_token = resp.get("nextPageToken")
             if not page_token:
@@ -234,9 +263,17 @@ class GmailSyncService:
         raw_bytes = base64.urlsafe_b64decode(raw_b64)
         email_msg = email.message_from_bytes(raw_bytes)
 
+        gmail_labels = msg_data.get("labelIds") or []
+
         from src.services.agents.orchestrator import process_incoming_email
         try:
-            await process_incoming_email(uid, email_msg, organization_id=org_id, historical=historical)
+            await process_incoming_email(
+                uid,
+                email_msg,
+                organization_id=org_id,
+                historical=historical,
+                gmail_labels=gmail_labels,
+            )
 
             # Store Gmail thread ID on the QP thread for read/unread sync
             gmail_thread_id = msg_data.get("threadId")
@@ -258,3 +295,57 @@ class GmailSyncService:
         except Exception as e:
             logger.error(f"process_incoming_email failed for {uid}: {e}")
             raise
+
+    async def _apply_spam_label_change(self, org_id: str, gmail_message_id: str, *, is_spam: bool) -> None:
+        """Mirror a Gmail SPAM label transition onto our thread.
+
+        Called from the history sync when Gmail itself (or a user acting
+        inside Gmail) adds or removes the SPAM label on a message we've
+        already ingested. We honour ``folder_override=True`` so a manual
+        move inside QP is not clobbered by a downstream Gmail event.
+
+        Unknown messages (not yet ingested) are silently skipped — the
+        regular messagesAdded path will pick them up with the correct
+        labels the first time.
+        """
+        uid = f"gm-{hashlib.sha256(gmail_message_id.encode()).hexdigest()[:32]}"
+
+        from src.models.agent_thread import AgentThread
+        from src.services.inbox_folder_service import InboxFolderService
+
+        async with get_db_context() as db:
+            thread_id = (await db.execute(
+                select(AgentMessage.thread_id).where(
+                    AgentMessage.email_uid == uid,
+                    AgentMessage.organization_id == org_id,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if not thread_id:
+                return
+
+            thread = (await db.execute(
+                select(AgentThread).where(
+                    AgentThread.id == thread_id,
+                    AgentThread.organization_id == org_id,
+                )
+            )).scalar_one_or_none()
+            if not thread or thread.folder_override:
+                return
+
+            svc = InboxFolderService(db)
+            if is_spam:
+                spam_id = await svc.get_system_folder_id(org_id, "spam")
+                if spam_id and thread.folder_id != spam_id:
+                    thread.folder_id = spam_id
+                if thread.category != "spam":
+                    thread.category = "spam"
+                await db.commit()
+                logger.info(f"Gmail→QP SPAM label add mirrored on thread {thread.id[:8]}")
+            else:
+                inbox_id = await svc.get_system_folder_id(org_id, "inbox")
+                if thread.folder_id != inbox_id:
+                    thread.folder_id = inbox_id
+                if thread.category == "spam":
+                    thread.category = None
+                await db.commit()
+                logger.info(f"Gmail→QP SPAM label removal mirrored on thread {thread.id[:8]}")

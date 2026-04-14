@@ -175,8 +175,23 @@ def _should_throttle_alert(from_email: str) -> bool:
     return False
 
 
-async def process_incoming_email(uid: str, msg, organization_id: str = "", historical: bool = False):
-    """Process a single incoming email."""
+async def process_incoming_email(
+    uid: str,
+    msg,
+    organization_id: str = "",
+    historical: bool = False,
+    gmail_labels: list[str] | None = None,
+):
+    """Process a single incoming email.
+
+    ``gmail_labels`` is the Gmail API's labelIds array for the source message
+    when the email came from a Gmail API sync. When "SPAM" is present we
+    trust Gmail's judgment and skip the AI classifier — the known-customer
+    override below still fires so flagged customer mail is routed for human
+    review instead of being silently hidden.
+    """
+    gmail_labels = gmail_labels or []
+    gmail_flagged_spam = "SPAM" in gmail_labels
     from_header = decode_email_header(msg.get("From", ""))
     subject = decode_email_header(msg.get("Subject", ""))
     from src.services.agents.mail_agent import extract_bodies
@@ -310,8 +325,35 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
     # If yes, NEVER auto-ignore — always require human review.
     sender_is_customer = bool(thread and thread.matched_customer_id)
     if not sender_is_customer:
+        # Honor `skip_customer_match` inbox-rule advisory: for shared /
+        # regional senders we don't want to reuse the last thread's match,
+        # because this email may be about a different customer than the
+        # previous one. The matcher's step 2 is the risky shortcut.
+        skip_prev = False
+        if organization_id:
+            try:
+                from src.services.inbox_rules_service import (
+                    ACTION_SKIP_CUSTOMER_MATCH,
+                    InboxRulesService,
+                    build_context,
+                )
+                async with get_db_context() as db:
+                    shared_actions = await InboxRulesService(db).evaluate(
+                        build_context(sender_email=from_email),
+                        organization_id,
+                    )
+                skip_prev = any(
+                    a.get("type") == ACTION_SKIP_CUSTOMER_MATCH
+                    for a in shared_actions
+                )
+            except Exception as e:
+                logger.warning(f"skip_customer_match check failed: {e}")
+
         # Quick check: does this email match a customer directly?
-        pre_match = await match_customer(from_email, subject, body[:500], from_header)
+        pre_match = await match_customer(
+            from_email, subject, body[:500], from_header,
+            skip_previous_match=skip_prev,
+        )
         if pre_match and pre_match.get("customer_id"):
             sender_is_customer = True
             # Update thread with customer info now so it's available downstream
@@ -335,8 +377,19 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
         if sender_is_customer:
             logger.info(f"  ...but sender is a customer — proceeding with classification")
 
-    # Classify and draft
-    result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
+    # Classify and draft — Gmail-flagged spam skips the AI classifier entirely.
+    # The downstream "spam + known customer" override (below) still forces
+    # human review if Gmail flags a customer we recognize.
+    if gmail_flagged_spam:
+        logger.info(f"Gmail-labeled SPAM, bypassing classifier: {(subject or '')[:60]}")
+        result = {
+            "category": "spam",
+            "needs_approval": False,
+            "draft_response": "",
+            "confidence": "high",
+        }
+    else:
+        result = await classify_and_draft(from_email, subject, body + thread_context, from_header=from_header)
 
     category = result.get("category", "general")
 
@@ -422,6 +475,27 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                 )
                 db.add(agent_msg)
                 await db.commit()
+
+                # Route spam + auto_reply to the Spam system folder unless the
+                # user has manually moved this thread. Without this, auto-
+                # handled spam stays in whatever folder the thread was born in
+                # (usually NULL = Inbox) and never surfaces in Spam either,
+                # since the Spam folder view filters by folder_id.
+                if category in ("spam", "auto_reply") and organization_id:
+                    try:
+                        from src.services.inbox_folder_service import InboxFolderService
+                        t = (await db.execute(
+                            select(AgentThread).where(AgentThread.id == thread.id)
+                        )).scalar_one_or_none()
+                        if t and not t.folder_override:
+                            spam_folder_id = await InboxFolderService(db).get_system_folder_id(
+                                organization_id, "spam"
+                            )
+                            if spam_folder_id and t.folder_id != spam_folder_id:
+                                t.folder_id = spam_folder_id
+                                await db.commit()
+                    except Exception as e:
+                        logger.warning(f"Spam folder assign failed for thread {thread.id}: {e}")
             await update_thread_status(thread.id)
             return
 

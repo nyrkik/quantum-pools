@@ -7,8 +7,7 @@ import { useWSRefetch } from "@/lib/ws";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { PenSquare, Settings2, X, RefreshCw, AlertTriangle } from "lucide-react";
-import { useCompose } from "@/components/email/compose-provider";
+import { Settings2, X, RefreshCw, AlertTriangle } from "lucide-react";
 import { PageLayout } from "@/components/layout/page-layout";
 import { usePermissions } from "@/lib/permissions";
 import type { Thread } from "@/types/agent";
@@ -62,7 +61,6 @@ type AssignFilter = "all" | "mine";
 
 export default function InboxPage() {
   const { user } = useAuth();
-  const { openCompose } = useCompose();
   const perms = usePermissions();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -73,6 +71,8 @@ export default function InboxPage() {
   const [staleFilter, setStaleFilter] = useState(false);
   const [failedFilter, setFailedFilter] = useState(false);
   const [autoHandledFilter, setAutoHandledFilter] = useState(false);
+  const [clientsOnlyFilter, setClientsOnlyFilter] = useState(false);
+  const [handledFilter, setHandledFilter] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
@@ -185,6 +185,8 @@ export default function InboxPage() {
     }
     if (search) params.set("search", search);
     if (assignFilter === "mine" && user?.id) params.set("assigned_to", user.id);
+    if (clientsOnlyFilter) params.set("has_customer", "true");
+    if (handledFilter) params.set("status", "handled");
 
     api.get<PaginatedThreads>(`/v1/admin/agent-threads?${params}`)
       .then((data) => {
@@ -193,7 +195,7 @@ export default function InboxPage() {
       })
       .catch(() => toast.error("Failed to load threads"))
       .finally(() => setLoading(false));
-  }, [search, page, assignFilter, staleFilter, autoHandledFilter, failedFilter, user?.id, selectedFolderId, selectedFolderKey]);
+  }, [search, page, assignFilter, staleFilter, autoHandledFilter, failedFilter, clientsOnlyFilter, handledFilter, user?.id, selectedFolderId, selectedFolderKey]);
 
   const loadStats = useCallback(() => {
     api.get<ThreadStats>("/v1/admin/agent-threads/stats")
@@ -259,6 +261,9 @@ export default function InboxPage() {
     setSelectedFolderId(folderId);
     setSelectedFolderKey(systemKey);
     setPage(0);
+    // Close any open thread — the thread belongs to a different folder
+    // context and its detail would be stale/irrelevant here.
+    setSelectedThreadId(null);
   };
 
   const handleSearch = () => {
@@ -314,12 +319,7 @@ export default function InboxPage() {
   return (
     <PageLayout
       title="Inbox"
-      action={
-        <Button size="sm" className="gap-1.5" onClick={() => openCompose()}>
-          <PenSquare className="h-3.5 w-3.5" />
-          New Email
-        </Button>
-      }
+      fullHeight
       secondaryActions={
         <>
           {lastSyncIso && (
@@ -386,7 +386,7 @@ export default function InboxPage() {
               } else {
                 // Non-Gmail (managed mode etc.) — drop user on the settings page
                 // since reconnect is provider-specific.
-                window.location.href = "/settings/email";
+                window.location.href = "/inbox/integrations";
               }
             }}
           >
@@ -401,7 +401,7 @@ export default function InboxPage() {
         onSelectFolder={handleFolderSelect}
       />
 
-      <div className="flex gap-3 w-full max-w-full overflow-hidden" style={{ height: "calc(100vh - 10rem)" }}>
+      <div className="flex gap-3 w-full max-w-full overflow-hidden flex-1 min-h-0">
         {/* Desktop folder sidebar */}
         <InboxFolderSidebar
           selectedFolderId={selectedFolderId}
@@ -424,6 +424,10 @@ export default function InboxPage() {
             stats={stats}
             groupByClient={groupByClient}
             onGroupByClientChange={setGroupByClient}
+            clientsOnlyFilter={clientsOnlyFilter}
+            onClientsOnlyFilterChange={(v) => { setClientsOnlyFilter(v); setPage(0); }}
+            handledFilter={handledFilter}
+            onHandledFilterChange={(v) => { setHandledFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
             staleFilter={staleFilter}
             onStaleFilterChange={(v) => { setStaleFilter(v); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
             failedFilter={failedFilter}

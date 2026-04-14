@@ -4,8 +4,7 @@ import { useState, useEffect, useCallback, useRef, type FormEvent } from "react"
 import { useAuth } from "@/lib/auth-context";
 import { api, getBackendOrigin } from "@/lib/api";
 import { toast } from "sonner";
-import Link from "next/link";
-import { Loader2, Save, Pencil, Upload, Mail, ChevronRight } from "lucide-react";
+import { Loader2, Save, Pencil, Upload } from "lucide-react";
 import { PageLayout } from "@/components/layout/page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -447,24 +446,6 @@ export default function SettingsPage() {
           </div>
           {canEdit && <BrandingSection />}
           {canEdit && <AddressesSection />}
-          {canEdit && (
-            <Link href="/settings/email" className="block">
-              <Card className="shadow-sm hover:bg-muted/50 transition-colors">
-                <CardContent className="flex items-center gap-3 py-4">
-                  <div className="rounded-md bg-primary/10 p-2">
-                    <Mail className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-medium text-sm">Email Integrations</div>
-                    <div className="text-xs text-muted-foreground">
-                      Connect Gmail or another mailbox so QP can send and receive customer email on your behalf.
-                    </div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-            </Link>
-          )}
         </div>
       )}
 

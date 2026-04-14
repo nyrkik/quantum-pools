@@ -40,6 +40,7 @@ import {
   X,
   Archive,
   Trash2,
+  CheckCheck,
 } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { formatTime } from "@/lib/format";
@@ -542,6 +543,13 @@ function AutoHandledFeedbackBanner({
   const [folderName, setFolderName] = useState<string | null>(null);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   const [showRuleEditor, setShowRuleEditor] = useState(false);
+  const [preview, setPreview] = useState<{
+    state: "covered" | "promotable" | "unclear";
+    rule_id?: string | null;
+    rule_name?: string | null;
+    append_value?: string | null;
+  } | null>(null);
+  const [appending, setAppending] = useState(false);
 
   useEffect(() => {
     api.get<{ folders: { id: string; name: string }[] }>("/v1/inbox-folders")
@@ -556,6 +564,17 @@ function AutoHandledFeedbackBanner({
       })
       .catch(() => setFolderName(null));
   }, [folderId]);
+
+  // Ask the backend whether an existing rule already covers this sender
+  // or could cleanly accept it. Drives the three-state banner.
+  useEffect(() => {
+    if (!canReview) return;
+    api.get<typeof preview>(
+      `/v1/inbox-rules/match-preview?thread_id=${encodeURIComponent(threadId)}`,
+    )
+      .then((p) => setPreview(p))
+      .catch(() => setPreview({ state: "unclear" }));
+  }, [threadId, canReview]);
 
   const submit = async (correct: boolean) => {
     setSubmitting(true);
@@ -631,19 +650,106 @@ function AutoHandledFeedbackBanner({
 
   if (reviewed || !canReview) return null;
 
+  // Describe what the AI actually did (shared across all three states).
+  const actionSummary = (() => {
+    const parts: string[] = [];
+    if (folderName && folderName !== "Inbox") parts.push(`moved this to "${folderName}"`);
+    else parts.push("auto-handled this");
+    if (senderTag) parts.push(`tagged sender "${senderTag}"`);
+    if (category && category !== "general") parts.push(`category "${category}"`);
+    return parts.join(", ");
+  })();
+
+  // "Add sender to existing rule" — the State B happy-path click.
+  const handleAppendToRule = async () => {
+    if (!preview || preview.state !== "promotable" || !preview.rule_id || !preview.append_value) return;
+    setAppending(true);
+    try {
+      await api.post(
+        `/v1/inbox-rules/${preview.rule_id}/append-sender?thread_id=${encodeURIComponent(threadId)}`,
+        { value: preview.append_value },
+      );
+      toast.success(
+        preview.rule_name
+          ? `Added to "${preview.rule_name}" rule`
+          : "Added to existing rule",
+      );
+      setReviewed(true);
+      onFeedback(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add to rule");
+    } finally {
+      setAppending(false);
+    }
+  };
+
+  // ------- STATE A: already covered by an existing rule -------
+  if (preview?.state === "covered") {
+    return (
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-800">
+        <Check className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+        <span className="text-xs text-purple-800 dark:text-purple-300 flex-1">
+          Already covered by{" "}
+          <span className="font-medium">
+            {preview.rule_name || "an existing rule"}
+          </span>
+          . Future matches will keep auto-handling.
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 text-xs text-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/30"
+          onClick={() => submit(true)}
+          disabled={submitting}
+        >
+          Got it
+        </Button>
+      </div>
+    );
+  }
+
+  // ------- STATE B: clean promotion to an existing rule -------
+  if (preview?.state === "promotable") {
+    return (
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-800">
+        <Bot className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+        <span className="text-xs text-purple-800 dark:text-purple-300 flex-1">
+          AI {actionSummary}. Add{" "}
+          <span className="font-mono text-[11px]">{preview.append_value}</span>{" "}
+          to <span className="font-medium">{preview.rule_name || "the matching rule"}</span>?
+        </span>
+        <Button
+          variant="default"
+          size="sm"
+          className="h-6 text-xs"
+          onClick={handleAppendToRule}
+          disabled={appending || submitting}
+        >
+          <Check className="h-3 w-3 mr-1" />
+          {appending ? "Adding…" : "Add to rule"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 text-xs text-destructive hover:bg-destructive/10"
+          onClick={() => submit(false)}
+          disabled={submitting}
+          title="Move to Inbox + AI learns"
+        >
+          <X className="h-3 w-3 mr-1" />
+          Move to Inbox
+        </Button>
+      </div>
+    );
+  }
+
+  // ------- STATE C: unclear — classic Yes / Create rule / No -------
   return (
     <>
       <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-800">
         <Bot className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
         <span className="text-xs text-purple-800 dark:text-purple-300 flex-1">
-          AI {(() => {
-            const parts: string[] = [];
-            if (folderName && folderName !== "Inbox") parts.push(`moved this to "${folderName}"`);
-            else parts.push("auto-handled this");
-            if (senderTag) parts.push(`tagged sender "${senderTag}"`);
-            if (category && category !== "general") parts.push(`category "${category}"`);
-            return parts.join(", ");
-          })()}. Was that right?
+          AI {actionSummary}. Was that right?
         </span>
         <Button
           variant="ghost"
@@ -784,10 +890,10 @@ function InlineReplyComposer({
             className="h-6 text-[11px] gap-1"
             onClick={onDraftFollowUp}
             disabled={draftingFollowUp}
-            title="AI draft a reply"
+            title="AI drafts a proactive follow-up based on the conversation so far"
           >
             {draftingFollowUp ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pencil className="h-3 w-3" />}
-            AI Draft
+            Draft follow-up
           </Button>
         )}
         <Button
@@ -879,6 +985,9 @@ export function ThreadDetailSheet({
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [reviseInstruction, setReviseInstruction] = useState("");
+  // AI draft panel collapses by default so the reading pane isn't dominated
+  // by the draft editor. User clicks the "AI drafted a reply" bar to expand.
+  const [draftExpanded, setDraftExpanded] = useState(false);
   const [revising, setRevising] = useState(false);
 
   // Follow-up (for handled threads)
@@ -897,6 +1006,7 @@ export function ThreadDetailSheet({
   const teamMembers = useTeamMembersFull();
 
   const timelineEndRef = useRef<HTMLDivElement>(null);
+  const newestMessageRef = useRef<HTMLDivElement>(null);
 
   // Load folders for move-to menu
   useEffect(() => {
@@ -904,6 +1014,18 @@ export function ThreadDetailSheet({
       .then((d) => setFolders(d.folders))
       .catch(() => {});
   }, []);
+
+  // On thread open (or when a new message lands), land at the TOP of the
+  // newest message so the reader sees the start of what was last sent,
+  // not the bottom of the thread. Email-client convention: you read a
+  // message top-down; the thread pane should show the beginning of the
+  // latest one, with older messages accessible by scrolling up.
+  useEffect(() => {
+    if (!thread?.timeline?.length) return;
+    requestAnimationFrame(() => {
+      newestMessageRef.current?.scrollIntoView({ block: "start" });
+    });
+  }, [thread?.id, thread?.timeline?.length]);
 
   const spamFolderId = folders.find((f) => f.system_key === "spam")?.id;
   const isInSpam = thread?.folder_id === spamFolderId;
@@ -963,6 +1085,17 @@ export function ThreadDetailSheet({
       .finally(() => setLoading(false));
   }, [threadId]);
 
+  // When threadId changes (user clicked a different thread in the left
+  // pane), clear local state so the detail pane shows a loading spinner
+  // instead of the previously-rendered thread. Without this the old body,
+  // draft, toolbar, etc. linger until the new fetch resolves.
+  useEffect(() => {
+    setThread(null);
+    setEditText("");
+    setReviseInstruction("");
+    setDraftExpanded(false);
+  }, [threadId]);
+
   useEffect(() => { loadThread(); }, [loadThread]);
 
   useEffect(() => {
@@ -971,6 +1104,28 @@ export function ThreadDetailSheet({
   }, [loading, thread]);
 
   const pendingMessage = thread?.timeline.find((m) => m.status === "pending" && m.direction === "inbound");
+
+  // Auto-generate a follow-up draft for handled customer threads so the
+  // composer has a reply ready to review. Classifier deliberately skipped
+  // drafting (category=no_response etc.), but Kim may still want to send
+  // a warm acknowledgment with one click. Only fires when:
+  //   - thread is matched to a customer (no point drafting for randoms)
+  //   - status=handled (not already-pending — that flow has its own draft)
+  //   - last message is inbound (AI just heard from the customer)
+  //   - nothing has been auto-drafted already this mount
+  const followUpAutoTriggeredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!thread) return;
+    if (followUpAutoTriggeredRef.current === thread.id) return;
+    if (!thread.matched_customer_id) return;
+    if (thread.status !== "handled") return;
+    const lastMsg = thread.timeline[thread.timeline.length - 1];
+    if (!lastMsg || lastMsg.direction !== "inbound") return;
+    if (followUp || draftingFollowUp) return;
+    followUpAutoTriggeredRef.current = thread.id;
+    handleDraftFollowUp();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread?.id, thread?.matched_customer_id, thread?.status]);
 
   const handleApprove = async (responseText?: string) => {
     setSending(true);
@@ -1227,15 +1382,11 @@ export function ThreadDetailSheet({
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
-      {/* Compact toolbar */}
+      {/* Compact toolbar — Status / Category / Stale badges intentionally
+          moved to the left-pane thread table (scanning surface). Right pane
+          keeps only the interactive controls: retag sender, add-as-contact
+          prompt, and the icon actions on the right. */}
       <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b bg-muted/30 flex-wrap">
-        <StatusBadge status={thread.status} />
-        <CategoryBadge category={thread.category} />
-        {thread.has_pending && isStale(thread.timeline[thread.timeline.length - 1]?.received_at) && (
-          <Badge variant="destructive" className="text-[10px] px-1.5">
-            <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />Stale
-          </Badge>
-        )}
         <SenderTagChip
           tag={thread.matched_customer_id ? "client" : (thread.sender_tag || "")}
           senderEmail={thread.contact_email}
@@ -1246,7 +1397,8 @@ export function ThreadDetailSheet({
         {!thread.matched_customer_id && !thread.sender_tag && (
           <ContactLearningPrompt threadId={threadId} onContactSaved={() => { loadThread(); onAction(); }} />
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-0.5">
+          {/* Group 1 — status: what state is this thread in */}
           <Button
             variant="ghost"
             size="icon"
@@ -1256,15 +1408,22 @@ export function ThreadDetailSheet({
           >
             {thread.is_unread ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-muted-foreground"
-            onClick={handleSpamToggle}
-            title={isInSpam ? "Not spam" : "Spam"}
-          >
-            {isInSpam ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
-          </Button>
+          {(thread.has_pending || thread.status !== "handled") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:text-green-600"
+              onClick={handleMarkHandled}
+              disabled={sending}
+              title="Mark handled (no reply needed)"
+            >
+              <CheckCheck className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          <div className="h-4 w-px bg-border mx-1.5" aria-hidden />
+
+          {/* Group 2 — place: where does this thread live */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" title="Move to folder">
@@ -1287,6 +1446,19 @@ export function ThreadDetailSheet({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground"
+            onClick={handleSpamToggle}
+            title={isInSpam ? "Not spam" : "Spam"}
+          >
+            {isInSpam ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
+          </Button>
+
+          <div className="h-4 w-px bg-border mx-1.5" aria-hidden />
+
+          {/* Group 3 — remove: destructive, placed last */}
           <Button
             variant="ghost"
             size="icon"
@@ -1369,7 +1541,10 @@ export function ThreadDetailSheet({
           const timestamp = isInbound ? msg.received_at : msg.sent_at;
           const isNewest = idx === thread.timeline.length - 1;
 
-          return (
+          // Wrap the newest message in a ref'd container so the initial
+          // scroll lands at the TOP of it (reader sees the beginning of
+          // the most recent email, not the bottom of the whole thread).
+          const content = (
             <EmailMessage
               key={msg.id}
               msg={msg}
@@ -1379,77 +1554,110 @@ export function ThreadDetailSheet({
               defaultExpanded={isNewest || isPending}
             />
           );
+          return isNewest ? (
+            <div key={msg.id} ref={newestMessageRef}>{content}</div>
+          ) : content;
         })}
         <div ref={timelineEndRef} />
       </div>
 
       {/* Bottom action area */}
       <div className="flex-shrink-0 border-t pt-3 px-4 pb-3 space-y-2 overflow-x-hidden">
-        {/* AI Draft editor — always expanded when pending */}
-        {pendingMessage && pendingMessage.draft_response && (
-          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
-                <Pencil className="h-3 w-3" />
-                AI Draft — review and send
-              </p>
+        {/* AI draft — collapsed by default so the reading pane isn't dominated
+            by the draft editor. Click the bar to review / edit / send. */}
+        {pendingMessage && pendingMessage.draft_response && !draftExpanded && (
+          <button
+            onClick={() => setDraftExpanded(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors text-left"
+          >
+            <Pencil className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400 shrink-0" />
+            <span className="text-sm text-blue-700 dark:text-blue-400">Reply</span>
+          </button>
+        )}
+
+        {pendingMessage && pendingMessage.draft_response && draftExpanded && (
+          <div className="rounded-lg border bg-background shadow-sm">
+            {/* Header — matches InlineReplyComposer */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b bg-blue-50 dark:bg-blue-950/30">
+              <Pencil className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400 shrink-0" />
+              <span className="text-xs text-blue-700 dark:text-blue-400 flex-1 truncate">
+                AI draft — review and send
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground"
+                onClick={() => setDraftExpanded(false)}
+                title="Collapse"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
             </div>
 
-            <Textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              className="text-sm min-h-[120px] bg-white dark:bg-background"
-              rows={6}
-            />
+            {/* Body */}
+            <div className="p-3 space-y-2">
+              <Textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                className="text-sm min-h-[120px] border-0 shadow-none focus-visible:ring-0 p-0 resize-none"
+                rows={6}
+              />
 
-            <div className="flex gap-2 items-end">
-              <div className="flex-1">
+              <div className="flex gap-2 items-end pt-2 border-t">
                 <Textarea
                   value={reviseInstruction}
                   onChange={(e) => setReviseInstruction(e.target.value)}
                   placeholder="Tell AI how to change it..."
-                  className="text-sm min-h-[2rem] bg-white dark:bg-background resize-none"
+                  className="text-sm min-h-[2rem] resize-none flex-1"
                   rows={1}
                   onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReviseDraft(); } }}
                 />
+                <Button variant="outline" size="sm" className="h-8" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
+                  {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
+                </Button>
               </div>
-              <Button variant="outline" size="sm" className="h-8 bg-white dark:bg-background" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
-                {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-              </Button>
+
+              <AttachmentPicker
+                attachments={approveAttachments}
+                onAttachmentsChange={setApproveAttachments}
+                sourceType="agent_message"
+              />
             </div>
 
-            <AttachmentPicker
-              attachments={approveAttachments}
-              onAttachmentsChange={setApproveAttachments}
-              sourceType="agent_message"
-            />
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={async () => {
-                  try {
-                    await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: editText });
-                    toast.success("Draft saved");
-                    loadThread();
-                  } catch { toast.error("Failed to save draft"); }
-                }}
-                disabled={sending}
-              >
-                Save Draft
-              </Button>
-              <Button onClick={() => handleApprove(editText)} disabled={sending} className="flex-1">
-                {sending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                Send
-              </Button>
+            {/* Send bar — matches InlineReplyComposer sizing/placement */}
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-t bg-muted/10">
+              <span className="text-[10px] text-muted-foreground">AI drafted — edit and send</span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={async () => {
+                    try {
+                      await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: editText });
+                      toast.success("Draft saved");
+                      loadThread();
+                    } catch { toast.error("Failed to save draft"); }
+                  }}
+                  disabled={sending}
+                >
+                  Save
+                </Button>
+                <Button size="sm" className="h-8" onClick={() => handleApprove(editText)} disabled={sending}>
+                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+                  Send
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Inline reply composer — always visible when no pending AI draft */}
-        {!pendingMessage && (
+        {/* Inline reply composer — visible whenever there isn't a draft
+            to approve. Covers (a) no pending message at all (classic
+            follow-up case) and (b) a pending inbound where draft generation
+            failed or returned empty (don't leave the user with no reply UI). */}
+        {(!pendingMessage || !pendingMessage.draft_response) && (
           <InlineReplyComposer
             threadId={threadId}
             recipient={thread.contact_email}

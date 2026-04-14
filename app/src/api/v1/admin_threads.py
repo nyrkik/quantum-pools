@@ -49,6 +49,7 @@ async def list_threads(
     exclude_ignored: bool = Query(False),
     assigned_to: Optional[str] = Query(None),
     customer_id: Optional[str] = Query(None),
+    has_customer: bool = Query(False),
     folder_id: Optional[str] = Query(None),
     folder: Optional[str] = Query(None),  # system_key shortcut: "inbox", "sent", "automated", "spam"
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
@@ -67,6 +68,7 @@ async def list_threads(
         offset=offset,
         assigned_to=assigned_to,
         customer_id=customer_id,
+        has_customer=has_customer,
         current_user_id=ctx.user.id,
         user_permission_slugs=perm_slugs,
         folder_id=folder_id,
@@ -976,7 +978,18 @@ async def bulk_spam(
 
     # Move ALL threads from those senders to Spam folder
     moved = 0
+    gmail_thread_ids: list[str] = []
     if sender_emails:
+        # Capture gmail_thread_ids before the folder update so we can mirror
+        # the spam decision back to Gmail (add SPAM / remove INBOX).
+        gmail_thread_ids = (await db.execute(
+            select(AgentThread.gmail_thread_id).where(
+                AgentThread.organization_id == ctx.organization_id,
+                func.lower(AgentThread.contact_email).in_(sender_emails),
+                AgentThread.gmail_thread_id.isnot(None),
+            )
+        )).scalars().all()
+
         result = await db.execute(
             AgentThread.__table__.update()
             .where(
@@ -988,6 +1001,28 @@ async def bulk_spam(
         moved = result.rowcount
 
     await db.commit()
+
+    # Best-effort Gmail label push: add SPAM, remove INBOX on each thread.
+    # Never block the request or surface failures to the user.
+    if gmail_thread_ids:
+        try:
+            from src.models.email_integration import EmailIntegration, IntegrationStatus
+            integration = (await db.execute(
+                select(EmailIntegration).where(
+                    EmailIntegration.organization_id == ctx.organization_id,
+                    EmailIntegration.type == "gmail_api",
+                    EmailIntegration.status == IntegrationStatus.connected.value,
+                    EmailIntegration.is_primary == True,  # noqa: E712
+                )
+            )).scalar_one_or_none()
+            if integration:
+                import asyncio
+                from src.services.gmail.read_sync import sync_spam_label
+                for gtid in gmail_thread_ids:
+                    asyncio.create_task(sync_spam_label(integration, gtid, mark_spam=True))
+        except Exception:
+            pass
+
     try:
         await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
     except Exception:
@@ -1024,7 +1059,16 @@ async def bulk_not_spam(
 
     # Move ALL threads from those senders back to Inbox (NULL folder_id)
     moved = 0
+    gmail_thread_ids: list[str] = []
     if sender_emails:
+        gmail_thread_ids = (await db.execute(
+            select(AgentThread.gmail_thread_id).where(
+                AgentThread.organization_id == ctx.organization_id,
+                func.lower(AgentThread.contact_email).in_(sender_emails),
+                AgentThread.gmail_thread_id.isnot(None),
+            )
+        )).scalars().all()
+
         result = await db.execute(
             AgentThread.__table__.update()
             .where(
@@ -1036,6 +1080,27 @@ async def bulk_not_spam(
         moved = result.rowcount
 
     await db.commit()
+
+    # Best-effort Gmail label push: remove SPAM, restore INBOX.
+    if gmail_thread_ids:
+        try:
+            from src.models.email_integration import EmailIntegration, IntegrationStatus
+            integration = (await db.execute(
+                select(EmailIntegration).where(
+                    EmailIntegration.organization_id == ctx.organization_id,
+                    EmailIntegration.type == "gmail_api",
+                    EmailIntegration.status == IntegrationStatus.connected.value,
+                    EmailIntegration.is_primary == True,  # noqa: E712
+                )
+            )).scalar_one_or_none()
+            if integration:
+                import asyncio
+                from src.services.gmail.read_sync import sync_spam_label
+                for gtid in gmail_thread_ids:
+                    asyncio.create_task(sync_spam_label(integration, gtid, mark_spam=False))
+        except Exception:
+            pass
+
     try:
         await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"bulk": True})
     except Exception:

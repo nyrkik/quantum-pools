@@ -68,3 +68,8 @@ sqlparse>=0.5.0
 google-auth>=2.30.0
 google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.130.0
+
+# Test infrastructure
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+asgi-lifespan>=2.1.0

@@ -201,6 +201,14 @@ After ANY code change, deploy via `/srv/quantumpools/scripts/deploy.sh`. Never r
 ### Email Code Changes
 After touching any email-sending path, send a test email to brian.parrotte@pm.me and verify: (1) email arrives, (2) no 500 in logs, (3) AgentMessage record exists, (4) thread shows in inbox.
 
+### Testing
+- **Test runner**: `pytest` from `app/` dir. Async via pytest-asyncio (auto mode, session-scoped event loop).
+- **Test DB**: dedicated `quantumpools_test` Postgres database on the same instance (port 7062). Created once: `sudo docker exec quantumpools-db psql -U quantumpools -d postgres -c "CREATE DATABASE quantumpools_test OWNER quantumpools;"`. Schema is `create_all`-ed on first run; tests TRUNCATE CASCADE between tests for isolation.
+- **Run all tests**: `cd /srv/quantumpools/app && /home/brian/00_MyProjects/QuantumPools/venv/bin/pytest tests/ -W ignore::DeprecationWarning`
+- **Existing coverage** (17 tests, see `tests/`): webhook signature validation, cross-org isolation on every fetch-by-id pattern, send-failure recovery (FB-24 class), Failed filter latest-only semantic.
+- **When to add tests**: any new security gate (auth check, org filter), any new send path, any new shared helper that handles failures. Pattern: red-test-first if you're fixing a bug — write the failing test, then fix.
+- **Fixtures available** (`tests/conftest.py`): `db_session` (per-test session, clean DB), `org_a` and `org_b` (two orgs for isolation tests).
+
 ### Documentation Alignment (MANDATORY for /cpu and any commit touching docs)
 
 **Whenever you create, rename, or delete a doc:** the change MUST be reflected in CLAUDE.md "Documentation Index" in the **same commit**. No orphaned docs.

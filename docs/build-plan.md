@@ -303,8 +303,8 @@ _See `docs/email-strategy.md` and `docs/email-integrations-plan.md` for full det
 - [x] Migration: backfill existing orgs (Sapphire = managed)
 - [x] Encrypt `config` field at rest (Fernet via `core/encryption.py`)
 - [x] Settings → Email page with integration list
-- [x] `email_auto_send_enabled` org flag (default false) — gates all auto-replies during setup
-- [x] `SuppressedEmailSender` model — org-wide "don't ask again" for contact prompts
+- [~] ~~`email_auto_send_enabled` org flag~~ — shipped 2026-04-11, then the entire auto-send feature was removed 2026-04-14 (AI drafts every reply; humans always approve). See `memory/feedback_no_auto_send.md`.
+- [~] ~~`SuppressedEmailSender` model~~ — shipped 2026-04-11, consolidated into the unified `InboxRule` table 2026-04-14 (Phases A–E of the inbox rules unification).
 - [x] `rfc_message_id` on AgentMessage — cross-source dedup (Gmail ↔ Postmark)
 
 ### 5b.2 Gmail API Integration ✅ (2026-04-12)

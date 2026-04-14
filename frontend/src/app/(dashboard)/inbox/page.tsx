@@ -37,6 +37,25 @@ interface PaginatedThreads {
 
 const PAGE_SIZE = 25;
 
+// Compact relative-time formatter for the "Synced Xm ago" indicator.
+function formatRelativeShort(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
+
+// Sync is stale if it hasn't ticked in >5 min — the poller runs every 60s,
+// so anything past that means polling is stuck or the integration is broken.
+function isSyncStale(iso: string): boolean {
+  return Date.now() - new Date(iso).getTime() > 5 * 60 * 1000;
+}
+
 type AssignFilter = "all" | "mine";
 
 // --- Main Page ---
@@ -85,21 +104,42 @@ export default function InboxPage() {
   const [folderRefreshKey, setFolderRefreshKey] = useState(0);
   const [groupByClient, setGroupByClient] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [brokenIntegrations, setBrokenIntegrations] = useState<{ id: string; type: string; account_email: string | null; last_error: string | null }[]>([]);
+  type IntegrationRow = { id: string; type: string; status: string; account_email: string | null; last_error: string | null; last_sync_at: string | null };
+  const [allIntegrations, setAllIntegrations] = useState<IntegrationRow[]>([]);
+  const brokenIntegrations = useMemo(
+    () => allIntegrations.filter((i) => i.status === "error" || i.status === "disconnected"),
+    [allIntegrations],
+  );
+  // Most recent sync across any connected gmail integration. Used to show
+  // "Last synced 2m ago" so the user can see the polling loop is alive.
+  const lastSyncIso = useMemo(() => {
+    const times = allIntegrations
+      .filter((i) => i.type === "gmail_api" && i.status === "connected" && i.last_sync_at)
+      .map((i) => i.last_sync_at as string);
+    if (!times.length) return null;
+    return times.sort().slice(-1)[0];
+  }, [allIntegrations]);
 
-  // Surface email integrations that are in error/disconnected state so the user
-  // doesn't silently fall back to Postmark for weeks without realizing.
+  // Surface email integrations + last sync time. Refetched on the same beats
+  // the inbox already invalidates state (folderRefreshKey is bumped after every
+  // successful Sync, after thread mutations, etc.), so this stays fresh without
+  // a separate poll loop.
   useEffect(() => {
-    api.get<{ integrations: { id: string; type: string; status: string; account_email: string | null; last_error: string | null }[] }>("/v1/email-integrations")
-      .then((d) => {
-        setBrokenIntegrations(
-          d.integrations
-            .filter((i) => i.status === "error" || i.status === "disconnected")
-            .map((i) => ({ id: i.id, type: i.type, account_email: i.account_email, last_error: i.last_error })),
-        );
-      })
-      .catch(() => setBrokenIntegrations([]));
+    api.get<{ integrations: IntegrationRow[] }>("/v1/email-integrations")
+      .then((d) => setAllIntegrations(d.integrations || []))
+      .catch(() => setAllIntegrations([]));
   }, [folderRefreshKey]);
+
+  // Re-fetch on a slow tick (60s) so the "Last synced Nm ago" indicator
+  // doesn't go stale just because the user is sitting on the inbox idle.
+  useEffect(() => {
+    const t = setInterval(() => {
+      api.get<{ integrations: IntegrationRow[] }>("/v1/email-integrations")
+        .then((d) => setAllIntegrations(d.integrations || []))
+        .catch(() => {});
+    }, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 639px)");
@@ -286,6 +326,16 @@ export default function InboxPage() {
       }
       secondaryActions={
         <>
+          {lastSyncIso && (
+            <span
+              className={`text-[11px] hidden sm:inline ${
+                isSyncStale(lastSyncIso) ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground"
+              }`}
+              title={`Last Gmail sync: ${new Date(lastSyncIso).toLocaleString()}`}
+            >
+              {isSyncStale(lastSyncIso) ? "⚠ " : ""}Synced {formatRelativeShort(lastSyncIso)}
+            </span>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -324,7 +374,25 @@ export default function InboxPage() {
             variant="outline"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => setSettingsOpen(true)}
+            onClick={async () => {
+              const broken = brokenIntegrations[0];
+              if (broken.type === "gmail_api") {
+                try {
+                  const resp = await api.post<{ authorize_url: string }>(
+                    "/v1/email-integrations/gmail/authorize",
+                    { integration_id: broken.id },
+                  );
+                  window.location.href = resp.authorize_url;
+                } catch (e) {
+                  const msg = (e as { message?: string })?.message || "Failed to start OAuth";
+                  toast.error(msg);
+                }
+              } else {
+                // Non-Gmail (managed mode etc.) — drop user on the settings page
+                // since reconnect is provider-specific.
+                window.location.href = "/settings/email";
+              }
+            }}
           >
             Reconnect
           </Button>

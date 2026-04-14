@@ -59,7 +59,46 @@ All addresses route to the `sapphire-pools-email` Cloudflare Worker:
 - Catch-all → Worker
 
 Worker source: `/email-worker/src/index.ts`
-Deploy: `CLOUDFLARE_API_KEY=... CLOUDFLARE_EMAIL=... npx wrangler deploy` from `email-worker/` dir
+Deploy: see "Webhook authentication & deploy" section below.
+
+### Webhook authentication & deploy
+
+Both inbound and outbound (delivery/bounce) webhooks are gated by a shared secret in `POSTMARK_WEBHOOK_TOKEN` (backend `.env`). Every webhook must POST with header `X-Webhook-Token: <token>`. Backend fails closed: if env var is unset, every webhook 401s. Constant-time compare prevents timing oracles. Confirmed safe over public internet.
+
+**Where the secret is set (3 places must match):**
+
+| Where | How |
+|---|---|
+| Backend | `POSTMARK_WEBHOOK_TOKEN` in `/srv/quantumpools/app/.env`. Restart `quantumpools-backend` to pick up. |
+| Postmark webhooks | Postmark dashboard → Servers → Sapphire Pools → Default Transactional Stream → each webhook (Delivery, Bounce, Spam Complaint) → "Custom HTTP headers" → add `X-Webhook-Token: <token>`. |
+| Cloudflare Worker | `wrangler secret put WEBHOOK_TOKEN` (interactive prompt) — bound to the worker, NOT in wrangler.toml. |
+
+**Why three webhooks all point at the inbound endpoint** (not the dedicated `/admin/postmark-webhook`): we use `?type=bounce` and `?type=delivery` query params on the inbound URL. The backend dispatches to `_handle_status_webhook` based on that. The dedicated `/admin/postmark-webhook` exists but is unused — kept for future where a single multi-event subscription is preferable. Spam Complaint webhook uses `?type=bounce` (cosmetic — backend doesn't have a separate spam handler yet, treats as bounce).
+
+**What we do NOT use:** Postmark Inbound Stream (paid-plan only). Cloudflare Email Worker handles inbound.
+
+**Worker deploy steps:**
+```bash
+cd /srv/quantumpools/email-worker
+# Auth: needs CLOUDFLARE_API_TOKEN env var (already in /srv/quantumpools/app/.env).
+# Token scope: "Edit Cloudflare Workers" template is sufficient.
+export CLOUDFLARE_API_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' /srv/quantumpools/app/.env | cut -d= -f2)
+npx wrangler deploy             # ship code changes
+echo '<token>' | npx wrangler secret put WEBHOOK_TOKEN   # set/rotate worker secret
+npx wrangler whoami             # sanity check auth
+```
+
+Cloudflare account: `brian.e.parrotte@gmail.com` (account ID `4f5794507b55069e37d5ce874cec7e85`). Worker name: `sapphire-pools-email`.
+
+**Token rotation procedure (do this if the secret is ever exposed):**
+1. Generate new: `python -c 'import secrets; print(secrets.token_urlsafe(32))'`
+2. Update `POSTMARK_WEBHOOK_TOKEN` in `/srv/quantumpools/app/.env`
+3. Restart backend: `sudo systemctl restart quantumpools-backend`
+4. Postmark dashboard: edit each webhook custom header to the new value, save
+5. Update CF Worker secret: `echo '<new-token>' | npx wrangler secret put WEBHOOK_TOKEN`
+6. Verify: send a test inbound email; check `journalctl -u quantumpools-backend | grep webhook` for 200s, not 401s
+
+**Failure mode:** if any of the three places drift out of sync, that path silently 401s and inbound or delivery events vanish. The agent_poller's "inbound freshness canary" (every 5 min) and the backend's "webhook rejected" log line are the early-warning signals — both fire ntfy alerts.
 
 ## Data flow
 

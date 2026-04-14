@@ -4,14 +4,15 @@
 >
 > **Removal note:** Delete this doc when a follow-up audit (different angle / fresh agent) confirms no new findings AND every fix has at least 30 days of production use without incident.
 
-## Action required from Brian (post-deploy)
+## Action required from Brian (post-deploy) — COMPLETED 2026-04-13
 
-The Postmark webhook auth gate is **fail-closed** — until the Postmark dashboard is configured to send the `X-Webhook-Token` header, every delivery + bounce + open + spam webhook returns 401 and we lose those events. Configure each webhook in Postmark with a custom header:
+The Postmark webhook auth gate is **fail-closed** — until each webhook sender is configured to send the `X-Webhook-Token` header, every webhook returns 401.
 
-- Header name: `X-Webhook-Token`
-- Header value: (the value of `POSTMARK_WEBHOOK_TOKEN` in `.env`)
+Configured 2026-04-13:
+- ✅ Postmark Default Transactional Stream → Bounce, Spam Complaint, Delivery webhooks all have `X-Webhook-Token` custom header
+- ✅ Cloudflare Email Worker (`sapphire-pools-email`) sends `X-Webhook-Token` (worker secret bound, version `b30827ed-5653-49d8-ab38-df94820fc8cc`)
 
-Apply to: delivery webhook, bounce webhook, open webhook, spam-complaint webhook, and the inbound-email webhook (different URL but same secret).
+For full setup details (token rotation, deploy commands, where the secret lives in each system) see `docs/email-pipeline.md` → "Webhook authentication & deploy".
 
 ## Context
 

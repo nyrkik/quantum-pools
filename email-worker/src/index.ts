@@ -8,6 +8,9 @@
 
 export interface Env {
   WEBHOOK_URL: string;
+  // Shared secret matching POSTMARK_WEBHOOK_TOKEN on the QP backend. Set via
+  // `wrangler secret put WEBHOOK_TOKEN` — never committed to wrangler.toml.
+  WEBHOOK_TOKEN: string;
 }
 
 export default {
@@ -42,10 +45,15 @@ export default {
       },
     };
 
-    // POST to our webhook
+    // POST to our webhook with the shared-secret auth header. Backend gates
+    // this endpoint behind X-Webhook-Token (POSTMARK_WEBHOOK_TOKEN env var) —
+    // without the header every webhook 401s and we silently lose inbound mail.
     const response = await fetch(env.WEBHOOK_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Webhook-Token": env.WEBHOOK_TOKEN,
+      },
       body: JSON.stringify(payload),
     });
 

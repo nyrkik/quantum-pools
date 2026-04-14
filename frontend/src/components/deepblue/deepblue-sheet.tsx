@@ -22,13 +22,41 @@ interface ConversationListItem {
   updated_at: string;
 }
 
+// Draft survives close/reopen, route changes, and even browser reload.
+// Closing the DeepBlue sheet unmounts the component, which used to destroy
+// local input state along with any in-progress draft.
+const DRAFT_KEY = "deepblue:input-draft";
+
+function readDraft(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return sessionStorage.getItem(DRAFT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeDraft(value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    if (value) sessionStorage.setItem(DRAFT_KEY, value);
+    else sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* sessionStorage may be unavailable in private mode */
+  }
+}
+
 export function DeepBlueSheet() {
   const { user } = useAuth();
   const currentUserId = user?.id || "";
   const {
     isOpen, isLoading, isHistorical, messages, context, conversationId, closeDeepBlue, sendMessage, clearConversation, saveToCase, loadConversation,
   } = useDeepBlue();
-  const [input, setInput] = useState("");
+  const [input, setInputState] = useState<string>(() => readDraft());
+  const setInput = (value: string) => {
+    setInputState(value);
+    writeDraft(value);
+  };
   const [showHistory, setShowHistory] = useState(false);
   const [historyScope, setHistoryScope] = useState<"mine" | "shared">("mine");
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
@@ -101,11 +129,21 @@ export function DeepBlueSheet() {
   };
 
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
+    // Optimistic clear: the user's message gets echoed into the chat list
+    // by sendMessage, so leaving the textbox full looks like nothing
+    // happened. Clear immediately. If the send throws, restore the text
+    // and tell the user so their work isn't silently lost.
     setInput("");
-    sendMessage(text);
+    try {
+      await sendMessage(text);
+    } catch (err) {
+      setInput(text);
+      const msg = err instanceof Error ? err.message : "Send failed";
+      toast.error(`${msg} — your message is still in the box`);
+    }
   };
 
   if (!isOpen) return null;

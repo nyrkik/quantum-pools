@@ -278,8 +278,15 @@ class AgentThreadService:
 
         return {"items": items, "total": total}
 
-    async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_permission_slugs: set[str] | None = None) -> dict:
-        """Thread-level stats. If user_permission_slugs provided, counts only visible threads."""
+    async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_permission_slugs: set[str] | None = None, can_manage_inbox: bool = False) -> dict:
+        """Thread-level stats. If user_permission_slugs provided, counts only visible threads.
+
+        Ops counts (failed, auto_sent, auto_handled_today, stale_pending) are
+        zeroed out for users without inbox.manage — they're a billing/ops concern,
+        not a manager-level dashboard. Defense-in-depth alongside the frontend
+        chip-rendering gate; if either layer is misconfigured the count never
+        leaks to managers/techs.
+        """
         thread_org = AgentThread.organization_id == org_id
 
         def _vis_filter(q):
@@ -436,12 +443,14 @@ class AgentThreadService:
         return {
             "total": total,
             "pending": pending,
-            "stale_pending": stale,
             "open_actions": open_actions,
             "unread": unread,
-            "auto_sent": auto_sent,
-            "failed": failed,
-            "auto_handled_today": auto_handled_today,
+            # Ops counts: only exposed to inbox-managers (owner/admin). Lower
+            # roles see 0 even if data exists, so the chips never render.
+            "stale_pending": stale if can_manage_inbox else 0,
+            "auto_sent": auto_sent if can_manage_inbox else 0,
+            "failed": failed if can_manage_inbox else 0,
+            "auto_handled_today": auto_handled_today if can_manage_inbox else 0,
         }
 
     async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None, user_id: str | None = None) -> dict | None:

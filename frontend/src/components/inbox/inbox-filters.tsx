@@ -33,6 +33,10 @@ interface InboxFiltersProps {
   autoHandledFilter?: boolean;
   onAutoHandledFilterChange?: (v: boolean) => void;
   autoHandledTodayCount?: number;  // for chip-style count
+  // Ops chips (Failed, Auto-Sent, Auto-Handled, Stale) are owner/admin only —
+  // billing/ops triage is not a manager concern. Backend stats also zero these
+  // out for non-managers as defense in depth.
+  canManageInbox?: boolean;
 }
 
 export function InboxFilters({
@@ -53,6 +57,7 @@ export function InboxFilters({
   autoHandledFilter,
   onAutoHandledFilterChange,
   autoHandledTodayCount,
+  canManageInbox = false,
 }: InboxFiltersProps) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -76,7 +81,7 @@ export function InboxFilters({
           By Client
         </Button>
       )}
-      {stats && (stats.failed ?? 0) > 0 && onFailedFilterChange && (
+      {canManageInbox && stats && (stats.failed ?? 0) > 0 && onFailedFilterChange && (
         <Button
           variant={failedFilter ? "destructive" : "outline"}
           size="sm"
@@ -87,7 +92,7 @@ export function InboxFilters({
           {stats.failed} Failed
         </Button>
       )}
-      {stats && (stats.auto_sent ?? 0) > 0 && onAutoSentFilterChange && (
+      {canManageInbox && stats && (stats.auto_sent ?? 0) > 0 && onAutoSentFilterChange && (
         <Button
           variant={autoSentFilter ? "default" : "outline"}
           size="sm"
@@ -98,7 +103,7 @@ export function InboxFilters({
           Auto-Sent
         </Button>
       )}
-      {onAutoHandledFilterChange && (
+      {canManageInbox && onAutoHandledFilterChange && (
         <Button
           variant={autoHandledFilter ? "default" : "outline"}
           size="sm"
@@ -113,7 +118,7 @@ export function InboxFilters({
           )}
         </Button>
       )}
-      {stats && stats.pending > 0 && onStaleFilterChange && (
+      {canManageInbox && stats && stats.pending > 0 && onStaleFilterChange && (
         <Button
           variant={staleFilter ? "destructive" : "outline"}
           size="sm"

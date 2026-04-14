@@ -81,8 +81,14 @@ async def get_thread_stats(
 ):
     """Thread-level stats (visibility-filtered)."""
     perm_slugs = await _get_user_perm_slugs(ctx, db)
+    can_manage = "*" in perm_slugs or "inbox.manage" in perm_slugs
     service = AgentThreadService(db)
-    return await service.get_thread_stats(org_id=ctx.organization_id, user_id=ctx.user.id, user_permission_slugs=perm_slugs)
+    return await service.get_thread_stats(
+        org_id=ctx.organization_id,
+        user_id=ctx.user.id,
+        user_permission_slugs=perm_slugs,
+        can_manage_inbox=can_manage,
+    )
 
 
 @router.get("/agent-threads/{thread_id}")

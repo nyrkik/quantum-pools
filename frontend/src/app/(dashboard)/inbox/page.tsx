@@ -437,6 +437,7 @@ export default function InboxPage() {
             autoHandledFilter={autoHandledFilter}
             onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setAutoSentFilter(false); setFailedFilter(false); setPage(0); }}
             autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
+            canManageInbox={perms.can("inbox.manage")}
           />
 
           <InboxMobileList threads={threads} loading={loading} currentUserId={user.id} />

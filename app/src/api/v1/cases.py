@@ -407,16 +407,35 @@ async def unlink_entity(
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
+    # Each entity fetch MUST be org-filtered. Without it, an authenticated user
+    # could unlink any thread/action/invoice from any org's case by ID.
+    # (Cross-org mutation, docs/inbox-security-audit-2026-04-13.md C2.)
+    org_id = ctx.organization_id
     if entity_type == "job":
-        action = (await db.execute(select(AgentAction).where(AgentAction.id == entity_id))).scalar_one_or_none()
+        action = (await db.execute(
+            select(AgentAction).where(
+                AgentAction.id == entity_id,
+                AgentAction.organization_id == org_id,
+            )
+        )).scalar_one_or_none()
         if action:
             action.case_id = None
     elif entity_type == "thread":
-        thread = (await db.execute(select(AgentThread).where(AgentThread.id == entity_id))).scalar_one_or_none()
+        thread = (await db.execute(
+            select(AgentThread).where(
+                AgentThread.id == entity_id,
+                AgentThread.organization_id == org_id,
+            )
+        )).scalar_one_or_none()
         if thread:
             thread.case_id = None
     elif entity_type == "invoice":
-        invoice = (await db.execute(select(Invoice).where(Invoice.id == entity_id))).scalar_one_or_none()
+        invoice = (await db.execute(
+            select(Invoice).where(
+                Invoice.id == entity_id,
+                Invoice.organization_id == org_id,
+            )
+        )).scalar_one_or_none()
         if invoice:
             invoice.case_id = None
 

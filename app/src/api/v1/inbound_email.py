@@ -29,11 +29,14 @@ async def receive_webhook(
 ):
     """Receive inbound email from an email provider webhook.
 
-    This is a PUBLIC endpoint — no auth required. Email providers
-    (SendGrid, Postmark, Mailgun) cannot authenticate with our JWT.
+    Authenticated via shared `X-Webhook-Token` header against the
+    POSTMARK_WEBHOOK_TOKEN env var. This is the same secret used for the
+    delivery webhook; configure both webhooks in the Postmark dashboard with
+    the custom header.
 
     Security:
     - Rate limited to 30/minute per IP
+    - X-Webhook-Token shared secret (fail-closed if env var unset)
     - Org slug must exist and be active
     - Block rules applied before processing
 
@@ -41,6 +44,10 @@ async def receive_webhook(
         provider: sendgrid | postmark | mailgun | generic (default: generic)
         type: bounce | delivery (optional — for status webhooks)
     """
+    # Reuse the verifier from admin_webhooks — same shared secret, same env var.
+    from src.api.v1.admin_webhooks import verify_postmark_webhook_token
+    verify_postmark_webhook_token(request)
+
     if provider not in VALID_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 

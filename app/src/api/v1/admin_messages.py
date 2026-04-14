@@ -397,11 +397,18 @@ async def draft_followup(
             for c in a.comments:
                 actions_context += f"\n  Comment ({c.author}): {c.text}"
 
-    # Get customer context
+    # Get customer context — MUST org-filter, otherwise the AI draft could
+    # leak data from a different tenant's customer record.
+    # (docs/inbox-security-audit-2026-04-13.md H1.)
     customer_info = ""
     if msg.matched_customer_id:
         from src.models.customer import Customer
-        cust = (await db.execute(select(Customer).where(Customer.id == msg.matched_customer_id))).scalar_one_or_none()
+        cust = (await db.execute(
+            select(Customer).where(
+                Customer.id == msg.matched_customer_id,
+                Customer.organization_id == ctx.organization_id,
+            )
+        )).scalar_one_or_none()
         if cust:
             customer_info = f"\nCustomer: {cust.display_name}"
             if cust.company_name:

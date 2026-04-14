@@ -1,8 +1,10 @@
 """Admin webhook endpoints — Twilio SMS + Postmark delivery events."""
 
 import logging
+import os
+import secrets as _secrets
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, Response, Depends
+from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +12,38 @@ from src.core.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-webhooks"])
+
+
+def verify_postmark_webhook_token(request: Request) -> None:
+    """Validate the X-Webhook-Token header against POSTMARK_WEBHOOK_TOKEN env var.
+
+    Postmark doesn't ship native HMAC signatures, but their dashboard lets you
+    attach custom headers to outbound webhooks. We require a shared secret in
+    `X-Webhook-Token`. Constant-time compare to avoid timing oracles.
+
+    FAIL CLOSED: if the env var isn't configured, every webhook is rejected
+    with 503. Better to lose delivery events than to silently accept forged
+    ones from the public internet.
+
+    Why this matters: before this check, anyone on the internet could POST to
+    /api/v1/admin/postmark-webhook with `{"RecordType":"Bounce","MessageID":"<id>"}`
+    and mark any outbound email in the DB as bounced.
+    """
+    expected = os.environ.get("POSTMARK_WEBHOOK_TOKEN")
+    if not expected:
+        logger.error(
+            "POSTMARK_WEBHOOK_TOKEN not set — rejecting webhook (fail-closed). "
+            "Set it in .env and configure Postmark to send X-Webhook-Token header."
+        )
+        raise HTTPException(status_code=503, detail="Webhook auth not configured")
+
+    provided = request.headers.get("X-Webhook-Token", "")
+    if not _secrets.compare_digest(provided, expected):
+        logger.warning(
+            f"Postmark webhook rejected: bad/missing X-Webhook-Token "
+            f"(remote={request.client.host if request.client else 'unknown'})"
+        )
+        raise HTTPException(status_code=401, detail="Invalid webhook token")
 
 
 @router.post("/postmark-webhook")
@@ -27,6 +61,7 @@ async def postmark_delivery_webhook(
 
     We match by MessageID to update the AgentMessage.
     """
+    verify_postmark_webhook_token(request)
     from src.models.agent_message import AgentMessage
 
     try:

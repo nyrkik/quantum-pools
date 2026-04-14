@@ -142,10 +142,26 @@ class InboundEmailService:
         if not message_id:
             return {"status": "ignored", "detail": "No MessageID in payload"}
 
-        # Find the outbound message by Postmark message ID
+        # Resolve org from the URL slug — the webhook URL is per-org and the
+        # signature gate (verify_postmark_webhook_token) ensures this request
+        # is actually from us. We then constrain the message lookup to that
+        # org, so a forged status update can't cross tenants even if the gate
+        # is ever bypassed. (docs/inbox-security-audit-2026-04-13.md H4.)
+        org_row = (await db.execute(
+            select(Organization.id).where(
+                Organization.slug == org_slug,
+                Organization.is_active == True,  # noqa: E712
+            )
+        )).scalar_one_or_none()
+        if not org_row:
+            logger.warning(f"Status webhook for unknown org slug: {org_slug}")
+            return {"status": "ignored", "detail": "Organization not found"}
+
+        # Find the outbound message by Postmark message ID, scoped to org.
         result = await db.execute(
             select(AgentMessage).where(
                 AgentMessage.postmark_message_id == message_id,
+                AgentMessage.organization_id == org_row,
             )
         )
         msg = result.scalar_one_or_none()

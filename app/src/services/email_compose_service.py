@@ -72,17 +72,26 @@ class EmailComposeService:
 
         from_email = os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com")
 
-        # Resolve customer info
+        # Resolve customer info — MUST filter by organization_id, otherwise an
+        # authenticated user in org A could pass a customer_id from org B and
+        # the resulting email would attach the wrong tenant's customer data.
+        # (Cross-org leak documented in docs/inbox-security-audit-2026-04-13.md C1.)
         customer_name = None
         property_address = None
         if customer_id:
             cust = (await self.db.execute(
-                select(Customer).where(Customer.id == customer_id)
+                select(Customer).where(
+                    Customer.id == customer_id,
+                    Customer.organization_id == org_id,
+                )
             )).scalar_one_or_none()
             if cust:
                 customer_name = cust.display_name
                 prop = (await self.db.execute(
-                    select(Property).where(Property.customer_id == customer_id).limit(1)
+                    select(Property).where(
+                        Property.customer_id == customer_id,
+                        Property.organization_id == org_id,
+                    ).limit(1)
                 )).scalar_one_or_none()
                 if prop:
                     property_address = prop.address

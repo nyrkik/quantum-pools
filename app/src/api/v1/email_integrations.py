@@ -138,10 +138,10 @@ async def get_integration(
 
 
 class GmailAuthorizeBody(BaseModel):
-    # Future: support multi-account by passing an existing integration_id to
-    # re-auth, or omit to create a new one. For now we always create a new
-    # integration row in 'connecting' state.
-    pass
+    # If provided, re-auth that existing integration row (preserves history,
+    # last_history_id, gmail_thread_id links on past threads). If omitted, a
+    # new placeholder integration is created.
+    integration_id: str | None = None
 
 
 @router.post("/gmail/authorize")
@@ -150,21 +150,43 @@ async def gmail_authorize(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Start the Gmail OAuth flow. Returns the URL the browser should redirect to."""
+    """Start the Gmail OAuth flow. Returns the URL the browser should redirect to.
+
+    If `body.integration_id` is provided, re-authenticates that existing
+    integration (preserves its sync history). Otherwise creates a new row.
+    """
     from src.services.gmail.oauth import build_authorize_url, OAuthConfigError
 
-    # Create a placeholder EmailIntegration in 'connecting' state.
-    # On callback we'll update it with tokens and flip status to 'connected'.
-    integration = EmailIntegration(
-        id=str(uuid.uuid4()),
-        organization_id=ctx.organization_id,
-        type=IntegrationType.gmail_api.value,
-        status=IntegrationStatus.connecting.value,
-        outbound_provider="gmail_api",
-        is_primary=False,  # set to True only after first successful sync if no other primary exists
-    )
-    db.add(integration)
-    await db.commit()
+    integration: EmailIntegration | None = None
+    if body.integration_id:
+        integration = (await db.execute(
+            select(EmailIntegration).where(
+                EmailIntegration.id == body.integration_id,
+                EmailIntegration.organization_id == ctx.organization_id,
+                EmailIntegration.type == IntegrationType.gmail_api.value,
+            )
+        )).scalar_one_or_none()
+        if not integration:
+            raise HTTPException(404, "Integration not found")
+        # Reuse the row — flip back to 'connecting' so the UI knows OAuth is in flight.
+        integration.status = IntegrationStatus.connecting.value
+        integration.last_error = None
+        integration.last_error_at = None
+        await db.commit()
+
+    if integration is None:
+        # Create a placeholder EmailIntegration in 'connecting' state.
+        # On callback we'll update it with tokens and flip status to 'connected'.
+        integration = EmailIntegration(
+            id=str(uuid.uuid4()),
+            organization_id=ctx.organization_id,
+            type=IntegrationType.gmail_api.value,
+            status=IntegrationStatus.connecting.value,
+            outbound_provider="gmail_api",
+            is_primary=False,  # set to True only after first successful sync if no other primary exists
+        )
+        db.add(integration)
+        await db.commit()
 
     # CSRF state — opaque to Google, validated on callback
     nonce = secrets.token_urlsafe(16)

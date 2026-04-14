@@ -41,7 +41,7 @@ import {
 interface EmailIntegration {
   id: string;
   type: "managed" | "gmail_api" | "ms_graph" | "forwarding" | "manual";
-  status: "setup_required" | "connecting" | "connected" | "error";
+  status: "setup_required" | "connecting" | "connected" | "error" | "disconnected";
   account_email: string | null;
   inbound_sender_address: string | null;
   outbound_provider: string | null;
@@ -172,12 +172,12 @@ function EmailSettingsContent() {
     router.replace("/settings/email");
   }, [searchParams, router]);
 
-  const handleConnectGmail = async () => {
+  const handleConnectGmail = async (reauthIntegrationId?: string) => {
     setConnecting(true);
     try {
       const resp = await api.post<{ authorize_url: string; integration_id: string }>(
         "/v1/email-integrations/gmail/authorize",
-        {}
+        reauthIntegrationId ? { integration_id: reauthIntegrationId } : {}
       );
       window.location.href = resp.authorize_url;
     } catch (e: unknown) {
@@ -244,7 +244,7 @@ function EmailSettingsContent() {
           <CardContent>
             <div className="flex flex-wrap gap-2">
               <Button
-                onClick={handleConnectGmail}
+                onClick={() => handleConnectGmail()}
                 disabled={connecting}
                 variant={hasGmailConnected ? "outline" : "default"}
               >
@@ -317,6 +317,18 @@ function EmailSettingsContent() {
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {ei.type === "gmail_api" && (ei.status === "error" || ei.status === "disconnected") && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleConnectGmail(ei.id)}
+                          disabled={connecting}
+                          title="Re-authenticate this Gmail account (preserves sync history)"
+                        >
+                          {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                          Reconnect
+                        </Button>
+                      )}
                       {ei.type === "gmail_api" && ei.status === "connected" && (
                         <>
                           <Button

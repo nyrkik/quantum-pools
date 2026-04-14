@@ -156,18 +156,29 @@ class AgentThreadService:
                     ),
                 )
             elif status == "failed":
-                # Anything an outbound message could be in a "did not get to the
-                # recipient" state: bounced/spam by the receiver, OR our own send
-                # failed (status=failed/queued) before it ever left.
+                # A thread is "failed" only if its MOST RECENT outbound attempt
+                # is in a failure state. If the user retried and a later send
+                # succeeded, the thread is resolved and should NOT appear here.
+                # (Counting any-failed-ever made this filter useless — a 4-fail
+                # 4-success retry storm showed the same as 4 actual losses.)
+                latest_outbound = (
+                    select(
+                        AgentMessage.thread_id.label("tid"),
+                        AgentMessage.status.label("st"),
+                        AgentMessage.delivery_status.label("ds"),
+                        AgentMessage.delivery_error.label("de"),
+                    )
+                    .where(AgentMessage.direction == "outbound")
+                    .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+                    .distinct(AgentMessage.thread_id)
+                    .subquery()
+                )
                 base = base.where(
                     AgentThread.id.in_(
-                        select(AgentMessage.thread_id).where(
-                            AgentMessage.direction == "outbound",
-                            (
-                                AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
-                                | AgentMessage.delivery_error.isnot(None)
-                                | AgentMessage.status.in_(("failed", "queued"))
-                            ),
+                        select(latest_outbound.c.tid).where(
+                            latest_outbound.c.ds.in_(("bounced", "spam_complaint"))
+                            | latest_outbound.c.de.isnot(None)
+                            | latest_outbound.c.st.in_(("failed", "queued"))
                         )
                     )
                 )
@@ -389,24 +400,34 @@ class AgentThreadService:
             )
         )).scalar() or 0
 
-        # Failed sends — any outbound message in a state where the recipient did
-        # NOT get the email: bounced/spam by the receiver, our send errored, or
-        # the message is stuck in failed/queued (the janitor flips queued→failed
-        # after 5 minutes; before that we still count it so the user can see it).
+        # Failed sends — count threads where the LATEST outbound attempt failed.
+        # See the failed-filter branch above for the rationale: a thread with a
+        # later successful retry is not failed, even if earlier attempts crashed.
+        latest_outbound = (
+            select(
+                AgentMessage.thread_id.label("tid"),
+                AgentMessage.status.label("st"),
+                AgentMessage.delivery_status.label("ds"),
+                AgentMessage.delivery_error.label("de"),
+            )
+            .where(AgentMessage.direction == "outbound")
+            .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+            .distinct(AgentMessage.thread_id)
+            .subquery()
+        )
         failed = (await self.db.execute(
             _vis_filter(
                 select(func.count(func.distinct(AgentThread.id)))
                 .select_from(AgentThread.__table__.join(
-                    AgentMessage.__table__,
-                    AgentMessage.thread_id == AgentThread.id,
+                    latest_outbound,
+                    latest_outbound.c.tid == AgentThread.id,
                 ))
                 .where(
                     thread_org,
-                    AgentMessage.direction == "outbound",
                     (
-                        AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
-                        | AgentMessage.delivery_error.isnot(None)
-                        | AgentMessage.status.in_(("failed", "queued"))
+                        latest_outbound.c.ds.in_(("bounced", "spam_complaint"))
+                        | latest_outbound.c.de.isnot(None)
+                        | latest_outbound.c.st.in_(("failed", "queued"))
                     ),
                 )
             )

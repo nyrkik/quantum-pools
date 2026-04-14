@@ -322,9 +322,141 @@ async def gmail_incremental_sync():
                     logger.error(f"Failed to flag integration {integ_id} as errored: {inner}")
 
 
+INBOUND_FRESHNESS_EVERY = 5  # check every 5 cycles (~5 min)
+INBOUND_BUSINESS_HOURS_THRESHOLD_MIN = 6 * 60   # 6h during business hours
+INBOUND_OFF_HOURS_THRESHOLD_MIN = 24 * 60       # 24h overnight/weekends
+RECONCILE_EVERY = 30  # every 30 cycles (~30 min)
+
+
+def _is_business_hours_pacific() -> bool:
+    """Mon-Fri, 7am-8pm Pacific. Used to pick the inbound-freshness threshold."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime as _dt
+        now = _dt.now(ZoneInfo("America/Los_Angeles"))
+        return now.weekday() < 5 and 7 <= now.hour < 20
+    except Exception:
+        return True  # default to stricter threshold on error
+
+
+async def inbound_freshness_check():
+    """Alert if no inbound email has arrived recently — system-wide canary.
+
+    This catches the failure mode where every per-integration health probe
+    looks fine but no mail is actually flowing (Postmark webhook endpoint
+    broken, Cloudflare worker down, all integrations dead, MX misconfig…).
+
+    Threshold is generous outside business hours since real customer email
+    can legitimately go quiet overnight.
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select, func
+    from src.core.database import get_db_context
+    from src.models.agent_message import AgentMessage
+
+    threshold_min = INBOUND_BUSINESS_HOURS_THRESHOLD_MIN if _is_business_hours_pacific() else INBOUND_OFF_HOURS_THRESHOLD_MIN
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_min)
+
+    async with get_db_context() as db:
+        latest = (await db.execute(
+            select(func.max(AgentMessage.received_at)).where(
+                AgentMessage.direction == "inbound",
+            )
+        )).scalar()
+
+    if latest is None:
+        # Empty database / brand-new install — nothing to alert on yet.
+        return
+
+    if latest >= cutoff:
+        # Recent inbound — clear any prior staleness flag.
+        _clear_failures("inbound_freshness")
+        return
+
+    # Stale. Calculate how stale and alert via ntfy with a 1-hour cooldown
+    # so we don't spam every 5 min during a multi-hour outage.
+    age_min = int((datetime.now(timezone.utc) - latest).total_seconds() / 60)
+    age_str = f"{age_min // 60}h{age_min % 60:02d}m" if age_min >= 60 else f"{age_min}m"
+    label = f"INBOUND STALE ({age_str})"
+
+    # Use _failure_counts to drive the cooldown via _send_ntfy's threshold logic.
+    _failure_counts["inbound_freshness"] = _failure_counts.get("inbound_freshness", 0) + 1
+    _send_ntfy(
+        title="QP inbox: no inbound mail",
+        message=(
+            f"No inbound email received in {age_str} (threshold {threshold_min // 60}h).\n"
+            f"Last inbound: {latest.isoformat()}\n"
+            f"Check: webhook delivery (Postmark dashboard), Gmail integration health, "
+            f"MX records, Cloudflare worker logs."
+        ),
+        priority="urgent",
+        tags="rotating_light,email",
+    )
+    logger.warning(f"{label} — last inbound {latest.isoformat()}, threshold {threshold_min}m")
+
+
+async def reconcile_thread_state():
+    """Detect and fix denormalized thread fields that have drifted from reality.
+
+    Thread fields like message_count, has_pending, last_message_at,
+    last_direction, last_snippet are denormalized for query speed and kept in
+    sync by `update_thread_status()` after every mutation. If a code path ever
+    forgets to call it (or crashes mid-mutation), the thread silently shows
+    stale state in the inbox UI. This job catches and fixes that drift.
+
+    Compares thread.message_count against the actual count for every thread.
+    Any mismatch triggers a full update_thread_status recompute on that thread.
+    """
+    from sqlalchemy import select, func
+    from src.core.database import get_db_context
+    from src.models.agent_thread import AgentThread
+    from src.models.agent_message import AgentMessage
+    from src.services.agents.thread_manager import update_thread_status
+
+    async with get_db_context() as db:
+        # Pull (thread_id, denorm_count, actual_count) for every thread.
+        rows = (await db.execute(
+            select(
+                AgentThread.id,
+                AgentThread.message_count,
+                func.count(AgentMessage.id).label("actual"),
+            )
+            .select_from(AgentThread)
+            .outerjoin(AgentMessage, AgentMessage.thread_id == AgentThread.id)
+            .group_by(AgentThread.id, AgentThread.message_count)
+        )).all()
+
+    drifted = [r.id for r in rows if (r.message_count or 0) != (r.actual or 0)]
+    if not drifted:
+        return
+
+    logger.warning(f"Thread reconciliation: fixing {len(drifted)} drifted thread(s)")
+    for tid in drifted:
+        try:
+            await update_thread_status(tid)
+        except Exception as e:
+            logger.warning(f"Thread reconciliation: update_thread_status failed for {tid}: {e}")
+
+    # If we had to fix more than 5 in one pass, something upstream is dropping
+    # update_thread_status calls — alert ops to investigate.
+    if len(drifted) > 5:
+        _send_ntfy(
+            title="QP inbox: high thread-state drift",
+            message=(
+                f"Reconciliation just fixed {len(drifted)} threads with mismatched "
+                f"message_count. Something upstream is creating/deleting messages "
+                f"without calling update_thread_status. Check recent commits + logs."
+            ),
+            priority="high",
+            tags="warning",
+        )
+
+
 async def main():
     logger.info("Background agent service started (monitoring: Sentry + ntfy)")
     logger.info("Inbound email: Postmark webhooks + Gmail incremental sync (every 60s)")
+    logger.info(f"Inbound freshness canary: every {INBOUND_FRESHNESS_EVERY} min")
+    logger.info(f"Thread state reconciliation: every {RECONCILE_EVERY} min")
     cycle = 0
 
     while True:
@@ -368,6 +500,23 @@ async def main():
                 _clear_failures("auto_close_visits")
             except Exception as e:
                 _handle_error("auto_close_visits", e)
+
+        # --- Inbound freshness canary (every 5 min) ---
+        # System-wide alert if no inbound mail has arrived recently.
+        if cycle % INBOUND_FRESHNESS_EVERY == 0:
+            try:
+                await inbound_freshness_check()
+            except Exception as e:
+                _handle_error("inbound_freshness_check", e)
+
+        # --- Thread state reconciliation (every 30 min) ---
+        # Detects + fixes drift in denormalized thread fields.
+        if cycle % RECONCILE_EVERY == 0:
+            try:
+                await reconcile_thread_state()
+                _clear_failures("reconcile_thread_state")
+            except Exception as e:
+                _handle_error("reconcile_thread_state", e)
 
         await asyncio.sleep(POLL_INTERVAL)
 

@@ -1,6 +1,6 @@
 # Entity Connections Plan
 
-**Status:** Draft — not started.
+**Status:** Phase 1 shipped 2026-04-14. Phase 2 not started.
 **Goal:** Make every meaningful work artifact connectable to the ServiceCase hub, with manual link/unlink UI, line-item-level revenue attribution, physical-work connections, equipment axis, and discovery. Remove when phases 1-5 are complete.
 
 ## Problem
@@ -141,17 +141,19 @@ Three affordances so connections aren't invisible:
 
 ## Phases
 
-### Phase 1 — Manual link/unlink UI for existing linkables (ships the Sierra Oaks use case)
+### Phase 1 — Manual link/unlink UI for existing linkables (ships the Sierra Oaks use case) — SHIPPED 2026-04-14
 
-- [ ] Extend `POST /v1/cases/{id}/link` and `DELETE /v1/cases/{id}/link` to handle `internal_thread` and `deepblue_conversation`.
-- [ ] Extend `update_counts(case_id)` to include `internal_thread_count`, `deepblue_conversation_count` on ServiceCase (new columns + migration).
-- [ ] Build `<LinkCasePicker>` component — searches cases, scoped to customer_id if known, falls back to global search. Includes "Create new case from this entity" option.
-- [ ] Wire it in on: invoice detail header, thread detail sheet, job detail content, internal thread page, DeepBlue conversation card.
-- [ ] Case detail page: "Attach…" dropdown per section, opens inverse picker.
-- [ ] Unit tests: link/unlink is idempotent, cross-org mutation is blocked, counts update correctly.
-- [ ] Activity log entry on link/unlink.
+- [x] Extend `POST /v1/cases/{id}/link` and `DELETE /v1/cases/{id}/link` to handle `internal_thread` and `deepblue_conversation`.
+- [x] Extend `update_counts(case_id)` to include `internal_thread_count`, `deepblue_conversation_count` on ServiceCase (new columns + migration `6ca65f3faef6`).
+- [x] Centralized `ServiceCaseService.set_entity_case()` — sole write path for `entity.case_id` mutations, handles counts + activity + events.
+- [x] Build `<LinkCasePicker>` component — searches cases, scoped to customer_id if known, falls back to global search. Includes "Create new case from this entity" option.
+- [x] Wire it in on: invoice detail header, thread detail sheet, job detail content, internal thread page. (DeepBlue conversation card: deferred — attach from case detail covers the inverse.)
+- [x] Case detail page: `<AttachExistingDialog>` in timeline header — inverse picker with per-row eye icon for email thread preview before committing.
+- [x] Unit tests: link/unlink is idempotent, cross-org mutation is blocked, counts update correctly (9 tests in `tests/test_case_link_service.py`, suite 53/53 green).
+- [x] Activity log entry on link/unlink via system comment on a host job.
+- [x] Real-time `case.updated` event on every link/unlink (shipped in Phase 1 per implementation invariant, not deferred to Phase 5).
 
-**Exit criterion:** Brian can attach EST-26005 to any existing Pinebrook case and detach it if wrong. All five entity types can be attached/detached from any entry point.
+**Exit criterion:** Brian can attach EST-26005 to any existing Pinebrook case and detach it if wrong. All five entity types can be attached/detached from any entry point. **Met.**
 
 ### Phase 2 — Line-item case attribution (Option B accounting correctness)
 

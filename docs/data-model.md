@@ -116,7 +116,7 @@ Unified case entity linking threads, jobs, and invoices.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| ServiceCase | `service_cases` | Parent case tying together threads, jobs, invoices, and internal threads for a customer issue. Tracks `manager_name` (coordinator), `current_actor_name` (derived: who needs to act next), `billing_name` (non-DB customers), and 7 attention flags (`flag_estimate_approved`, `flag_estimate_rejected`, `flag_payment_received`, `flag_customer_replied`, `flag_jobs_complete`, `flag_invoice_overdue`, `flag_stale`) |
+| ServiceCase | `service_cases` | Parent case tying together threads, jobs, invoices, internal threads, and DeepBlue conversations for a customer issue. Tracks `manager_name` (coordinator), `current_actor_name` (derived: who needs to act next), `billing_name` (non-DB customers), denormalized counts (`job_count`, `open_job_count`, `thread_count`, `invoice_count`, `internal_thread_count`, `deepblue_conversation_count`), totals (`total_invoiced`, `total_paid`), and 7 attention flags (`flag_estimate_approved`, `flag_estimate_rejected`, `flag_payment_received`, `flag_customer_replied`, `flag_jobs_complete`, `flag_invoice_overdue`, `flag_stale`). All `case_id` writes MUST route through `ServiceCaseService.set_entity_case()` — direct assignment causes count drift. Closed is terminal: once closed, `update_status_from_children` won't re-derive. Cases auto-close when jobs done + invoice sent (payment tracked independently via AR). See `docs/entity-connections-plan.md`. |
 
 ### AI Agents & Jobs
 

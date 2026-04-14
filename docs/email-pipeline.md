@@ -75,6 +75,11 @@ Both inbound and outbound (delivery/bounce) webhooks are gated by a shared secre
 
 **Why three webhooks all point at the inbound endpoint** (not the dedicated `/admin/postmark-webhook`): we use `?type=bounce` and `?type=delivery` query params on the inbound URL. The backend dispatches to `_handle_status_webhook` based on that. The dedicated `/admin/postmark-webhook` exists but is unused — kept for future where a single multi-event subscription is preferable. Spam Complaint webhook uses `?type=bounce` (cosmetic — backend doesn't have a separate spam handler yet, treats as bounce).
 
+**Known gaps in webhook handler coverage** (todo whenever someone adds these Postmark events):
+- `?type=opens` — backend currently only matches `bounce` and `delivery`. Open events would fall through to the inbound parsing path and fail. To enable open tracking, add an `opened` branch in `_handle_status_webhook` that bumps `open_count` and sets `first_opened_at` on the matching AgentMessage.
+- `?type=spam_complaint` — same. Currently spam complaints arrive via `?type=bounce` and get marked `bounced` — functional but the dashboard can't distinguish "bounce" from "user marked as spam." Add a dedicated branch that sets `delivery_status='spam_complaint'`.
+- `?type=subscription_change` — Postmark's unsubscribe events. Not handled. Lower priority since we don't currently honor unsubscribes (no marketing list).
+
 **What we do NOT use:** Postmark Inbound Stream (paid-plan only). Cloudflare Email Worker handles inbound.
 
 **Worker deploy steps:**

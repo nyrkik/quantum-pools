@@ -490,7 +490,7 @@ class AgentThreadService:
                 atts_by_msg.setdefault(a.source_id, []).append({
                     "id": a.id,
                     "filename": a.filename,
-                    "url": f"/uploads/attachments/{a.organization_id}/{a.stored_filename}",
+                    "url": f"/api/v1/attachments/{a.id}/file",
                     "mime_type": a.mime_type,
                     "file_size": a.file_size,
                 })
@@ -680,9 +680,14 @@ class AgentThreadService:
         if user_role in ("owner", "admin"):
             broadcast = True
         elif org_id:
-            # Check if user is the assignee
+            # Check if user is the assignee — must scope by org so a caller
+            # can't probe foreign threads via this code path.
+            # (docs/inbox-security-audit-2026-04-13.md M3.)
             thread = (await self.db.execute(
-                select(AgentThread).where(AgentThread.id == thread_id)
+                select(AgentThread).where(
+                    AgentThread.id == thread_id,
+                    AgentThread.organization_id == org_id,
+                )
             )).scalar_one_or_none()
             if thread and thread.assigned_to_user_id == user_id:
                 broadcast = True

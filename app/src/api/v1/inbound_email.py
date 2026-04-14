@@ -7,6 +7,18 @@ from fastapi import Depends
 
 from src.core.database import get_db
 from src.core.rate_limiter import limiter
+
+
+def _per_org_key(request: Request) -> str:
+    """Rate-limit key: per-org-slug from URL path. Falls back to IP if path
+    doesn't match. Prevents one org's webhook flood from starving another's
+    (and vice versa, prevents one IP flooding many org slugs)."""
+    parts = request.url.path.split("/")
+    # /api/v1/inbound-email/webhook/{org_slug}
+    if len(parts) >= 6 and parts[-2] == "webhook":
+        return f"org:{parts[-1]}"
+    from slowapi.util import get_remote_address
+    return get_remote_address(request)
 from src.services.inbound_email_service import InboundEmailService
 
 logger = logging.getLogger(__name__)
@@ -19,7 +31,7 @@ VALID_PROVIDERS = {"sendgrid", "postmark", "mailgun", "cloudflare", "generic"}
 
 
 @router.post("/webhook/{org_slug}")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute", key_func=_per_org_key)
 async def receive_webhook(
     org_slug: str,
     request: Request,

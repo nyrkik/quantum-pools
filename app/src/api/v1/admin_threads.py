@@ -776,19 +776,27 @@ async def bulk_mark_unread(
     """Mark multiple threads as unread by clearing read_at for all org users."""
     from src.models.thread_read import ThreadRead
     from src.models.agent_thread import AgentThread
-    gmail_thread_ids = []
-    for tid in body.thread_ids:
+
+    # First, restrict thread_ids to ones the caller's org actually owns. A
+    # naive `tid IN (body.thread_ids)` could let a caller pass another org's
+    # thread_ids and (a) delete that org's ThreadRead rows, (b) read
+    # gmail_thread_ids that don't belong to them.
+    # (docs/inbox-security-audit-2026-04-13.md M3.)
+    owned = (await db.execute(
+        select(AgentThread.id, AgentThread.gmail_thread_id).where(
+            AgentThread.id.in_(body.thread_ids),
+            AgentThread.organization_id == ctx.organization_id,
+        )
+    )).all()
+    owned_ids = [r.id for r in owned]
+    gmail_thread_ids = [r.gmail_thread_id for r in owned if r.gmail_thread_id]
+
+    if owned_ids:
         await db.execute(
             ThreadRead.__table__.delete().where(
-                ThreadRead.thread_id == tid,
+                ThreadRead.thread_id.in_(owned_ids),
             )
         )
-        # Collect Gmail thread IDs for sync
-        t = (await db.execute(
-            select(AgentThread.gmail_thread_id).where(AgentThread.id == tid)
-        )).scalar_one_or_none()
-        if t:
-            gmail_thread_ids.append(t)
     await db.commit()
 
     # Sync unread to Gmail (non-blocking)

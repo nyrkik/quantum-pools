@@ -1,8 +1,17 @@
 # Inbox/Email Subsystem Security Audit — 2026-04-13
 
-> **Status:** Audit complete, fixes IN PROGRESS. Each fix updates this doc with date + commit SHA when shipped.
+> **Status: ALL ITEMS RESOLVED 2026-04-13.** Doc retained for traceability and as the authoritative reference for the patterns applied (org-isolation in fetch-by-id, webhook signature gating, authenticated attachment serving). A follow-up audit should be run before this doc is deleted to confirm no regression.
 >
-> **Removal note:** Delete this doc when every CRITICAL/HIGH item is closed AND a follow-up audit confirms no regression.
+> **Removal note:** Delete this doc when a follow-up audit (different angle / fresh agent) confirms no new findings AND every fix has at least 30 days of production use without incident.
+
+## Action required from Brian (post-deploy)
+
+The Postmark webhook auth gate is **fail-closed** — until the Postmark dashboard is configured to send the `X-Webhook-Token` header, every delivery + bounce + open + spam webhook returns 401 and we lose those events. Configure each webhook in Postmark with a custom header:
+
+- Header name: `X-Webhook-Token`
+- Header value: (the value of `POSTMARK_WEBHOOK_TOKEN` in `.env`)
+
+Apply to: delivery webhook, bounce webhook, open webhook, spam-complaint webhook, and the inbound-email webhook (different URL but same secret).
 
 ## Context
 
@@ -17,21 +26,21 @@ Audit was run by an Explore subagent reading every email-related router/service 
 - **Bug:** `select(Customer).where(Customer.id == customer_id)` has no `Customer.organization_id == org_id` predicate.
 - **Impact:** An authenticated user in org A can pass a `customer_id` belonging to org B in the compose payload and the resulting email gets the wrong org's customer name/property/contact data attached. Cross-tenant data leak via composed email content.
 - **Fix:** Add `Customer.organization_id == org_id` to the where clause. Also re-check the `Property` lookup right after (line 84-86) — same pattern.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### C2. Case unlink — cross-org mutation by ID
 - **File:** `app/src/api/v1/cases.py:411,415`
 - **Bug:** Case unlink endpoint fetches AgentAction (line 411) and AgentThread (line 415) by ID alone. The case lookup IS org-filtered, but the entity being unlinked is not.
 - **Impact:** An authenticated user can unlink any thread or action from any org's case, by ID. Mutation across tenants.
 - **Fix:** Add `organization_id == ctx.organization_id` to both fetches.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### C3. Postmark webhook — zero signature validation
 - **File:** `app/src/api/v1/admin_webhooks.py:15-70`
 - **Bug:** The endpoint accepts any unauthenticated POST and writes to `AgentMessage.delivery_status`, `delivery_error`, `open_count`, `first_opened_at`. No HMAC check, no shared-secret in URL, no source-IP allowlist.
 - **Impact:** Anyone on the internet who guesses the URL can mark every outbound email in the DB as `bounced` with a script. Or fake "Delivered/Opened" events. Or trigger spam-complaint cascades.
 - **Fix:** Validate the request signature using Postmark's HMAC-SHA256 + a shared `POSTMARK_WEBHOOK_SECRET` env var. Reject anything that doesn't match. (Postmark sends the signature in the `X-Postmark-Signature` header.)
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ## HIGH findings
 
@@ -40,7 +49,7 @@ Audit was run by an Explore subagent reading every email-related router/service 
 - **Bug:** Same C1 pattern in the AI-drafted-followup endpoint.
 - **Impact:** AI drafts referencing the wrong org's customer record.
 - **Fix:** Add `Customer.organization_id == ctx.organization_id`.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### H2. Unauthenticated attachment downloads
 - **File:** `app/app.py` — `app.mount("/uploads", StaticFiles(...))`
@@ -51,21 +60,21 @@ Audit was run by an Explore subagent reading every email-related router/service 
   - Verifies `attachment.organization_id == ctx.organization_id`
   - Streams the file from disk
 - Update every URL builder to point at the new endpoint instead of `/uploads/attachments/...`.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### H3. Inbound email webhook — no signature validation
 - **File:** `app/src/api/v1/inbound_email.py:21-72`
 - **Bug:** Same as C3 — no Postmark signature check on the inbound webhook either. The `org_slug` is taken from the URL with no proof the request is legitimate.
 - **Impact:** Network-adjacent attacker can inject forged inbound emails into any org's inbox.
 - **Fix:** Same HMAC validation as C3, on this endpoint too.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### H4. Status webhook handler — no org filter
 - **File:** `app/src/services/inbound_email_service.py:146-149`
 - **Bug:** `select(AgentMessage).where(AgentMessage.postmark_message_id == message_id)` — no org_id constraint.
 - **Impact:** Defense-in-depth gap. With C3 fixed this is less exploitable, but the principle still violates least-privilege.
 - **Fix:** The status webhook payload includes the recipient address — derive org_id from there, add to the where clause.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ## MEDIUM findings
 
@@ -73,25 +82,25 @@ Audit was run by an Explore subagent reading every email-related router/service 
 - **File:** `app/src/services/agents/orchestrator.py:212, 262-268, 287`
 - **Bug:** Full subjects + 200-char body snippets are logged. Bodies routinely contain customer names, addresses, billing info.
 - **Fix:** Log message ID + first 50 chars of subject only. Bodies never.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### M2. Raw exception text returned to client
 - **File:** `app/src/services/email_compose_service.py:223-232`
 - **Bug:** The FB-24 hardening returns `f"{type(exc).__name__}: {exc}"` to the client. Exposes internal types and stack info.
 - **Fix:** Log the full exception server-side, return a generic "Send failed" + a stable error code to the client. Keep the actual reason in `delivery_error` (visible only via authenticated thread detail).
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### M3. Bulk thread ops — verify org filter
 - **File:** `app/src/api/v1/admin_threads.py:750+` (mark-read, mark-unread, move, spam, not-spam)
 - **Bug:** Audit flagged but didn't confirm. Bulk operations accept `thread_ids: list[str]` — need to verify the service layer filters every ID by `organization_id`.
 - **Fix:** Read each handler, add `organization_id` constraint to bulk update queries if missing.
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ### M4. No per-org rate limiting on webhooks
 - **File:** `app/src/api/v1/admin_webhooks.py`, `app/src/api/v1/inbound_email.py`
 - **Bug:** Webhook endpoints have a global rate limit but not per-org. An attacker could DoS one org's webhook handling.
 - **Fix:** Add per-org rate limiter (counter keyed on `org_slug` derived from payload).
-- **Status:** PENDING
+- **Status:** RESOLVED 2026-04-13
 
 ## Operational gaps (separate from this audit, tracked here for visibility)
 

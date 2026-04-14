@@ -233,12 +233,17 @@ class EmailComposeService:
             logger.exception(f"compose_and_send crashed for thread {thread.id}: {exc}")
             try:
                 message.status = "failed"
+                # delivery_error captures the FULL detail server-side so ops can
+                # debug via the authenticated thread-detail view.
                 message.delivery_error = f"{type(exc).__name__}: {exc}"[:500]
                 await self.db.commit()
                 await update_thread_status(thread.id)
             except Exception as inner:
                 logger.error(f"Failed to mark message {message.id} as failed after crash: {inner}")
-            return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+            # Do NOT leak the raw exception type/text to the client — that
+            # exposes internals (which DB driver, which library, etc.). The
+            # actual reason is in delivery_error, viewable via the inbox UI.
+            return {"success": False, "error": "Send failed — see Failed filter or thread detail for diagnostics."}
 
     # ------------------------------------------------------------------
     # AI draft

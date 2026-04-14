@@ -286,9 +286,26 @@ def create_app() -> FastAPI:
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response
 
-    # Static file serving for uploads
+    # Static file serving for uploads.
+    # IMPORTANT: /uploads/attachments is intentionally blocked here — message
+    # attachments are sensitive (customer photos, contracts, scans) and must
+    # only be served via the authenticated /api/v1/attachments/{id}/file
+    # endpoint which verifies organization_id ownership. Other subdirs
+    # (branding, photos, visits, charges, feedback) are still served as
+    # static; tighten those separately if/when their content becomes sensitive.
     upload_path = Path(settings.upload_dir)
     upload_path.mkdir(parents=True, exist_ok=True)
+
+    @app.middleware("http")
+    async def block_static_attachments(request: Request, call_next):
+        # Block direct access to /uploads/attachments/* — those go through auth.
+        if request.url.path.startswith("/uploads/attachments/"):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Use /api/v1/attachments/{id}/file (auth required)"},
+            )
+        return await call_next(request)
+
     app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
 
     # Global exception handlers

@@ -209,7 +209,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
         if block_rule:
             logger.info(f"Block rule matched '{block_rule.address_pattern}' — routing to Spam folder: {from_email}")
 
-    logger.info(f"Processing email from {from_email}: {subject}")
+    logger.info(f"Processing email from {from_email}: {(subject or '')[:60]}")
 
     # Check if already processed — by email_uid OR RFC Message-ID (cross-source dedup)
     async with get_db_context() as db:
@@ -363,7 +363,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
             result["category"] = "general"
             result["needs_approval"] = True
         else:
-            logger.info(f"Auto-handled {category}: {subject}")
+            logger.info(f"Auto-handled {category}: {(subject or '')[:60]}")
             async with get_db_context() as db:
                 agent_msg = AgentMessage(
                     organization_id=organization_id,
@@ -559,7 +559,7 @@ async def process_incoming_email(uid: str, msg, organization_id: str = "", histo
                 logger.info(f"Throttled SMS alert for {from_email} (cooldown)")
             elif not _is_business_hours():
                 # --- Outside business hours: skip SMS, just log ---
-                logger.info(f"Outside business hours, skipping SMS alert for: {subject}")
+                logger.info(f"Outside business hours, skipping SMS alert for: {(subject or '')[:60]}")
                 agent_msg.notes = (agent_msg.notes or "") + "\nSMS alert suppressed (outside business hours)"
                 agent_msg.notes = agent_msg.notes.strip()
                 await db.commit()

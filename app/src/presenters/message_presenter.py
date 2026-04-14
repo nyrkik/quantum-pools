@@ -144,7 +144,7 @@ class MessagePresenter(Presenter):
             {
                 "id": a.id,
                 "filename": a.filename,
-                "url": f"/uploads/attachments/{a.organization_id}/{a.stored_filename}",
+                "url": f"/api/v1/attachments/{a.id}/file",
                 "mime_type": a.mime_type,
                 "file_size": a.file_size,
             }

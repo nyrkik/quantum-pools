@@ -1,11 +1,13 @@
-"""Message attachment upload endpoint."""
+"""Message attachment upload + authenticated download endpoints."""
 
 import os
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -86,7 +88,39 @@ async def upload_attachment(
     return AttachmentResponse(
         id=attachment.id,
         filename=attachment.filename,
-        url=f"/uploads/attachments/{ctx.organization_id}/{stored_name}",
+        url=f"/api/v1/attachments/{attachment.id}/file",
         mime_type=attachment.mime_type,
         file_size=attachment.file_size,
+    )
+
+
+@router.get("/{attachment_id}/file")
+async def download_attachment(
+    attachment_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream a message attachment file. Requires auth + org ownership.
+
+    Replaces the unauthenticated /uploads/attachments/* static path that used
+    to leak any tenant's files to anyone with a URL.
+    (docs/inbox-security-audit-2026-04-13.md H2.)
+    """
+    att = (await db.execute(
+        select(MessageAttachment).where(
+            MessageAttachment.id == attachment_id,
+            MessageAttachment.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    fpath = UPLOAD_ROOT / "attachments" / att.organization_id / att.stored_filename
+    if not fpath.exists():
+        raise HTTPException(status_code=404, detail="Attachment file missing on disk")
+
+    return FileResponse(
+        path=str(fpath),
+        media_type=att.mime_type or "application/octet-stream",
+        filename=att.filename,
     )

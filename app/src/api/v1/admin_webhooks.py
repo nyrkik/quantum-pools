@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
+from src.core.rate_limiter import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin-webhooks"])
@@ -47,6 +48,7 @@ def verify_postmark_webhook_token(request: Request) -> None:
 
 
 @router.post("/postmark-webhook")
+@limiter.limit("600/minute")
 async def postmark_delivery_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),

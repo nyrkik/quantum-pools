@@ -163,61 +163,73 @@ class EmailComposeService:
         await self.db.commit()
 
         # ── Step 2: Load attachments and send email ──
-        email_atts = None
-        att_rows = []
-        if attachment_ids:
-            from src.models.message_attachment import MessageAttachment
-            from pathlib import Path
-            upload_root = Path(os.environ.get("UPLOAD_DIR", "./uploads"))
-            rows = (await self.db.execute(
-                select(MessageAttachment).where(
-                    MessageAttachment.id.in_(attachment_ids[:5]),
-                    MessageAttachment.organization_id == org_id,
-                    MessageAttachment.source_type == "agent_message",
-                    MessageAttachment.source_id.is_(None),
-                )
-            )).scalars().all()
-            email_atts = []
-            for a in rows:
-                fpath = upload_root / "attachments" / a.organization_id / a.stored_filename
-                if fpath.exists():
-                    email_atts.append({
-                        "filename": a.filename,
-                        "content_bytes": fpath.read_bytes(),
-                        "mime_type": a.mime_type,
-                    })
-                a.source_id = message.id
-            att_rows = list(rows)
-            await self.db.commit()
-
-        email_svc = EmailService(self.db)
-        result = await email_svc.send_agent_reply(
-            org_id, to, subject, body,
-            sender_name=sender_name,
-            is_new=True,
-            attachments=email_atts or None,
-        )
-
-        # ── Step 3: Update status based on result ──
-        if result.success:
-            message.status = "sent"
-            message.sent_at = datetime.now(timezone.utc)
-        else:
-            message.status = "failed"
-        await self.db.commit()
-
-        # Recalculate thread status
+        # Wrap everything from here on in try/except — any unhandled exception
+        # MUST flip the message to status=failed with an error message, otherwise
+        # we leave phantom "queued" messages in the DB and the user has no idea
+        # the send failed (the FB-24 incident: 8 queued ghosts from a NameError).
         from src.services.agents.thread_manager import update_thread_status
-        await update_thread_status(thread.id)
+        try:
+            email_atts = None
+            if attachment_ids:
+                from src.models.message_attachment import MessageAttachment
+                from pathlib import Path
+                upload_root = Path(os.environ.get("UPLOAD_DIR", "./uploads"))
+                rows = (await self.db.execute(
+                    select(MessageAttachment).where(
+                        MessageAttachment.id.in_(attachment_ids[:5]),
+                        MessageAttachment.organization_id == org_id,
+                        MessageAttachment.source_type == "agent_message",
+                        MessageAttachment.source_id.is_(None),
+                    )
+                )).scalars().all()
+                email_atts = []
+                for a in rows:
+                    fpath = upload_root / "attachments" / a.organization_id / a.stored_filename
+                    if fpath.exists():
+                        email_atts.append({
+                            "filename": a.filename,
+                            "content_bytes": fpath.read_bytes(),
+                            "mime_type": a.mime_type,
+                        })
+                    a.source_id = message.id
+                await self.db.commit()
 
-        if not result.success:
-            return {"success": False, "error": result.error}
+            email_svc = EmailService(self.db)
+            result = await email_svc.send_agent_reply(
+                org_id, to, subject, body,
+                sender_name=sender_name,
+                is_new=True,
+                attachments=email_atts or None,
+            )
 
-        return {
-            "success": True,
-            "thread_id": thread.id,
-            "message_id": message.id,
-        }
+            # ── Step 3: Update status based on result ──
+            if result.success:
+                message.status = "sent"
+                message.sent_at = datetime.now(timezone.utc)
+            else:
+                message.status = "failed"
+                message.delivery_error = (result.error or "unknown send error")[:500]
+            await self.db.commit()
+            await update_thread_status(thread.id)
+
+            if not result.success:
+                return {"success": False, "error": result.error}
+
+            return {
+                "success": True,
+                "thread_id": thread.id,
+                "message_id": message.id,
+            }
+        except Exception as exc:  # noqa: BLE001 — we deliberately catch all
+            logger.exception(f"compose_and_send crashed for thread {thread.id}: {exc}")
+            try:
+                message.status = "failed"
+                message.delivery_error = f"{type(exc).__name__}: {exc}"[:500]
+                await self.db.commit()
+                await update_thread_status(thread.id)
+            except Exception as inner:
+                logger.error(f"Failed to mark message {message.id} as failed after crash: {inner}")
+            return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
 
     # ------------------------------------------------------------------
     # AI draft

@@ -8,6 +8,7 @@ import base64
 import logging
 import os
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -407,6 +408,17 @@ class EmailService:
                 )
             except GmailClientError as e:
                 logger.error(f"Gmail send failed for org {org_id}, falling through to Postmark: {e}")
+                # Mark the integration as errored so the UI can surface a reconnect
+                # banner. Without this, OAuth disconnects fail silently — every send
+                # falls through to Postmark and the user never knows their Gmail
+                # integration is broken until they go check Settings → Email manually.
+                try:
+                    integration_row.status = IntegrationStatus.error.value
+                    integration_row.last_error = str(e)[:500]
+                    integration_row.last_error_at = datetime.now(timezone.utc)
+                    await self.db.commit()
+                except Exception as commit_err:
+                    logger.warning(f"Failed to flag integration {integration_row.id} as errored: {commit_err}")
                 # Fall through to Postmark below — better to deliver via the
                 # transactional path than fail the user's reply outright.
             except Exception as e:

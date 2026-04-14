@@ -185,9 +185,9 @@ function EmailMessage({
             {!isInbound && !isAutoSent && msg.approved_by && organizationName && (
               <span className="text-[10px] text-muted-foreground">on behalf of {organizationName}</span>
             )}
-            {!isInbound && msg.delivery_status && (
+            {!isInbound && (msg.delivery_status || msg.status === "failed" || msg.status === "queued") && (
               <DeliveryStatusChip
-                status={msg.delivery_status}
+                status={msg.delivery_status || msg.status}
                 error={msg.delivery_error}
                 firstOpenedAt={msg.first_opened_at}
                 openCount={msg.open_count}
@@ -360,6 +360,16 @@ function DeliveryStatusChip({
     text = "text-red-700 dark:text-red-400";
     label = "Spam complaint";
     title = error || undefined;
+  } else if (status === "failed") {
+    bg = "bg-red-100 dark:bg-red-950/40";
+    text = "text-red-700 dark:text-red-400";
+    label = "Send failed";
+    title = error || "The email never reached the recipient. Re-send when the underlying issue is fixed.";
+  } else if (status === "queued") {
+    bg = "bg-amber-100 dark:bg-amber-950/40";
+    text = "text-amber-700 dark:text-amber-400";
+    label = "Sending…";
+    title = "Send in progress. If this persists more than a couple minutes the janitor will flip it to failed.";
   }
   return (
     <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium ${bg} ${text}`} title={title}>

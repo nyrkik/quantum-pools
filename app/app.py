@@ -58,8 +58,13 @@ async def lifespan(app: FastAPI):
     # scheduler.add_job(_run_billing_cycle, CronTrigger(hour=6, minute=0), id="billing_cycle")
     # scheduler.add_job(_run_payment_retries, CronTrigger(hour=10, minute=0), id="payment_retries")
     scheduler.add_job(_send_auto_sent_digest, CronTrigger(day_of_week="mon", hour=14, minute=0), id="auto_sent_digest")
+    # Outbound send janitor: any outbound message stuck in `queued` for more than
+    # 5 minutes is presumed dead (the sender path crashed before flipping status).
+    # Flip to `failed` so it surfaces in the Failed filter and the user knows.
+    from apscheduler.triggers.interval import IntervalTrigger
+    scheduler.add_job(_run_outbound_send_janitor, IntervalTrigger(minutes=2), id="outbound_send_janitor")
     scheduler.start()
-    logger.info("Scheduler started (weekly auto-sent digest only; billing dormant)")
+    logger.info("Scheduler started (weekly auto-sent digest + outbound send janitor; billing dormant)")
 
     yield
 
@@ -112,6 +117,62 @@ async def _run_payment_retries():
     except Exception as e:
         logger.error(f"Payment retry error: {e}")
         sentry_sdk.capture_exception(e)
+
+
+async def _run_outbound_send_janitor():
+    """Flip outbound messages stuck in `queued` for >5 min to `failed`.
+
+    A queued outbound message normally lives for milliseconds — created, sent,
+    flipped to sent/failed. Anything older than 5 minutes means the send path
+    crashed before flipping status (the FB-24 NameError pattern). Without this
+    janitor, those messages stay queued forever, invisible to the user and the
+    Failed filter, and the email is silently lost.
+    """
+    from datetime import datetime, timedelta, timezone
+    from src.core.database import get_db_context
+    from src.models.agent_message import AgentMessage
+    from src.services.agents.thread_manager import update_thread_status
+    from sqlalchemy import select, update
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    try:
+        async with get_db_context() as db:
+            stuck = (await db.execute(
+                select(AgentMessage.id, AgentMessage.thread_id).where(
+                    AgentMessage.direction == "outbound",
+                    AgentMessage.status == "queued",
+                    AgentMessage.received_at < cutoff,
+                )
+            )).all()
+            if not stuck:
+                return
+            ids = [s.id for s in stuck]
+            thread_ids = {s.thread_id for s in stuck if s.thread_id}
+            await db.execute(
+                update(AgentMessage)
+                .where(AgentMessage.id.in_(ids))
+                .values(status="failed", delivery_error="timed out in queue (sender crashed before completing)")
+            )
+            await db.commit()
+            logger.warning(f"Outbound janitor: flipped {len(ids)} stuck queued message(s) to failed")
+            for tid in thread_ids:
+                try:
+                    await update_thread_status(tid)
+                except Exception as e:
+                    logger.warning(f"Janitor: failed to recompute thread {tid}: {e}")
+            # Surface to ops via ntfy so the user knows something failed silently.
+            try:
+                from src.utils.notify import alert_failure
+                alert_failure(
+                    "outbound-email",
+                    f"{len(ids)} outbound email(s) stuck in queued >5min — flipped to failed. "
+                    f"Check the inbox Failed filter for thread details.",
+                    cooldown_seconds=600,
+                )
+            except Exception:
+                pass  # ntfy is best-effort
+    except Exception as e:
+        logger.error(f"Outbound send janitor error: {e}")
 
 
 async def _send_auto_sent_digest():

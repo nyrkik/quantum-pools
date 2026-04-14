@@ -7,7 +7,7 @@ import { useWSRefetch } from "@/lib/ws";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { PenSquare, Settings2, X, RefreshCw } from "lucide-react";
+import { PenSquare, Settings2, X, RefreshCw, AlertTriangle } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
 import { PageLayout } from "@/components/layout/page-layout";
 import { usePermissions } from "@/lib/permissions";
@@ -85,6 +85,21 @@ export default function InboxPage() {
   const [folderRefreshKey, setFolderRefreshKey] = useState(0);
   const [groupByClient, setGroupByClient] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [brokenIntegrations, setBrokenIntegrations] = useState<{ id: string; type: string; account_email: string | null; last_error: string | null }[]>([]);
+
+  // Surface email integrations that are in error/disconnected state so the user
+  // doesn't silently fall back to Postmark for weeks without realizing.
+  useEffect(() => {
+    api.get<{ integrations: { id: string; type: string; status: string; account_email: string | null; last_error: string | null }[] }>("/v1/email-integrations")
+      .then((d) => {
+        setBrokenIntegrations(
+          d.integrations
+            .filter((i) => i.status === "error" || i.status === "disconnected")
+            .map((i) => ({ id: i.id, type: i.type, account_email: i.account_email, last_error: i.last_error })),
+        );
+      })
+      .catch(() => setBrokenIntegrations([]));
+  }, [folderRefreshKey]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 639px)");
@@ -288,6 +303,34 @@ export default function InboxPage() {
         </>
       }
     >
+      {/* Email integration disconnected banner — surfaces silent OAuth failures.
+          Without this, when Gmail tokens go bad we silently fall back to Postmark
+          and the user never knows their integration is broken. */}
+      {brokenIntegrations.length > 0 && perms.can("inbox.manage") && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">
+              {brokenIntegrations.length === 1
+                ? `Email integration disconnected: ${brokenIntegrations[0].account_email || brokenIntegrations[0].type}`
+                : `${brokenIntegrations.length} email integrations disconnected`}
+            </div>
+            <div className="text-xs opacity-80 mt-0.5">
+              Outbound emails are falling through to the Postmark backup. Reconnect to restore Sent-folder visibility and inbox sync.
+              {brokenIntegrations[0].last_error ? ` Last error: ${brokenIntegrations[0].last_error}` : ""}
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Reconnect
+          </Button>
+        </div>
+      )}
+
       {/* Mobile folder pills */}
       <InboxFolderPills
         selectedFolderId={selectedFolderId}

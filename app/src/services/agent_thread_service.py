@@ -156,12 +156,18 @@ class AgentThreadService:
                     ),
                 )
             elif status == "failed":
-                # Threads with bounced, spam complaints, or delivery errors
+                # Anything an outbound message could be in a "did not get to the
+                # recipient" state: bounced/spam by the receiver, OR our own send
+                # failed (status=failed/queued) before it ever left.
                 base = base.where(
                     AgentThread.id.in_(
                         select(AgentMessage.thread_id).where(
-                            AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
-                            | (AgentMessage.delivery_error.isnot(None) & (AgentMessage.direction == "outbound"))
+                            AgentMessage.direction == "outbound",
+                            (
+                                AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
+                                | AgentMessage.delivery_error.isnot(None)
+                                | AgentMessage.status.in_(("failed", "queued"))
+                            ),
                         )
                     )
                 )
@@ -383,7 +389,10 @@ class AgentThreadService:
             )
         )).scalar() or 0
 
-        # Failed sends (bounces + spam complaints + delivery errors on outbound)
+        # Failed sends — any outbound message in a state where the recipient did
+        # NOT get the email: bounced/spam by the receiver, our send errored, or
+        # the message is stuck in failed/queued (the janitor flips queued→failed
+        # after 5 minutes; before that we still count it so the user can see it).
         failed = (await self.db.execute(
             _vis_filter(
                 select(func.count(func.distinct(AgentThread.id)))
@@ -393,8 +402,12 @@ class AgentThreadService:
                 ))
                 .where(
                     thread_org,
-                    AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
-                    | (AgentMessage.delivery_error.isnot(None) & (AgentMessage.direction == "outbound")),
+                    AgentMessage.direction == "outbound",
+                    (
+                        AgentMessage.delivery_status.in_(("bounced", "spam_complaint"))
+                        | AgentMessage.delivery_error.isnot(None)
+                        | AgentMessage.status.in_(("failed", "queued"))
+                    ),
                 )
             )
         )).scalar() or 0

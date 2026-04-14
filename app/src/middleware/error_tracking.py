@@ -49,32 +49,28 @@ _tracker = _ErrorTracker()
 
 
 async def _send_error_alert(endpoint: str, count: int, error_msg: str):
-    """Send email alert for repeated 500s. Best-effort, never crashes."""
-    try:
-        from src.services.email_service import get_provider, EmailMessage
-        notification_email = os.environ.get("NOTIFICATION_EMAIL")
-        if not notification_email:
-            logger.warning("NOTIFICATION_EMAIL not set — skipping error alert")
-            return
+    """Push an ntfy alert for repeated 500s. Best-effort, never crashes.
 
-        msg = EmailMessage(
-            to=notification_email,
-            subject=f"⚠ QuantumPools: {count} errors on {endpoint}",
-            text_body=(
-                f"Endpoint {endpoint} has hit {count} server errors "
-                f"in the last {WINDOW_SECONDS // 60} minutes.\n\n"
-                f"Latest error: {error_msg}\n\n"
-                f"Check logs: sudo journalctl -u quantumpools-backend -f"
-            ),
-            from_email=os.environ.get("AGENT_FROM_EMAIL", "noreply@quantumpoolspro.com"),
-            from_name="QuantumPools Monitor",
+    Email alerting was a chicken-and-egg trap — when the email pipeline itself
+    is broken (the FB-24 incident), the alert can't deliver. ntfy goes to the
+    self-hosted topic on MS-01 and is independent of the email path.
+    """
+    try:
+        from src.utils.notify import send_ntfy
+        body = (
+            f"Endpoint {endpoint} hit {count} server errors in the last "
+            f"{WINDOW_SECONDS // 60} minutes.\n\n"
+            f"Latest: {error_msg[:300]}\n\n"
+            f"Logs: sudo journalctl -u quantumpools-backend -f"
         )
-        provider = get_provider()
-        result = await provider.send(msg)
-        if result.success:
-            logger.info(f"Error alert sent for {endpoint}")
-        else:
-            logger.error(f"Failed to send error alert: {result.error}")
+        send_ntfy(
+            title=f"QP backend: {count} errors on {endpoint}",
+            body=body,
+            priority="high",
+            tags="warning",
+            cooldown_key=f"err_{endpoint}",
+            cooldown_seconds=COOLDOWN_SECONDS,
+        )
     except Exception as e:
         logger.error(f"Error alert failed: {e}")
 

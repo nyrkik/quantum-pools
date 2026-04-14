@@ -267,8 +267,14 @@ export function ComposeEmail() {
       if (options.onSent) options.onSent();
       closeCompose();
     } catch (e: unknown) {
-      const msg = (e as { message?: string })?.message || "Failed to send email";
-      toast.error(msg);
+      const err = e as { message?: string; detail?: string | { message?: string } };
+      const detailMsg = typeof err.detail === "string" ? err.detail : err.detail?.message;
+      const msg = err.message || detailMsg || "Send failed (no error returned)";
+      // Stay on screen until dismissed — the recipient never got the email.
+      toast.error(`Send failed: ${msg}`, {
+        duration: 15000,
+        description: "The email was NOT delivered. Check the Failed filter in the inbox to retry.",
+      });
     } finally {
       setSending(false);
     }

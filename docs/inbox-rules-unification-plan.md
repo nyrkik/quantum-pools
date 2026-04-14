@@ -8,6 +8,62 @@
 
 ---
 
+## Kickoff context — read this first if you're starting fresh
+
+If you're a Claude session beginning this work without the prior conversation in context, here's everything you need to start solidly:
+
+### Patterns to mirror (don't re-derive these)
+
+1. **Shared service helper pattern.** See `app/src/services/agents/send_failure.py` — a single helper that every send path calls in its except block. The `InboxRulesService` should follow the same shape: one entry point (`evaluate(message, thread, org_id) -> [Action]`), one application method (`apply(actions, thread, db)`), all callers route through it. No "we'll inline it just this once."
+2. **Test-first discipline.** Every new endpoint/service gate gets a test. Patterns to copy from `app/tests/`:
+   - `test_webhook_auth.py` — gating on a secret/token (mirror for any new admin endpoint)
+   - `test_org_isolation.py` — every fetch-by-id needs `organization_id` in the where clause; the test asserts cross-org leakage is impossible
+   - `test_send_failure_recovery.py` — exception handling that persists state (mirror for the new InboxRulesService failure paths)
+   - `test_failed_filter.py` — query semantics tests (mirror for any new filter logic)
+   See CLAUDE.md "Testing" section for run command + DB setup. 22 tests passing as of session 2026-04-13.
+3. **The no-half-stepping rule.** From `~/.claude/projects/-srv-quantumpools/memory/feedback_no_half_stepping.md` — when fixing a bug, audit every similar path, add detection (canary/reconciliation/alert), close the visibility gap so the next instance is impossible to miss. Especially load-bearing for Phase B since the orchestrator is the email path and bugs there hide actual emails.
+4. **Org-isolation everywhere.** Every fetch-by-id MUST filter by `organization_id` matching the caller's org. The 2026-04-13 security audit (`docs/inbox-security-audit-2026-04-13.md`) found 6 places that violated this — don't add more.
+
+### Recent context (what shipped just before you start)
+
+The 2026-04-13 session was a heavy hardening pass. Key things to be aware of:
+
+- **All 5 outbound send paths** are wrapped in try/except using `record_outbound_send_failure` from `app/src/services/agents/send_failure.py`. Don't break that pattern when wiring InboxRulesService into the orchestrator.
+- **Webhook auth** (`X-Webhook-Token`) gates `/api/v1/admin/postmark-webhook` and `/api/v1/inbound-email/webhook/{slug}`. Token in `.env` as `POSTMARK_WEBHOOK_TOKEN`. Verifier is `verify_postmark_webhook_token` in `admin_webhooks.py`.
+- **Cross-org isolation** — every relevant fetch is org-filtered after the audit. Don't regress.
+- **Failed filter "latest only"** semantic — `agent_thread_service.py` counts a thread as failed only if its most recent outbound attempt failed. Preserves the fix even if you touch list_threads.
+- **Redis graceful degradation** — `events.publish()` swallows + resets cache on failure. `agent_poller` has a 60s health probe. Don't add new Redis usage without try/except + reset_redis on exception.
+- **Test infrastructure exists.** Don't say "no tests yet" — there are 22 in `app/tests/`. Add to them.
+- **Database backups** run nightly, weekly verify. Documented in `docs/backup-and-restore.md`. Take a manual backup before any destructive migration: `/srv/quantumpools/scripts/backup_db.sh`.
+
+### Phase ordering — DO NOT skip ahead
+
+Phase B is the load-bearing one because the orchestrator is the email path. The plan calls for a **50-email regression test fixture BEFORE Phase B ships** — anonymized real emails from production, run through both old and new code paths, asserting identical folder/tag/visibility outcomes. This is the safety net for the migration itself. Without it, Phase B can silently mis-route during cutover.
+
+Build order:
+1. Phase A (schema + Alembic) — pure additive, no code path changes
+2. Build the 50-email regression fixture — `app/tests/test_inbox_rules_migration.py` or similar
+3. Phase B (service + data migration + orchestrator wiring) — only after fixture green
+4. Phase C (UI) — once Phase B has run clean for at least a few days
+5. Phase D (delete old code) — wait at least 2 weeks of clean Phase B operation
+6. Phase E (drop tables) — 30 days after Phase D
+
+Take a backup before Phase B's data migration.
+
+### Verify before declaring complete
+
+For each phase, the "done" checklist:
+- [ ] Tests written and passing (run `cd app && /home/brian/00_MyProjects/QuantumPools/venv/bin/pytest tests/ -W ignore::DeprecationWarning`)
+- [ ] No org-isolation regressions (cross-org test in `test_org_isolation.py` passes)
+- [ ] Doc updated (this file's status section + email-pipeline.md if behavior changed)
+- [ ] Deployed via `/srv/quantumpools/scripts/deploy.sh` (never restart individual services)
+- [ ] No 401s/500s in `journalctl -u quantumpools-backend` for at least 5 minutes
+- [ ] If you touched anything email-related: send a test from external account → contact@sapphire-pools.com → confirm it lands
+
+---
+
+---
+
 ## Background — how we got here
 
 Two suppression/routing systems were built in different sessions without coordination:

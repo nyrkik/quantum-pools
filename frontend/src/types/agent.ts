@@ -158,6 +158,7 @@ export interface ThreadDetail {
   is_unread: boolean;
   sender_tag: string | null;
   has_auto_sent: boolean;
+  is_auto_handled?: boolean;
   timeline: TimelineMessage[];
   actions: unknown[];
 }

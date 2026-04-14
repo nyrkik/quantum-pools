@@ -310,6 +310,43 @@ async def trigger_sync(
     return {"stats": stats, "integration": _to_response(integration)}
 
 
+@router.post("/sync-all")
+async def sync_all(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger incremental sync for all connected Gmail integrations in the org.
+
+    Used by the inbox refresh button. Returns aggregate stats.
+    """
+    integrations = (await db.execute(
+        select(EmailIntegration).where(
+            EmailIntegration.organization_id == ctx.organization_id,
+            EmailIntegration.type == IntegrationType.gmail_api.value,
+            EmailIntegration.status == IntegrationStatus.connected.value,
+        )
+    )).scalars().all()
+
+    if not integrations:
+        return {"synced": 0, "stats": {"fetched": 0, "ingested": 0, "skipped": 0, "errors": 0}}
+
+    from src.services.gmail.sync import GmailSyncService
+    total = {"fetched": 0, "ingested": 0, "skipped": 0, "errors": 0}
+    synced = 0
+    for integration in integrations:
+        try:
+            svc = GmailSyncService(integration)
+            stats = await svc.incremental_sync()
+            for k in total:
+                total[k] += stats.get(k, 0)
+            synced += 1
+        except Exception as e:
+            logger.warning(f"sync-all: integration {integration.id} failed: {e}")
+            total["errors"] += 1
+
+    return {"synced": synced, "stats": total}
+
+
 @router.delete("/{integration_id}")
 async def disconnect_integration(
     integration_id: str,

@@ -145,6 +145,16 @@ class AgentThreadService:
                         select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
                     )
                 )
+            elif status == "auto_handled":
+                # AI hid the email without sending a reply. Most-recent first.
+                base = base.where(
+                    AgentThread.last_direction == "inbound",
+                    AgentThread.status.in_(("ignored", "handled")),
+                    AgentThread.has_pending == False,  # noqa: E712
+                    AgentThread.id.notin_(
+                        select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
+                    ),
+                )
             elif status == "failed":
                 # Threads with bounced, spam complaints, or delivery errors
                 base = base.where(
@@ -183,8 +193,8 @@ class AgentThreadService:
                     AgentThread.visibility_permission.in_(user_permission_slugs),
                 )
             )
-        # Folder filtering (skip when showing stale, auto_sent, or failed — those search all folders)
-        if status in ("stale", "auto_sent", "failed"):
+        # Folder filtering (skip when showing stale, auto_sent, auto_handled, or failed — those search all folders)
+        if status in ("stale", "auto_sent", "auto_handled", "failed"):
             pass  # No folder filter for global searches
         elif folder_key == "inbox" or (not folder_id and not folder_key):
             # Inbox = NULL folder_id OR explicitly assigned to inbox system folder
@@ -344,7 +354,21 @@ class AgentThreadService:
 
         # Auto-handled today (status=ignored or status=handled with no human action)
         # Surfaces email the AI hid from the inbox so the user knows what's not visible.
+        # Excludes threads that any admin/owner has already opened (reviewed).
         today_start = datetime.now(timezone.utc) - timedelta(hours=24)
+        from src.models.thread_read import ThreadRead
+        from src.models.organization_user import OrganizationUser
+        admin_user_ids_subq = (
+            select(OrganizationUser.user_id)
+            .where(
+                OrganizationUser.organization_id == org_id,
+                OrganizationUser.role.in_(("owner", "admin")),
+            )
+        )
+        reviewed_thread_ids_subq = (
+            select(ThreadRead.thread_id)
+            .where(ThreadRead.user_id.in_(admin_user_ids_subq))
+        )
         auto_handled_today = (await self.db.execute(
             _vis_filter(
                 select(func.count(AgentThread.id))
@@ -354,6 +378,7 @@ class AgentThreadService:
                     AgentThread.last_direction == "inbound",
                     AgentThread.status.in_(("ignored", "handled")),
                     AgentThread.has_pending == False,  # noqa: E712
+                    AgentThread.id.notin_(reviewed_thread_ids_subq),
                 )
             )
         )).scalar() or 0

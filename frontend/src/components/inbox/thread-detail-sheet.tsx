@@ -508,6 +508,98 @@ function HtmlEmailBody({ html }: { html: string }) {
   );
 }
 
+function AutoHandledFeedbackBanner({
+  threadId,
+  category,
+  senderTag,
+  folderId,
+  onFeedback,
+}: {
+  threadId: string;
+  category: string | null;
+  senderTag: string | null;
+  folderId: string | null;
+  onFeedback: (reloadThread: boolean) => void;
+}) {
+  const { role } = useAuth();
+  const canReview = role === "owner" || role === "admin";
+  const [reviewed, setReviewed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [folderName, setFolderName] = useState<string | null>(null);
+
+  // Look up folder name for the message
+  useEffect(() => {
+    if (!folderId) {
+      setFolderName("Inbox");
+      return;
+    }
+    api.get<{ folders: { id: string; name: string }[] }>("/v1/inbox-folders")
+      .then((d) => {
+        const f = d.folders.find((x) => x.id === folderId);
+        setFolderName(f?.name || "Inbox");
+      })
+      .catch(() => setFolderName(null));
+  }, [folderId]);
+
+  const submit = async (correct: boolean) => {
+    setSubmitting(true);
+    try {
+      await api.post("/v1/admin/agent-threads/auto-handled-feedback", {
+        thread_id: threadId,
+        was_correct: correct,
+      });
+      toast.success(correct ? "Got it — keep handling similar emails this way" : "Moved to Inbox — AI will learn");
+      setReviewed(true);
+      // Only reload the thread when we said "No" (thread was moved back to inbox + marked pending).
+      // On "Yes" nothing in the thread changed — reloading would unmount the banner and reset reviewed state.
+      onFeedback(!correct);
+    } catch {
+      toast.error("Failed to save feedback");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (reviewed || !canReview) return null;
+
+  return (
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-800">
+      <Bot className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+      <span className="text-xs text-purple-800 dark:text-purple-300 flex-1">
+        AI {(() => {
+          const parts: string[] = [];
+          if (folderName && folderName !== "Inbox") parts.push(`moved this to "${folderName}"`);
+          else parts.push("auto-handled this");
+          if (senderTag) parts.push(`tagged sender "${senderTag}"`);
+          if (category && category !== "general") parts.push(`category "${category}"`);
+          return parts.join(", ");
+        })()}. Was that right?
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 text-xs text-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/30"
+        onClick={() => submit(true)}
+        disabled={submitting}
+      >
+        <Check className="h-3 w-3 mr-1" />
+        Yes
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 text-xs text-destructive hover:bg-destructive/10"
+        onClick={() => submit(false)}
+        disabled={submitting}
+        title="Move to Inbox + AI learns"
+      >
+        <X className="h-3 w-3 mr-1" />
+        No, move to Inbox
+      </Button>
+    </div>
+  );
+}
+
 function AutoSentFeedbackBanner({ threadId, onFeedback }: { threadId: string; onFeedback: () => void }) {
   const { role } = useAuth();
   const canReview = role === "owner" || role === "admin";
@@ -1229,6 +1321,17 @@ export function ThreadDetailSheet({
       {/* Auto-sent feedback banner */}
       {thread.has_auto_sent && (
         <AutoSentFeedbackBanner threadId={threadId} onFeedback={() => { loadThread(); onAction(); }} />
+      )}
+
+      {/* Auto-handled feedback banner (AI hid from inbox without sending a reply) */}
+      {thread.is_auto_handled && !thread.has_auto_sent && (
+        <AutoHandledFeedbackBanner
+          threadId={threadId}
+          category={thread.category}
+          senderTag={thread.sender_tag}
+          folderId={thread.folder_id}
+          onFeedback={(reloadThread) => { if (reloadThread) loadThread(); onAction(); }}
+        />
       )}
 
       {/* Email reading pane */}

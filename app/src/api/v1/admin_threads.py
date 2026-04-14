@@ -843,6 +843,66 @@ class AutoSentFeedbackBody(BaseModel):
     was_correct: bool
 
 
+class AutoHandledFeedbackBody(BaseModel):
+    thread_id: str
+    was_correct: bool  # True = correctly hidden, False = should have been visible
+
+
+@router.post("/agent-threads/auto-handled-feedback")
+async def auto_handled_feedback(
+    body: AutoHandledFeedbackBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record human feedback on an AI-auto-handled thread (the AI hid it from the inbox).
+    Feeds the agent learning system so the AI improves classification."""
+    from src.models.agent_message import AgentMessage
+
+    msg = (await db.execute(
+        select(AgentMessage).where(
+            AgentMessage.thread_id == body.thread_id,
+            AgentMessage.organization_id == ctx.organization_id,
+            AgentMessage.direction == "inbound",
+        ).order_by(desc(AgentMessage.received_at)).limit(1)
+    )).scalar_one_or_none()
+    if not msg:
+        raise HTTPException(404, "No inbound message found in thread")
+
+    try:
+        from src.services.agents.agent_learning_service import AgentLearningService
+        learner = AgentLearningService(db)
+        await learner.record_correction(
+            organization_id=ctx.organization_id,
+            agent_type="email_classifier",
+            category=msg.category or "general",
+            customer_id=msg.matched_customer_id,
+            input_context=f"Subject: {msg.subject}\n\nBody: {(msg.body or '')[:500]}",
+            original_output=f"category={msg.category}, status={msg.status}",
+            corrected_output=None,
+            correction_type="acceptance" if body.was_correct else "rejection",
+            correction_note="Auto-handled review: " + ("correct" if body.was_correct else "should NOT have been hidden"),
+            reviewed_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email,
+        )
+    except Exception as e:
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(f"Failed to record auto-handled feedback: {e}")
+
+    # If user said it should have been visible, restore it to inbox + mark pending
+    if not body.was_correct:
+        from src.models.agent_thread import AgentThread
+        thread = (await db.execute(
+            select(AgentThread).where(AgentThread.id == body.thread_id)
+        )).scalar_one_or_none()
+        if thread:
+            thread.folder_id = None  # back to Inbox
+            thread.folder_override = True
+            thread.status = "pending"
+            thread.has_pending = True
+            await db.commit()
+
+    return {"ok": True}
+
+
 @router.post("/agent-threads/auto-sent-feedback")
 async def auto_sent_feedback(
     body: AutoSentFeedbackBody,

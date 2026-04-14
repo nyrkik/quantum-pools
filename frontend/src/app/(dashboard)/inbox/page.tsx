@@ -7,7 +7,7 @@ import { useWSRefetch } from "@/lib/ws";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { PenSquare, Settings2, X } from "lucide-react";
+import { PenSquare, Settings2, X, RefreshCw } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
 import { PageLayout } from "@/components/layout/page-layout";
 import { usePermissions } from "@/lib/permissions";
@@ -54,6 +54,7 @@ export default function InboxPage() {
   const [staleFilter, setStaleFilter] = useState(false);
   const [autoSentFilter, setAutoSentFilter] = useState(false);
   const [failedFilter, setFailedFilter] = useState(false);
+  const [autoHandledFilter, setAutoHandledFilter] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
@@ -100,12 +101,15 @@ export default function InboxPage() {
       offset: String(page * PAGE_SIZE),
     });
 
-    // Stale / Auto-Sent / Failed filters: search across ALL folders
+    // Stale / Auto-Sent / Auto-Handled / Failed filters: search across ALL folders
     if (staleFilter) {
       params.set("status", "stale");
       params.set("exclude_spam", "false");
     } else if (autoSentFilter) {
       params.set("status", "auto_sent");
+      params.set("exclude_spam", "false");
+    } else if (autoHandledFilter) {
+      params.set("status", "auto_handled");
       params.set("exclude_spam", "false");
     } else if (failedFilter) {
       params.set("status", "failed");
@@ -138,7 +142,7 @@ export default function InboxPage() {
       })
       .catch(() => toast.error("Failed to load threads"))
       .finally(() => setLoading(false));
-  }, [search, page, assignFilter, staleFilter, autoSentFilter, failedFilter, user?.id, selectedFolderId, selectedFolderKey]);
+  }, [search, page, assignFilter, staleFilter, autoSentFilter, autoHandledFilter, failedFilter, user?.id, selectedFolderId, selectedFolderKey]);
 
   const loadStats = useCallback(() => {
     api.get<ThreadStats>("/v1/admin/agent-threads/stats")
@@ -213,12 +217,43 @@ export default function InboxPage() {
 
   const handleSelectThread = (id: string) => {
     setSelectedThreadId(id);
+    // Optimistically mark read in local state — backend marks it read on detail GET
+    setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, is_unread: false } : t)));
+    // Refresh stats so the unread count drops immediately
+    loadStats();
+    setFolderRefreshKey((k) => k + 1);
   };
 
   const handleCloseDetail = () => {
     setSelectedThreadId(null);
     loadThreads();
     loadStats();
+  };
+
+  const [syncing, setSyncing] = useState(false);
+  const handleRefresh = async () => {
+    setSyncing(true);
+    try {
+      const result = await api.post<{ synced: number; stats: { fetched: number; ingested: number; errors: number } }>(
+        "/v1/email-integrations/sync-all",
+        {},
+      );
+      const { ingested, errors } = result.stats;
+      if (ingested > 0) {
+        toast.success(`${ingested} new email${ingested === 1 ? "" : "s"} synced`);
+      } else if (errors > 0) {
+        toast.error(`Sync had ${errors} error${errors === 1 ? "" : "s"}`);
+      } else {
+        toast.success("Up to date");
+      }
+      loadThreads();
+      loadStats();
+      setFolderRefreshKey((k) => k + 1);
+    } catch {
+      toast.error("Sync failed");
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -235,11 +270,22 @@ export default function InboxPage() {
         </Button>
       }
       secondaryActions={
-        perms.can("inbox.manage") ? (
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
-            <Settings2 className="h-4 w-4" />
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRefresh}
+            disabled={syncing}
+            title="Sync new email from Gmail"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
           </Button>
-        ) : undefined
+          {perms.can("inbox.manage") && (
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          )}
+        </>
       }
     >
       {/* Mobile folder pills */}
@@ -272,11 +318,14 @@ export default function InboxPage() {
             groupByClient={groupByClient}
             onGroupByClientChange={setGroupByClient}
             staleFilter={staleFilter}
-            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoSentFilter(false); setFailedFilter(false); setPage(0); }}
+            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoSentFilter(false); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
             autoSentFilter={autoSentFilter}
-            onAutoSentFilterChange={(v) => { setAutoSentFilter(v); setStaleFilter(false); setFailedFilter(false); setPage(0); }}
+            onAutoSentFilterChange={(v) => { setAutoSentFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
             failedFilter={failedFilter}
-            onFailedFilterChange={(v) => { setFailedFilter(v); setStaleFilter(false); setAutoSentFilter(false); setPage(0); }}
+            onFailedFilterChange={(v) => { setFailedFilter(v); setStaleFilter(false); setAutoSentFilter(false); setAutoHandledFilter(false); setPage(0); }}
+            autoHandledFilter={autoHandledFilter}
+            onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setAutoSentFilter(false); setFailedFilter(false); setPage(0); }}
+            autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
           />
 
           <InboxMobileList threads={threads} loading={loading} currentUserId={user.id} />
@@ -286,6 +335,7 @@ export default function InboxPage() {
             loading={loading}
             currentUserId={user.id}
             onSelectThread={handleSelectThread}
+            selectedThreadId={selectedThreadId}
             onBulkAction={() => { loadThreads(); loadStats(); setFolderRefreshKey((k) => k + 1); }}
             compact={!!selectedThreadId}
             groupByClient={groupByClient}

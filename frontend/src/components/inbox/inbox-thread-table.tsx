@@ -44,12 +44,13 @@ interface InboxThreadTableProps {
   loading: boolean;
   currentUserId: string;
   onSelectThread: (id: string) => void;
+  selectedThreadId?: string | null;
   onBulkAction?: () => void;
   compact?: boolean;
   groupByClient?: boolean;
 }
 
-export function InboxThreadTable({ threads, loading, currentUserId, onSelectThread, onBulkAction, compact, groupByClient }: InboxThreadTableProps) {
+export function InboxThreadTable({ threads, loading, currentUserId, onSelectThread, selectedThreadId, onBulkAction, compact, groupByClient }: InboxThreadTableProps) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
@@ -245,16 +246,26 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
             ) : (
               (() => {
                 const colSpan = compact ? 2 : 5;
-                const renderRow = (t: Thread, i: number) => (
+                const renderRow = (t: Thread, i: number) => {
+                  const isSelected = t.id === selectedThreadId;
+                  return (
                   <TableRow
                     key={t.id}
-                    className={`cursor-pointer transition-colors hover:bg-blue-50 dark:hover:bg-blue-950 touch-manipulation relative ${
-                      t.has_pending
-                        ? "bg-amber-50 dark:bg-amber-950/30"
-                        : i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""
+                    className={`cursor-pointer transition-colors touch-manipulation relative ${
+                      isSelected
+                        ? "bg-blue-100 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-950/50"
+                        : t.has_pending
+                        ? "bg-amber-50 dark:bg-amber-950/30 hover:bg-blue-50 dark:hover:bg-blue-950"
+                        : `${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""} hover:bg-blue-50 dark:hover:bg-blue-950`
                     } ${t.is_unread ? "font-medium" : ""}`}
                     onClick={() => onSelectThread(t.id)}
-                    style={t.has_pending ? { boxShadow: "inset 4px 0 0 0 #f59e0b" } : undefined}
+                    style={
+                      isSelected
+                        ? { boxShadow: "inset 4px 0 0 0 #3b82f6" }
+                        : t.has_pending
+                        ? { boxShadow: "inset 4px 0 0 0 #f59e0b" }
+                        : undefined
+                    }
                   >
                     {!compact && (
                       <TableCell className="px-2" onClick={(e) => e.stopPropagation()}>
@@ -358,7 +369,8 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                       </TableCell>
                     )}
                   </TableRow>
-                );
+                  );
+                };
 
                 if (groupedThreads) {
                   return groupedThreads.map((group) => (

@@ -137,6 +137,14 @@ class ThreadPresenter(Presenter):
         )).scalar_one_or_none()
         d["has_auto_sent"] = auto is not None
 
+        # Auto-handled (AI hid this from inbox without human action — and there's no auto-sent reply)
+        d["is_auto_handled"] = (
+            thread.last_direction == "inbound"
+            and thread.status in ("ignored", "handled")
+            and not thread.has_pending
+            and not d["has_auto_sent"]
+        )
+
         # Sender tag
         if thread.contact_email:
             from sqlalchemy import select, func

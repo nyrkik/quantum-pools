@@ -30,6 +30,9 @@ interface InboxFiltersProps {
   onAutoSentFilterChange?: (v: boolean) => void;
   failedFilter?: boolean;
   onFailedFilterChange?: (v: boolean) => void;
+  autoHandledFilter?: boolean;
+  onAutoHandledFilterChange?: (v: boolean) => void;
+  autoHandledTodayCount?: number;  // for chip-style count
 }
 
 export function InboxFilters({
@@ -47,6 +50,9 @@ export function InboxFilters({
   onAutoSentFilterChange,
   failedFilter,
   onFailedFilterChange,
+  autoHandledFilter,
+  onAutoHandledFilterChange,
+  autoHandledTodayCount,
 }: InboxFiltersProps) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -90,6 +96,21 @@ export function InboxFilters({
         >
           <Bot className="h-3.5 w-3.5" />
           Auto-Sent
+        </Button>
+      )}
+      {onAutoHandledFilterChange && (
+        <Button
+          variant={autoHandledFilter ? "default" : "outline"}
+          size="sm"
+          className={`h-7 px-2.5 text-xs gap-1 ${!autoHandledFilter ? "border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-400" : ""}`}
+          onClick={() => onAutoHandledFilterChange(!autoHandledFilter)}
+          title="Show all emails the AI auto-handled (moved/tagged without human action)"
+        >
+          <Bot className="h-3.5 w-3.5" />
+          Auto-Handled
+          {(autoHandledTodayCount ?? 0) > 0 && (
+            <span className="ml-0.5 text-[10px] font-semibold opacity-70">+{autoHandledTodayCount}</span>
+          )}
         </Button>
       )}
       {stats && stats.pending > 0 && onStaleFilterChange && (

@@ -11,7 +11,9 @@ The email pipeline handles all inbound and outbound email for QuantumPools. **Mu
 
 **Rendering:** HTML bodies stored alongside stripped text, rendered client-side in a sandboxed iframe (no script execution, CSS isolated). Quoted text auto-detected and collapsed. Attachments render as image grid + type-colored file cards.
 
-**Deliverability:** Postmark webhook (`/api/v1/admin/postmark-webhook`) receives Delivery/Bounce/Open/SpamComplaint events. Outbound messages show status chips (Delivered, Opened Nx, Bounced, Spam). "Failed" filter surfaces bounced/errored sends across all folders.
+**Deliverability:** Postmark webhook (`/api/v1/admin/postmark-webhook`) receives Delivery/Bounce/Open/SpamComplaint events. Outbound messages show status chips (Delivered, Opened Nx, Bounced, Spam, **Send failed**, **Sending…**). The "Failed" filter surfaces ALL outbound failure modes — bounces and spam complaints from the recipient, plus our-side `delivery_error`/`status=failed`/`status=queued` (sender path crashed before delivery).
+
+**Send-failure hardening (post FB-24):** `EmailComposeService.compose_and_send` is wrapped in try/except — any unhandled exception flips the message to `failed` with the actual error in `delivery_error` and returns it to the router so the UI toast shows the real reason (not generic "Failed to send email"). An APScheduler `_run_outbound_send_janitor` runs every 2 minutes, flips outbound messages stuck in `queued` >5 min to `failed` ("timed out in queue"), recomputes thread state, and fires a high-priority ntfy alert. When Gmail OAuth fails, `send_agent_reply` marks the integration `status='error'` with `last_error_at` so the inbox page shows a "Reconnect" banner instead of silently falling through to Postmark indefinitely. Backend 500s alert via ntfy (was email — chicken-and-egg when the email path itself is broken).
 
 **Auto-send monitoring:** Threads with auto-sent replies get a sky-blue "Auto-Sent" chip. Reading pane shows a feedback banner (Yes/No — owner/admin only) that records `AgentCorrection` for learning. Weekly digest email to org owner summarizes auto-sends. First-contact auto-sends trigger ntfy push alert.
 

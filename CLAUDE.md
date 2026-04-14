@@ -435,6 +435,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/billing-dormant.md` | Inventory of the billing/Stripe code that's built but intentionally disabled. **Do NOT re-enable scheduler without explicit approval.** Includes Stripe Connect concern for multi-tenant. **Remove when billing is live + stable.** |
 | `docs/audit-2026-04-07.md` | Code health audit findings |
 | `docs/inbox-security-audit-2026-04-13.md` | **HIGH PRIORITY** — security audit found 3 CRITICAL + 4 HIGH + 4 MEDIUM issues in inbox/email subsystem (cross-org leakage, unsigned webhooks, unauth attachment access). Each item has file:line + status. **Remove when every CRITICAL/HIGH is closed.** |
+| `docs/backup-and-restore.md` | DB backup + restore-verification runbook. Cron schedule, retention (GFS 7d/4w/12m), restore commands with safety snapshots, ntfy signaling, follow-up gaps (off-host, off-site, WAL archiving). |
 
 ### Doc Maintenance Rules
 

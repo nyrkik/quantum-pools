@@ -254,9 +254,77 @@ async def auto_close_stale_visits():
     await _close()
 
 
+async def gmail_incremental_sync():
+    """Pull new mail from every connected Gmail integration.
+
+    Runs every cycle (60s). Without this, mail sent directly to the connected
+    Gmail account (not via the *@org-domain alias path) only arrives in QP
+    when someone manually clicks Sync. Discovered 2026-04-13: 30+ hour gap
+    where two real customer emails sat in Gmail and never reached the inbox.
+
+    Per-integration try/except so one broken integration can't block others.
+    On persistent failure (3 consecutive), the integration is flipped to
+    status='error' with last_error so the inbox banner surfaces it.
+    """
+    from sqlalchemy import select
+    from src.core.database import get_db_context
+    from src.models.email_integration import EmailIntegration, IntegrationStatus
+    from src.services.gmail.sync import GmailSyncService
+    from datetime import datetime, timezone
+
+    async with get_db_context() as db:
+        integrations = (await db.execute(
+            select(EmailIntegration).where(
+                EmailIntegration.type == "gmail_api",
+                EmailIntegration.status == IntegrationStatus.connected.value,
+            )
+        )).scalars().all()
+        # Detach the rows so we can use them outside this DB session.
+        targets = [(i.id, i.organization_id, i.account_email) for i in integrations]
+
+    for integ_id, org_id, account in targets:
+        per_key = f"gmail_sync_{integ_id}"
+        try:
+            # Re-fetch with a fresh session so each integration's sync gets a
+            # clean session for token-refresh writes.
+            async with get_db_context() as db:
+                fresh = (await db.execute(
+                    select(EmailIntegration).where(EmailIntegration.id == integ_id)
+                )).scalar_one_or_none()
+                if not fresh or fresh.status != IntegrationStatus.connected.value:
+                    continue
+                svc = GmailSyncService(fresh)
+                stats = await svc.incremental_sync()
+            if stats.get("ingested", 0) > 0:
+                logger.info(f"Gmail sync {account}: ingested {stats['ingested']} (errors={stats.get('errors',0)})")
+            _clear_failures(per_key)
+        except Exception as e:
+            _failure_counts[per_key] = _failure_counts.get(per_key, 0) + 1
+            logger.warning(f"Gmail sync failed for {account} (count={_failure_counts[per_key]}): {e}")
+            # After 3 consecutive failures, flip the integration to error so the
+            # banner surfaces it. Capture the actual reason in last_error.
+            if _failure_counts[per_key] >= 3:
+                try:
+                    async with get_db_context() as db:
+                        fresh = (await db.execute(
+                            select(EmailIntegration).where(EmailIntegration.id == integ_id)
+                        )).scalar_one_or_none()
+                        if fresh:
+                            fresh.status = IntegrationStatus.error.value
+                            fresh.last_error = f"{type(e).__name__}: {e}"[:500]
+                            fresh.last_error_at = datetime.now(timezone.utc)
+                            await db.commit()
+                    _send_ntfy(
+                        title=f"QP Gmail sync: {account} broken",
+                        message=f"3+ consecutive Gmail sync failures for {account}.\nLast error: {e}\nReconnect in /settings/email.",
+                    )
+                except Exception as inner:
+                    logger.error(f"Failed to flag integration {integ_id} as errored: {inner}")
+
+
 async def main():
     logger.info("Background agent service started (monitoring: Sentry + ntfy)")
-    logger.info("Inbound email: Postmark webhooks (no IMAP polling)")
+    logger.info("Inbound email: Postmark webhooks + Gmail incremental sync (every 60s)")
     cycle = 0
 
     while True:
@@ -269,6 +337,13 @@ async def main():
                 logger.info(f"Heartbeat: {cycle} cycles, active failures: {fails}")
             else:
                 logger.info(f"Heartbeat: {cycle} cycles, all healthy")
+
+        # --- Gmail incremental sync (every cycle = 60s) ---
+        # Per-integration error handling lives inside this function.
+        try:
+            await gmail_incremental_sync()
+        except Exception as e:
+            _handle_error("gmail_incremental_sync", e)
 
         # --- Estimate reminders (hourly) ---
         if cycle % REMINDER_EVERY == 0:

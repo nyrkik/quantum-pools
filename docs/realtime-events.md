@@ -6,7 +6,7 @@ QuantumPools uses a WebSocket-based real-time event system to push server-side m
 
 **How it works:** Backend services call `publish()` after mutations. Redis Pub/Sub delivers events instantly to the WebSocket gateway, which fans them out to authenticated clients. Redis Streams provide a replay buffer so reconnecting clients catch up on missed events.
 
-**Graceful degradation:** If Redis is unavailable, `publish()` is a silent no-op. The frontend falls back to existing data-fetching patterns (SWR/manual refetch). No feature breaks — updates just arrive on next manual refresh instead of instantly.
+**Graceful degradation + auto-recovery:** If Redis is unavailable, `publish()` is a silent no-op (returns None). On any Redis exception the cached client is reset (`reset_redis()`), so the next op retries the connection — without this, a Redis blip after first successful ping would leave the cached client permanently broken until backend restart. Connection has 2s socket timeouts so failures are fast, not hanging. `agent_poller` runs a Redis health probe every 60s for proactive recovery; ntfy alert fires after 3 consecutive failed probes. Frontend falls back to existing data-fetching patterns (SWR/manual refetch) when WS is disconnected, polling every 60s.
 
 ## Architecture
 

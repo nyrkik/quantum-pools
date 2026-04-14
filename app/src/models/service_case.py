@@ -35,6 +35,8 @@ class ServiceCase(Base):
     open_job_count: Mapped[int] = mapped_column(Integer, default=0)
     thread_count: Mapped[int] = mapped_column(Integer, default=0)
     invoice_count: Mapped[int] = mapped_column(Integer, default=0)
+    internal_thread_count: Mapped[int] = mapped_column(Integer, default=0)
+    deepblue_conversation_count: Mapped[int] = mapped_column(Integer, default=0)
     total_invoiced: Mapped[float] = mapped_column(Float, default=0.0)
     total_paid: Mapped[float] = mapped_column(Float, default=0.0)
 

@@ -334,8 +334,15 @@ async def update_case(
 
     if "title" in body:
         case.title = body["title"][:300]
-    if "status" in body:
+    status_override = "status" in body
+    if status_override:
         case.status = body["status"]
+        if body["status"] == "closed":
+            from datetime import datetime, timezone
+            case.closed_at = datetime.now(timezone.utc)
+        elif body["status"] not in ("closed", "cancelled"):
+            # Reopening: clear closed_at.
+            case.closed_at = None
     if "priority" in body:
         case.priority = body["priority"]
     if "assigned_to_name" in body:
@@ -346,7 +353,12 @@ async def update_case(
         case.assigned_to_user_id = body.get("assigned_to_user_id")
 
     await db.flush()
-    await svc.update_status_from_children(case_id)
+    # Skip child-state re-derivation if the user explicitly set status in this
+    # request — manual override wins. Otherwise the user's "close this case"
+    # action gets immediately overwritten by the auto-derived pending_payment /
+    # in_progress etc. based on open invoices, done jobs, and so on.
+    if not status_override:
+        await svc.update_status_from_children(case_id)
     await db.commit()
     presenter = CasePresenter(db)
     return await presenter.one(case)
@@ -359,38 +371,32 @@ async def link_entity(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually link a job, thread, or invoice to a case."""
-    svc = ServiceCaseService(db)
-    case = await svc.get(ctx.organization_id, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    """Manually link an entity to a case.
 
-    entity_type = body.get("type")  # "job", "thread", "invoice"
+    Supported types: job, thread, invoice, internal_thread, deepblue_conversation.
+    Cross-org mutations are blocked by ServiceCaseService.set_entity_case.
+    """
+    entity_type = body.get("type")
     entity_id = body.get("id")
     if not entity_type or not entity_id:
         raise HTTPException(status_code=400, detail="type and id required")
 
-    if entity_type == "job":
-        action = (await db.execute(select(AgentAction).where(AgentAction.id == entity_id, AgentAction.organization_id == ctx.organization_id))).scalar_one_or_none()
-        if not action:
-            raise HTTPException(status_code=404, detail="Job not found")
-        action.case_id = case_id
-    elif entity_type == "thread":
-        thread = (await db.execute(select(AgentThread).where(AgentThread.id == entity_id, AgentThread.organization_id == ctx.organization_id))).scalar_one_or_none()
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-        thread.case_id = case_id
-    elif entity_type == "invoice":
-        invoice = (await db.execute(select(Invoice).where(Invoice.id == entity_id, Invoice.organization_id == ctx.organization_id))).scalar_one_or_none()
-        if not invoice:
-            raise HTTPException(status_code=404, detail="Invoice not found")
-        invoice.case_id = case_id
-    else:
-        raise HTTPException(status_code=400, detail="type must be job, thread, or invoice")
-
-    await svc.update_counts(case_id)
+    svc = ServiceCaseService(db)
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip() or None
+    try:
+        result = await svc.set_entity_case(
+            org_id=ctx.organization_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            new_case_id=case_id,
+            user_name=user_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     await db.commit()
-    return {"linked": True}
+    return {"linked": True, **result}
 
 
 @router.delete("/{case_id}/link")
@@ -401,47 +407,49 @@ async def unlink_entity(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlink a job, thread, or invoice from a case."""
+    """Unlink an entity from a case.
+
+    Only unlinks if the entity's current case_id matches `case_id` — a missed
+    org/case guard cannot silently wipe another case's links. Cross-org is
+    enforced by ServiceCaseService.set_entity_case.
+    """
     svc = ServiceCaseService(db)
     case = await svc.get(ctx.organization_id, case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    # Each entity fetch MUST be org-filtered. Without it, an authenticated user
-    # could unlink any thread/action/invoice from any org's case by ID.
-    # (Cross-org mutation, docs/inbox-security-audit-2026-04-13.md C2.)
-    org_id = ctx.organization_id
-    if entity_type == "job":
-        action = (await db.execute(
-            select(AgentAction).where(
-                AgentAction.id == entity_id,
-                AgentAction.organization_id == org_id,
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip() or None
+    try:
+        # Verify the entity is currently attached to THIS case. Prevents a
+        # valid-but-unrelated unlink request from clearing a link that belongs
+        # to a different case (cheap guard, zero downside).
+        from src.services.service_case_service import LINKABLE_MODELS
+        model = LINKABLE_MODELS.get(entity_type)
+        if not model:
+            raise HTTPException(status_code=400, detail=f"unknown type: {entity_type}")
+        current = (await db.execute(
+            select(model.case_id).where(
+                model.id == entity_id,
+                model.organization_id == ctx.organization_id,
             )
         )).scalar_one_or_none()
-        if action:
-            action.case_id = None
-    elif entity_type == "thread":
-        thread = (await db.execute(
-            select(AgentThread).where(
-                AgentThread.id == entity_id,
-                AgentThread.organization_id == org_id,
-            )
-        )).scalar_one_or_none()
-        if thread:
-            thread.case_id = None
-    elif entity_type == "invoice":
-        invoice = (await db.execute(
-            select(Invoice).where(
-                Invoice.id == entity_id,
-                Invoice.organization_id == org_id,
-            )
-        )).scalar_one_or_none()
-        if invoice:
-            invoice.case_id = None
+        if current != case_id:
+            # Already unlinked or attached elsewhere — idempotent success.
+            return {"unlinked": True, "changed": False}
 
-    await svc.update_counts(case_id)
+        result = await svc.set_entity_case(
+            org_id=ctx.organization_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            new_case_id=None,
+            user_name=user_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     await db.commit()
-    return {"unlinked": True}
+    return {"unlinked": True, **result}
 
 
 class CreateJobInCaseBody(BaseModel):

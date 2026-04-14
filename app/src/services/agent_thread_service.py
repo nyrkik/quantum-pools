@@ -226,6 +226,20 @@ class AgentThreadService:
                 base = base.where(or_(AgentThread.folder_id.is_(None), AgentThread.folder_id == inbox_folder))
             else:
                 base = base.where(AgentThread.folder_id.is_(None))
+        elif folder_key == "sent":
+            # Sent is a VIEW, not exclusive placement: any thread with at least
+            # one outbound `sent` message, regardless of the thread's folder_id.
+            # A thread routed to Clients/Billing/etc. still surfaces here after
+            # we reply — matches the Gmail mental model.
+            base = base.where(
+                AgentThread.id.in_(
+                    select(AgentMessage.thread_id).where(
+                        AgentMessage.organization_id == org_id,
+                        AgentMessage.direction == "outbound",
+                        AgentMessage.status == "sent",
+                    )
+                )
+            )
         elif folder_key:
             from src.models.inbox_folder import InboxFolder
             target = (await self.db.execute(
@@ -452,7 +466,11 @@ class AgentThreadService:
 
         Returns None if thread doesn't exist or user lacks required visibility permission.
         """
-        result = await self.db.execute(select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id))
+        result = await self.db.execute(
+            select(AgentThread)
+            .options(selectinload(AgentThread.case))
+            .where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
+        )
         thread = result.scalar_one_or_none()
         if not thread:
             return None

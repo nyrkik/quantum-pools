@@ -397,16 +397,26 @@ async def get_approval(
 ):
     """Get approval record for an estimate."""
     import json
-    from sqlalchemy import select
+    from sqlalchemy import select, case
     from src.models.estimate_approval import EstimateApproval
 
+    # Legacy data may contain >1 row per invoice (a stale `pending` row plus a
+    # real approval). Prefer approved rows, then newest first. See fix in
+    # estimate_workflow_service.approve_by_admin that prevents new duplicates.
     result = await db.execute(
-        select(EstimateApproval).where(
+        select(EstimateApproval)
+        .where(
             EstimateApproval.invoice_id == invoice_id,
             EstimateApproval.organization_id == ctx.organization_id,
         )
+        .order_by(
+            case((EstimateApproval.approved_by_type == "pending", 1), else_=0),
+            EstimateApproval.approved_at.desc().nullslast(),
+            EstimateApproval.created_at.desc(),
+        )
+        .limit(1)
     )
-    approval = result.scalar_one_or_none()
+    approval = result.scalars().first()
     if not approval:
         return {"approved": False}
 

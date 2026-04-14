@@ -48,6 +48,7 @@ import { StatusBadge, UrgencyBadge, CategoryBadge } from "./inbox-badges";
 import { CollapsibleBody } from "./collapsible-body";
 import { ContactLearningPrompt, SENDER_TAG_STYLES } from "./contact-learning-modal";
 import { RuleEditorDialog, type RuleDraft } from "./rule-editor-dialog";
+import { LinkCasePicker } from "@/components/cases/link-case-picker";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 import { AttachmentDisplay } from "@/components/ui/attachment-display";
 import {
@@ -1470,31 +1471,21 @@ export function ThreadDetailSheet({
           />
         )}
 
-        {/* Quick actions: Create Case / Create Job, Draft Estimate */}
-        <div className="flex gap-2 flex-wrap">
-            {thread.case_id ? (
-              <>
-                <Button variant="outline" size="sm" onClick={() => router.push(`/cases/${thread.case_id}`)}>
-                  <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
-                  View Case
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
-                  {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
-                  Add Job
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="outline" size="sm" onClick={handleCreateCase} disabled={creatingJob}>
-                  {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FolderOpen className="h-3.5 w-3.5 mr-1.5" />}
-                  Create Case
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
-                  {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
-                  Create Job
-                </Button>
-              </>
-            )}
+        {/* Quick actions: Link case, Create/Add Job, Draft Estimate */}
+        <div className="flex gap-2 flex-wrap items-center">
+            <LinkCasePicker
+              entityType="thread"
+              entityId={thread.id}
+              customerId={thread.matched_customer_id || undefined}
+              currentCaseId={thread.case_id}
+              currentCaseNumber={thread.case_number}
+              currentCaseTitle={thread.case_title}
+              onChange={() => { loadThread(); onAction(); }}
+            />
+            <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
+              {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
+              {thread.case_id ? "Add Job" : "Create Job"}
+            </Button>
             {thread.matched_customer_id && (
               <Button
                 variant="outline"

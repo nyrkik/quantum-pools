@@ -88,6 +88,19 @@ async def view_estimate(token: str, db: AsyncSession = Depends(get_db)):
         invoice.viewed_at = datetime.now(timezone.utc)
         await db.commit()
 
+    # If the document has been converted to an invoice since this approval
+    # link was sent, surface that to the frontend so it can redirect to the
+    # invoice pay page instead of rendering an approve-an-estimate view for
+    # something that is no longer an estimate.
+    converted_to_invoice = None
+    if invoice.document_type == "invoice":
+        converted_to_invoice = {
+            "invoice_number": invoice.invoice_number,
+            "payment_token": invoice.payment_token,
+            "status": invoice.status,
+            "balance": float(invoice.balance or 0),
+        }
+
     return {
         "estimate_number": invoice.invoice_number,
         "subject": invoice.subject,
@@ -99,6 +112,7 @@ async def view_estimate(token: str, db: AsyncSession = Depends(get_db)):
         "line_items": items,
         "total": float(invoice.total or 0),
         "recipient_name": approval.recipient_name,
+        "converted_to_invoice": converted_to_invoice,
         "terms": {
             "payment_terms_days": settings.payment_terms_days if settings else 30,
             "estimate_validity_days": settings.estimate_validity_days if settings else 30,

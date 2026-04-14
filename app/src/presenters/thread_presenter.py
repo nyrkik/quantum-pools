@@ -152,5 +152,7 @@ class ThreadPresenter(Presenter):
             "visibility_permission": t.visibility_permission,
             "delivered_to": t.delivered_to,
             "case_id": t.case_id if hasattr(t, "case_id") else None,
+            "case_number": (t.case.case_number if getattr(t, "case", None) else None),
+            "case_title": (t.case.title if getattr(t, "case", None) else None),
             "folder_id": t.folder_id,
         }

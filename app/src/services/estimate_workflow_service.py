@@ -197,17 +197,32 @@ class EstimateWorkflowService:
         }
 
         now = datetime.now(timezone.utc)
-        approval = EstimateApproval(
-            organization_id=org_id,
-            invoice_id=invoice.id,
-            approved_by_type="admin_on_behalf",
-            approved_by_name=user_name,
-            approved_by_user_id=user_id,
-            approval_method="admin_dashboard",
-            snapshot_json=json.dumps(snapshot),
-            approved_at=now,
-        )
-        self.db.add(approval)
+        # Reuse the pending row if send_estimate_email already created one —
+        # otherwise we leave a stale pending duplicate that breaks
+        # /invoices/{id}/approval's scalar_one_or_none().
+        existing = (await self.db.execute(
+            select(EstimateApproval).where(EstimateApproval.invoice_id == invoice.id)
+        )).scalar_one_or_none()
+        if existing and existing.approved_by_type == "pending":
+            existing.approved_by_type = "admin_on_behalf"
+            existing.approved_by_name = user_name
+            existing.approved_by_user_id = user_id
+            existing.approval_method = "admin_dashboard"
+            existing.snapshot_json = json.dumps(snapshot)
+            existing.approved_at = now
+            approval = existing
+        else:
+            approval = EstimateApproval(
+                organization_id=org_id,
+                invoice_id=invoice.id,
+                approved_by_type="admin_on_behalf",
+                approved_by_name=user_name,
+                approved_by_user_id=user_id,
+                approval_method="admin_dashboard",
+                snapshot_json=json.dumps(snapshot),
+                approved_at=now,
+            )
+            self.db.add(approval)
         await self.db.flush()
 
         invoice.approved_at = now
@@ -256,6 +271,23 @@ class EstimateWorkflowService:
         )).scalar_one_or_none()
         if not approval:
             return {"error": "not_found", "detail": "Estimate not found or link expired"}
+
+        # Check if the underlying document has already been converted to an
+        # invoice. Stale email links (customer clicks an old approval link
+        # after the admin has already converted) used to silently overwrite
+        # the invoice's status with "approved", producing invoices that look
+        # unbilled when they're actually sent. Return a friendly state instead.
+        current_invoice = (await self.db.execute(
+            select(Invoice).where(Invoice.id == approval.invoice_id)
+        )).scalar_one_or_none()
+        if current_invoice and current_invoice.document_type == "invoice":
+            return {
+                "already_converted": True,
+                "invoice_number": current_invoice.invoice_number,
+                "invoice_total": float(current_invoice.total or 0),
+                "payment_token": current_invoice.payment_token,
+                "approved_at": approval.approved_at.isoformat() if approval.approved_at else None,
+            }
 
         if approval.approved_by_type and approval.approved_by_type != "pending":
             return {"already_approved": True, "approved_at": approval.approved_at.isoformat()}

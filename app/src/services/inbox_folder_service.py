@@ -78,6 +78,18 @@ class InboxFolderService:
             for fid, cnt in unread_rows:
                 folder_unread[fid] = cnt
 
+        # Sent is a view, not exclusive placement: count threads with any
+        # outbound `sent` message regardless of folder_id. Matches the list
+        # behavior in AgentThreadService.list_threads.
+        from src.models.agent_message import AgentMessage
+        sent_thread_count = (await self.db.execute(
+            select(func.count(func.distinct(AgentMessage.thread_id))).where(
+                AgentMessage.organization_id == org_id,
+                AgentMessage.direction == "outbound",
+                AgentMessage.status == "sent",
+            )
+        )).scalar() or 0
+
         result = []
         for folder, thread_count in rows:
             tc = thread_count
@@ -86,6 +98,9 @@ class InboxFolderService:
             if folder.system_key == "inbox":
                 tc += inbox_thread_count
                 uc += folder_unread.get(None, 0)
+            elif folder.system_key == "sent":
+                tc = sent_thread_count
+                uc = 0  # Sent folder isn't something users track as unread
             result.append({
                 "id": folder.id,
                 "name": folder.name,

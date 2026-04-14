@@ -110,7 +110,7 @@ class Invoice(Base):
 
     # Relationships
     organization = relationship("Organization", lazy="noload")
-    case = relationship("ServiceCase", back_populates="invoices")
+    case = relationship("ServiceCase", back_populates="invoices", lazy="noload")
     customer = relationship("Customer", back_populates="invoices", lazy="noload")
     line_items = relationship("InvoiceLineItem", back_populates="invoice", lazy="noload",
                               cascade="all, delete-orphan", order_by="InvoiceLineItem.sort_order")

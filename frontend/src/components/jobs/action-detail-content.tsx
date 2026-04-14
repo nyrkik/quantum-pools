@@ -45,6 +45,7 @@ import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges"
 import { TasksSection } from "@/components/jobs/tasks-section";
 import type { ActionDetail } from "@/types/agent";
 import { JobPartsSection } from "@/components/jobs/job-parts-section";
+import { LinkCasePicker } from "@/components/cases/link-case-picker";
 import { useTeamMembers, ACTION_TYPES } from "@/hooks/use-team-members";
 
 // --- Utility components ---
@@ -416,15 +417,16 @@ function StatusBar({ detail, actionId, onUpdate, loadDetail, onClose }: {
       <div className="flex items-center justify-between mt-1">
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           {detail.customer_name && <span>{detail.customer_name}</span>}
-          {detail.case_id && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1 border-blue-300 text-blue-600 cursor-pointer hover:bg-blue-50"
-              onClick={() => statusRouter.push(`/cases/${detail.case_id}`)}
-            >
-              View Case
-            </Badge>
-          )}
+          <LinkCasePicker
+            entityType="job"
+            entityId={actionId}
+            customerId={detail.matched_customer_id || undefined}
+            currentCaseId={detail.case_id ?? null}
+            currentCaseNumber={detail.case_number}
+            currentCaseTitle={detail.case_title}
+            onChange={() => { loadDetail(); onUpdate(); }}
+          />
+
           {detail.assigned_to && <span>→ {detail.assigned_to}</span>}
           <DueDateEditor actionId={actionId} currentDate={detail.due_date} onUpdate={() => { loadDetail(); onUpdate(); }} />
         </div>

@@ -84,76 +84,6 @@ class AgentActionService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
-    async def _create_invoice_from_estimate(self, org_id: str, action_id: str) -> dict | None:
-        """If the job has an approved estimate, create a draft invoice from it."""
-        from src.models.invoice import Invoice
-        from src.models.job_invoice import JobInvoice
-        from src.services.invoice_service import InvoiceService
-        from sqlalchemy.orm import selectinload
-
-        # Find linked invoices/estimates for this job
-        result = await self.db.execute(
-            select(Invoice)
-            .join(JobInvoice, JobInvoice.invoice_id == Invoice.id)
-            .where(JobInvoice.action_id == action_id)
-            .options(selectinload(Invoice.line_items))
-        )
-        linked = result.scalars().all()
-        if not linked:
-            return None
-
-        # Find an approved estimate that hasn't been converted yet
-        estimate = None
-        for inv in linked:
-            if inv.document_type == "estimate" and inv.approved_at and inv.status != "void":
-                estimate = inv
-                break
-        if not estimate:
-            return None
-
-        # Check no invoice already exists for this job
-        for inv in linked:
-            if inv.document_type == "invoice":
-                return None
-
-        # Create draft invoice copying estimate line items
-        svc = InvoiceService(self.db)
-        line_items_data = []
-        if estimate.line_items:
-            for li in estimate.line_items:
-                line_items_data.append({
-                    "description": li.description,
-                    "quantity": float(li.quantity),
-                    "unit_price": float(li.unit_price),
-                    "is_taxed": li.is_taxed if hasattr(li, "is_taxed") else False,
-                })
-
-        invoice = await svc.create(
-            org_id=org_id,
-            customer_id=estimate.customer_id,
-            line_items_data=line_items_data,
-            document_type="invoice",
-            subject=estimate.subject,
-            issue_date=date.today(),
-            tax_rate=float(estimate.tax_rate or 0),
-            discount=float(estimate.discount or 0),
-            notes=estimate.notes,
-            case_id=estimate.case_id,
-        )
-
-        # Link the new invoice to this job
-        from src.services.job_invoice_service import link_job_invoice
-        await link_job_invoice(self.db, action_id, invoice.id, linked_by="auto")
-        await self.db.commit()
-
-        return {
-            "id": invoice.id,
-            "invoice_number": invoice.invoice_number,
-            "total": float(invoice.total or 0),
-            "status": invoice.status,
-            "estimate_number": estimate.invoice_number,
-        }
-
     async def _detect_equipment_changes(self, org_id: str, action: AgentAction):
         """Delegated to equipment_agent.detect_equipment_changes."""
         from src.services.agents.equipment_agent import detect_equipment_changes
@@ -439,13 +369,13 @@ class AgentActionService:
             except Exception as e:
                 logger.warning(f"Equipment change detection failed for {action_id}: {e}")
 
-        # If just marked done, auto-create draft invoice from approved estimate
+        # Auto-invoice-from-done-job was removed 2026-04-14. That path created a
+        # duplicate Invoice row by copying an approved estimate's line items
+        # instead of converting the estimate in place. When a job is "done" is
+        # not a reliable signal for "ready to bill" — humans decide that via the
+        # /convert-to-invoice button. See docs/entity-connections-plan.md and the
+        # Pinebrook impeller incident (invoices 26005 vs 26009).
         created_invoice = None
-        if status == "done" and was_not_done:
-            try:
-                created_invoice = await self._create_invoice_from_estimate(org_id, action_id)
-            except Exception as e:
-                logger.warning(f"Auto-invoice from estimate failed for {action_id}: {e}")
 
         # If just marked done, evaluate if a follow-up action is needed
         suggestion = None
@@ -494,7 +424,11 @@ class AgentActionService:
         """Get action with comments, tasks, related jobs, parent message."""
         result = await self.db.execute(
             select(AgentAction)
-            .options(selectinload(AgentAction.comments), selectinload(AgentAction.tasks))
+            .options(
+                selectinload(AgentAction.comments),
+                selectinload(AgentAction.tasks),
+                selectinload(AgentAction.case),
+            )
             .where(AgentAction.id == action_id, AgentAction.organization_id == org_id)
         )
         action = result.scalar_one_or_none()

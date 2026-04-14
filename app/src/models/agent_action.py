@@ -36,7 +36,7 @@ class AgentAction(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    case = relationship("ServiceCase", back_populates="jobs")
+    case = relationship("ServiceCase", back_populates="jobs", lazy="noload")
     message = relationship("AgentMessage", backref="actions")
     comments = relationship("AgentActionComment", back_populates="action", order_by="AgentActionComment.created_at")
     tasks = relationship("AgentActionTask", back_populates="action", order_by="AgentActionTask.sort_order")

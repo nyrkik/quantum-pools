@@ -7,6 +7,8 @@ export interface AgentAction {
   agent_message_id: string;
   thread_id?: string | null;
   case_id?: string | null;
+  case_number?: string | null;
+  case_title?: string | null;
   action_type: string;
   description: string;
   assigned_to: string | null;
@@ -93,6 +95,8 @@ export interface Thread {
   customer_address: string | null;
   matched_customer_id: string | null;
   case_id: string | null;
+  case_number?: string | null;
+  case_title?: string | null;
   status: string;
   urgency: string | null;
   category: string | null;
@@ -140,6 +144,8 @@ export interface ThreadDetail {
   customer_name: string | null;
   matched_customer_id: string | null;
   case_id: string | null;
+  case_number?: string | null;
+  case_title?: string | null;
   status: string;
   urgency: string | null;
   category: string | null;

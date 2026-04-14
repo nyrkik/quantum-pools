@@ -38,6 +38,8 @@ export interface InvoiceLineItem {
 export interface Invoice {
   id: string;
   case_id: string | null;
+  case_number?: string | null;
+  case_title?: string | null;
   invoice_number: string | null;
   customer_id: string;
   customer_name: string;

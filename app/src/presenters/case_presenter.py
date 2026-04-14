@@ -25,6 +25,8 @@ class CasePresenter(Presenter):
             "open_job_count": case.open_job_count,
             "thread_count": case.thread_count,
             "invoice_count": case.invoice_count,
+            "internal_thread_count": case.internal_thread_count,
+            "deepblue_conversation_count": case.deepblue_conversation_count,
             "total_invoiced": case.total_invoiced,
             "total_paid": case.total_paid,
             "flags": {

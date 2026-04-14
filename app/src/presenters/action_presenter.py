@@ -228,6 +228,8 @@ class ActionPresenter(Presenter):
             "notes": a.notes,
             "invoice_ids": [],  # populated by many() or one()
             "case_id": a.case_id if hasattr(a, "case_id") else None,
+            "case_number": (a.case.case_number if getattr(a, "case", None) else None),
+            "case_title": (a.case.title if getattr(a, "case", None) else None),
             "parent_action_id": a.parent_action_id,
             "task_count": a.task_count or 0,
             "tasks_completed": a.tasks_completed or 0,

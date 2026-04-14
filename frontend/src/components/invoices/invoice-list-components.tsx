@@ -68,6 +68,7 @@ export interface InvoiceStats {
   invoice_count: number;
   paid_count: number;
   overdue_count: number;
+  void_count?: number;
 }
 
 export interface MonthlyData {

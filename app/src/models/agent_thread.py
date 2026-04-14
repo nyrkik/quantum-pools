@@ -64,5 +64,5 @@ class AgentThread(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    case = relationship("ServiceCase", back_populates="threads")
+    case = relationship("ServiceCase", back_populates="threads", lazy="noload")
     messages = relationship("AgentMessage", back_populates="thread", order_by="AgentMessage.received_at")

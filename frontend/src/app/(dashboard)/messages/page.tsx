@@ -25,6 +25,7 @@ import { ComposeMessage } from "@/components/messages/compose-message";
 import { PageLayout } from "@/components/layout/page-layout";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
 import { AttachmentDisplay, type AttachmentInfo } from "@/components/ui/attachment-display";
+import { LinkCasePicker } from "@/components/cases/link-case-picker";
 
 interface ThreadSummary {
   id: string;
@@ -54,12 +55,15 @@ interface ThreadDetail {
   id: string;
   participants: string[];
   subject: string | null;
+  customer_id: string | null;
   customer_name: string | null;
   action_id: string | null;
   priority: string;
   messages: ThreadMessage[];
   converted_to_action_id: string | null;
   case_id: string | null;
+  case_number: string | null;
+  case_title: string | null;
 }
 
 export default function MessagesPage() {
@@ -231,21 +235,18 @@ export default function MessagesPage() {
                   </div>
                 </div>
                 <div className="flex gap-1.5 shrink-0">
-                  {detail.case_id ? (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => router.push(`/cases/${detail.case_id}`)}>
-                      <FolderOpen className="h-3 w-3 mr-1" /> View Case
-                    </Button>
-                  ) : (
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={async () => {
-                      try {
-                        const result = await api.post<{ case_id: string; case_number?: string }>(`/v1/messages/${selectedThreadId}/create-case`, {});
-                        toast.success(`Case created: ${result.case_number || ""}`);
-                        router.push(`/cases/${result.case_id}`);
-                      } catch { toast.error("Failed to create case"); }
-                    }}>
-                      <FolderOpen className="h-3 w-3 mr-1" /> Create Case
-                    </Button>
-                  )}
+                  <LinkCasePicker
+                    entityType="internal_thread"
+                    entityId={selectedThreadId!}
+                    customerId={detail.customer_id || undefined}
+                    currentCaseId={detail.case_id}
+                    currentCaseNumber={detail.case_number}
+                    currentCaseTitle={detail.case_title}
+                    onChange={() => {
+                      if (selectedThreadId) loadDetail(selectedThreadId);
+                      loadThreads();
+                    }}
+                  />
                 </div>
               </div>
             </div>

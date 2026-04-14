@@ -91,6 +91,17 @@ class MessagePresenter(Presenter):
         msg_ids = [m.id for m in messages]
         attachments_by_msg = await self._load_attachments("internal_message", msg_ids)
 
+        # Load case summary for the link picker
+        case_number = None
+        case_title = None
+        if getattr(thread, "case_id", None):
+            from src.models.service_case import ServiceCase
+            case = (await self.db.execute(
+                select(ServiceCase.case_number, ServiceCase.title).where(ServiceCase.id == thread.case_id)
+            )).one_or_none()
+            if case:
+                case_number, case_title = case
+
         return {
             "id": thread.id,
             "participant_ids": thread.participant_ids,
@@ -102,6 +113,8 @@ class MessagePresenter(Presenter):
             "priority": thread.priority,
             "converted_to_action_id": thread.converted_to_action_id,
             "case_id": thread.case_id if hasattr(thread, "case_id") else None,
+            "case_number": case_number,
+            "case_title": case_title,
             "created_at": self._iso(thread.created_at),
             "messages": [
                 {

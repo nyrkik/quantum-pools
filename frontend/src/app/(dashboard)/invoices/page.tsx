@@ -260,12 +260,13 @@ export default function InvoicesPage() {
       key: "open",
       label: "Open",
       count: stats
-        ? stats.invoice_count - stats.paid_count - stats.overdue_count
+        ? stats.invoice_count - stats.paid_count - stats.overdue_count - (stats.void_count || 0)
         : undefined,
     },
     { key: "all", label: "All Invoices", count: stats?.invoice_count },
     { key: "paid", label: "Paid", count: stats?.paid_count },
     { key: "overdue", label: "Overdue", count: stats?.overdue_count },
+    { key: "void", label: "Voided", count: stats?.void_count },
   ];
 
   return (

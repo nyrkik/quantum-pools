@@ -29,6 +29,8 @@ class InvoicePresenter(Presenter):
             "billing_email": inv.billing_email,
             "invoice_number": inv.invoice_number,
             "case_id": inv.case_id if hasattr(inv, "case_id") else None,
+            "case_number": (inv.case.case_number if getattr(inv, "case", None) else None),
+            "case_title": (inv.case.title if getattr(inv, "case", None) else None),
             "document_type": inv.document_type if hasattr(inv, "document_type") else "invoice",
             "subject": inv.subject,
             "status": inv.status,

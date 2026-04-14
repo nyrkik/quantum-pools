@@ -35,6 +35,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { ComposeMessage } from "@/components/messages/compose-message";
 import { useCompose } from "@/components/email/compose-provider";
+import { AttachExistingDialog } from "@/components/cases/attach-existing-dialog";
 import { CaseDeepBlueCard } from "@/components/deepblue/case-deepblue-card";
 import { useDeepBlueContext } from "@/components/deepblue/deepblue-provider";
 import { useTeamMembers } from "@/hooks/use-team-members";
@@ -1108,7 +1109,7 @@ export default function CaseDetailPage({
               try {
                 await api.put(`/v1/cases/${id}`, { status: "closed" });
                 toast.success("Case closed");
-                load();
+                router.push("/cases");
               } catch (_) {
                 toast.error("Failed to close case");
               }
@@ -1293,6 +1294,11 @@ export default function CaseDetailPage({
                   >
                     <Sparkles className="h-3 w-3" /><span className="hidden sm:inline"> DeepBlue</span>
                   </Button>
+                  <AttachExistingDialog
+                    caseId={id}
+                    customerId={detail.customer_id}
+                    onAttached={load}
+                  />
                 </div>
               </div>
             </CardHeader>

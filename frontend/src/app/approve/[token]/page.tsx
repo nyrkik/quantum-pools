@@ -35,6 +35,12 @@ interface EstimateData {
   } | null;
   revision_count: number;
   revised_at: string | null;
+  converted_to_invoice: {
+    invoice_number: string;
+    payment_token: string;
+    status: string;
+    balance: number;
+  } | null;
 }
 
 export default function ApprovePage({ params }: { params: Promise<{ token: string }> }) {
@@ -82,6 +88,14 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || "Approval failed");
       }
+      const body = await res.json().catch(() => ({}));
+      // Race-condition path: the estimate was converted between page load
+      // and submit. Reload to get the "now an invoice" view instead of
+      // silently reporting success.
+      if (body && body.already_converted && body.payment_token) {
+        window.location.href = `/pay/${body.payment_token}`;
+        return;
+      }
       setApproved(true);
     } catch (e: unknown) {
       setApproveError(e instanceof Error ? e.message : "Failed to submit approval.");
@@ -106,6 +120,45 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
             <FileText className="h-12 w-12 text-slate-300 mx-auto mb-4" />
             <p className="text-lg font-medium text-slate-700">Estimate Unavailable</p>
             <p className="text-sm text-slate-500 mt-2">This estimate is no longer available or the link has expired. Please contact us if you need assistance.</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Estimate was already approved and converted to an invoice. Show a tidy
+  // "your estimate is now an invoice" state with a button to the pay page.
+  if (data.converted_to_invoice) {
+    const inv = data.converted_to_invoice;
+    const isPaid = inv.status === "paid" || inv.balance <= 0;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="py-10 text-center space-y-4">
+            <CheckCircle2 className="h-12 w-12 text-green-600 mx-auto" />
+            <div className="space-y-1">
+              <p className="text-lg font-semibold text-slate-800">
+                Estimate approved
+              </p>
+              <p className="text-sm text-slate-500">
+                {data.org_name ? `${data.org_name} has ` : "We have "}issued invoice {inv.invoice_number}{data.subject ? ` for ${data.subject}` : ""}.
+              </p>
+            </div>
+            {!isPaid ? (
+              <div className="pt-2">
+                <p className="text-2xl font-semibold text-slate-800 mb-1">
+                  ${inv.balance.toFixed(2)}
+                </p>
+                <p className="text-xs text-slate-500 mb-4">Balance due</p>
+                <Button asChild className="w-full">
+                  <a href={`/pay/${inv.payment_token}`}>View &amp; Pay Invoice</a>
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-green-700 font-medium">
+                This invoice has been paid in full. Thank you!
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

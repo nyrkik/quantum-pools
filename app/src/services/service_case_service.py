@@ -1,4 +1,4 @@
-"""ServiceCase service — CRUD, matching, status management."""
+"""ServiceCase service — CRUD, matching, status management, entity linking."""
 
 import uuid
 import logging
@@ -9,11 +9,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.models.service_case import ServiceCase
-from src.models.agent_action import AgentAction
+from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_thread import AgentThread
 from src.models.invoice import Invoice
+from src.models.internal_message import InternalThread
+from src.models.deepblue_conversation import DeepBlueConversation
 
 logger = logging.getLogger(__name__)
+
+
+# Single source of truth for the set of entity types that can be linked to a case.
+# Adding a new linkable entity type requires:
+#   1. Adding a case_id FK on the entity's model
+#   2. Adding an entry here mapping type-name -> SQLAlchemy model class
+#   3. Extending update_counts() below to maintain a denormalized count
+LINKABLE_MODELS = {
+    "job": AgentAction,
+    "thread": AgentThread,
+    "invoice": Invoice,
+    "internal_thread": InternalThread,
+    "deepblue_conversation": DeepBlueConversation,
+}
 
 # Subject words to ignore when matching
 _STOP_WORDS = {"re", "fwd", "fw", "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "at", "is"}
@@ -193,7 +209,138 @@ class ServiceCaseService:
         case.total_invoiced = float(inv_row[1])
         case.total_paid = float(inv_row[2])
 
+        # Internal threads
+        it_count = (await self.db.execute(
+            select(func.count(InternalThread.id)).where(InternalThread.case_id == case_id)
+        )).scalar() or 0
+        case.internal_thread_count = it_count
+
+        # DeepBlue conversations
+        db_count = (await self.db.execute(
+            select(func.count(DeepBlueConversation.id)).where(DeepBlueConversation.case_id == case_id)
+        )).scalar() or 0
+        case.deepblue_conversation_count = db_count
+
         case.updated_at = datetime.now(timezone.utc)
+
+    async def set_entity_case(
+        self,
+        org_id: str,
+        entity_type: str,
+        entity_id: str,
+        new_case_id: str | None,
+        user_name: str | None = None,
+    ) -> dict:
+        """Authoritative entry point for linking/unlinking entities to cases.
+
+        Every code path that mutates `<entity>.case_id` MUST route through here.
+        Handles:
+          - Cross-org safety (org-scoped entity lookup + target case lookup)
+          - Prior-case count refresh (so detaching updates the source case)
+          - New-case count refresh (so attaching updates the target)
+          - Activity log entry on the linked job (if any)
+          - `case.updated` real-time event publish for both affected cases
+
+        Returns dict describing the transition. Raises on validation error.
+        """
+        model = LINKABLE_MODELS.get(entity_type)
+        if not model:
+            raise ValueError(f"unknown linkable entity type: {entity_type}")
+
+        entity = (await self.db.execute(
+            select(model).where(model.id == entity_id, model.organization_id == org_id)
+        )).scalar_one_or_none()
+        if not entity:
+            raise LookupError(f"{entity_type} not found")
+
+        prior_case_id = entity.case_id
+
+        if new_case_id:
+            target_case = (await self.db.execute(
+                select(ServiceCase).where(
+                    ServiceCase.id == new_case_id,
+                    ServiceCase.organization_id == org_id,
+                )
+            )).scalar_one_or_none()
+            if not target_case:
+                raise LookupError("target case not found")
+
+        # Idempotent: same case → no-op.
+        if prior_case_id == new_case_id:
+            return {"changed": False, "prior_case_id": prior_case_id, "new_case_id": new_case_id}
+
+        entity.case_id = new_case_id
+        await self.db.flush()
+
+        if prior_case_id:
+            await self.update_counts(prior_case_id)
+        if new_case_id:
+            await self.update_counts(new_case_id)
+
+        # Activity log — best-effort. Log on the linked job (for invoice→job
+        # chain) or on any job sharing the thread for thread-type links.
+        try:
+            await self._log_link_activity(entity_type, entity, prior_case_id, new_case_id, user_name)
+        except Exception:  # pragma: no cover
+            logger.warning("link activity log failed", exc_info=True)
+
+        # Fire real-time events for both affected cases so open UIs refresh.
+        from src.core.events import EventType, publish
+        payload = {"entity_type": entity_type, "entity_id": entity_id}
+        if prior_case_id:
+            try:
+                await publish(EventType.CASE_UPDATED, org_id, {"case_id": prior_case_id, "action": "unlinked", **payload})
+            except Exception:
+                logger.warning("publish CASE_UPDATED (unlink) failed", exc_info=True)
+        if new_case_id:
+            try:
+                await publish(EventType.CASE_UPDATED, org_id, {"case_id": new_case_id, "action": "linked", **payload})
+            except Exception:
+                logger.warning("publish CASE_UPDATED (link) failed", exc_info=True)
+
+        return {
+            "changed": True,
+            "prior_case_id": prior_case_id,
+            "new_case_id": new_case_id,
+        }
+
+    async def _log_link_activity(
+        self,
+        entity_type: str,
+        entity,
+        prior_case_id: str | None,
+        new_case_id: str | None,
+        user_name: str | None,
+    ) -> None:
+        """Leave a trail on a job attached to the same target case so the case
+        timeline shows the link event. If there's no job to attach to, we skip —
+        activity logs on cases without jobs are a Phase 5 concern.
+        """
+        target_case_id = new_case_id or prior_case_id
+        if not target_case_id:
+            return
+        # Find any job currently attached to the target case to host the comment.
+        host_job = (await self.db.execute(
+            select(AgentAction).where(AgentAction.case_id == target_case_id).limit(1)
+        )).scalar_one_or_none()
+        if not host_job:
+            return
+
+        who = user_name or "System"
+        if new_case_id and prior_case_id:
+            msg = f"{who} moved {entity_type} {entity.id[:8]} from case {prior_case_id[:8]} to case {new_case_id[:8]}"
+        elif new_case_id:
+            msg = f"{who} linked {entity_type} {entity.id[:8]} to this case"
+        else:
+            msg = f"{who} unlinked {entity_type} {entity.id[:8]} from this case"
+
+        self.db.add(AgentActionComment(
+            id=str(uuid.uuid4()),
+            organization_id=host_job.organization_id,
+            action_id=host_job.id,
+            author="System",
+            text=f"[ACTIVITY]\n{msg}",
+        ))
 
     async def update_status_from_children(self, case_id: str) -> None:
         """Auto-advance case status, compute flags, and derive current actor.
@@ -201,7 +348,11 @@ class ServiceCaseService:
         Called after any job status change, invoice send/pay, or estimate approval.
         """
         case = await self.db.get(ServiceCase, case_id)
-        if not case or case.status in ("cancelled",):
+        if not case or case.status in ("closed", "cancelled"):
+            # Closed/cancelled are terminal. Re-deriving from children would
+            # undo a deliberate human close (e.g., writing off an open invoice
+            # then closing the case would flip back to pending_payment).
+            # Users can explicitly reopen via PUT /cases/{id} with a non-terminal status.
             return
 
         # Load child states — jobs with assignees
@@ -235,10 +386,14 @@ class ServiceCaseService:
         has_rejected_estimate = "rejected" in estimate_statuses
         has_sent_estimate = any(s in ("sent", "revised", "viewed") for s in estimate_statuses)
 
-        if all_jobs_done and all_invoices_paid and invoice_statuses:
+        # Cases close once the work is done and an invoice has been issued.
+        # Payment collection (30-45 days of AR waiting) is tracked by the
+        # invoice itself, not by keeping the case in a pending_payment limbo
+        # that clutters the active case list. If the invoice goes overdue,
+        # flag_invoice_overdue still fires on the closed case so reports can
+        # find it; users can reopen the case if a dispute arises.
+        if all_jobs_done and (all_invoices_paid or has_sent_invoice) and invoice_statuses:
             new_status = "closed"
-        elif all_jobs_done and has_sent_invoice:
-            new_status = "pending_payment"
         elif any_job_in_progress or (has_approved_estimate and job_statuses):
             new_status = "in_progress"
         elif has_approved_estimate:
@@ -276,7 +431,7 @@ class ServiceCaseService:
         ))
 
         # All jobs complete but case still open (need to invoice or close)
-        case.flag_jobs_complete = bool(all_jobs_done and job_statuses and new_status not in ("closed", "pending_payment"))
+        case.flag_jobs_complete = bool(all_jobs_done and job_statuses and new_status != "closed")
 
         # Invoice overdue
         now_date = datetime.now(timezone.utc).date()

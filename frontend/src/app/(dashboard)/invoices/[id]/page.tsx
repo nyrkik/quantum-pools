@@ -66,6 +66,7 @@ import {
   PaymentHistory,
 } from "@/components/invoices/invoice-detail-components";
 import type { Invoice, Payment, Revision } from "@/components/invoices/invoice-detail-components";
+import { LinkCasePicker } from "@/components/cases/link-case-picker";
 import {
   Card,
   CardContent,
@@ -243,7 +244,10 @@ export default function InvoiceDetailPage({
   const canSend = ["draft", "sent", "revised"].includes(invoice.status);
   const canPay = !isEstimate && ["sent", "overdue"].includes(invoice.status);
   const canDelete = invoice.status === "draft";
-  const canVoid = ["sent", "revised", "overdue"].includes(invoice.status);
+  // Void is available on anything past draft that isn't already finalized.
+  // Backend rejects void on draft/paid; we also exclude already-void and
+  // written-off here so the button doesn't show for no-op states.
+  const canVoid = !["draft", "void", "paid", "written_off"].includes(invoice.status);
   const canWriteOff = !isEstimate && ["sent", "overdue"].includes(invoice.status);
   const canApprove = isEstimate && !invoice.approved_at && ["sent", "revised", "viewed"].includes(invoice.status);
   const canConvert = isEstimate && !!invoice.approved_at;
@@ -271,15 +275,17 @@ export default function InvoiceDetailPage({
               </Link>
               {invoice.subject && ` — ${invoice.subject}`}
             </p>
-            {invoice.case_id && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 border-blue-300 text-blue-600 cursor-pointer hover:bg-blue-50 mt-1 w-fit"
-                onClick={() => router.push(`/cases/${invoice.case_id}`)}
-              >
-                View Case
-              </Badge>
-            )}
+            <div className="mt-2">
+              <LinkCasePicker
+                entityType="invoice"
+                entityId={invoice.id}
+                customerId={invoice.customer_id}
+                currentCaseId={invoice.case_id}
+                currentCaseNumber={invoice.case_number}
+                currentCaseTitle={invoice.case_title}
+                onChange={fetchData}
+              />
+            </div>
           </div>
           <InvoiceStatusBadge status={invoice.status} />
         </div>

@@ -209,6 +209,7 @@ class InvoiceService:
                 selectinload(Invoice.line_items),
                 selectinload(Invoice.payments),
                 selectinload(Invoice.customer),
+                selectinload(Invoice.case),
             )
         )
         invoice = result.scalar_one_or_none()
@@ -511,6 +512,14 @@ class InvoiceService:
         )
         overdue_count = overdue_count_result.scalar() or 0
 
+        void_count_result = await self.db.execute(
+            select(func.count(Invoice.id)).where(
+                invoices_only,
+                Invoice.status == InvoiceStatus.void.value,
+            )
+        )
+        void_count = void_count_result.scalar() or 0
+
         return {
             "total_outstanding": round(total_outstanding, 2),
             "total_overdue": round(total_overdue, 2),
@@ -518,6 +527,7 @@ class InvoiceService:
             "invoice_count": invoice_count,
             "paid_count": paid_count,
             "overdue_count": overdue_count,
+            "void_count": void_count,
         }
 
     async def get_monthly(self, org_id: str, year: int) -> List[dict]:

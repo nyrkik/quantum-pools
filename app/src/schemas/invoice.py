@@ -101,3 +101,4 @@ class InvoiceStatsResponse(BaseModel):
     invoice_count: int
     paid_count: int
     overdue_count: int
+    void_count: int = 0

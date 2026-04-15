@@ -10,19 +10,9 @@
 
 ### The conflation rule (mandatory)
 
-When making decisions about email, DNS, infrastructure, billing, or anything customer-facing, ALWAYS ask:
-- "Is this a Quantum Pools concern (the SaaS product) or a Sapphire concern (a customer)?"
-- "If a different customer onboarded today, would they configure this the same way?"
+For every email/DNS/infra/billing/customer-facing decision, ask: "Is this a QP concern or a Sapphire concern?" and "Would a different customer configure this the same way?" If Sapphire diverges because Brian owns both, that's wrong — Sapphire is a customer.
 
-If the answer is "Sapphire would do it differently because Brian owns both," that's wrong. Sapphire should be configured exactly like every other customer will be. Brian owns Sapphire as a separate business — Sapphire's choices belong to Sapphire.
-
-**Past mistake (2026-04-09):** Treated Sapphire's email as QP infrastructure, set up Cloudflare Workers + Postmark managed mode for Sapphire. The code is correct and reusable as a future managed-mode product feature, but Sapphire shouldn't be on it. Sapphire should be on Google Workspace like a normal customer. See `docs/sapphire-recovery-plan.md`.
-
-## Project Overview
-Enterprise pool service management platform consolidating:
-- **BarkurrRX** (architecture reference): FastAPI + Next.js 16 + React 19 + TypeScript + Tailwind 4 + shadcn/ui
-- **Quantum Pools (NAS)**: OR-Tools VRP route optimization, Leaflet maps, customer/tech management, multi-tenancy
-- **Pool Scout Pro**: Health inspection scraping, PDF extraction, violation analysis, AI summarization
+**Past mistake (2026-04-09):** Set up Cloudflare Workers + Postmark managed mode for Sapphire. Sapphire belongs on Google Workspace. See `docs/sapphire-recovery-plan.md`.
 
 ## Architecture
 
@@ -80,37 +70,12 @@ All inline action icons use `Button variant="ghost" size="icon"`. No text labels
 
 ### Visual Polish (MANDATORY — apply everywhere)
 
-**Cards:**
-- All `<Card>` get `shadow-sm` — subtle depth lift
-- Inner sub-cards (view mode tiles) use `bg-muted/50` with no shadow
-- In edit mode: parent card gets `bg-muted/50`, child edit tiles get `bg-background` (white) — form fields stand out against the shaded parent
-
-**Tables:**
-- Table header row: `bg-slate-100 dark:bg-slate-800` — solid gray, clearly distinct from data rows
-- Table header text: `text-xs font-medium uppercase tracking-wide`
-- Table rows: `hover:bg-blue-50 dark:hover:bg-blue-950` — visible blue tint on hover
-- Alternating rows: odd index `bg-slate-50 dark:bg-slate-900` for scanability
-
-**Section headers** (group titles like "Commercial", "Residential"):
-- `bg-primary text-primary-foreground px-4 py-2.5` with icon + title + count
-- Strong contrast — anchors the section visually
-- Icon and count use `opacity-70` for subtle hierarchy within the header
-
-**Status badges:**
-- Active: `variant="default"` (filled primary)
-- Inactive: `variant="secondary"` (gray)
-- Pending: `variant="outline" className="border-amber-400 text-amber-600"`
-- One-time: `variant="outline" className="border-blue-400 text-blue-600"`
-
-**Enum/status display:**
-- NEVER display raw enum values to users. Always title-case: `.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())`
-- CSS `capitalize` is NOT sufficient — it only capitalizes the first letter ("written off" not "Written Off")
-- Applies to: status badges, action types, payment methods, categories — any DB enum shown in UI
-
-**General:**
-- No gradients, heavy shadows, or heavy rounded corners
-- Color is informational, not decorative
-- `text-muted-foreground` for secondary information, never full black
+- **Cards**: `<Card>` gets `shadow-sm`. View-mode sub-tiles `bg-muted/50` (no shadow). In edit mode: parent `bg-muted/50`, child edit tiles `bg-background`.
+- **Tables**: header `bg-slate-100 dark:bg-slate-800`, text `text-xs font-medium uppercase tracking-wide`. Rows `hover:bg-blue-50 dark:hover:bg-blue-950`, odd rows `bg-slate-50 dark:bg-slate-900`.
+- **Section headers**: `bg-primary text-primary-foreground px-4 py-2.5` with icon + title + count (icon/count `opacity-70`).
+- **Status badges**: Active `variant="default"`; Inactive `variant="secondary"`; Pending `variant="outline" className="border-amber-400 text-amber-600"`; One-time `variant="outline" className="border-blue-400 text-blue-600"`.
+- **Enums**: never raw. Title-case with `.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())`. CSS `capitalize` is insufficient.
+- **General**: no gradients/heavy shadows/heavy rounded corners. Color is informational. Secondary text = `text-muted-foreground`, never full black.
 
 ## Network
 
@@ -118,72 +83,9 @@ See `~/.claude/CLAUDE.md` for full network topology, port registry, and Tailscal
 
 ## Project Structure
 
-```
-QuantumPools/
-├── app/                              # FastAPI backend
-│   ├── app.py                        # create_app() factory + /uploads static mount
-│   ├── worker.py                     # APScheduler background jobs
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── alembic.ini
-│   ├── migrations/versions/
-│   ├── scripts/                       # One-off scripts (reimport, batch geocode)
-│   ├── uploads/                       # Local file storage (measurements, etc.)
-│   └── src/
-│       ├── api/
-│       │   ├── deps.py               # Auth deps, RBAC, org scoping
-│       │   └── v1/                    # All route modules
-│       ├── core/
-│       │   ├── config.py             # Pydantic settings
-│       │   ├── database.py           # Async engine, migration-only init
-│       │   ├── security.py           # JWT, bcrypt, RBAC
-│       │   ├── exceptions.py
-│       │   ├── redis_client.py
-│       │   └── rate_limiter.py
-│       ├── middleware/
-│       ├── models/                    # SQLAlchemy ORM (one file per model)
-│       ├── schemas/                   # Pydantic request/response
-│       ├── services/                  # Business logic layer
-│       │   ├── agents/                # Email pipeline agents (orchestrator, classifier, matcher, etc.)
-│       │   ├── deepblue/              # DeepBlue AI (engine, tools, eval, quota)
-│       │   ├── inspection/            # Inspection scraper + PDF extractor
-│       │   ├── emd/                   # EMD service (backward-compat aliases)
-│       │   ├── gmail/                 # Gmail OAuth, sync, outbound (Phase 5b.2)
-│       │   ├── parts/                 # Parts catalog services
-│       │   ├── billing_service.py        # Recurring invoice generation, autopay scheduling
-│       │   ├── thread_action_service.py  # Thread email sending, approval, dismissal
-│       │   ├── thread_ai_service.py      # AI drafting, job extraction, estimate generation
-│       │   ├── estimate_workflow_service.py  # Estimate approval, snapshot, email sending
-│       │   └── stripe_service.py         # Stripe Checkout sessions, payment verification, webhook
-│       ├── seeds/
-│       └── utils/
-├── frontend/                          # Next.js 16
-│   ├── app/                           # App router
-│   │   └── portal/                    # Customer portal
-│   ├── components/
-│   │   ├── ui/                        # shadcn/ui primitives
-│   │   ├── layout/                    # Sidebar (responsive) + mobile nav
-│   │   ├── maps/                      # Leaflet components
-│   │   ├── measurement/              # Pool measurement photo capture + results
-│   │   ├── cases/                     # Case detail: timeline+detail two-column layout
-│   │   ├── customers/                 # ClientSection, CreateClientDialog, FilterBar
-│   │   ├── inbox/                     # InboxFilters, ThreadTable, Pagination
-│   │   ├── invoices/                  # Detail + list extracted components
-│   │   ├── jobs/                      # FilterBar, GroupList, AiSuggestionBanner
-│   │   ├── profitability/             # Charts, tables, cost cards (9 components)
-│   │   ├── team/                      # MemberDetail, InviteDialog, TeamTable
-│   │   └── {domain}/                  # Other domain-specific components
-│   └── lib/
-│       ├── api.ts                     # API client (cookie auth + FormData upload)
-│       ├── auth-context.tsx           # AuthProvider + useAuth
-│       ├── ws.tsx                     # WebSocketProvider + useWSEvent/useWSRefetch hooks
-│       ├── permissions.ts             # usePermissions hook (role + feature checks)
-│       └── dev-mode.tsx               # Dev mode context (view-as-role)
-├── docs/                              # Architecture docs (see Documentation section below)
-├── docker-compose.yml
-├── .do/app.yaml
-└── CLAUDE.md
-```
+- **Backend** (`app/`): `app.py` factory, `worker.py` (APScheduler), `src/{api,core,middleware,models,schemas,services,seeds,utils}`. Services are grouped by domain: `agents/`, `deepblue/`, `inspection/`, `gmail/`, `parts/`, plus top-level `billing_service.py`, `thread_action_service.py`, `thread_ai_service.py`, `estimate_workflow_service.py`, `stripe_service.py`.
+- **Frontend** (`frontend/`): Next.js App Router under `app/` (with `portal/` for customers), domain components under `components/{domain}/`, shared libs in `lib/` (`api.ts`, `auth-context.tsx`, `ws.tsx`, `permissions.ts`, `dev-mode.tsx`).
+- **Docs**: `docs/` — see Documentation Index below.
 
 ## Mandatory Processes
 
@@ -202,30 +104,19 @@ After ANY code change, deploy via `/srv/quantumpools/scripts/deploy.sh`. Never r
 After touching any email-sending path, send a test email to brian.parrotte@pm.me and verify: (1) email arrives, (2) no 500 in logs, (3) AgentMessage record exists, (4) thread shows in inbox.
 
 ### Database Backups
-Nightly pg_dump → `/srv/quantumpools/backups/` at 3am UTC, weekly restore-verification at 4am UTC Sunday. Both via Brian's user crontab. ntfy alerts on failure / staleness; positive ntfy on weekly verify success. Manual emergency backup: `/srv/quantumpools/scripts/backup_db.sh`. Restore (refuses without `--yes`): `/srv/quantumpools/scripts/restore_db.sh <file>.sql.gz --yes`. Full runbook: `docs/backup-and-restore.md`.
+Nightly pg_dump + weekly restore-verification via Brian's crontab; ntfy on failure/staleness and on verify success. Runbook: `docs/backup-and-restore.md`.
 
 ### Testing
-- **Test runner**: `pytest` from `app/` dir. Async via pytest-asyncio (auto mode, session-scoped event loop).
-- **Test DB**: dedicated `quantumpools_test` Postgres database on the same instance (port 7062). Created once: `sudo docker exec quantumpools-db psql -U quantumpools -d postgres -c "CREATE DATABASE quantumpools_test OWNER quantumpools;"`. Schema is `create_all`-ed on first run; tests TRUNCATE CASCADE between tests for isolation.
-- **Run all tests**: `cd /srv/quantumpools/app && /home/brian/00_MyProjects/QuantumPools/venv/bin/pytest tests/ -W ignore::DeprecationWarning`
-- **Existing coverage** (76 tests, see `tests/`): webhook signature validation (5), cross-org isolation on every fetch-by-id pattern (5), send-failure recovery FB-24 class (3), Failed filter latest-only semantic (4), Redis graceful degradation + auto-recovery (5), inbox-rules service (27: value-as-list, customer_matched, skip_customer_match, match-preview, append-sender, plus the legacy 18), case-link service, no-auto-send guard (4), Gmail spam sync + retention (5), MIME-unwrap centralization (3).
-- **When to add tests**: any new security gate (auth check, org filter), any new send path, any new shared helper that handles failures. Pattern: red-test-first if you're fixing a bug — write the failing test, then fix.
-- **Fixtures available** (`tests/conftest.py`): `db_session` (per-test session, clean DB), `org_a` and `org_b` (two orgs for isolation tests).
+- **Runner**: `pytest` from `app/` dir. Async via pytest-asyncio (auto mode, session-scoped event loop).
+- **Test DB**: `quantumpools_test` on port 7062; `create_all` on first run, TRUNCATE CASCADE between tests.
+- **Run**: `cd /srv/quantumpools/app && /home/brian/00_MyProjects/QuantumPools/venv/bin/pytest tests/ -W ignore::DeprecationWarning`
+- **Coverage**: see `tests/` for current suite.
+- **When to add**: new security gate (auth/org filter), new send path, new shared failure-handling helper. Red-test-first for bug fixes.
+- **Fixtures** (`tests/conftest.py`): `db_session`, `org_a`, `org_b` (for isolation tests).
 
-### Documentation Alignment (MANDATORY for /cpu and any commit touching docs)
+### Documentation Alignment (MANDATORY)
 
-**Whenever you create, rename, or delete a doc:** the change MUST be reflected in CLAUDE.md "Documentation Index" in the **same commit**. No orphaned docs.
-
-**Whenever `/cpu` runs:** before committing, perform this check:
-1. List actual files: `ls docs/*.md`
-2. Compare against entries in CLAUDE.md "Documentation Index"
-3. **Drift = error.** Either:
-   - A doc exists on disk but isn't in the index → add it to the index
-   - A doc is in the index but doesn't exist → remove from index, check for broken cross-references in other docs
-4. Also grep for stale doc references: `grep -rn 'docs/[a-z-]*\.md' docs/ CLAUDE.md` and ensure every reference resolves to a real file
-5. Only commit after the index and the filesystem agree
-
-**Why this exists:** Past sessions have created docs that the rest of the project never learned about. CLAUDE.md is the single entry point — every doc must be reachable from there.
+Every create/rename/delete of a `docs/*.md` file must update the Documentation Index below **in the same commit**. `/cpu` verifies: `ls docs/*.md` ⇄ the index — any drift (orphan doc, or index entry missing file) is an error. Also grep cross-references for broken paths. CLAUDE.md is the single entry point; every doc must be reachable from here.
 
 ## Dev Environment Notes
 
@@ -243,28 +134,14 @@ Nightly pg_dump → `/srv/quantumpools/backups/` at 3am UTC, weekly restore-veri
 - **Properties under Customers**: Properties are accessed via Customer detail page (vertical stacked layout, no tabs), not as a top-level nav item. `/properties` route still exists for direct links.
 - **Inbox information architecture (2026-04-14)**: Email integrations live at `/inbox/integrations` (moved from `/settings/email`; 308 redirect in `next.config.ts`). Rules at `/inbox/rules`. Compose button at top of the inbox folder sidebar (`InboxFolderSidebar`), NOT in `PageLayout` header or app sidebar. Inbox filter chips: Clients (customer-matched threads), Handled (archive view), plus ops chips (Failed / Auto-Handled / Stale, owner+admin only). Thread row badges in fixed order: Sender tag → Category → Status → Stale.
 - **Case ownership**: `manager_name` = coordinator (set at creation, reassignable via inline popover). `current_actor_name` = derived from open job assignees → pending thread assignees → "Awaiting customer" → manager fallback. Recomputed by `update_status_from_children()` on every job/thread mutation. 7 boolean flags auto-set from child state. Cases support `billing_name` for non-DB customers.
-- **Case detail**: Two-column (timeline left, detail right). Desktop auto-selects first timeline item. Mobile: detail opens as bottom sheet on tap only. Action buttons (+ Email, + Task, + Estimate, + Job, DeepBlue) are icon-only on mobile. Jobs and tasks are inline-editable in the detail panel (assignee dropdown, description edit, status toggle).
-- **Client detail layout**: Vertical stack — client card (with nested contact/billing tiles) → property tiles (with nested WF tiles) → collapsible invoices accordion. No tabs.
-- **WF progressive disclosure**: Water feature tiles have 3 levels — collapsed (name, gallons, minutes, service days), tech quick view (equipment, sanitizer, access, gate/dog), full manager details (dimensions, billing, pool info). Measure tool (Ruler button) is in the WF header row.
-- **Property override toggle**: Properties inherit client address/access info by default. "Different info for this property" toggle reveals address, gate code, access notes, dog, locked to day, notes fields.
-- **Client list sorting**: Commercial-first default, then alphabetical. Sort arrows on all columns (Name, Property, Mgmt Company, Pool Type, Rate, Balance, Status). Management company field is dropdown of existing companies + "New company..." option.
-- **Multi-day service**: `preferred_day` stores comma-separated days (e.g., "Mon,Wed,Fri"). Toggle buttons in client edit. Displayed as badges in WF header.
-- **Pool measurement per-WF**: Measure page accepts `?bow={id}` query param, passes `water_feature_id` in upload FormData, shows/applies to specific water feature.
-- **Pool measurement scale reference**: Default is "Depth Marker Tile (6x6)" — standard commercial pool tiles used as scale reference. Claude Vision prompt prioritizes tile detection over placed objects. Residential pools default to yardstick.
-- **Dashboard tiles**: Clickable — link to Customers, Properties, Routes, Invoices respectively.
+- **Properties inherit client info**: address/access fields default from Customer; "Different info for this property" toggle reveals per-property overrides.
+- **Multi-day service**: `preferred_day` stores comma-separated days (e.g. `"Mon,Wed,Fri"`).
+- **Pool measurement**: `?bow={id}` scopes to a specific WaterFeature. Default scale reference is depth marker tile (6×6); residential falls back to yardstick.
 - **File uploads**: Served via FastAPI StaticFiles mount at `/uploads`. Photos stored in `./uploads/measurements/{property_id}/`. Uploads bypass the Next.js rewrite proxy (body size limits) and go directly to the backend on port 7061. Photos are resized client-side to max 1600px before upload. CORS allows Tailscale + LAN origins.
 - **WaterFeature (WF)**: Each Property has 1+ WaterFeature records (pool, spa, hot_tub, wading_pool, fountain, water_feature). One is `is_primary=True`. Pool dimensions, equipment, gallons, service minutes all live on WF. Property still has the old columns for backward compat during transition. Profitability, route optimization, measurements, and chemical readings all aggregate from WFs. Table: `water_features`. API: `/api/v1/bodies-of-water/property/{id}` (list/create), `/api/v1/bodies-of-water/{id}` (get/update/delete).
-- **Inspection Intelligence**: Health department inspection data. 5 models: `InspectionFacility`, `Inspection`, `InspectionViolation`, `InspectionEquipment`, `InspectionLookup`. ~2,092 facility rows, ~2,409 inspections (post 2026-04-11 cleanup). Playwright scraper at `app/src/services/inspection/scraper.py`. PyMuPDF PDF extractor at `app/src/services/inspection/pdf_extractor.py` (handles both labeled and unlabeled-position PDF formats). **Tier-gated access**: `my_inspections`, `full_research`, `single_lookup`. API: `/api/v1/inspections/`. Frontend: `/inspections`. PDFs stored in `./uploads/inspection/<year>/<inspection_id>.pdf` (canonical, post-2026-04-11; no `uploads/emd/` tree). **County coverage — IMPORTANT**: Sacramento County is the **ONLY** California county that publishes pool inspection reports online. Placer, El Dorado, and other counties we serve do NOT have public portals — Placer customers (Bridges at Woodcreek Oaks, Coventry Park, Slate Creek Apartments, etc.) cannot have inspection data scraped. The `PLACER_PLACEHOLDER` in `county_config.py` is aspirational only and is NOT registered in `COUNTY_CONFIGS`. **Multi-building / multi-BoW facilities**: one EMD establishment (FA####) can have multiple `inspection_facilities` rows distinguished by `program_identifier` (e.g. POOL vs SPA, or `POOL @ 4407 OAK HOLLOW DR` vs `POOL @ 4440 OAK HOLLOW DR` for one establishment with two physical buildings — Arbor Ridge case). Composite unique index `(facility_id, program_identifier) NULLS NOT DISTINCT`. The scraper auto-splits when it sees a new program_identifier at an existing FA. **Inspection scraper rate limit**: `RATE_LIMIT_SECONDS = 8` enforced inside `InspectionScraper._request()` via an asyncio Lock + circuit breaker (`PortalBlocked` exception on 403/429). Never call `page.goto()` directly from scraper methods — always go through `_request()`. **QC tooling**: `scripts/audit_inspections.py` walks every PDF and reports DB drift; `scripts/qc_inspections.py` picks 10 random swim-season dates and compares DB inspection_ids against the live portal listing.
-- **À La Carte Subscriptions**: Feature subscription system. 3 tables: `features` (10 features), `feature_tiers` (3 inspection tiers), `org_subscriptions`. Migration `e2caa91ea93a`. Organizations columns: `stripe_customer_id`, `billing_email`, `trial_ends_at`. `require_feature()` dependency in `deps.py` gates API endpoints. `FeatureService` checks subscriptions, base features, trials. `/v1/auth/me` returns `features: string[]` + `inspection_tier`. Frontend: `usePermissions()` merges role + feature checks. `FeatureGate` + `UpgradePrompt` components. Existing org grandfathered with all features. 9 routers gated: routes, invoices, payments, profitability, satellite, measurements, inspections, chemical-costs, deepblue. Billing API: `GET /v1/billing/features` (public catalog), `GET /v1/billing/subscription` (owner/admin).
-- **Satellite analysis per-WF**: Each pool WF gets its own satellite analysis (1:1 via `water_feature_id` on `satellite_analyses`). Spas/fountains excluded (use measurement tool). `SatelliteImage` stays property-keyed (one set of overhead photos per yard). API: `/v1/satellite/pool-bows` (list pool WFs), `/v1/satellite/bows/{bow_id}` (get/pin/analyze). Frontend: `/satellite?bow={id}`.
-
-## Critical Reference Files
-
-- `/home/brian/00_MyProjects/BarkurrRX/app/src/core/database.py` — migration-only DB init pattern
-- `/home/brian/00_MyProjects/BarkurrRX/app/src/api/deps.py` — auth dependency chain
-- `/home/brian/00_MyProjects/BarkurrRX/app/app.py` — app factory with lifespan, Sentry, middleware
-- `/home/brian/00_MyProjects/BarkurrRX/frontend/lib/api.ts` — API client with cookie auth
-- `/home/brian/00_MyProjects/BarkurrRX/frontend/lib/auth-context.tsx` — auth context pattern
+- **Inspection Intelligence**: Playwright scraper (`app/src/services/inspection/`) + PyMuPDF PDF extractor. Tier-gated (`my_inspections`/`full_research`/`single_lookup`). PDFs at `./uploads/inspection/<year>/<id>.pdf`. Rate-limit 8s via `InspectionScraper._request()` — never call `page.goto()` directly. Sacramento is the only CA county with online reports; `PLACER_PLACEHOLDER` is aspirational. Multi-building facilities use `(facility_id, program_identifier)` unique index. QC: `scripts/audit_inspections.py`, `scripts/qc_inspections.py`.
+- **À La Carte Subscriptions**: `require_feature()` dep in `deps.py` gates 9 routers (routes, invoices, payments, profitability, satellite, measurements, inspections, chemical-costs, deepblue). `FeatureService` checks subscriptions/base features/trials. `/v1/auth/me` returns `features[]` + `inspection_tier`. Frontend merges role + feature via `usePermissions()`; gate UI with `FeatureGate` + `UpgradePrompt`. Existing org grandfathered.
+- **Satellite analysis per-WF**: Pool WFs only (spas/fountains use measurement). 1:1 via `water_feature_id` on `satellite_analyses`. `SatelliteImage` stays property-keyed. API under `/v1/satellite/`. Frontend: `/satellite?bow={id}`.
 
 ## RBAC Roles
 
@@ -278,24 +155,7 @@ Nightly pg_dump → `/srv/quantumpools/backups/` at 3am UTC, weekly restore-veri
 
 ### Role-Based UI Visibility
 
-Frontend views are filtered by role. A `usePermissions()` hook exposes feature flags.
-
-| Section | technician | manager | admin | owner |
-|---------|-----------|---------|-------|-------|
-| Equipment/sanitizer/access | yes | yes | yes | yes |
-| Service schedule | own | all | all | all |
-| Chemical readings | own | all | all | all |
-| Measurement tool | no | yes | yes | yes |
-| Dimensions/gallons | no | yes | yes | yes |
-| Difficulty scoring | no | yes | yes | yes |
-| Satellite analysis | no | yes | yes | yes |
-| Route management | no | yes | yes | yes |
-| Customer list (full) | no | yes | yes | yes |
-| Rates/billing | no | no | yes | yes |
-| Invoices/payments | no | no | yes | yes |
-| Profitability | no | no | yes | yes |
-| Tech management | no | no | yes | yes |
-| Settings/org | no | no | no | yes |
+Frontend views are filtered by role via `usePermissions()` (`frontend/lib/permissions.ts`). Source of truth for which sections each role sees — check the hook, don't restate the matrix here.
 
 ## Architecture Principles (MANDATORY)
 
@@ -328,10 +188,8 @@ New features that change data visible in the UI MUST publish an event. See `docs
 - **Polling is the fallback**, not the primary. Frontend polls at 60s when WS is connected, 15s when disconnected.
 - **Never block on publish** — wrap in try/except, events are non-critical
 
-### Notification Consistency
-- Notification type strings are centralized in `src/core/notification_types.py` — never use string literals
-- Job assignment, completion, and auto-close all trigger notifications
-- Thread assignment triggers notification
+### Notifications
+Notification type strings centralized in `src/core/notification_types.py` — never use string literals. Job assignment/completion/auto-close and thread assignment all trigger notifications.
 
 ## Data Architecture Rules (MANDATORY)
 
@@ -343,65 +201,36 @@ New features that change data visible in the UI MUST publish an event. See `docs
 
 ## Key Relationships
 
-> Full model reference: `docs/data-model.md`
+> Full model reference: `docs/data-model.md`. Core hubs:
 
-```
-Organization 1──* OrganizationUser *──1 User
-Organization 1──* Customer 1──* Property
-Organization 1──* Tech
-Organization 1──1 OrgCostSettings
-Organization 1──* EmailIntegration (gmail_api, managed, etc.)
-Organization 1──* InboxRule (sender/recipient rules: tag + folder + spam + mark-as-read)
-Organization 1──* InboxFolder (system: Inbox/Sent/Spam + custom)
-AgentThread *──1 InboxFolder (nullable = Inbox)
-Customer 1──* Invoice 1──* InvoiceLineItem
-Customer 1──* Payment
-Property 1──* WaterFeature (pool, spa, fountain, etc.)
-Property 1──* Visit *──1 Tech
-WaterFeature 1──1 SatelliteAnalysis (pools only)
-WaterFeature 1──* PoolMeasurement
-Visit 1──* ChemicalReading ──? WaterFeature
-Visit 1──* VisitCharge
-Tech 1──* Route 1──* RouteStop ──1 Property
-ServiceCase 1──* AgentAction (jobs)
-ServiceCase 1──? AgentThread
-ServiceCase 1──* DeepBlueConversation
-AgentThread 1──* AgentMessage
-AgentThread 1──* AgentAction (jobs extracted from emails)
-AgentAction 1──* AgentActionTask (checklist items)
-AgentAction 1──* AgentActionComment
-InspectionFacility 1──* Inspection 1──* InspectionViolation
-InspectionFacility ──? Property (matched via address)
-EquipmentCatalog 1──* EquipmentItem *──1 Property
-```
+- **Organization** → Customer, Tech, EmailIntegration, InboxRule, InboxFolder, OrgCostSettings
+- **Customer** → Property, Invoice (→ LineItem), Payment
+- **Property** → WaterFeature (pool/spa/fountain), Visit, EquipmentItem
+- **WaterFeature** → SatelliteAnalysis (pools 1:1), PoolMeasurement, ChemicalReading (via Visit)
+- **ServiceCase** (hub) → AgentThread, AgentAction (jobs), DeepBlueConversation, Invoice
+- **AgentThread** → AgentMessage, AgentAction, InboxFolder
+- **InspectionFacility** → Inspection → InspectionViolation; matched to Property by address
 
 ## Phase Status
 
-- [x] Phase 0: Foundation (Auth + skeleton end-to-end)
-- [x] Phase 1: Core Business Operations (customers, properties, techs, visits, chemical readings)
-- [x] Phase 2: Route Optimization & Maps (Leaflet, OR-Tools VRP, drag-drop)
-- [x] Phase 3a: Invoicing CRUD (invoices, payments, estimates, approval workflows)
-- [x] Phase 3b: Profitability Analysis (difficulty scoring, cost breakdown, bather load, satellite detection, whale curve)
-- [x] Pool Measurement: Ground-truth dimensions via tech photos + Claude Vision
-- [x] WaterFeature: Multi-body support (pool, spa, fountain per property)
-- [~] Phase 3c: Invoicing completion — email service (Postmark) DONE, PDF generation DONE, Stripe Checkout DONE, public invoice pay page DONE, non-client invoices DONE, webhook PARTIAL, AutoPay/recurring DONE (billing_service + card-on-file flow)
-- [~] Phase 3d: Core Pool Ops — dosing engine PARTIAL, service checklists PARTIAL, guided workflows NOT STARTED
-- [ ] Phase 4: Customer Portal (customer-facing login, service history, invoices)
-- [x] Phase 5: Inspection Intelligence (Playwright scraping, PDF extraction, 908 facilities, frontend)
-- [~] Phase 5b: Email Integrations Multi-Mode — managed mode DONE, Gmail API OAuth DONE (Sapphire connected). AI drafts every customer reply; humans approve from the timeline (auto-send rejected + removed 2026-04-14, see `memory/feedback_no_auto_send.md`). **Inbox rules unified into single `inbox_rules` JSONB table 2026-04-14 — `InboxRulesService` is the sole pattern-matching entry point. Actions: route_to_spam, assign_folder, assign_tag, assign_category, set_visibility, mark_as_read, suppress_contact_prompt, skip_customer_match (advisory flag — tells matcher to bypass previous-match reuse for shared/regional senders). Condition value can be scalar OR array (any-of semantics); virtual `customer_matched` field derives "yes"/"no" from matcher output so rules can route all matched customers without naming UUIDs. Rules UI at `/inbox/rules` with drag-to-reorder + inline folder create + free-form tags + permission-catalog picker.** Cross-source dedup, sender tags with folder routing, folders (Inbox/Sent/Spam + custom), HTML rendering in sandboxed iframe, quoted-text collapse, Postmark delivery webhooks (Delivered/Opened/Bounced), auto-handled review loop (three-state banner: "covered" = already in an existing rule; "promotable" = one-click append sender to the matching rule via `/v1/inbox-rules/{id}/append-sender`; "unclear" = fallback Yes/Create-rule/No), Auto-Handled filter + Inbox count chip (owner/admin), manual refresh button (sync-all), click-to-read optimistic update, selected-thread highlight, Gmail read/unread sync. **Gmail spam bidirectional sync 2026-04-14: `includeSpamTrash=True` pulls Gmail-filtered spam into QP; `labelAdded`/`labelRemoved` history events mirror Gmail moves; QP mark-as-spam propagates to Gmail via `users.threads.modify(addLabelIds=['SPAM'], removeLabelIds=['INBOX'])`. Gmail SPAM on known-customer mail forces pending review. 30-day retention via APScheduler at 04:30 UTC.** MS Graph and forwarding modes PLANNED. See `docs/email-strategy.md`.
-- [ ] Phase 6: Platform Admin (tenant management, subscriptions)
-- [ ] Phase 7-10: See `docs/build-plan.md` for full roadmap
+Completed phases + full roadmap: see `docs/build-plan.md`. In-flight work:
+- [~] Phase 3c: Invoicing — webhook PARTIAL; email/PDF/Stripe Checkout/pay page/non-client invoices/AutoPay DONE.
+- [~] Phase 3d: Core Pool Ops — dosing engine + checklists PARTIAL; guided workflows NOT STARTED.
+- [~] Phase 5b: Email Integrations — managed mode + Gmail API OAuth DONE (Sapphire connected). No auto-send (see `memory/feedback_no_auto_send.md`). Unified `inbox_rules` JSONB; `InboxRulesService` is the sole matcher. Gmail spam bidirectional sync + 30-day retention. MS Graph/forwarding PLANNED. See `docs/email-strategy.md` + `docs/email-pipeline.md`.
+- [ ] Phase 4: Customer Portal.
+- [ ] Phase 6: Platform Admin (tenant management, subscriptions).
+- [ ] Phases 7-10: `docs/build-plan.md`.
 
 ### Systems Built Outside Original Phases
-- Email/Agent Pipeline: AI inbox with triage, classification, auto-drafting, customer matching, thread management
-- DeepBlue: Conversational AI assistant with 29 domain tools, eval suite, usage tracking
-- Service Cases: Unifying entity linking threads → jobs → invoices → internal threads → DeepBlue conversations per customer issue. Manager/actor ownership tracking, 7 attention flags (estimate approved/rejected, customer replied, jobs complete, payment received, invoice overdue, stale), inline reassign, customer picker with non-DB support. Manual link/unlink UI on every entity detail page (Phase 1 of entity-connections-plan, shipped 2026-04-14). All `case_id` writes go through `ServiceCaseService.set_entity_case()` for count sync + activity log + real-time events. Cases auto-close when jobs done + invoice sent (AR handles payment separately); closed is terminal.
-- Internal Messaging: Staff-to-staff messaging with threads, notifications, case linking
-- Real-Time Events: Redis Pub/Sub + WebSocket gateway for instant UI updates
-- Equipment & Parts: Catalog (114 entries), items per property, parts (434), vendor tracking
-- Granular Permissions: 60-slug permission system with presets, custom roles, per-user overrides
-- À La Carte Subscriptions: Feature gating with tiers, trial support, Stripe customer IDs
-- Feedback System: In-app user feedback with screenshots and resolution tracking
+- **Email/Agent Pipeline**: AI inbox — triage, classification, drafting, customer matching, thread management.
+- **DeepBlue**: conversational AI assistant with 29 domain tools, eval suite, usage tracking.
+- **Service Cases**: hub linking threads/jobs/invoices/internal threads/DeepBlue. Manager + derived actor; 7 attention flags; inline reassign; non-DB customer support. All `case_id` writes through `ServiceCaseService.set_entity_case()`. Auto-closes when jobs done + invoice sent; closed is terminal.
+- **Internal Messaging**: staff↔staff threads with notifications + case linking.
+- **Real-Time Events**: Redis Pub/Sub + WebSocket gateway.
+- **Equipment & Parts**: catalog (114) + items per property + parts (434) + vendor tracking.
+- **Granular Permissions**: 60-slug system with presets, custom roles, per-user overrides.
+- **À La Carte Subscriptions**: feature gating with tiers, trial support, Stripe customer IDs.
+- **Feedback System**: in-app feedback with screenshots + resolution tracking.
 
 ## Documentation Index (SOURCE OF TRUTH)
 
@@ -410,8 +239,8 @@ This is the canonical index of all project documentation. **Whenever you create 
 ### Strategy & Vision
 | Doc | Purpose |
 |-----|---------|
-| `docs/email-strategy.md` | Why QP is an email-aware customer system, NOT an email server. Multi-mode integration architecture. Decision log. |
-| `docs/competitive-research.md` | Market audit, competitor analysis, our differentiators (with build status) |
+| `docs/email-strategy.md` | Email-aware customer system (not email server); multi-mode integration + decision log |
+| `docs/competitive-research.md` | Market audit + differentiators |
 
 ### Build Plans (forward-looking, with checkboxes)
 | Doc | Purpose |
@@ -426,10 +255,10 @@ This is the canonical index of all project documentation. **Whenever you create 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |
 |-----|---------|
-| `docs/data-model.md` | All 78 models organized by domain, relationships, conventions, deprecated fields |
-| `docs/email-pipeline.md` | Current managed-mode email architecture (Cloudflare Workers + Postmark) |
-| `docs/realtime-events.md` | WebSocket + Redis Pub/Sub, event types, frontend hooks |
-| `docs/deepblue-architecture.md` | DeepBlue AI engine, tools, eval suite, quota |
+| `docs/data-model.md` | All models by domain, relationships, deprecated fields |
+| `docs/email-pipeline.md` | Managed-mode email architecture (Cloudflare Workers + Postmark) |
+| `docs/realtime-events.md` | WebSocket + Redis Pub/Sub event types + frontend hooks |
+| `docs/deepblue-architecture.md` | DeepBlue engine, tools, eval, quota |
 
 ### Operational / One-Off Plans
 | Doc | Purpose |
@@ -441,11 +270,4 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/inbox-security-audit-2026-04-13.md` | **HIGH PRIORITY** — security audit found 3 CRITICAL + 4 HIGH + 4 MEDIUM issues in inbox/email subsystem (cross-org leakage, unsigned webhooks, unauth attachment access). Each item has file:line + status. **Remove when every CRITICAL/HIGH is closed.** |
 | `docs/backup-and-restore.md` | DB backup + restore-verification runbook. Cron schedule, retention (GFS 7d/4w/12m), restore commands with safety snapshots, ntfy signaling, follow-up gaps (off-host, off-site, WAL archiving). |
 
-### Doc Maintenance Rules
-
-1. **New doc → must be added to this index in the same commit.** No orphaned docs.
-2. **Renamed/moved doc → update the index immediately.**
-3. **Deleted doc → remove from index and check for stale references in other docs.**
-4. **`/cpu` must verify alignment**: list `docs/*.md` and confirm every file is in this index, and every index entry exists. Flag drift before committing.
-5. **Cross-reference rule**: when a doc references another doc, use the path from this index. Don't invent new paths.
-6. **CLAUDE.md is the entry point** — every new contributor (or future Claude session) starts here. If something is important enough that future work depends on it, it must be reachable from CLAUDE.md within one click.
+> Maintenance rules for this index are defined above under **Documentation Alignment**.

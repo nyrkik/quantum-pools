@@ -35,6 +35,7 @@ export interface CaseJob {
   completed_at: string | null;
   created_at: string;
   notes: string | null;
+  closed_by_case_cascade?: boolean;
   tasks: { id: string; title: string; status: string; assigned_to: string | null; sort_order: number }[];
   comments: { id: string; author: string; text: string; created_at: string }[];
 }

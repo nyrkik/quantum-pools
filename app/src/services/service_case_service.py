@@ -272,6 +272,23 @@ class ServiceCaseService:
         entity.case_id = new_case_id
         await self.db.flush()
 
+        # Thread→case linking cascades to the thread's jobs. Orchestrator creates jobs
+        # with case_id=None; they inherit the thread's case so we never leave work orphaned.
+        cascaded_job_ids: list[str] = []
+        if entity_type == "thread":
+            jobs_on_thread = (await self.db.execute(
+                select(AgentAction).where(
+                    AgentAction.thread_id == entity_id,
+                    AgentAction.organization_id == org_id,
+                )
+            )).scalars().all()
+            for job in jobs_on_thread:
+                if job.case_id != new_case_id:
+                    job.case_id = new_case_id
+                    cascaded_job_ids.append(job.id)
+            if cascaded_job_ids:
+                await self.db.flush()
+
         if prior_case_id:
             await self.update_counts(prior_case_id)
         if new_case_id:
@@ -505,3 +522,51 @@ class ServiceCaseService:
         cases = result.scalars().all()
 
         return {"items": cases, "total": total}
+
+    async def close_open_jobs(self, case_id: str, new_status: str = "done") -> int:
+        """Terminate every non-terminal job on a case.
+
+        Called when a case is manually set to closed/cancelled. Mirrors the case terminal
+        state onto its jobs so nothing is left "open" under a closed case.
+
+        Returns the number of jobs updated.
+        """
+        jobs = (await self.db.execute(
+            select(AgentAction).where(
+                AgentAction.case_id == case_id,
+                AgentAction.status.not_in(["done", "cancelled", "completed"]),
+            )
+        )).scalars().all()
+        if not jobs:
+            return 0
+        now = datetime.now(timezone.utc)
+        for job in jobs:
+            job.status = new_status
+            job.completed_at = now
+            job.closed_by_case_cascade = True
+        await self.db.flush()
+        return len(jobs)
+
+    async def reopen_cascade_jobs(self, case_id: str, job_ids: list[str]) -> int:
+        """Reopen specific jobs that were cascade-closed when a case closed.
+
+        Only jobs currently flagged `closed_by_case_cascade=True` on this case are eligible —
+        protects against reopening jobs that were genuinely completed by a human.
+
+        Returns the number of jobs reopened.
+        """
+        if not job_ids:
+            return 0
+        jobs = (await self.db.execute(
+            select(AgentAction).where(
+                AgentAction.id.in_(job_ids),
+                AgentAction.case_id == case_id,
+                AgentAction.closed_by_case_cascade == True,  # noqa: E712
+            )
+        )).scalars().all()
+        for job in jobs:
+            job.status = "open"
+            job.completed_at = None
+            job.closed_by_case_cascade = False
+        await self.db.flush()
+        return len(jobs)

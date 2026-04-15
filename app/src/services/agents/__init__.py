@@ -7,7 +7,6 @@ from .orchestrator import process_incoming_email, handle_sms_reply, save_discove
 from .triage_agent import ai_triage
 from .customer_matcher import verify_customer_match
 from .thread_manager import get_or_create_thread, update_thread_status
-from .job_manager import evaluate_next_action
 from .communicator import send_email_response, send_sms, send_approval_request, notify_others
 from .customer_matcher import match_customer
 from .classifier import classify_and_draft, get_correction_history, build_context_prompt, SYSTEM_PROMPT
@@ -25,7 +24,6 @@ __all__ = [
     "auto_close_stale_visits",
     "get_or_create_thread",
     "update_thread_status",
-    "evaluate_next_action",
     "send_email_response",
     "send_sms",
     "send_approval_request",

@@ -343,7 +343,6 @@ class AgentThreadService:
             select(func.count(AgentAction.id)).where(
                 AgentAction.organization_id == org_id,
                 AgentAction.status.in_(("open", "in_progress")),
-                AgentAction.is_suggested == False,
             )
         )).scalar() or 0
 
@@ -517,6 +516,62 @@ class AgentThreadService:
                     "file_size": a.file_size,
                 })
 
+        # Resolve inbound sender names. Primary source: AgentMessage.customer_name — the AI
+        # classifier captures the sender's display name from the header at message time.
+        # Fallback: CustomerContact lookup (first+last) for senders saved as contacts.
+        # Filter out strings that match the matched_customer org name (those are the account
+        # label, not the person). Filter out thread.customer_name (often the property/org).
+        inbound_msgs = [m for m in messages if m.direction == "inbound" and m.from_email]
+        from_name_by_msg_id: dict[str, str] = {}
+
+        # Load matched customer display names to filter out org-name false positives.
+        matched_cust_ids = {m.matched_customer_id for m in inbound_msgs if m.matched_customer_id}
+        matched_cust_names: set[str] = set()
+        if thread.matched_customer_id:
+            matched_cust_ids.add(thread.matched_customer_id)
+        if matched_cust_ids:
+            from src.models.customer import Customer
+            cust_rows = (await self.db.execute(
+                select(Customer.first_name, Customer.last_name, Customer.company_name).where(
+                    Customer.id.in_(list(matched_cust_ids))
+                )
+            )).all()
+            for fn, ln, co in cust_rows:
+                for val in [co, f"{fn or ''} {ln or ''}".strip()]:
+                    if val:
+                        matched_cust_names.add(val.lower())
+
+        # Build CustomerContact fallback map.
+        from src.presenters.thread_presenter import clean_person_name
+        inbound_emails = {m.from_email.lower() for m in inbound_msgs}
+        contact_name_by_email: dict[str, str] = {}
+        if inbound_emails:
+            from src.models.customer_contact import CustomerContact
+            from sqlalchemy import func as _func
+            rows = (await self.db.execute(
+                select(CustomerContact).where(
+                    CustomerContact.organization_id == org_id,
+                    _func.lower(CustomerContact.email).in_(list(inbound_emails)),
+                )
+            )).scalars().all()
+            for c in rows:
+                if not c.email:
+                    continue
+                name = " ".join(filter(None, [c.first_name, c.last_name])).strip()
+                cleaned = clean_person_name(name, matched_cust_names)
+                if cleaned:
+                    contact_name_by_email[c.email.lower()] = cleaned
+
+        for m in inbound_msgs:
+            # Prefer per-message AI-extracted name (captures who actually sent THIS message)
+            cleaned = clean_person_name(m.customer_name, matched_cust_names)
+            if cleaned:
+                from_name_by_msg_id[m.id] = cleaned
+            else:
+                fallback = contact_name_by_email.get(m.from_email.lower())
+                if fallback:
+                    from_name_by_msg_id[m.id] = fallback
+
         # Build conversation timeline
         timeline = []
         for m in messages:
@@ -524,6 +579,7 @@ class AgentThreadService:
                 "id": m.id,
                 "direction": m.direction,
                 "from_email": m.from_email,
+                "from_name": from_name_by_msg_id.get(m.id) if m.direction == "inbound" else None,
                 "to_email": m.to_email,
                 "subject": m.subject,
                 "body": strip_email_signature(strip_quoted_reply(m.body)) if m.body else None,

@@ -228,62 +228,6 @@ async def add_action_comment(
     return result
 
 
-@router.post("/agent-actions/{action_id}/approve-suggestion")
-async def approve_suggestion(
-    action_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Approve a suggested action — converts it to a normal open action."""
-    from sqlalchemy import select
-    from src.models.agent_action import AgentAction
-
-    result = await db.execute(
-        select(AgentAction).where(
-            AgentAction.id == action_id,
-            AgentAction.organization_id == ctx.organization_id,
-        )
-    )
-    action = result.scalar_one_or_none()
-    if not action:
-        raise HTTPException(status_code=404, detail="Action not found")
-    if not action.is_suggested:
-        raise HTTPException(status_code=400, detail="Action is not a suggestion")
-    action.is_suggested = False
-    action.suggestion_confidence = None
-    await db.commit()
-    return {"ok": True, "id": action.id, "is_suggested": False}
-
-
-@router.post("/agent-actions/{action_id}/dismiss-suggestion")
-async def dismiss_suggestion(
-    action_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Dismiss a suggested action — cancels it."""
-    from sqlalchemy import select
-    from src.models.agent_action import AgentAction
-
-    result = await db.execute(
-        select(AgentAction).where(
-            AgentAction.id == action_id,
-            AgentAction.organization_id == ctx.organization_id,
-        )
-    )
-    action = result.scalar_one_or_none()
-    if not action:
-        raise HTTPException(status_code=404, detail="Action not found")
-    if not action.is_suggested:
-        raise HTTPException(status_code=400, detail="Action is not a suggestion")
-    action.status = "cancelled"
-    action.is_suggested = False
-    action.notes = (action.notes or "") + "\nSuggestion dismissed"
-    action.notes = action.notes.strip()
-    await db.commit()
-    return {"ok": True, "id": action.id, "status": "cancelled"}
-
-
 @router.post("/agent-actions/{action_id}/draft-invoice")
 async def draft_invoice_from_action(
     action_id: str,

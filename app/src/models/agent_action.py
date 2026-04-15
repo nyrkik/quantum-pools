@@ -26,14 +26,13 @@ class AgentAction(Base):
     case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
     parent_action_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_actions.id"), index=True)
     job_path: Mapped[str] = mapped_column(String(20), default="internal", server_default="internal")  # internal, customer
-    status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, suggested, cancelled, pending_approval, approved
-    is_suggested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    suggestion_confidence: Mapped[str | None] = mapped_column(String(10))  # high, medium, low
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open, in_progress, done, cancelled, pending_approval, approved
     created_by: Mapped[str | None] = mapped_column(String(100))  # user name or "DeepBlue"
     notes: Mapped[str | None] = mapped_column(Text)
     task_count: Mapped[int | None] = mapped_column(Integer, default=0)
     tasks_completed: Mapped[int | None] = mapped_column(Integer, default=0)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_by_case_cascade: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     case = relationship("ServiceCase", back_populates="jobs", lazy="noload")

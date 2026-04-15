@@ -18,7 +18,6 @@ import { useTeamMembers } from "@/hooks/use-team-members";
 import { ActionDetailContent } from "@/components/jobs/action-detail-content";
 import { NewJobForm } from "@/components/jobs/new-job-form";
 import { JobFilterBar } from "@/components/jobs/job-filter-bar";
-import { AiSuggestionBanner } from "@/components/jobs/ai-suggestion-banner";
 import { JobGroupList } from "@/components/jobs/job-group-list";
 import { PageLayout } from "@/components/layout/page-layout";
 import type { AgentAction, AgentStats } from "@/types/agent";
@@ -37,12 +36,6 @@ export default function JobsPage() {
   const [selectedActionId, setSelectedActionId] = useState<string | null>(
     searchParams.get("action")
   );
-  const [suggestion, setSuggestion] = useState<{
-    id: string;
-    action_type: string;
-    description: string;
-    reasoning: string;
-  } | null>(null);
   const [newActionOpen, setNewActionOpen] = useState(false);
   const [jobFilter, setJobFilter] = useState<string>("mine");
   const [showCompleted, setShowCompleted] = useState(false);
@@ -53,17 +46,7 @@ export default function JobsPage() {
   ) => {
     const newStatus = currentStatus === "done" ? "open" : "done";
     try {
-      const result = await api.put<{
-        suggestion?: {
-          id: string;
-          action_type: string;
-          description: string;
-          reasoning: string;
-        };
-      }>(`/v1/admin/agent-actions/${actionId}`, { status: newStatus });
-      if (result.suggestion) {
-        setSuggestion(result.suggestion);
-      }
+      await api.put(`/v1/admin/agent-actions/${actionId}`, { status: newStatus });
       load();
     } catch {
       toast.error("Failed to update");
@@ -146,15 +129,6 @@ export default function JobsPage() {
         </div>
       }
     >
-
-      {/* AI Suggestion banner */}
-      {suggestion && (
-        <AiSuggestionBanner
-          suggestion={suggestion}
-          onDismiss={() => setSuggestion(null)}
-          onRefresh={load}
-        />
-      )}
 
       {/* Job filters */}
       <JobFilterBar

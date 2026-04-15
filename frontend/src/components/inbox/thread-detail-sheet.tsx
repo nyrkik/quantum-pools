@@ -144,8 +144,11 @@ function EmailMessage({
         ) : (
           <ArrowUpRight className="h-3 w-3 text-blue-500 shrink-0" />
         )}
-        <span className="font-medium text-xs truncate w-32 shrink-0">
-          {isInbound ? msg.from_email.split("@")[0] : isAutoSent ? "AI (auto)" : outboundName}
+        <span
+          className="font-medium text-xs truncate w-32 shrink-0"
+          title={isInbound ? msg.from_email : (msg.to_email || "")}
+        >
+          {isInbound ? (msg.from_name || msg.from_email.split("@")[0]) : isAutoSent ? "AI (auto)" : outboundName}
         </span>
         <span className="text-xs text-muted-foreground truncate flex-1">{preview.slice(0, 100)}</span>
         <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
@@ -177,7 +180,9 @@ function EmailMessage({
               <ArrowUpRight className="h-3 w-3 text-blue-500 shrink-0" />
             )}
             <span className="text-sm font-medium">
-              {isInbound ? msg.from_email : isAutoSent ? "AI (auto-sent)" : outboundName}
+              {isInbound
+                ? (msg.from_name ? `${msg.from_name} <${msg.from_email}>` : msg.from_email)
+                : isAutoSent ? "AI (auto-sent)" : outboundName}
             </span>
             {isAutoSent && (
               <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[10px] font-medium bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400">
@@ -989,6 +994,10 @@ export function ThreadDetailSheet({
   // by the draft editor. User clicks the "AI drafted a reply" bar to expand.
   const [draftExpanded, setDraftExpanded] = useState(false);
   const [revising, setRevising] = useState(false);
+  // Linked-jobs panel + older-message accordion both collapse by default for
+  // the same reason — keep the email body the dominant element of the panel.
+  const [jobsExpanded, setJobsExpanded] = useState(false);
+  const [olderMessagesExpanded, setOlderMessagesExpanded] = useState(false);
 
   // Follow-up (for handled threads)
   const [followUp, setFollowUp] = useState<{ draft: string; to: string; subject: string } | null>(null);
@@ -1338,12 +1347,8 @@ export function ThreadDetailSheet({
         router.push(`/jobs?action=${result.action_id}`);
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "";
-      if (msg.includes("already exists")) {
-        toast.info("Job already exists for this thread");
-      } else {
-        toast.error("Failed to create job");
-      }
+      const msg = e instanceof Error && e.message ? e.message : "Failed to create job";
+      toast.error(msg);
     } finally {
       setCreatingJob(false);
     }
@@ -1533,36 +1538,59 @@ export function ThreadDetailSheet({
         />
       )}
 
-      {/* Email reading pane */}
+      {/* Email reading pane — when a thread has >3 messages, the older history is
+          collapsed behind a single button so the latest message dominates. Pending
+          inbound messages always render so they don't get hidden. */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden bg-muted/20 py-2">
-        {thread.timeline.map((msg, idx) => {
-          const isInbound = msg.direction === "inbound";
-          const isPending = msg.status === "pending" && isInbound;
-          const timestamp = isInbound ? msg.received_at : msg.sent_at;
-          const isNewest = idx === thread.timeline.length - 1;
+        {(() => {
+          const total = thread.timeline.length;
+          const VISIBLE_RECENT = 2;
+          const shouldCollapse = total > 3 && !olderMessagesExpanded;
+          const visibleStartIdx = shouldCollapse ? total - VISIBLE_RECENT : 0;
 
-          // Wrap the newest message in a ref'd container so the initial
-          // scroll lands at the TOP of it (reader sees the beginning of
-          // the most recent email, not the bottom of the whole thread).
-          const content = (
-            <EmailMessage
-              key={msg.id}
-              msg={msg}
-              isInbound={isInbound}
-              isPending={isPending}
-              timestamp={timestamp}
-              defaultExpanded={isNewest || isPending}
-            />
+          return (
+            <>
+              {total > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setOlderMessagesExpanded((x) => !x)}
+                  className="mx-2 my-1.5 flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-muted/50 text-xs"
+                >
+                  {olderMessagesExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  <span className="font-medium text-muted-foreground">
+                    Earlier messages ({total - VISIBLE_RECENT})
+                  </span>
+                </button>
+              )}
+              {thread.timeline.map((msg, idx) => {
+                const isInbound = msg.direction === "inbound";
+                const isPending = msg.status === "pending" && isInbound;
+                if (shouldCollapse && idx < visibleStartIdx && !isPending) return null;
+                const timestamp = isInbound ? msg.received_at : msg.sent_at;
+                const isNewest = idx === total - 1;
+                const content = (
+                  <EmailMessage
+                    key={msg.id}
+                    msg={msg}
+                    isInbound={isInbound}
+                    isPending={isPending}
+                    timestamp={timestamp}
+                    defaultExpanded={isNewest || isPending}
+                  />
+                );
+                return isNewest ? (
+                  <div key={msg.id} ref={newestMessageRef}>{content}</div>
+                ) : content;
+              })}
+            </>
           );
-          return isNewest ? (
-            <div key={msg.id} ref={newestMessageRef}>{content}</div>
-          ) : content;
-        })}
+        })()}
         <div ref={timelineEndRef} />
       </div>
 
-      {/* Bottom action area */}
-      <div className="flex-shrink-0 border-t pt-3 px-4 pb-3 space-y-2 overflow-x-hidden">
+      {/* Bottom action area — capped so the reading pane keeps at least half the panel
+          even when reply composer / linked jobs / actions are all expanded. */}
+      <div className="flex-shrink-0 border-t pt-3 px-4 pb-3 space-y-2 overflow-x-hidden overflow-y-auto max-h-[50vh]">
         {/* AI draft — collapsed by default so the reading pane isn't dominated
             by the draft editor. Click the bar to review / edit / send. */}
         {pendingMessage && pendingMessage.draft_response && !draftExpanded && (
@@ -1679,7 +1707,41 @@ export function ThreadDetailSheet({
           />
         )}
 
-        {/* Quick actions: Link case, Create/Add Job, Draft Estimate */}
+        {/* Linked jobs — collapsed pill by default; expand inline on click. Keeps the
+            email body dominant when a thread has many linked jobs. */}
+        {Array.isArray(thread.actions) && thread.actions.length > 0 && (
+          <div className="rounded border bg-muted/30 text-xs">
+            <button
+              type="button"
+              onClick={() => setJobsExpanded((x) => !x)}
+              className="w-full flex items-center gap-1.5 px-2 py-1.5 hover:bg-muted/50 rounded"
+            >
+              {jobsExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              <span className="font-medium text-muted-foreground">Linked jobs ({thread.actions.length})</span>
+            </button>
+            {jobsExpanded && (
+              <div className="px-2 pb-2 space-y-1">
+                {thread.actions.map((raw) => {
+                  const job = raw as { id: string; description: string | null; status: string };
+                  return (
+                    <div key={job.id} className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="text-left hover:underline truncate flex-1"
+                        onClick={() => router.push(`/jobs?action=${job.id}`)}
+                      >
+                        {job.description || "(no description)"}
+                      </button>
+                      <Badge variant="outline" className="text-[10px] capitalize">{job.status}</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Quick actions: Link case, Add Job, Draft Estimate */}
         <div className="flex gap-2 flex-wrap items-center">
             <LinkCasePicker
               entityType="thread"
@@ -1690,10 +1752,12 @@ export function ThreadDetailSheet({
               currentCaseTitle={thread.case_title}
               onChange={() => { loadThread(); onAction(); }}
             />
-            <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
-              {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
-              {thread.case_id ? "Add Job" : "Create Job"}
-            </Button>
+            {thread.case_id && (
+              <Button variant="outline" size="sm" onClick={handleCreateJob} disabled={creatingJob}>
+                {creatingJob ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ClipboardList className="h-3.5 w-3.5 mr-1.5" />}
+                Add Job
+              </Button>
+            )}
             {thread.matched_customer_id && (
               <Button
                 variant="outline"

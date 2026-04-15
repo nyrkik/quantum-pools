@@ -14,9 +14,6 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   CheckCircle2,
-  Lightbulb,
-  Check,
-  X,
 } from "lucide-react";
 import { formatDueDate, isOverdue } from "@/lib/format";
 import {
@@ -115,40 +112,22 @@ export function JobGroupList({
                       a.status !== "done" &&
                       a.status !== "cancelled" &&
                       isOverdue(a.due_date);
-                    const isSuggested = a.is_suggested === true;
                     return (
                       <div
                         key={a.id}
                         className={`flex items-start gap-2 py-1.5 pl-2 rounded cursor-pointer ${
-                          isSuggested
-                            ? "border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/10"
-                            : overdue
-                              ? "bg-red-50 dark:bg-red-950/20"
-                              : "hover:bg-muted/50"
+                          overdue
+                            ? "bg-red-50 dark:bg-red-950/20"
+                            : "hover:bg-muted/50"
                         }`}
                         onClick={() => onSelectAction(a.id)}
                       >
-                        {isSuggested ? (
-                          <Lightbulb className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                        ) : (
-                          <ActionStatusIcon status={a.status} />
-                        )}
+                        <ActionStatusIcon status={a.status} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <ActionTypeBadge type={a.action_type} />
                             <JobPathBadge path={a.job_path} />
-                            {isSuggested && (
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] px-1.5 border-amber-400 text-amber-600"
-                              >
-                                Suggested
-                                {a.suggestion_confidence === "low"
-                                  ? " (low)"
-                                  : ""}
-                              </Badge>
-                            )}
-                            {overdue && !isSuggested && (
+                            {overdue && (
                               <Badge
                                 variant="destructive"
                                 className="text-[10px] px-1.5"
@@ -159,7 +138,7 @@ export function JobGroupList({
                             {a.due_date && (
                               <span
                                 className={`text-[10px] ${
-                                  overdue && !isSuggested
+                                  overdue
                                     ? "text-red-600 font-medium"
                                     : "text-muted-foreground"
                                 }`}
@@ -172,99 +151,50 @@ export function JobGroupList({
                             className={`text-sm mt-0.5 ${
                               a.status === "done"
                                 ? "line-through text-muted-foreground"
-                                : isSuggested
-                                  ? "text-muted-foreground"
-                                  : ""
+                                : ""
                             }`}
                           >
                             {a.description}
                           </p>
-                          {!isSuggested && (
-                            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                              <Select
-                                value={a.assigned_to || ""}
-                                onValueChange={async (v) => {
-                                  try {
-                                    await api.put(
-                                      `/v1/admin/agent-actions/${a.id}`,
-                                      { assigned_to: v }
-                                    );
-                                    onRefresh();
-                                  } catch {
-                                    toast.error("Failed to assign");
-                                  }
-                                }}
-                              >
-                                <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
-                                  <SelectValue placeholder="Assign..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {teamMembers.map((name) => (
-                                    <SelectItem
-                                      key={name}
-                                      value={name}
-                                      className="text-xs"
-                                    >
-                                      {name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                            <Select
+                              value={a.assigned_to || ""}
+                              onValueChange={async (v) => {
+                                try {
+                                  await api.put(
+                                    `/v1/admin/agent-actions/${a.id}`,
+                                    { assigned_to: v }
+                                  );
+                                  onRefresh();
+                                } catch {
+                                  toast.error("Failed to assign");
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="h-5 w-auto border-none bg-transparent p-0 text-xs gap-1 shadow-none">
+                                <SelectValue placeholder="Assign..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {teamMembers.map((name) => (
+                                  <SelectItem
+                                    key={name}
+                                    value={name}
+                                    className="text-xs"
+                                  >
+                                    {name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
-                          {isSuggested && (
-                            <div
-                              className="flex gap-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 text-muted-foreground hover:text-green-600"
-                                onClick={async () => {
-                                  try {
-                                    await api.post(
-                                      `/v1/admin/agent-actions/${a.id}/approve-suggestion`,
-                                      {}
-                                    );
-                                    toast.success("Suggestion approved");
-                                    onRefresh();
-                                  } catch {
-                                    toast.error("Failed");
-                                  }
-                                }}
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                                onClick={async () => {
-                                  try {
-                                    await api.post(
-                                      `/v1/admin/agent-actions/${a.id}/dismiss-suggestion`,
-                                      {}
-                                    );
-                                    toast.success("Suggestion dismissed");
-                                    onRefresh();
-                                  } catch {
-                                    toast.error("Failed");
-                                  }
-                                }}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          )}
-                          {!isSuggested && (a.task_count || 0) > 0 && (
+                          {(a.task_count || 0) > 0 && (
                             <span className="text-[10px] text-muted-foreground">
                               {a.tasks_completed || 0}/{a.task_count} tasks
                             </span>
                           )}
-                          {!isSuggested && a.assigned_to && (
+                          {a.assigned_to && (
                             <span className="text-[10px] text-muted-foreground">
                               {a.assigned_to}
                             </span>

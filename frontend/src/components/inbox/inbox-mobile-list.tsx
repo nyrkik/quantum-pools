@@ -30,8 +30,14 @@ export function InboxMobileList({ threads, loading, currentUserId }: InboxMobile
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               {t.is_unread && <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />}
-              <span className={`text-sm truncate ${t.is_unread ? "font-semibold" : ""}`}>
+              <span
+                className={`text-sm truncate ${t.is_unread ? "font-semibold" : ""}`}
+                title={t.contact_email}
+              >
                 {t.customer_name || t.contact_email.split("@")[0]}
+                {t.customer_name && t.contact_person_name && (
+                  <span className="font-normal text-muted-foreground"> ({t.contact_person_name})</span>
+                )}
               </span>
               {t.assigned_to_name && (
                 <Badge variant="secondary" className="text-[10px] px-1.5 shrink-0">

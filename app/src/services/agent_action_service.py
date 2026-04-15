@@ -176,22 +176,18 @@ class AgentActionService:
 
         due = datetime.fromisoformat(due_date) if due_date else None
 
-        # Find or create a case for this job
-        case_id = None
-        try:
-            from src.services.service_case_service import ServiceCaseService
-            case_svc = ServiceCaseService(self.db)
-            case = await case_svc.find_or_create_case(
-                org_id=org_id,
-                customer_id=customer_id,
-                thread_id=None,
-                subject=description,
-                source="manual",
-                created_by=created_by,
-            )
-            case_id = case.id
-        except Exception as e:
-            logger.warning(f"Case creation failed for manual job: {e}")
+        # Find or create a case for this job. Every job must live in a case — no orphans.
+        from src.services.service_case_service import ServiceCaseService
+        case_svc = ServiceCaseService(self.db)
+        case = await case_svc.find_or_create_case(
+            org_id=org_id,
+            customer_id=customer_id,
+            thread_id=None,
+            subject=description,
+            source="manual",
+            created_by=created_by,
+        )
+        case_id = case.id
 
         action = AgentAction(
             organization_id=org_id,
@@ -377,89 +373,8 @@ class AgentActionService:
         # Pinebrook impeller incident (invoices 26005 vs 26009).
         created_invoice = None
 
-        # If just marked done, evaluate if a follow-up action is needed
-        suggestion = None
-        if status == "done" and was_not_done:
-            from src.services.agents.job_manager import evaluate_next_action
-            try:
-                rec = await evaluate_next_action(action_id)
-                if rec:
-                    # Dedup: don't create a follow-up suggestion if a similar
-                    # one is already sitting on this customer/case/thread.
-                    # Triggers when multiple parent jobs complete back-to-back
-                    # and each independently asks for the same next step
-                    # (FB Willow Glen case: 2 parents done 8s apart → 2 dupes).
-                    rec_desc_lower = (rec.get("description") or "").lower().strip()
-                    rec_words = set(rec_desc_lower.split())
-                    dedup_scope = select(AgentAction).where(
-                        AgentAction.organization_id == org_id,
-                        AgentAction.status == "suggested",
-                        AgentAction.id != action.id,
-                    )
-                    if action.customer_id:
-                        dedup_scope = dedup_scope.where(AgentAction.customer_id == action.customer_id)
-                    elif action.thread_id:
-                        dedup_scope = dedup_scope.where(AgentAction.thread_id == action.thread_id)
-                    elif action.case_id:
-                        dedup_scope = dedup_scope.where(AgentAction.case_id == action.case_id)
-                    else:
-                        # No scope to dedup against — fall through, can't safely dedup.
-                        dedup_scope = None
-
-                    is_dup = False
-                    if dedup_scope is not None and rec_words:
-                        existing_suggestions = (await self.db.execute(dedup_scope)).scalars().all()
-                        for existing in existing_suggestions:
-                            existing_words = set((existing.description or "").lower().split())
-                            if not existing_words:
-                                continue
-                            overlap = len(existing_words & rec_words) / max(
-                                len(existing_words), len(rec_words)
-                            )
-                            if overlap > 0.6:
-                                logger.info(
-                                    f"Skipping duplicate follow-up suggestion "
-                                    f"(overlap {overlap:.0%}): {rec['description'][:60]}"
-                                )
-                                is_dup = True
-                                break
-
-                    if is_dup:
-                        suggested = None
-                    else:
-                        due_days = rec.get("due_days", 3)
-                        follow_due = datetime.now(timezone.utc) + timedelta(days=due_days) if due_days else None
-                        suggested = AgentAction(
-                            organization_id=org_id,
-                            agent_message_id=rec.get("agent_message_id"),
-                            thread_id=action.thread_id,
-                            case_id=action.case_id,
-                            parent_action_id=action.id,
-                            action_type=rec["action_type"],
-                            description=rec["description"],
-                            due_date=follow_due,
-                            status="suggested",
-                            created_by="DeepBlue",
-                            customer_id=action.customer_id,
-                            customer_name=action.customer_name,
-                            property_address=action.property_address,
-                        )
-                        self.db.add(suggested)
-                        await self.db.commit()
-                        await self.db.refresh(suggested)
-                    if suggested is not None:
-                        presenter = ActionPresenter(self.db)
-                        suggestion = {
-                            **(await presenter.one(suggested, include_comments=False, include_email=False)),
-                            "reasoning": rec.get("reasoning", ""),
-                        }
-            except Exception as e:
-                logger.error(f"Next action eval failed: {e}")
-
         presenter = ActionPresenter(self.db)
         result_dict = await presenter.one(action, include_comments=False, include_email=False)
-        if suggestion:
-            result_dict["suggestion"] = suggestion
         if created_invoice:
             result_dict["created_invoice"] = created_invoice
         return result_dict

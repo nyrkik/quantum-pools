@@ -235,8 +235,6 @@ class ActionPresenter(Presenter):
             "tasks_completed": a.tasks_completed or 0,
             "completed_at": self._iso(a.completed_at),
             "created_at": self._iso(a.created_at),
-            "is_suggested": a.is_suggested if hasattr(a, "is_suggested") else False,
-            "suggestion_confidence": a.suggestion_confidence if hasattr(a, "suggestion_confidence") else None,
             "created_by": a.created_by,
             "property_address": a.property_address,
         }

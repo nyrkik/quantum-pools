@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import { ComposeMessage } from "@/components/messages/compose-message";
 import { useCompose } from "@/components/email/compose-provider";
 import { AttachExistingDialog } from "@/components/cases/attach-existing-dialog";
+import { ReopenCaseDialog } from "@/components/cases/reopen-case-dialog";
 import { CaseDeepBlueCard } from "@/components/deepblue/case-deepblue-card";
 import { useDeepBlueContext } from "@/components/deepblue/deepblue-provider";
 import { useTeamMembers } from "@/hooks/use-team-members";
@@ -880,6 +881,7 @@ export default function CaseDetailPage({
   });
   const [loading, setLoading] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
+  const [reopenDialogOpen, setReopenDialogOpen] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const [addingJob, setAddingJob] = useState(false);
   const [newJobDesc, setNewJobDesc] = useState("");
@@ -1086,9 +1088,17 @@ export default function CaseDetailPage({
     (j) => !JOB_TYPES.has(j.action_type) && j.status !== "cancelled"
   );
   const doneTasks = tasks.filter((t) => t.status === "done").length;
+  const cascadeClosedJobs = detail.jobs.filter((j) => j.closed_by_case_cascade);
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
+      <ReopenCaseDialog
+        caseId={id}
+        cascadeJobs={cascadeClosedJobs}
+        open={reopenDialogOpen}
+        onOpenChange={setReopenDialogOpen}
+        onDone={load}
+      />
       {/* Header */}
       <div className="flex items-start gap-3">
         <Button
@@ -1123,15 +1133,7 @@ export default function CaseDetailPage({
             variant="outline"
             size="sm"
             className="h-8 text-xs gap-1.5 shrink-0"
-            onClick={async () => {
-              try {
-                await api.put(`/v1/cases/${id}`, { status: "open" });
-                toast.success("Case reopened");
-                load();
-              } catch (_) {
-                toast.error("Failed to reopen case");
-              }
-            }}
+            onClick={() => setReopenDialogOpen(true)}
           >
             <FolderOpen className="h-3.5 w-3.5" />
             Reopen

@@ -244,7 +244,6 @@ async def get_customer_alerts(
             AgentAction.organization_id == org_id,
             AgentAction.customer_id == customer_id,
             AgentAction.status.in_(("open", "in_progress")),
-            AgentAction.is_suggested == False,
         )
     )).scalar() or 0
 

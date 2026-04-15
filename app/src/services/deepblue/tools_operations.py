@@ -156,7 +156,6 @@ async def _exec_get_open_jobs(inp: dict, ctx: ToolContext) -> dict:
                 "status": r.status,
                 "assigned_to": r.assigned_to,
                 "due_date": r.due_date.isoformat() if r.due_date else None,
-                "is_suggested": r.is_suggested,
             }
             for r in rows
         ],

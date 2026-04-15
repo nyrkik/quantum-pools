@@ -239,6 +239,7 @@ class EstimateWorkflowService:
             action = AgentAction(
                 organization_id=org_id,
                 customer_id=invoice.customer_id,
+                case_id=invoice.case_id,
                 action_type="repair",
                 description=f"Approved: {invoice.subject or 'Service Estimate'}",
                 status="open",

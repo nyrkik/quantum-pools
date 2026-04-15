@@ -147,6 +147,8 @@ class ThreadActionService:
                 thread_id=thread_id,
                 matched_customer_id=msg.matched_customer_id,
                 customer_name=msg.customer_name,
+                approved_by=user_name,
+                approved_at=now,
                 sent_at=now,
                 received_at=now,
             )
@@ -273,6 +275,8 @@ class ThreadActionService:
                 thread_id=thread_id,
                 matched_customer_id=thread.matched_customer_id,
                 customer_name=thread.customer_name,
+                approved_by=user_name,
+                approved_at=now,
                 sent_at=now,
                 received_at=now,
             )

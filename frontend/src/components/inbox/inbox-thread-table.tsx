@@ -284,8 +284,14 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                     </TableCell>
                     <TableCell className={compact ? "max-w-[250px]" : "max-w-[200px]"}>
                       <div className="flex items-center gap-1.5">
-                        <span className={`truncate ${t.is_unread ? "font-semibold" : ""}`}>
+                        <span
+                          className={`truncate ${t.is_unread ? "font-semibold" : ""}`}
+                          title={t.contact_email}
+                        >
                           {t.customer_name || t.contact_email}
+                          {t.customer_name && t.contact_person_name && (
+                            <span className="font-normal text-muted-foreground"> ({t.contact_person_name})</span>
+                          )}
                         </span>
                         {t.visibility_permission && (
                           <span title={`Restricted: ${t.visibility_permission}`}>
@@ -302,9 +308,6 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                           <UrgencyBadge urgency={t.urgency} />
                         </span>
                       </div>
-                      {t.customer_name && (
-                        <p className="text-[10px] text-muted-foreground truncate">{t.contact_email}</p>
-                      )}
                       <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                         {/* Standard order: sender tag → category → status → stale warning.
                             Reading flow: "who is this?" → "what kind?" → "what state?" → "needs attention?" */}

@@ -141,12 +141,13 @@ Return ONLY the email body text (no signature)."""
         if not thread:
             return {"error": "not_found", "detail": "Thread not found"}
 
-        # Check if job already exists for this thread
-        existing = (await self.db.execute(
-            select(AgentAction).where(AgentAction.thread_id == thread_id, AgentAction.organization_id == org_id)
-        )).scalar_one_or_none()
-        if existing:
-            return {"error": "exists", "detail": "Job already exists for this thread", "action_id": existing.id}
+        # Jobs live inside cases. The thread must be linked to a case first — either attached
+        # to an existing case or a new case created — via LinkCasePicker in the UI.
+        if not thread.case_id:
+            return {"error": "no_case", "detail": "Link this thread to a case before adding a job"}
+
+        # A thread can legitimately spawn multiple jobs (different work items surfaced in same
+        # conversation). All jobs from the thread share a case via thread.case_id.
 
         # Build conversation context
         msgs = (await self.db.execute(
@@ -184,24 +185,7 @@ Respond with JSON:
             # Fallback to thread subject
             data = {"action_type": "follow_up", "description": (thread.subject or "Follow up")[:60]}
 
-        # Find or create case for this thread
         case_id = thread.case_id
-        if not case_id:
-            try:
-                from src.services.service_case_service import ServiceCaseService
-                case_svc = ServiceCaseService(self.db)
-                case = await case_svc.find_or_create_case(
-                    org_id=org_id,
-                    customer_id=thread.matched_customer_id,
-                    thread_id=thread_id,
-                    subject=thread.subject or "",
-                    source="email",
-                    created_by=created_by,
-                )
-                case_id = case.id
-                thread.case_id = case_id
-            except Exception as e:
-                logger.warning(f"Case creation failed in create_job_from_thread: {e}")
 
         action = AgentAction(
             organization_id=org_id,

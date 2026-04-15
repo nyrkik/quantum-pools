@@ -5,10 +5,43 @@ Resolves:
 - matched_customer_id → first Property address
 """
 
+import re
 from datetime import datetime
 
 from src.presenters.base import Presenter
 from src.models.agent_thread import AgentThread
+
+
+_PAREN_SUFFIX = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def clean_person_name(raw: str | None, forbidden: set[str]) -> str | None:
+    """Strip trailing property/company suffixes from an AI-extracted name.
+
+    Handles patterns like:
+      "Gene (Pinebrook Village)"           → "Gene"
+      "Caprice Goshko / Bridges at Woodcreek" → "Caprice Goshko"
+      "Toshi Cordova — Willow Glen"        → "Toshi Cordova"
+      "Terra Bella (BrightPM)"             → None  (bare property/company, no person)
+
+    Returns None if what's left is empty, matches a forbidden org label, or is too
+    short to be a real person name.
+    """
+    if not raw:
+        return None
+    s = raw.strip()
+    # Repeatedly strip trailing parentheticals so "A (B) (C)" collapses fully.
+    prev = None
+    while prev != s:
+        prev = s
+        s = _PAREN_SUFFIX.sub("", s).strip()
+    # Drop anything after a separator.
+    for sep in ("/", "—", "–"):
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+    if not s or s.lower() in forbidden:
+        return None
+    return s
 
 
 class ThreadPresenter(Presenter):
@@ -19,6 +52,10 @@ class ThreadPresenter(Presenter):
         cust_ids = {t.matched_customer_id for t in threads if t.matched_customer_id}
         customers = await self._load_customers(cust_ids)
         addresses = await self._load_customer_addresses(cust_ids)
+
+        # Batch-resolve per-thread person name (latest inbound sender — see helper).
+        # Used to show "Org Name (Person)" — the person who actually replied vs. the account.
+        contact_name_by_email = await self._load_contact_names(threads)
 
         # Batch-resolve sender tags via InboxRulesService (unified rule engine).
         # Each unique sender is looked up once; thread-level assignment happens
@@ -55,6 +92,9 @@ class ThreadPresenter(Presenter):
                 if t.contact_email
                 else None
             )
+
+            # Person-name (latest inbound sender), shown next to customer/org name.
+            d["contact_person_name"] = contact_name_by_email.get(t.id)
 
             # Unread status — rule-driven auto_read_at silences threads that
             # matched a mark_as_read rule up to last_message_at. A later
@@ -129,7 +169,92 @@ class ThreadPresenter(Presenter):
         else:
             d["sender_tag"] = None
 
+        # Person-name from latest inbound message (or CustomerContact fallback)
+        names = await self._load_contact_names([thread])
+        d["contact_person_name"] = names.get(thread.id)
+
         return d
+
+    async def _load_contact_names(self, threads: list[AgentThread]) -> dict[str, str]:
+        """Batch-resolve person names per thread (keyed by thread.id).
+
+        Preference order for each thread:
+          1. Most-recent inbound AgentMessage.customer_name (AI-extracted at receive time).
+          2. CustomerContact.first_name + last_name matched by (org, sender email).
+        Values that equal the matched customer's display name are filtered out so we don't
+        show "Coventry Park (Coventry Park)".
+        """
+        if not threads:
+            return {}
+        from sqlalchemy import select, func
+        from src.models.customer_contact import CustomerContact
+        from src.models.agent_message import AgentMessage
+        from src.models.customer import Customer
+
+        thread_ids = [t.id for t in threads]
+        cust_ids = {t.matched_customer_id for t in threads if t.matched_customer_id}
+
+        # Build the set of forbidden display names — org labels that must not be shown as person names.
+        forbidden: set[str] = set()
+        if cust_ids:
+            cust_rows = (await self.db.execute(
+                select(Customer.first_name, Customer.last_name, Customer.company_name).where(
+                    Customer.id.in_(list(cust_ids))
+                )
+            )).all()
+            for fn, ln, co in cust_rows:
+                for val in [co, f"{fn or ''} {ln or ''}".strip()]:
+                    if val:
+                        forbidden.add(val.lower())
+
+        # Most-recent inbound message per thread (one query, deduped in Python).
+        msg_rows = (await self.db.execute(
+            select(AgentMessage.thread_id, AgentMessage.from_email, AgentMessage.customer_name, AgentMessage.received_at)
+            .where(
+                AgentMessage.thread_id.in_(thread_ids),
+                AgentMessage.direction == "inbound",
+            )
+            .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+        )).all()
+        latest_by_thread: dict[str, tuple[str | None, str | None]] = {}
+        for tid, from_email, cname, _rec in msg_rows:
+            if tid not in latest_by_thread:
+                latest_by_thread[tid] = (from_email, cname)
+
+        # CustomerContact fallback — batch by org.
+        by_org: dict[str, set[str]] = {}
+        for tid, (from_email, _) in latest_by_thread.items():
+            if from_email:
+                org = next((t.organization_id for t in threads if t.id == tid), None)
+                if org:
+                    by_org.setdefault(org, set()).add(from_email.lower())
+        contact_name_by_email: dict[tuple[str, str], str] = {}
+        for org_id, emails in by_org.items():
+            rows = (await self.db.execute(
+                select(CustomerContact).where(
+                    CustomerContact.organization_id == org_id,
+                    func.lower(CustomerContact.email).in_(list(emails)),
+                )
+            )).scalars().all()
+            for c in rows:
+                if not c.email:
+                    continue
+                name = " ".join(filter(None, [c.first_name, c.last_name])).strip()
+                cleaned = clean_person_name(name, forbidden)
+                if cleaned:
+                    contact_name_by_email[(org_id, c.email.lower())] = cleaned
+
+        out: dict[str, str] = {}
+        for t in threads:
+            from_email, msg_cname = latest_by_thread.get(t.id, (None, None))
+            cleaned = clean_person_name(msg_cname, forbidden)
+            if cleaned:
+                out[t.id] = cleaned
+            elif from_email:
+                fallback = contact_name_by_email.get((t.organization_id, from_email.lower()))
+                if fallback:
+                    out[t.id] = fallback
+        return out
 
     def _base(self, t: AgentThread) -> dict:
         return {

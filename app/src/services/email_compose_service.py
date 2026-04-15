@@ -133,6 +133,8 @@ class EmailComposeService:
             customer_name=customer_name,
             property_address=property_address,
             thread_id=thread.id,
+            approved_by=sender_name,
+            approved_at=now,
         )
         self.db.add(message)
 

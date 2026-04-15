@@ -111,6 +111,7 @@ async def get_case(
             "completed_at": presenter._iso(j.completed_at),
             "created_at": presenter._iso(j.created_at),
             "notes": j.notes,
+            "closed_by_case_cascade": j.closed_by_case_cascade,
             "tasks": [
                 {"id": t.id, "title": t.title, "status": t.status, "assigned_to": t.assigned_to, "sort_order": t.sort_order}
                 for t in (j.tasks or [])
@@ -336,6 +337,7 @@ async def update_case(
         case.title = body["title"][:300]
     status_override = "status" in body
     if status_override:
+        prior_status = case.status
         case.status = body["status"]
         if body["status"] == "closed":
             from datetime import datetime, timezone
@@ -343,6 +345,10 @@ async def update_case(
         elif body["status"] not in ("closed", "cancelled"):
             # Reopening: clear closed_at.
             case.closed_at = None
+        # When transitioning to a terminal state, mirror it onto any open jobs.
+        # Closing a case with open work underneath would leave orphaned actionable items.
+        if body["status"] in ("closed", "cancelled") and prior_status not in ("closed", "cancelled"):
+            await svc.close_open_jobs(case_id, new_status="done" if body["status"] == "closed" else "cancelled")
     if "priority" in body:
         case.priority = body["priority"]
     if "assigned_to_name" in body:
@@ -362,6 +368,39 @@ async def update_case(
     await db.commit()
     presenter = CasePresenter(db)
     return await presenter.one(case)
+
+
+@router.post("/{case_id}/reopen-jobs")
+async def reopen_cascade_jobs(
+    case_id: str,
+    body: dict,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reopen jobs that were cascade-closed when the case was closed.
+
+    Body: {"job_ids": ["...", ...]}
+
+    Only jobs flagged `closed_by_case_cascade` on this case can be reopened through here.
+    Human-closed jobs are immutable via this path to protect the audit trail.
+    """
+    svc = ServiceCaseService(db)
+    case = await svc.get(ctx.organization_id, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    job_ids = body.get("job_ids") or []
+    if not isinstance(job_ids, list):
+        raise HTTPException(status_code=400, detail="job_ids must be a list")
+    count = await svc.reopen_cascade_jobs(case_id, [str(j) for j in job_ids])
+    if count:
+        await svc.update_status_from_children(case_id)
+    await db.commit()
+    from src.core.events import EventType, publish
+    try:
+        await publish(EventType.CASE_UPDATED, ctx.organization_id, {"case_id": case_id, "action": "jobs_reopened", "count": count})
+    except Exception:
+        pass
+    return {"reopened": count}
 
 
 @router.post("/{case_id}/link")

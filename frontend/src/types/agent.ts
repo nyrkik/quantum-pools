@@ -23,8 +23,6 @@ export interface AgentAction {
   from_email?: string;
   customer_name?: string;
   subject?: string;
-  is_suggested?: boolean;
-  suggestion_confidence?: string | null;
 }
 
 export interface ActionComment {
@@ -113,12 +111,14 @@ export interface Thread {
   visibility_permission: string | null;
   delivered_to: string | null;
   sender_tag: string | null;
+  contact_person_name?: string | null;
 }
 
 export interface TimelineMessage {
   id: string;
   direction: string;
   from_email: string;
+  from_name?: string | null;
   to_email: string;
   subject: string | null;
   body: string | null;
@@ -161,6 +161,7 @@ export interface ThreadDetail {
   is_unread: boolean;
   sender_tag: string | null;
   is_auto_handled?: boolean;
+  contact_person_name?: string | null;
   timeline: TimelineMessage[];
   actions: unknown[];
 }
@@ -207,6 +208,7 @@ export interface CaseJob {
   due_date: string | null;
   completed_at: string | null;
   created_at: string;
+  closed_by_case_cascade?: boolean;
 }
 
 export interface CaseThread {

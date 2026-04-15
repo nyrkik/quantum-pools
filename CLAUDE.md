@@ -224,7 +224,7 @@ Completed phases + full roadmap: see `docs/build-plan.md`. In-flight work:
 ### Systems Built Outside Original Phases
 - **Email/Agent Pipeline**: AI inbox — triage, classification, drafting, customer matching, thread management.
 - **DeepBlue**: conversational AI assistant with 29 domain tools, eval suite, usage tracking.
-- **Service Cases**: hub linking threads/jobs/invoices/internal threads/DeepBlue. Manager + derived actor; 7 attention flags; inline reassign; non-DB customer support. All `case_id` writes through `ServiceCaseService.set_entity_case()`. Auto-closes when jobs done + invoice sent; closed is terminal.
+- **Service Cases**: hub linking threads/jobs/invoices/internal threads/DeepBlue. Manager + derived actor; 7 attention flags; inline reassign; non-DB customer support. All `case_id` writes through `ServiceCaseService.set_entity_case()`. Linking a thread to a case cascades to its jobs (so orchestrator-created caseless jobs inherit a case the moment the thread gets linked). Closing a case cascades open jobs to `done`/`cancelled` with `closed_by_case_cascade=true`; reopening prompts the user to selectively reopen the cascade-closed jobs. Auto-closes when jobs done + invoice sent; closed is terminal. Jobs may only exist inside a case — `ThreadAIService.create_job_from_thread` rejects caseless threads, `AgentActionService.create_action` no longer swallows case-creation failures.
 - **Internal Messaging**: staff↔staff threads with notifications + case linking.
 - **Real-Time Events**: Redis Pub/Sub + WebSocket gateway.
 - **Equipment & Parts**: catalog (114) + items per property + parts (434) + vendor tracking.

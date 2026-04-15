@@ -152,6 +152,9 @@ Three affordances so connections aren't invisible:
 - [x] Unit tests: link/unlink is idempotent, cross-org mutation is blocked, counts update correctly (9 tests in `tests/test_case_link_service.py`, suite 53/53 green).
 - [x] Activity log entry on link/unlink via system comment on a host job.
 - [x] Real-time `case.updated` event on every link/unlink (shipped in Phase 1 per implementation invariant, not deferred to Phase 5).
+- [x] **Thread→jobs cascade in `set_entity_case`** — linking a thread to a case auto-attaches every job on that thread, so orchestrator-created caseless jobs inherit a case the moment a human links the thread. (Added 2026-04-14 alongside the case-as-hub enforcement work; closes the going-forward gap for the email orchestrator path.)
+- [x] **Jobs-must-live-in-cases invariant enforced** — `ThreadAIService.create_job_from_thread` returns 400 `no_case` if `thread.case_id` is null; `AgentActionService.create_action` raises (no longer swallows) on case-creation failure; `estimate_workflow_service.approve_estimate` sets `case_id=invoice.case_id` on auto-created jobs. UI: "Add Job" button hidden on caseless threads (LinkCasePicker is the only pre-job affordance).
+- [x] **Close/reopen cascade** — closing a case sets every non-terminal job to `done`/`cancelled` with `closed_by_case_cascade=true`; reopening surfaces a dialog listing only the cascade-closed jobs so the user can selectively reopen them. Human-completed jobs are immutable through this path. (`ServiceCaseService.close_open_jobs` + `reopen_cascade_jobs`.)
 
 **Exit criterion:** Brian can attach EST-26005 to any existing Pinebrook case and detach it if wrong. All five entity types can be attached/detached from any entry point. **Met.**
 

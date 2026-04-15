@@ -124,7 +124,7 @@ Agent actions (jobs), AI learning, and observability.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| AgentAction | `agent_actions` | Job/task created by or for an agent (self-referencing `parent_action_id`) |
+| AgentAction | `agent_actions` | Job/task created by or for an agent (self-referencing `parent_action_id`). `case_id` is required in practice — `create_action` find-or-creates a case if absent, and the email orchestrator path inherits via thread→case cascade in `ServiceCaseService.set_entity_case`. `closed_by_case_cascade` flags jobs that were auto-closed when the parent case closed, so reopen flows can selectively un-cascade without resurrecting human-completed work. The legacy `is_suggested` + `suggestion_confidence` columns and the `evaluate_next_action` follow-up engine were removed 2026-04-14 — AI suggestions now happen on-demand only, when the user clicks "Add Job" on a thread. |
 | AgentActionComment | `agent_action_comments` | Comments on a job |
 | AgentActionTask | `agent_action_tasks` | Sub-tasks within a job |
 | AgentCorrection | `agent_corrections` | Human corrections to AI outputs (learning data) |

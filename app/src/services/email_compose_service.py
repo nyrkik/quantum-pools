@@ -55,6 +55,7 @@ class EmailComposeService:
         case_id: str | None = None,
         sender_user_id: str | None = None,
         attachment_ids: list[str] | None = None,
+        cc: str | None = None,
     ) -> dict:
         """Send email, create AgentMessage + AgentThread records.
 
@@ -210,6 +211,7 @@ class EmailComposeService:
                 org_id, to, subject, body,
                 sender_name=sender_name,
                 is_new=True,
+                cc=cc,
                 attachments=email_atts or None,
             )
 

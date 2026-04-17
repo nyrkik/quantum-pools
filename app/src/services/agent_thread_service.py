@@ -267,6 +267,14 @@ class AgentThreadService:
             q = f"%{search}%"
             # Subquery: thread_ids with any message body matching
             body_match = select(AgentMessage.thread_id).where(AgentMessage.body.ilike(q))
+            # Subquery: customer IDs matching search by actual customer name
+            customer_match = select(Customer.id).where(
+                Customer.organization_id == org_id,
+                (Customer.first_name + " " + Customer.last_name).ilike(q)
+                | Customer.first_name.ilike(q)
+                | Customer.last_name.ilike(q)
+                | Customer.display_name_col.ilike(q),
+            )
             base = base.where(
                 AgentThread.contact_email.ilike(q)
                 | AgentThread.subject.ilike(q)
@@ -274,6 +282,7 @@ class AgentThreadService:
                 | AgentThread.property_address.ilike(q)
                 | AgentThread.last_snippet.ilike(q)
                 | AgentThread.id.in_(body_match)
+                | AgentThread.matched_customer_id.in_(customer_match)
             )
         total = (await self.db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
         result = await self.db.execute(

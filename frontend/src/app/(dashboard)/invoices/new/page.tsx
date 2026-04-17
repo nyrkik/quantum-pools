@@ -39,6 +39,7 @@ interface InvoiceResponse {
   tax_rate: number;
   discount: number;
   notes: string | null;
+  internal_notes: string | null;
   line_items: {
     description: string;
     quantity: number;
@@ -74,6 +75,7 @@ function NewInvoiceForm() {
   const [taxRate, setTaxRate] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [notes, setNotes] = useState("");
+  const [internalNotes, setInternalNotes] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([
     { description: "", quantity: 1, unit_price: 0, is_taxed: false },
   ]);
@@ -104,6 +106,7 @@ function NewInvoiceForm() {
       setTaxRate(inv.tax_rate || 0);
       setDiscount(inv.discount || 0);
       setNotes(inv.notes || "");
+      setInternalNotes(inv.internal_notes || "");
       if (inv.line_items.length > 0) {
         setLineItems(
           inv.line_items.map((li) => ({
@@ -200,6 +203,7 @@ function NewInvoiceForm() {
         tax_rate: taxRate,
         discount,
         notes: notes || null,
+        internal_notes: internalNotes || null,
         line_items: validItems.map((li, i) => ({
           description: li.description,
           quantity: li.quantity,
@@ -330,6 +334,8 @@ function NewInvoiceForm() {
           onDiscountChange={setDiscount}
           notes={notes}
           onNotesChange={setNotes}
+          internalNotes={internalNotes}
+          onInternalNotesChange={setInternalNotes}
           lineItems={lineItems}
           section="top"
         />
@@ -425,6 +431,8 @@ function NewInvoiceForm() {
           onDiscountChange={setDiscount}
           notes={notes}
           onNotesChange={setNotes}
+          internalNotes={internalNotes}
+          onInternalNotesChange={setInternalNotes}
           lineItems={lineItems}
           section="bottom"
         />

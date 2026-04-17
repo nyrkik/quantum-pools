@@ -66,6 +66,7 @@ async def create_invoice(
         tax_rate=body.tax_rate,
         is_recurring=body.is_recurring,
         notes=body.notes,
+        internal_notes=body.internal_notes,
         billing_name=body.billing_name,
         billing_email=body.billing_email,
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),

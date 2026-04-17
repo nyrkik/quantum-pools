@@ -41,6 +41,7 @@ class InvoiceCreate(BaseModel):
     tax_rate: float = 0.0
     is_recurring: bool = False
     notes: Optional[str] = None
+    internal_notes: Optional[str] = None
     line_items: list[InvoiceLineItemCreate] = []
     job_id: Optional[str] = None  # link to job on creation
     case_id: Optional[str] = None  # link to case on creation
@@ -53,6 +54,7 @@ class InvoiceUpdate(BaseModel):
     discount: Optional[float] = None
     tax_rate: Optional[float] = None
     notes: Optional[str] = None
+    internal_notes: Optional[str] = None
     line_items: Optional[list[InvoiceLineItemCreate]] = None
 
 
@@ -78,6 +80,7 @@ class InvoiceResponse(BaseModel):
     balance: float
     is_recurring: bool
     notes: Optional[str] = None
+    internal_notes: Optional[str] = None
     pss_invoice_id: Optional[str] = None
     payment_token: str
     approved_at: Optional[datetime] = None

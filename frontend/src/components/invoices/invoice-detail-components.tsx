@@ -57,6 +57,7 @@ export interface Invoice {
   amount_paid: number;
   balance: number;
   notes: string | null;
+  internal_notes: string | null;
   sent_at: string | null;
   approved_at: string | null;
   approved_by: string | null;

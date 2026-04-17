@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { Loader2, X } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
+import { usePasteAttachments } from "@/hooks/use-paste-attachments";
+import { EmojiPickerButton } from "@/components/ui/emoji-picker-button";
 
 interface ComposeMessageProps {
   open: boolean;
@@ -32,6 +34,7 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
   const [searchQuery, setSearchQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const onPaste = usePasteAttachments({ attachments, onAttachmentsChange: setAttachments, sourceType: "internal_message" });
 
   const reset = () => {
     setSelectedUsers([]);
@@ -139,10 +142,14 @@ export function ComposeMessage({ open, onClose, onSent, defaultCustomerId, defau
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Message</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Message</Label>
+              <EmojiPickerButton onEmojiSelect={(emoji) => setMessage((prev) => prev + emoji)} />
+            </div>
             <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onPaste={onPaste}
               placeholder="What do you need?"
               className="text-sm resize-none"
               rows={3}

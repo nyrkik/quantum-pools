@@ -126,6 +126,12 @@ export interface CaseDetail {
   threads: CaseThread[];
   invoices: CaseInvoice[];
   deepblue_conversations: DeepBlueConversation[];
+  internal_threads: {
+    id: string;
+    subject: string | null;
+    message_count: number;
+    messages: { id: string; from_user_id: string; text: string; created_at: string }[];
+  }[];
   timeline: TimelineEntry[];
 }
 

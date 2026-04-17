@@ -119,8 +119,19 @@ async def download_attachment(
     if not fpath.exists():
         raise HTTPException(status_code=404, detail="Attachment file missing on disk")
 
+    mime = att.mime_type or "application/octet-stream"
+    # Inline preview for browser-native types; download for everything else
+    inline_types = {"image/", "application/pdf", "text/plain", "video/"}
+    is_inline = any(mime.startswith(t) for t in inline_types)
+
+    if is_inline:
+        from starlette.responses import FileResponse as _FR
+        resp = _FR(path=str(fpath), media_type=mime)
+        resp.headers["Content-Disposition"] = f'inline; filename="{att.filename}"'
+        return resp
+
     return FileResponse(
         path=str(fpath),
-        media_type=att.mime_type or "application/octet-stream",
+        media_type=mime,
         filename=att.filename,
     )

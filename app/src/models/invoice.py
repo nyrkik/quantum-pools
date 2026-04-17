@@ -63,6 +63,7 @@ class Invoice(Base):
 
     # Notes
     notes: Mapped[str | None] = mapped_column(Text)
+    internal_notes: Mapped[str | None] = mapped_column(Text)
 
     # PSS migration reference
     pss_invoice_id: Mapped[str | None] = mapped_column(String(50), index=True)

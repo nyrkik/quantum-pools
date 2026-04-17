@@ -47,6 +47,7 @@ class EmailMessage:
     from_email: str | None = None
     from_name: str | None = None
     reply_to: str | None = None
+    cc: str | None = None
     attachments: list[dict] | None = None  # [{filename, content_bytes, mime_type}]
 
 
@@ -86,6 +87,8 @@ class SmtpProvider(EmailProvider):
         mime = MIMEMultipart("mixed")
         mime["From"] = f"{message.from_name} <{message.from_email}>" if message.from_name else message.from_email or ""
         mime["To"] = message.to
+        if message.cc:
+            mime["Cc"] = message.cc
         mime["Subject"] = message.subject
         if message.reply_to:
             mime["Reply-To"] = message.reply_to
@@ -143,6 +146,8 @@ class PostmarkProvider(EmailProvider):
             "TextBody": message.text_body,
             "MessageStream": "outbound",
         }
+        if message.cc:
+            body["Cc"] = message.cc
         if message.html_body:
             body["HtmlBody"] = message.html_body
         if message.reply_to:
@@ -318,6 +323,7 @@ class EmailService:
         from_address: str | None = None,
         sender_name: str | None = None,
         is_new: bool = False,
+        cc: str | None = None,
         attachments: list[dict] | None = None,
     ) -> EmailResult:
         """SINGLE EXIT POINT for all outbound customer-facing email.
@@ -398,6 +404,8 @@ class EmailService:
                     html_body=html_body,
                     from_address=from_address or integration_row.account_email,
                     from_name=from_name,
+                    attachments=attachments,
+                    cc=cc,
                 )
                 # Persist any token-refresh side effects from build_gmail_client
                 await self.db.commit()
@@ -427,7 +435,7 @@ class EmailService:
 
         msg = EmailMessage(
             to=to, subject=final_subject, text_body=full_body, html_body=html_body,
-            from_email=from_address, from_name=from_name, attachments=attachments,
+            from_email=from_address, from_name=from_name, cc=cc, attachments=attachments,
         )
         return await self.send_email(org_id, msg)
 

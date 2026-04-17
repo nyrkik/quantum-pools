@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, use } from "react";
+import { useState, useEffect, useCallback, useMemo, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -39,7 +39,8 @@ import { AttachExistingDialog } from "@/components/cases/attach-existing-dialog"
 import { ReopenCaseDialog } from "@/components/cases/reopen-case-dialog";
 import { CaseDeepBlueCard } from "@/components/deepblue/case-deepblue-card";
 import { useDeepBlueContext } from "@/components/deepblue/deepblue-provider";
-import { useTeamMembers } from "@/hooks/use-team-members";
+import { useTeamMembers, useTeamMembersFull } from "@/hooks/use-team-members";
+import { useAuth } from "@/lib/auth-context";
 import {
   Select,
   SelectContent,
@@ -714,26 +715,100 @@ function CommentDetailPanel({ entry }: { entry: TimelineEntry }) {
 
 // --- Detail Panel: Internal Message ---
 
-function InternalMessageDetailPanel({ entry }: { entry: TimelineEntry }) {
+function InternalMessageDetailPanel({
+  entry,
+  detail,
+  caseId,
+  onUpdate,
+}: {
+  entry: TimelineEntry;
+  detail: CaseDetail;
+  caseId: string;
+  onUpdate: () => void;
+}) {
+  const { user } = useAuth();
+  const team = useTeamMembersFull();
+  const threadId = entry.metadata?.internal_thread_id as string | undefined;
+  const thread = (detail.internal_threads || []).find((t) => t.id === threadId);
+  const messages = thread?.messages || [];
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const replyRef = useRef<HTMLTextAreaElement>(null);
+
+  const nameFor = (userId: string) => {
+    const m = team.find((t) => t.user_id === userId);
+    return m ? `${m.first_name} ${m.last_name}`.trim() : "Unknown";
+  };
+
+  const handleReply = async () => {
+    if (!replyText.trim() || !threadId || sending) return;
+    setSending(true);
+    try {
+      await api.post(`/v1/messages/${threadId}/reply`, { message: replyText.trim() });
+      setReplyText("");
+      onUpdate();
+    } catch {
+      toast.error("Failed to send reply");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <MessageSquare className="h-4 w-4 text-purple-500" />
-        <span className="text-sm font-medium">Internal Message</span>
-        {entry.actor && (
-          <span className="text-xs text-muted-foreground">
-            by {entry.actor}
-          </span>
-        )}
+        <span className="text-sm font-medium">
+          Team Thread{thread?.subject ? ` — ${thread.subject}` : ""}
+        </span>
       </div>
 
-      <div className="text-sm whitespace-pre-wrap rounded-md p-4 bg-purple-50 dark:bg-purple-950/30 border-l-2 border-purple-400">
-        {entry.body || "(empty)"}
+      <div className="space-y-2 max-h-[350px] overflow-y-auto">
+        {messages.map((m) => {
+          const isMe = m.from_user_id === user?.id;
+          return (
+            <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+              <span className="text-[10px] text-muted-foreground mb-0.5">
+                {nameFor(m.from_user_id)} · {formatTime(m.created_at)}
+              </span>
+              <div
+                className={`text-sm whitespace-pre-wrap rounded-md px-3 py-2 max-w-[85%] ${
+                  isMe
+                    ? "bg-primary/10 dark:bg-primary/20"
+                    : "bg-purple-50 dark:bg-purple-950/30 border-l-2 border-purple-400"
+                }`}
+              >
+                {m.text}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <p className="text-[10px] text-muted-foreground">
-        {formatTime(entry.timestamp)}
-      </p>
+      <div className="flex items-end gap-1.5 pt-1">
+        <textarea
+          ref={replyRef}
+          value={replyText}
+          onChange={(e) => {
+            setReplyText(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = Math.min(e.target.scrollHeight, 80) + "px";
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+          placeholder="Reply to thread..."
+          rows={1}
+          className="flex-1 min-h-[36px] max-h-[80px] px-2.5 py-2 rounded-md border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary/30 resize-none"
+          disabled={sending}
+        />
+        <Button
+          size="icon"
+          className="h-9 w-9 shrink-0 rounded-md"
+          onClick={handleReply}
+          disabled={!replyText.trim() || sending}
+        >
+          {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -770,6 +845,111 @@ function DeepBlueDetailPanel({
         conversations={filtered}
         onUpdate={onUpdate}
       />
+    </div>
+  );
+}
+
+// --- New Internal Message Compose ---
+
+function NewInternalMessagePanel({
+  caseId,
+  detail,
+  onUpdate,
+}: {
+  caseId: string;
+  detail: CaseDetail;
+  onUpdate: () => void;
+}) {
+  const { user } = useAuth();
+  const team = useTeamMembersFull();
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Exclude self from recipient list
+  const available = team.filter((m) => m.user_id !== user?.id);
+
+  const toggleRecipient = (userId: string) => {
+    setSelectedRecipients((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleSend = async () => {
+    if (!message.trim() || selectedRecipients.length === 0 || sending) return;
+    setSending(true);
+    try {
+      await api.post("/v1/messages", {
+        to_user_ids: selectedRecipients,
+        message: message.trim(),
+        case_id: caseId,
+        subject: detail.title,
+      });
+      setMessage("");
+      setSelectedRecipients([]);
+      toast.success("Message sent");
+      onUpdate();
+    } catch {
+      toast.error("Failed to send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-4 w-4 text-purple-500" />
+        <span className="text-sm font-medium">New Team Message</span>
+      </div>
+
+      <div>
+        <p className="text-xs text-muted-foreground mb-1.5">To:</p>
+        <div className="flex flex-wrap gap-1">
+          {available.map((m) => {
+            const selected = selectedRecipients.includes(m.user_id);
+            return (
+              <button
+                key={m.user_id}
+                onClick={() => toggleRecipient(m.user_id)}
+                className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                  selected
+                    ? "bg-purple-100 dark:bg-purple-900/40 border-purple-400 text-purple-700 dark:text-purple-300"
+                    : "bg-muted/50 border-transparent hover:bg-muted text-muted-foreground"
+                }`}
+              >
+                {m.first_name} {m.last_name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex items-end gap-1.5">
+        <textarea
+          ref={inputRef}
+          value={message}
+          onChange={(e) => {
+            setMessage(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          placeholder="Type your message..."
+          rows={2}
+          className="flex-1 min-h-[60px] max-h-[120px] px-2.5 py-2 rounded-md border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary/30 resize-none"
+          disabled={sending}
+        />
+        <Button
+          size="icon"
+          className="h-9 w-9 shrink-0 rounded-md"
+          onClick={handleSend}
+          disabled={!message.trim() || selectedRecipients.length === 0 || sending}
+        >
+          {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -812,6 +992,11 @@ function DetailPanel({
     );
   }
 
+  // New internal team message
+  if (selectedItem.type === "new_internal_message") {
+    return <NewInternalMessagePanel caseId={caseId} detail={detail} onUpdate={onUpdate} />;
+  }
+
   const entry = mergedTimeline.find(
     (e) => e.id === selectedItem.id && e.type === selectedItem.type
   );
@@ -839,7 +1024,7 @@ function DetailPanel({
     case "comment":
       return <CommentDetailPanel entry={entry} />;
     case "internal_message":
-      return <InternalMessageDetailPanel entry={entry} />;
+      return <InternalMessageDetailPanel entry={entry} detail={detail} caseId={caseId} onUpdate={onUpdate} />;
     case "deepblue_chat":
       return (
         <DeepBlueDetailPanel
@@ -899,6 +1084,13 @@ export default function CaseDetailPage({
   const [editTaskDue, setEditTaskDue] = useState("");
   const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
+  const detailPanelRef = useRef<HTMLDivElement>(null);
+
+  const selectAndScroll = useCallback((item: SelectedItem) => {
+    setSelectedItem(item);
+    // On mobile the detail panel is below the timeline — scroll it into view
+    setTimeout(() => detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }, []);
 
   // Merge DeepBlue conversations into the timeline
   const mergedTimeline = useMemo(() => {
@@ -1292,7 +1484,15 @@ export default function CaseDetailPage({
                     variant="ghost"
                     size="sm"
                     className="h-6 text-[10px] px-1.5 gap-0.5"
-                    onClick={() => setSelectedItem({ type: "deepblue_chat", id: "new" })}
+                    onClick={() => selectAndScroll({ type: "new_internal_message", id: "new" })}
+                  >
+                    <Plus className="h-2.5 w-2.5" /><MessageSquare className="h-3 w-3" /><span className="hidden sm:inline"> Message</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] px-1.5 gap-0.5"
+                    onClick={() => selectAndScroll({ type: "deepblue_chat", id: "new" })}
                   >
                     <Sparkles className="h-3 w-3" /><span className="hidden sm:inline"> DeepBlue</span>
                   </Button>
@@ -1399,7 +1599,7 @@ export default function CaseDetailPage({
                         selectedItem?.type === entry.type
                       }
                       onSelect={() =>
-                        setSelectedItem({ type: entry.type, id: entry.id })
+                        selectAndScroll({ type: entry.type, id: entry.id })
                       }
                     />
                   ))}
@@ -1410,7 +1610,7 @@ export default function CaseDetailPage({
         </div>
 
         {/* Detail panel — right column on desktop (40%), stacked below timeline on mobile */}
-        <div className="w-full lg:w-[40%] min-w-0">
+        <div ref={detailPanelRef} className="w-full lg:w-[40%] min-w-0">
           <Card className="shadow-sm lg:sticky lg:top-4">
             <CardContent className="p-4 overflow-x-hidden">
               <DetailPanel

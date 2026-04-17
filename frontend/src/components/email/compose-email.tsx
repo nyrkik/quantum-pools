@@ -81,6 +81,8 @@ export function ComposeEmail() {
   const [extraEmails, setExtraEmails] = useState<string[]>([]);
   const [addingEmail, setAddingEmail] = useState(false);
   const [newEmailInput, setNewEmailInput] = useState("");
+  const [cc, setCc] = useState("");
+  const [showCc, setShowCc] = useState(false);
 
   // Customer search
   const [customerSearch, setCustomerSearch] = useState("");
@@ -125,6 +127,8 @@ export function ComposeEmail() {
       setAttachments([]);
       setExtraEmails([]);
       setAddingEmail(false);
+      setCc("");
+      setShowCc(false);
       setNewEmailInput("");
 
       if (options.customerId) {
@@ -244,6 +248,7 @@ export function ComposeEmail() {
     try {
       await api.post("/v1/email/compose", {
         to: to.trim(),
+        cc: cc.trim() || undefined,
         subject: subject.trim(),
         body: body.trim(),
         customer_id: customerId,
@@ -465,6 +470,28 @@ export function ComposeEmail() {
             </div>
           )}
         </div>
+
+        {/* CC toggle + field */}
+        {!showCc && (
+          <button
+            type="button"
+            onClick={() => setShowCc(true)}
+            className="text-[10px] text-muted-foreground hover:text-foreground ml-10"
+          >
+            + CC
+          </button>
+        )}
+        {showCc && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground w-8">CC</span>
+            <Input
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              className="h-8 text-sm flex-1"
+              placeholder="email@example.com, ..."
+            />
+          </div>
+        )}
 
         {/* Subject */}
         <div className="flex items-center gap-2">

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/email", tags=["email"])
 
 class ComposeRequest(BaseModel):
     to: str
+    cc: Optional[str] = None
     subject: str
     body: str
     customer_id: Optional[str] = None
@@ -50,6 +51,7 @@ async def compose_email(
         job_id=req.job_id,
         case_id=req.case_id,
         attachment_ids=req.attachment_ids,
+        cc=req.cc,
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail={"error": "send_failed", "message": result.get("error", "Failed to send email")})

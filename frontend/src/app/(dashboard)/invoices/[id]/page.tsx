@@ -579,6 +579,18 @@ export default function InvoiceDetailPage({
         </Card>
       )}
 
+      {/* Internal Notes */}
+      {invoice.internal_notes && (
+        <Card className="border-l-4 border-amber-400">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-1.5">Internal Notes <span className="text-xs font-normal text-muted-foreground">(not visible to client)</span></CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap">{invoice.internal_notes}</p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Revision History */}
       <RevisionHistory
         revisions={revisions}

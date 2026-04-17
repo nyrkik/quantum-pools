@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 def _build_mime(
     *,
     to: str,
+    cc: str | None = None,
     subject: str,
     body_text: str,
     html_body: str | None,
@@ -36,6 +37,7 @@ def _build_mime(
     from_name: str | None,
     in_reply_to: str | None,
     references: str | None,
+    attachments: list[dict] | None = None,
 ) -> str:
     """Build an RFC 5322 message and base64url-encode it for the Gmail API."""
     msg = StdlibEmailMessage()
@@ -44,6 +46,8 @@ def _build_mime(
     else:
         msg["From"] = from_address
     msg["To"] = to
+    if cc:
+        msg["Cc"] = cc
     msg["Subject"] = subject
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
@@ -54,6 +58,17 @@ def _build_mime(
     msg.set_content(body_text)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+
+    # File attachments
+    if attachments:
+        for att in attachments:
+            maintype, _, subtype = att["mime_type"].partition("/")
+            msg.add_attachment(
+                att["content_bytes"],
+                maintype=maintype,
+                subtype=subtype or "octet-stream",
+                filename=att["filename"],
+            )
 
     raw = msg.as_bytes()
     return base64.urlsafe_b64encode(raw).decode("ascii")
@@ -71,6 +86,8 @@ async def send_reply(
     gmail_thread_id: str | None = None,
     in_reply_to_message_id: str | None = None,
     references: str | None = None,
+    attachments: list[dict] | None = None,
+    cc: str | None = None,
 ) -> dict[str, Any]:
     """Send an outbound email via the Gmail API.
 
@@ -96,6 +113,7 @@ async def send_reply(
 
     raw = _build_mime(
         to=to,
+        cc=cc,
         subject=subject,
         body_text=body_text,
         html_body=html_body,
@@ -103,6 +121,7 @@ async def send_reply(
         from_name=from_name,
         in_reply_to=in_reply_to_message_id,
         references=references,
+        attachments=attachments,
     )
 
     body: dict[str, Any] = {"raw": raw}

@@ -24,6 +24,8 @@ import { useTeamMembersFull } from "@/hooks/use-team-members";
 import { ComposeMessage } from "@/components/messages/compose-message";
 import { PageLayout } from "@/components/layout/page-layout";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
+import { usePasteAttachments } from "@/hooks/use-paste-attachments";
+import { EmojiPickerButton } from "@/components/ui/emoji-picker-button";
 import { AttachmentDisplay, type AttachmentInfo } from "@/components/ui/attachment-display";
 import { LinkCasePicker } from "@/components/cases/link-case-picker";
 
@@ -83,6 +85,7 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  const onPasteReply = usePasteAttachments({ attachments: replyAttachments, onAttachmentsChange: setReplyAttachments, sourceType: "internal_message" });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadThreads = useCallback(() => {
@@ -304,10 +307,12 @@ export default function MessagesPage() {
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
+                  onPaste={onPasteReply}
                   placeholder="Type a message..."
                   className="text-sm min-h-[2.25rem] max-h-32 resize-none"
                   rows={1}
                 />
+                <EmojiPickerButton onEmojiSelect={(emoji) => setReply((prev) => prev + emoji)} />
                 <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleReply} disabled={!reply.trim() || sending}>
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>

@@ -45,6 +45,7 @@ class InvoicePresenter(Presenter):
             "balance": float(inv.balance or 0),
             "paid_date": inv.paid_date.isoformat() if inv.paid_date else None,
             "notes": inv.notes,
+            "internal_notes": inv.internal_notes,
             "approved_at": self._iso(inv.approved_at) if hasattr(inv, "approved_at") else None,
             "approved_by": inv.approved_by if hasattr(inv, "approved_by") else None,
             "revision_count": inv.revision_count if hasattr(inv, "revision_count") else 0,

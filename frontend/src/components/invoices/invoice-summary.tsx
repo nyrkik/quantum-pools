@@ -31,6 +31,8 @@ interface InvoiceSummaryProps {
   onDiscountChange: (v: number) => void;
   notes: string;
   onNotesChange: (v: string) => void;
+  internalNotes: string;
+  onInternalNotesChange: (v: string) => void;
   lineItems: LineItem[];
 }
 
@@ -151,6 +153,8 @@ export function InvoiceSummary({
   onDiscountChange,
   notes,
   onNotesChange,
+  internalNotes,
+  onInternalNotesChange,
   lineItems,
   section,
 }: InvoiceSummaryProps & { section?: "top" | "bottom" }) {
@@ -243,6 +247,15 @@ export function InvoiceSummary({
             </CardHeader>
             <CardContent>
               <Textarea value={notes} onChange={(e) => onNotesChange(e.target.value)} placeholder="Additional notes for the client..." rows={3} className="text-sm" />
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm border-l-4 border-amber-400">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-1.5">Internal Notes <span className="text-[10px] font-normal text-muted-foreground">(not visible to client)</span></CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Textarea value={internalNotes} onChange={(e) => onInternalNotesChange(e.target.value)} placeholder="Internal notes for staff only..." rows={3} className="text-sm" />
             </CardContent>
           </Card>
 

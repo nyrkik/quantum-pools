@@ -32,6 +32,11 @@ const EQUIPMENT_TYPES = [
   { value: "jet_pump", label: "Jet Pump" },
   { value: "chemical_feeder", label: "Chemical Feeder" },
   { value: "automation", label: "Automation" },
+  { value: "flow_meter", label: "Flow Meter" },
+  { value: "light", label: "Light" },
+  { value: "valve", label: "Valve" },
+  { value: "drain_cover", label: "Drain Cover" },
+  { value: "blower", label: "Blower" },
 ];
 
 function typeLabel(t: string) {

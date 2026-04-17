@@ -31,7 +31,7 @@ For every email/DNS/infra/billing/customer-facing decision, ask: "Is this a QP c
 | Geocoding | OpenStreetMap primary, Google Maps fallback, DB cache |
 | AI | Claude API (anthropic SDK) — Haiku for satellite + pool measurement Vision |
 | Real-time | Redis Pub/Sub + WebSocket gateway (`/api/v1/ws`) — see `docs/realtime-events.md` |
-| Email | Multi-mode: Gmail API (OAuth) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted tokens. Folders (Inbox/Sent/Spam + custom). Sender tags with auto-folder routing. HTML rendering in sandboxed iframe. AI drafts every reply; humans always send via one-click approve (no auto-send). Postmark delivery webhooks. Gmail read/unread sync. See `docs/email-pipeline.md` |
+| Email | Multi-mode: Gmail API (OAuth) + Postmark (outbound fallback) + Cloudflare Workers (managed mode inbound). Fernet-encrypted tokens. Folders (Inbox/Sent/Spam + custom). Sender tags with auto-folder routing. HTML rendering in sandboxed iframe. AI drafts every reply; humans always send via one-click approve (no auto-send). Postmark delivery webhooks. Gmail read/unread sync. CC support on compose. File attachments via Gmail MIME + Postmark API. See `docs/email-pipeline.md` |
 | Payments | Stripe Checkout (test mode), webhook for confirmation, verify-on-return fallback |
 | File uploads | Local disk (`./uploads/`), DO Spaces for prod |
 
@@ -225,7 +225,7 @@ Completed phases + full roadmap: see `docs/build-plan.md`. In-flight work:
 - **Email/Agent Pipeline**: AI inbox — triage, classification, drafting, customer matching, thread management.
 - **DeepBlue**: conversational AI assistant with 29 domain tools, eval suite, usage tracking.
 - **Service Cases**: hub linking threads/jobs/invoices/internal threads/DeepBlue. Manager + derived actor; 7 attention flags; inline reassign; non-DB customer support. All `case_id` writes through `ServiceCaseService.set_entity_case()`. Linking a thread to a case cascades to its jobs (so orchestrator-created caseless jobs inherit a case the moment the thread gets linked). Closing a case cascades open jobs to `done`/`cancelled` with `closed_by_case_cascade=true`; reopening prompts the user to selectively reopen the cascade-closed jobs. Auto-closes when jobs done + invoice sent; closed is terminal. Jobs may only exist inside a case — `ThreadAIService.create_job_from_thread` rejects caseless threads, `AgentActionService.create_action` no longer swallows case-creation failures.
-- **Internal Messaging**: staff↔staff threads with notifications + case linking.
+- **Internal Messaging**: staff↔staff threads with notifications + case linking. Inline compose + reply from case detail view. Emoji picker + clipboard paste for images.
 - **Real-Time Events**: Redis Pub/Sub + WebSocket gateway.
 - **Equipment & Parts**: catalog (114) + items per property + parts (434) + vendor tracking.
 - **Granular Permissions**: 60-slug system with presets, custom roles, per-user overrides.

@@ -81,7 +81,7 @@ Invoicing, payments, estimates, and charges.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. |
+| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. `internal_notes` for staff-only notes (never exposed to public API). |
 | InvoiceLineItem | `invoice_line_items` | Individual line items on an invoice |
 | InvoiceRevision | `invoice_revisions` | Audit trail of invoice changes |
 | Payment | `payments` | Payment received against an invoice. `customer_id` nullable (non-client). Stripe fields: `stripe_payment_intent_id`, `stripe_charge_id`. |

@@ -294,6 +294,55 @@ async def test_service_create_clean_reading_emits_only_logged(
 
 
 @pytest.mark.asyncio
+async def test_reading_event_omits_null_entity_ref_keys(
+    db_session, org_a, seeded_property, event_recorder
+):
+    """entity_refs should only contain populated FK keys — null values
+    should be omitted so queries like `entity_refs @> '{water_feature_id:
+    X}'` work cleanly and distinct-key enumeration doesn't see noise."""
+    # No water_feature_id, no visit_id on this reading
+    reading = ChemicalReading(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        property_id=seeded_property.id,
+        ph=7.4,
+    )
+    db_session.add(reading)
+    await db_session.flush()
+
+    await emit_chemical_reading_logged(db_session, reading, source="manual")
+    await db_session.commit()
+
+    event = await event_recorder.find("chemical_reading.logged")
+    assert event is not None
+    assert "water_feature_id" not in event["entity_refs"]
+    assert "visit_id" not in event["entity_refs"]
+    # Required keys still present
+    assert event["entity_refs"]["chemical_reading_id"] == reading.id
+    assert event["entity_refs"]["property_id"] == seeded_property.id
+
+
+@pytest.mark.asyncio
+async def test_out_of_range_event_omits_null_water_feature_id(
+    db_session, org_a, seeded_property, event_recorder
+):
+    reading = ChemicalReading(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        property_id=seeded_property.id,
+        ph=6.5,  # breach
+    )
+    db_session.add(reading)
+    await db_session.flush()
+    await emit_chemistry_out_of_range_events(db_session, reading)
+    await db_session.commit()
+
+    events = await event_recorder.all_of_type("chemistry.reading.out_of_range")
+    assert len(events) == 1
+    assert "water_feature_id" not in events[0]["entity_refs"]
+
+
+@pytest.mark.asyncio
 async def test_service_create_rolls_back_emits_when_business_op_fails(
     db_session, org_a, event_recorder
 ):

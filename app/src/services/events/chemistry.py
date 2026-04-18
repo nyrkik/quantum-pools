@@ -151,6 +151,15 @@ async def emit_chemical_reading_logged(
     agent when test_strip_vision/deepblue did it autonomously. Falls
     back to system if not provided.
     """
+    refs = {
+        "chemical_reading_id": reading.id,
+        "property_id": reading.property_id,
+    }
+    if reading.water_feature_id:
+        refs["water_feature_id"] = reading.water_feature_id
+    if reading.visit_id:
+        refs["visit_id"] = reading.visit_id
+
     await PlatformEventService.emit(
         db=db,
         event_type="chemical_reading.logged",
@@ -161,12 +170,7 @@ async def emit_chemical_reading_logged(
         ),
         actor=actor or actor_system(),
         organization_id=reading.organization_id,
-        entity_refs={
-            "chemical_reading_id": reading.id,
-            "water_feature_id": reading.water_feature_id,
-            **({"visit_id": reading.visit_id} if reading.visit_id else {}),
-            "property_id": reading.property_id,
-        },
+        entity_refs=refs,
         payload={"source": source},
     )
 
@@ -185,6 +189,13 @@ async def emit_chemistry_out_of_range_events(
     if not breaches:
         return 0
 
+    refs = {
+        "chemical_reading_id": reading.id,
+        "property_id": reading.property_id,
+    }
+    if reading.water_feature_id:
+        refs["water_feature_id"] = reading.water_feature_id
+
     for b in breaches:
         await PlatformEventService.emit(
             db=db,
@@ -197,11 +208,7 @@ async def emit_chemistry_out_of_range_events(
             level="system_action",
             actor=actor_system(),
             organization_id=reading.organization_id,
-            entity_refs={
-                "chemical_reading_id": reading.id,
-                "water_feature_id": reading.water_feature_id,
-                "property_id": reading.property_id,
-            },
+            entity_refs=refs,
             payload={
                 "parameter": b.parameter,
                 "direction": b.direction,

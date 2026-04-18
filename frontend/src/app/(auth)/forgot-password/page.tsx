@@ -41,7 +41,7 @@ export default function ForgotPasswordPage() {
         <CardTitle className="text-2xl">Reset Password</CardTitle>
         <CardDescription>
           {sent
-            ? "Check your email for a reset link"
+            ? "If an account exists with that email, a reset link was sent. The link expires in 1 hour."
             : "Enter your email to receive a reset link"}
         </CardDescription>
       </CardHeader>
@@ -64,12 +64,18 @@ export default function ForgotPasswordPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Sending..." : "Send reset link"}
             </Button>
-            <Link
-              href="/login"
-              className="text-sm text-muted-foreground underline hover:text-foreground"
-            >
-              Back to sign in
-            </Link>
+            <div className="text-sm text-muted-foreground text-center space-x-1">
+              <Link
+                href="/forgot-email"
+                className="underline hover:text-foreground"
+              >
+                Forgot email?
+              </Link>
+              <span>&middot;</span>
+              <Link href="/login" className="underline hover:text-foreground">
+                Back to sign in
+              </Link>
+            </div>
           </CardFooter>
         </form>
       )}

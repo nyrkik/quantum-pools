@@ -1,19 +1,29 @@
 """Authentication endpoints."""
 
+import hashlib
+import logging
+import os
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, update
 from sqlalchemy.orm import joinedload
 
 from src.core.database import get_db
 from src.core.config import settings
 from src.core.exceptions import AuthenticationError, ValidationError
+from src.core.rate_limiter import limiter
 from pydantic import BaseModel, Field
 from typing import Optional
 from src.schemas.auth import (
     RegisterRequest,
     LoginRequest,
     ForgotPasswordRequest,
+    RecoverEmailRequest,
+    RecoverEmailResponse,
     ResetPasswordRequest,
     SetupAccountRequest,
     TokenResponse,
@@ -26,6 +36,35 @@ from src.services.auth_service import AuthService
 from src.api.deps import get_current_user, get_current_org_user, OrgUserContext, REFRESH_TOKEN_COOKIE
 from src.models.user import User
 from src.models.organization import Organization
+from src.models.organization_user import OrganizationUser
+from src.models.user_session import UserSession
+
+logger = logging.getLogger(__name__)
+
+RESET_TOKEN_TTL_HOURS = 1
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _normalize_phone(raw: str) -> str:
+    """Strip everything except digits. Leading +/country code collapses to digits too."""
+    return re.sub(r"\D+", "", raw or "")
+
+
+def _mask_email(email: str) -> str:
+    """b****@g***.com — show first char + TLD suffix, mask the rest."""
+    if not email or "@" not in email:
+        return ""
+    local, _, domain = email.partition("@")
+    if "." in domain:
+        dom_name, _, tld = domain.rpartition(".")
+        masked_domain = (dom_name[0] if dom_name else "") + "*" * max(len(dom_name) - 1, 3) + "." + tld
+    else:
+        masked_domain = (domain[0] if domain else "") + "*" * max(len(domain) - 1, 3)
+    masked_local = (local[0] if local else "") + "*" * max(len(local) - 1, 3)
+    return f"{masked_local}@{masked_domain}"
 
 
 def _branding(org) -> OrgBrandingResponse | None:
@@ -263,15 +302,157 @@ async def list_my_orgs(
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-    # Always return success to prevent email enumeration
-    return MessageResponse(message="If an account exists with that email, a reset link has been sent.")
+@limiter.limit("5/hour")
+async def forgot_password(
+    body: ForgotPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Issue a password-reset token and email it to the user.
+
+    Always returns the same success shape to prevent email enumeration.
+    """
+    generic_response = MessageResponse(
+        message="If an account exists with that email, a reset link has been sent."
+    )
+
+    email_lower = body.email.lower().strip()
+    result = await db.execute(select(User).where(func.lower(User.email) == email_lower))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        return generic_response
+
+    # Generate plaintext token for the email, store only the hash.
+    plaintext_token = secrets.token_urlsafe(32)
+    user.reset_token = _hash_token(plaintext_token)
+    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+    await db.commit()
+
+    # Pick an org for branding (first active membership); fall back to None.
+    org_result = await db.execute(
+        select(OrganizationUser)
+        .where(OrganizationUser.user_id == user.id, OrganizationUser.is_active == True)
+        .limit(1)
+    )
+    org_user = org_result.scalar_one_or_none()
+    org_id = org_user.organization_id if org_user else None
+
+    base_url = os.environ.get("FRONTEND_URL", "http://100.121.52.15:7060")
+    reset_url = f"{base_url}/reset-password?token={plaintext_token}"
+
+    from src.services.email_service import EmailService
+    email_service = EmailService(db)
+    try:
+        send_result = await email_service.send_password_reset(
+            org_id=org_id or "",
+            to=user.email,
+            user_name=user.first_name or user.email,
+            reset_url=reset_url,
+            expires_in_hours=RESET_TOKEN_TTL_HOURS,
+        )
+        if not send_result.success:
+            logger.error(f"Password-reset email failed for {user.email}: {send_result.error}")
+    except Exception as e:
+        logger.exception(f"Password-reset email crashed for {user.email}: {e}")
+
+    return generic_response
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    # TODO: Implement password reset token verification
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Password reset not yet implemented.")
+@limiter.limit("10/hour")
+async def reset_password(
+    body: ResetPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Consume a reset token and set a new password.
+
+    On success: nulls the token, invalidates all existing sessions,
+    and sends a confirmation email.
+    """
+    from src.core.security import get_password_hash
+
+    token_hash = _hash_token(body.token)
+    result = await db.execute(select(User).where(User.reset_token == token_hash))
+    user = result.scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    if not user or not user.reset_token_expires or user.reset_token_expires < now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_or_expired_token", "message": "This reset link is invalid or has expired."},
+        )
+
+    user.hashed_password = get_password_hash(body.new_password)
+    user.reset_token = None
+    user.reset_token_expires = None
+    user.failed_login_attempts = 0
+    user.locked_until = None
+
+    # Invalidate all existing sessions so an attacker already logged in is ejected.
+    await db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user.id, UserSession.is_revoked == False)
+        .values(is_revoked=True)
+    )
+    await db.commit()
+
+    # Pick an org for branding.
+    org_result = await db.execute(
+        select(OrganizationUser)
+        .where(OrganizationUser.user_id == user.id, OrganizationUser.is_active == True)
+        .limit(1)
+    )
+    org_user = org_result.scalar_one_or_none()
+    org_id = org_user.organization_id if org_user else ""
+
+    from src.services.email_service import EmailService
+    email_service = EmailService(db)
+    try:
+        await email_service.send_password_changed(
+            org_id=org_id, to=user.email, user_name=user.first_name or user.email
+        )
+    except Exception as e:
+        logger.exception(f"Password-changed notification failed for {user.email}: {e}")
+
+    return MessageResponse(message="Password updated. You can now sign in.")
+
+
+@router.post("/recover-email", response_model=RecoverEmailResponse)
+@limiter.limit("5/hour")
+async def recover_email(
+    body: RecoverEmailRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Look up a user by phone and return a masked email hint if matched.
+
+    Anti-enumeration: same response shape whether or not there's a match;
+    email_hint is null on no match.
+    """
+    generic = RecoverEmailResponse(
+        message="If an account matches that phone number, a hint is shown below.",
+        email_hint=None,
+    )
+    normalized = _normalize_phone(body.phone)
+    if len(normalized) < 7:
+        return generic
+
+    # Match by stripping non-digits from stored phone and comparing suffixes.
+    # Phones may be stored as "(555) 123-4567" or "+15551234567" — normalize both sides.
+    result = await db.execute(
+        select(User).where(
+            User.phone.isnot(None),
+            User.is_active == True,
+        )
+    )
+    candidates = result.scalars().all()
+    for u in candidates:
+        u_norm = _normalize_phone(u.phone or "")
+        if not u_norm:
+            continue
+        # Match if either normalizes to equal, or one is a suffix of the other (handles +1 prefix variance).
+        if u_norm == normalized or u_norm.endswith(normalized) or normalized.endswith(u_norm):
+            return RecoverEmailResponse(
+                message="We found an account matching that phone number.",
+                email_hint=_mask_email(u.email),
+            )
+
+    return generic
 
 
 @router.post("/setup-account", response_model=MessageResponse)

@@ -26,6 +26,8 @@ from src.services.email_templates import (
     invoice_email_template,
     estimate_email_template,
     notification_template,
+    password_changed_template,
+    password_reset_template,
     team_invite_template,
 )
 
@@ -247,6 +249,42 @@ class EmailService:
         msg = EmailMessage(
             to=to,
             subject=f"You've been invited to {org_name}",
+            text_body=text,
+            html_body=html,
+        )
+        return await self.send_email(org_id, msg)
+
+    async def send_password_reset(
+        self, org_id: str, to: str, user_name: str, reset_url: str, expires_in_hours: int = 1
+    ) -> EmailResult:
+        """Send password reset email with token link."""
+        org = await self._get_org(org_id)
+        org_name = org.name if org else "QuantumPools"
+        color = getattr(org, "branding_color", None) or "#1a1a2e"
+
+        text, html = password_reset_template(
+            org_name, user_name, reset_url, expires_in_hours=expires_in_hours, branding_color=color
+        )
+        msg = EmailMessage(
+            to=to,
+            subject=f"Reset your {org_name} password",
+            text_body=text,
+            html_body=html,
+        )
+        return await self.send_email(org_id, msg)
+
+    async def send_password_changed(
+        self, org_id: str, to: str, user_name: str
+    ) -> EmailResult:
+        """Notify user that their password was changed."""
+        org = await self._get_org(org_id)
+        org_name = org.name if org else "QuantumPools"
+        color = getattr(org, "branding_color", None) or "#1a1a2e"
+
+        text, html = password_changed_template(org_name, user_name, branding_color=color)
+        msg = EmailMessage(
+            to=to,
+            subject=f"Your {org_name} password was changed",
             text_body=text,
             html_body=html,
         )

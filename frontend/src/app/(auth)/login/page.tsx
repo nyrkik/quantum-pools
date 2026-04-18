@@ -79,6 +79,13 @@ export default function LoginPage() {
               Forgot password?
             </Link>
             <span>&middot;</span>
+            <Link
+              href="/forgot-email"
+              className="underline hover:text-foreground"
+            >
+              Forgot email?
+            </Link>
+            <span>&middot;</span>
             <Link href="/register" className="underline hover:text-foreground">
               Create account
             </Link>

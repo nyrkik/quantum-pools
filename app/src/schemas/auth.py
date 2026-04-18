@@ -27,6 +27,15 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
+class RecoverEmailRequest(BaseModel):
+    phone: str = Field(..., min_length=3, max_length=40)
+
+
+class RecoverEmailResponse(BaseModel):
+    message: str
+    email_hint: Optional[str] = None  # populated only on match; masked format
+
+
 class SetupAccountRequest(BaseModel):
     token: str
     email: EmailStr

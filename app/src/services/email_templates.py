@@ -166,6 +166,61 @@ def customer_email_template(
     return text, html
 
 
+def password_reset_template(
+    org_name: str,
+    user_name: str,
+    reset_url: str,
+    expires_in_hours: int = 1,
+    branding_color: str = "#1a1a2e",
+) -> tuple[str, str]:
+    """Password reset email with token link."""
+    text = f"""Hi {user_name},
+
+We received a request to reset the password for your {org_name} account.
+
+Click the link below to choose a new password:
+
+{reset_url}
+
+This link will expire in {expires_in_hours} hour(s). If you didn't request this, you can ignore this email — your password will stay the same.
+
+— {org_name}"""
+
+    content = f"""<p style="color: #4a5568; line-height: 1.6;">Hi {user_name},</p>
+<p style="color: #4a5568; line-height: 1.6;">We received a request to reset the password for your <strong>{org_name}</strong> account.</p>
+<p style="margin: 24px 0;">
+  <a href="{reset_url}" style="background: {branding_color}; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Reset Password</a>
+</p>
+<p style="color: #718096; font-size: 0.875rem;">This link expires in {expires_in_hours} hour(s). If you didn't request this, ignore this email — your password will stay the same.</p>
+<p style="color: #718096; font-size: 0.75rem;">Button not working? Copy this URL:<br>
+<span style="color: #4a5568; word-break: break-all;">{reset_url}</span></p>"""
+
+    html = _base_html(org_name, branding_color, content)
+    return text, html
+
+
+def password_changed_template(
+    org_name: str,
+    user_name: str,
+    branding_color: str = "#1a1a2e",
+) -> tuple[str, str]:
+    """Notification that password was changed."""
+    text = f"""Hi {user_name},
+
+Your password for {org_name} was just changed.
+
+If you made this change, you can ignore this email. If you didn't, contact your organization admin immediately — your account may be compromised.
+
+— {org_name}"""
+
+    content = f"""<p style="color: #4a5568; line-height: 1.6;">Hi {user_name},</p>
+<p style="color: #4a5568; line-height: 1.6;">Your password for <strong>{org_name}</strong> was just changed.</p>
+<p style="color: #4a5568; line-height: 1.6;">If you made this change, you can ignore this email. If you didn't, contact your organization admin immediately — your account may be compromised.</p>"""
+
+    html = _base_html(org_name, branding_color, content)
+    return text, html
+
+
 def notification_template(
     org_name: str,
     title: str,

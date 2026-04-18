@@ -19,24 +19,52 @@ interface CommunicationsTileProps {
   customerName?: string;
 }
 
+interface ContactRow {
+  id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  role: string | null;
+  is_primary: boolean;
+  receives_estimates: boolean;
+  receives_invoices: boolean;
+}
+
 export function CommunicationsTile({ customerId, customerEmail, customerName }: CommunicationsTileProps) {
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const { openCompose } = useCompose();
 
   const load = () => {
-    api.get<{ items: Thread[] }>(`/v1/admin/agent-threads?customer_id=${customerId}&limit=5`)
-      .then((d) => setThreads(d.items || []))
-      .catch(() => {})
-      .finally(() => setLoaded(true));
+    Promise.all([
+      api.get<{ items: Thread[] }>(`/v1/admin/agent-threads?customer_id=${customerId}&limit=5`)
+        .then((d) => setThreads(d.items || []))
+        .catch(() => {}),
+      api.get<ContactRow[]>(`/v1/customers/${customerId}/contacts`)
+        .then((items) => setContacts(items || []))
+        .catch(() => setContacts([])),
+    ]).finally(() => setLoaded(true));
   };
 
   useEffect(() => { load(); }, [customerId]);
 
+  // Prefer an explicit contact address. Order of precedence:
+  //   1. primary contact with an email
+  //   2. first contact flagged receives_estimates or receives_invoices
+  //   3. first contact with any email
+  //   4. legacy customer.email (backward-compat for customers with no contacts)
+  const contactWithEmail = contacts.filter((c) => c.email);
+  const primaryContact =
+    contactWithEmail.find((c) => c.is_primary) ||
+    contactWithEmail.find((c) => c.receives_estimates || c.receives_invoices) ||
+    contactWithEmail[0];
+  const displayEmail = primaryContact?.email || customerEmail || null;
+
   const handleNewEmail = () => {
     openCompose({
-      to: customerEmail || undefined,
+      to: displayEmail || undefined,
       customerId,
       customerName,
     });
@@ -53,17 +81,21 @@ export function CommunicationsTile({ customerId, customerEmail, customerName }: 
               <Mail className="h-4 w-4 text-muted-foreground" />
               Communications
             </span>
-            {customerEmail && (
+            {displayEmail && (
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNewEmail} title="New email">
                 <SquarePen className="h-3.5 w-3.5" />
               </Button>
             )}
           </CardTitle>
-          {customerEmail && (
+          {displayEmail && (
             <div className="space-y-0.5">
-              {customerEmail.split(",").map((email) => (
-                <p key={email.trim()} className="text-xs text-muted-foreground">{email.trim()}</p>
-              ))}
+              <p className="text-xs text-muted-foreground">{displayEmail}</p>
+              {primaryContact && (
+                <p className="text-[10px] text-muted-foreground/70">
+                  {[primaryContact.first_name, primaryContact.last_name].filter(Boolean).join(" ")}
+                  {primaryContact.role ? ` · ${primaryContact.role.replace(/_/g, " ")}` : ""}
+                </p>
+              )}
             </div>
           )}
         </CardHeader>

@@ -65,6 +65,11 @@ async def send_message(
         thread = thread_result.scalar_one_or_none()
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
+        # Case-linked threads are visible to anyone on the case — auto-add
+        # the replier to participant_ids so they receive future notifications
+        # and the thread appears in their personal inbox. (FB-27)
+        if thread.case_id and from_user_id not in (thread.participant_ids or []):
+            thread.participant_ids = sorted(set((thread.participant_ids or []) + [from_user_id]))
     else:
         if not recipient_ids:
             raise HTTPException(status_code=400, detail="At least one recipient required")

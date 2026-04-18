@@ -296,6 +296,7 @@ async def send_invoice(
         # Send invoice email with payment link
         from src.services.email_service import EmailService
         from src.models.customer import Customer
+        from src.models.customer_contact import CustomerContact
         from src.core.config import settings
 
         to_email = None
@@ -305,8 +306,23 @@ async def send_invoice(
                 select(Customer).where(Customer.id == invoice.customer_id)
             )).scalar_one_or_none()
             if cust:
-                to_email = cust.email
-                to_name = cust.display_name
+                # Prefer customer_contacts marked receives_invoices=True; primary first.
+                contacts = (await db.execute(
+                    select(CustomerContact)
+                    .where(
+                        CustomerContact.customer_id == cust.id,
+                        CustomerContact.receives_invoices == True,
+                        CustomerContact.email.isnot(None),
+                    )
+                    .order_by(CustomerContact.is_primary.desc())
+                )).scalars().all()
+                if contacts:
+                    to_email = contacts[0].email
+                    to_name = " ".join(filter(None, [contacts[0].first_name, contacts[0].last_name])) or cust.display_name
+                else:
+                    # Fallback to legacy customer.email for customers without contacts configured.
+                    to_email = cust.email
+                    to_name = cust.display_name
         else:
             to_email = invoice.billing_email
             to_name = invoice.billing_name or "Customer"

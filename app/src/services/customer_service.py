@@ -4,7 +4,7 @@ import uuid
 from typing import Optional, List, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload
 
 from src.models.customer import Customer
@@ -45,11 +45,29 @@ class CustomerService:
             count_query = count_query.where(Customer.is_active == is_active)
         if search:
             search_filter = f"%{search}%"
+            # Match customers whose properties (service addresses) hit the search — via EXISTS
+            # to avoid duplicates from the join.
+            property_match = (
+                select(Property.id)
+                .where(
+                    Property.customer_id == Customer.id,
+                    or_(
+                        Property.address.ilike(search_filter),
+                        Property.city.ilike(search_filter),
+                        Property.name.ilike(search_filter),
+                    ),
+                )
+                .exists()
+            )
             search_clause = (
-                (Customer.first_name.ilike(search_filter))
-                | (Customer.last_name.ilike(search_filter))
-                | (Customer.company_name.ilike(search_filter))
-                | (Customer.email.ilike(search_filter))
+                Customer.first_name.ilike(search_filter)
+                | Customer.last_name.ilike(search_filter)
+                | Customer.company_name.ilike(search_filter)
+                | Customer.display_name_col.ilike(search_filter)
+                | Customer.email.ilike(search_filter)
+                | Customer.billing_address.ilike(search_filter)
+                | Customer.billing_city.ilike(search_filter)
+                | property_match
             )
             query = query.where(search_clause)
             count_query = count_query.where(search_clause)

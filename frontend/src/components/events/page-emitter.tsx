@@ -19,12 +19,13 @@ import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { events } from "@/lib/events";
 
-// The 10 key surfaces that get dwell-time tracking.
-// Match any path that starts with these prefixes.
+// The 10 key surfaces that get dwell-time tracking. Some match detail
+// pages only (entries with a trailing slash require a following segment),
+// others match the surface and its children.
 const DWELL_TRACKED_PREFIXES = [
   "/inbox",
-  "/cases/",
-  "/customers/",
+  "/cases/",       // detail pages only, not /cases list
+  "/customers/",   // detail pages only
   "/invoices/",
   "/estimates/",
   "/jobs/",
@@ -35,7 +36,11 @@ const DWELL_TRACKED_PREFIXES = [
 ];
 
 function isDwellTracked(path: string): boolean {
-  return DWELL_TRACKED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  // Exact match OR path starts with "<prefix>/" — prevents accidental
+  // matches like "/settings-export" looking like "/settings".
+  return DWELL_TRACKED_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(prefix + (prefix.endsWith("/") ? "" : "/")),
+  );
 }
 
 /** Convert a specific path to a normalized route template for analytics.

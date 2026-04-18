@@ -647,16 +647,31 @@ class AgentThreadService:
         d["actions"] = actions
         return d
 
-    async def archive_thread(self, org_id: str, thread_id: str) -> dict:
+    async def archive_thread(self, org_id: str, thread_id: str, actor=None) -> dict:
         """Archive a thread — hidden from inbox but preserved for records."""
+        from src.services.events.platform_event_service import PlatformEventService
+        from src.services.events.actor_factory import actor_system
+
         result = await self.db.execute(
             select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
         )
         thread = result.scalar_one_or_none()
         if not thread:
             raise Exception("Thread not found")
+        prior_status = thread.status
         thread.status = "archived"
         thread.has_pending = False
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="thread.archived",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"thread_id": thread_id},
+            payload={"prior_status": prior_status},
+        )
+
         await self.db.commit()
         return {"archived": True}
 
@@ -696,17 +711,22 @@ class AgentThreadService:
         await self.db.commit()
         return {"deleted": True}
 
-    async def assign_thread(self, org_id: str, thread_id: str, user_id: str | None, user_name: str | None) -> dict:
+    async def assign_thread(self, org_id: str, thread_id: str, user_id: str | None, user_name: str | None, actor=None) -> dict:
         """Assign/unassign a thread to a team member. Creates notification on assign.
 
         Rejects assignment if thread requires a visibility permission the target user lacks.
         """
+        from src.services.events.platform_event_service import PlatformEventService
+        from src.services.events.actor_factory import actor_system
+
         result = await self.db.execute(
             select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
         )
         thread = result.scalar_one_or_none()
         if not thread:
             return {"error": "not_found", "detail": "Thread not found"}
+
+        prior_assignee_id = thread.assigned_to_user_id
 
         now = datetime.now(timezone.utc)
         if user_id:
@@ -745,6 +765,16 @@ class AgentThreadService:
             thread.assigned_to_user_id = None
             thread.assigned_to_name = None
             thread.assigned_at = None
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="thread.assigned",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"thread_id": thread_id, **({"user_id": user_id} if user_id else {})},
+            payload={"prior_assignee_id": prior_assignee_id},
+        )
 
         await self.db.commit()
         return {

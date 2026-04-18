@@ -138,6 +138,10 @@ async def db_session() -> AsyncSession:
 # ------------------------------------------------------------------
 
 
+# Re-export the event_recorder fixture so tests can depend on it by name.
+from tests.fixtures.event_recorder import event_recorder  # noqa: F401
+
+
 @pytest_asyncio.fixture
 async def org_a(db_session):
     """Sample organization A. Pair with org_b for cross-tenant tests."""

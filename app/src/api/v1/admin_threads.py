@@ -100,6 +100,9 @@ async def get_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Get thread with full conversation timeline. Marks as read for current user."""
+    from src.services.events.actor_factory import actor_from_org_ctx
+    from src.services.events.platform_event_service import PlatformEventService
+
     perm_slugs = await _get_user_perm_slugs(ctx, db)
     service = AgentThreadService(db)
     result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_permission_slugs=perm_slugs, user_id=ctx.user.id)
@@ -107,6 +110,18 @@ async def get_thread(
         raise HTTPException(status_code=404, detail="Thread not found")
     # Mark as read — admins/owners broadcast to all users
     await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
+
+    # Instrumentation: thread.opened — a user viewed the thread detail.
+    await PlatformEventService.emit(
+        db=db,
+        event_type="thread.opened",
+        level="user_action",
+        actor=actor_from_org_ctx(ctx),
+        organization_id=ctx.organization_id,
+        entity_refs={"thread_id": thread_id},
+    )
+    await db.commit()
+
     return result
 
 
@@ -159,8 +174,12 @@ async def archive_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Archive a thread — hidden from inbox, preserved for records."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     service = AgentThreadService(db)
-    result = await service.archive_thread(org_id=ctx.organization_id, thread_id=thread_id)
+    result = await service.archive_thread(
+        org_id=ctx.organization_id, thread_id=thread_id,
+        actor=actor_from_org_ctx(ctx),
+    )
     await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "archived"})
     return result
 
@@ -186,12 +205,14 @@ async def assign_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Assign or unassign a thread to a team member."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     service = AgentThreadService(db)
     result = await service.assign_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,
         user_id=body.user_id,
         user_name=body.user_name,
+        actor=actor_from_org_ctx(ctx),
     )
     if "error" in result:
         code = {"not_found": 404, "forbidden": 403}[result["error"]]

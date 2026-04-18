@@ -12,6 +12,29 @@ This plan is **intentionally verbose about "why"** because the developer is one 
 
 Every AI output in QP — a suggested job, an estimate draft, an email reply, an equipment match, a workflow config change — flows through the same proposals system. Every user action on a proposal (accept, edit, reject) is a training signal fed back to the responsible agent. Every significant user action in the product emits an event into an observation stream. A workflow-observer agent watches those events per-org and proposes configuration changes to that org's admin. A separate agent (Sonar) watches across orgs (and the product itself) and proposes product changes to the developer. The end state is a product that compounds in usefulness every week it's used — for its users and for its builder.
 
+## Per-phase refinement process (MANDATORY gate)
+
+This master plan is the **skeleton**: why each phase exists, what it produces, sequencing, and dependencies. The **detailed implementation design for each phase is done immediately before that phase begins** — never all at once when this master plan was written.
+
+**Why this matters:** Detailed spec for Phase 7 written today would be wrong in ways Phases 1-6 will teach us. Committing to that detail now anchors us to untested assumptions. Writing the detail at the last responsible moment means each phase's spec incorporates everything learned from prior phases.
+
+### The gate before starting any phase
+
+1. **Re-read** the phase's section in this master plan.
+2. **Produce the phase's detailed implementation spec** — either by expanding this doc's phase section in place, or creating `docs/ai-platform-phase-N.md` (delete when phase ships; master plan tracks status).
+3. **Resolve all open questions** specific to this phase (including any marked TBD in the master plan).
+4. **Reassess the scope estimate** against current reality (prior phases may have shipped faster/slower; this phase's complexity may look different now).
+5. **Confirm with Brian** before writing code — this is the same `investigate → propose → confirm → implement` discipline that applies to every meaningful change.
+6. **After the phase ships**, update this master plan's status tracker AND note anything learned that should revise downstream phases.
+
+### What NOT to do
+
+- Do NOT detail-spec Phase N+2 while starting Phase N. Sketch the shape; detail at Phase N+2's gate.
+- Do NOT skip the refinement gate because "the master plan already covers it." The master plan is intentionally incomplete for future phases — that's the point.
+- Do NOT retrofit the gate ("we'll do the spec alongside the code"). Write the spec first, commit it, then build.
+
+This process is itself a DNA-adjacent rule: see `feedback_refine_per_phase.md`.
+
 ## DNA rules this plan enforces
 
 Every phase in this plan exists because of one or more of these rules (in `CLAUDE.md` Product DNA section):
@@ -659,17 +682,27 @@ Per CLAUDE.md mandatory processes:
 
 ## Status tracker
 
-| Phase | Status | Target start | Notes |
+Each phase goes through two gates: **Refinement spec** (detailed design written + approved) and **Implementation** (code shipped). Don't start implementation without the spec gate closed.
+
+| Phase | Refinement spec | Implementation | Notes |
 |---|---|---|---|
-| 0 — Decisions & taxonomy | Not started | — | Write `docs/event-taxonomy.md` |
-| 1 — Event instrumentation | Not started | — | Prerequisite for everything |
-| 2 — `agent_proposals` system | Not started | — | Includes DeepBlue migration |
-| 3 — Inbox summarizer | Not started | — | First proposal consumer; validates architecture |
-| 4 — Post-creation handlers | Not started | — | Parallel-able with Phase 3 if bandwidth allows |
-| 5 — Unify existing agents | Not started | — | Cleanup phase; can run in parallel with Phase 6 |
-| 6 — `workflow_observer` | Not started | — | Needs Phases 1 + 2 |
-| 7 — Sonar (dev-facing) | Not started | — | Can start limited on Phase 1 data before Phases 2-6 fully land |
-| 8 — User-Sonar | Deferred | — | After ≥5 customer orgs |
+| 0 — Decisions & taxonomy | Not started | — | This IS the refinement for Phase 1's event layer |
+| 1 — Event instrumentation | Not started | Not started | Prerequisite for everything |
+| 2 — `agent_proposals` system | Not started | Not started | Includes DeepBlue migration |
+| 3 — Inbox summarizer | Not started | Not started | First proposal consumer; validates architecture |
+| 4 — Post-creation handlers | Not started | Not started | Parallel-able with Phase 3 if bandwidth allows |
+| 5 — Unify existing agents | Not started | Not started | Cleanup phase; can run in parallel with Phase 6 |
+| 6 — `workflow_observer` | Not started | Not started | Needs Phases 1 + 2 shipped |
+| 7 — Sonar (dev-facing) | Not started | Not started | Can start limited on Phase 1 data before Phases 2-6 fully land |
+| 8 — User-Sonar | Deferred | Deferred | After ≥5 customer orgs |
+
+**Legend:**
+- _Not started_ → work hasn't begun
+- _In progress_ → actively being worked
+- _Shipped_ → merged to master and verified
+- _Deferred_ → intentionally paused with reason
+
+**Rule**: a phase's Implementation cell must not flip to "In progress" while its Refinement spec is "Not started." If you catch this happening, stop and write the spec.
 
 ---
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { events } from "@/lib/events";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useWSRefetch } from "@/lib/ws";
@@ -80,6 +81,46 @@ export default function InboxPage() {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
   const [defaultFolderResolved, setDefaultFolderResolved] = useState(false);
+
+  // Instrumentation: emit inbox.filter_changed whenever any filter-chip state
+  // changes. Skip first render (initial state is not a user change). One event
+  // per change rather than one per chip so analytics see a single "filters
+  // touched" signal with the full active-chip set.
+  const filtersInitializedRef = useRef(false);
+  useEffect(() => {
+    if (!filtersInitializedRef.current) {
+      filtersInitializedRef.current = true;
+      return;
+    }
+    const active: string[] = [];
+    if (assignFilter !== "all") active.push(`assign:${assignFilter}`);
+    if (staleFilter) active.push("stale");
+    if (failedFilter) active.push("failed");
+    if (autoHandledFilter) active.push("auto_handled");
+    if (clientsOnlyFilter) active.push("clients_only");
+    if (handledFilter) active.push("handled");
+    events.emit("inbox.filter_changed", {
+      level: "user_action",
+      payload: { chips_active: active, count: active.length },
+    });
+  }, [assignFilter, staleFilter, failedFilter, autoHandledFilter, clientsOnlyFilter, handledFilter]);
+
+  // Instrumentation: emit inbox.folder_viewed whenever the selected folder
+  // changes. Also skips initial render.
+  const folderInitializedRef = useRef(false);
+  useEffect(() => {
+    if (!folderInitializedRef.current) {
+      folderInitializedRef.current = true;
+      return;
+    }
+    events.emit("inbox.folder_viewed", {
+      level: "user_action",
+      payload: {
+        folder_id: selectedFolderId,
+        folder_key: selectedFolderKey,
+      },
+    });
+  }, [selectedFolderId, selectedFolderKey]);
 
   // Set default folder to first custom folder (e.g., Clients) if one exists
   useEffect(() => {

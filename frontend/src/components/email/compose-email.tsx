@@ -71,7 +71,7 @@ interface EmailTemplate {
 // --- Component ---
 
 export function ComposeEmail() {
-  const { isOpen, isMinimized, options, closeCompose, toggleMinimize } = useCompose();
+  const { isOpen, isMinimized, options, closeCompose, closeComposeAfterSend, toggleMinimize } = useCompose();
 
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
@@ -270,7 +270,7 @@ export function ComposeEmail() {
 
       toast.success("Email sent");
       if (options.onSent) options.onSent();
-      closeCompose();
+      closeComposeAfterSend();
     } catch (e: unknown) {
       const err = e as { message?: string; detail?: string | { message?: string } };
       const detailMsg = typeof err.detail === "string" ? err.detail : err.detail?.message;

@@ -13,6 +13,7 @@ import { DeepBlueTrigger } from "@/components/deepblue/deepblue-trigger";
 import { Sidebar } from "@/components/layout/sidebar";
 import { ActiveVisitBanner } from "@/components/layout/active-visit-banner";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
+import { PageEmitter } from "@/components/events/page-emitter";
 import { Code2 } from "lucide-react";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -72,6 +73,7 @@ export default function DashboardLayout({
               <ComposeEmail />
               <DeepBlueTrigger />
               <DeepBlueSheet />
+              <PageEmitter />
             </DeepBlueProvider>
           </ComposeProvider>
         </DevModeProvider>

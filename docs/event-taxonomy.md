@@ -310,6 +310,15 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | `error.frontend_unhandled` | error | — | Payload: `{route, error_class, short_error, user_agent_class}`. |
 | `platform_event.oversized_payload` | error | — | Emit helper truncated an over-8KB payload. Payload: `{original_event_type, attempted_size_bytes, truncated: true}`. Flags taxonomy violations so we find them. |
 
+### 8.12b Meta / platform lifecycle
+
+Events emitted by the platform itself about its own housekeeping. Rare but useful for ops monitoring.
+
+| Event | Level | Expected entity_refs | Notes |
+|---|---|---|---|
+| `system.partition.created` | system_action | — | APScheduler's partition_manager created next month's `platform_events_YYYY_MM` partition. Payload: `{partition_name, range_start, range_end}`. `organization_id` is null (platform-level). |
+| `system.retention_purge.completed` | system_action | — | Daily retention-purge run finished. Payload: `{orgs_processed, rows_purged_total, duration_ms}`. `organization_id` is null (aggregated across orgs). |
+
 ### 8.13 Activation funnel (org-scoped milestones)
 
 The SaaS "time-to-value" funnel. Each event fires once per org, first time the milestone is hit. Rollups feed onboarding dashboards and TTV measurement.

@@ -101,12 +101,23 @@ CREATE INDEX idx_platform_events_type_created
     ON platform_events (event_type, created_at DESC);
 CREATE INDEX idx_platform_events_entity_refs
     ON platform_events USING GIN (entity_refs);
-CREATE UNIQUE INDEX idx_platform_events_idempotency
+
+-- Idempotency lookup — NON-UNIQUE. Postgres requires unique indexes on
+-- partitioned tables to include the partition key; a composite unique
+-- on (organization_id, client_emit_id, created_at) doesn't give us the
+-- semantics we want because retries get a new server-time created_at.
+-- Solution: app-level check-then-insert in PlatformEventService.emit()
+-- (see §5.1). Index here serves the lookup; uniqueness enforced in code.
+CREATE INDEX idx_platform_events_client_emit_id
     ON platform_events (organization_id, client_emit_id)
     WHERE client_emit_id IS NOT NULL;
-CREATE INDEX idx_platform_events_level_created
-    ON platform_events (level, created_at DESC)
-    WHERE level = 'error';                  -- partial index — errors are rare, want them fast
+
+-- Error path — partial index keeps errors (rare) fast to query.
+-- Level column omitted from key columns because WHERE clause already
+-- constrains to level='error'; saves disk.
+CREATE INDEX idx_platform_events_error_created
+    ON platform_events (created_at DESC)
+    WHERE level = 'error';
 
 -- 4.1.d: initial partitions — current + 3 future months
 -- Written as a DO block for the migration; partition_manager.py handles subsequent months.
@@ -262,7 +273,26 @@ class PlatformEventService:
             session_id = session_id or _current_session_id()
             job_run_id = job_run_id or _current_job_run_id()
 
-            # 3. Insert
+            # 3. Idempotency: app-level check-then-insert. We can't use
+            # ON CONFLICT because partitioned tables require unique indexes
+            # to include the partition key — see §4.1.c.
+            # Small race window (two concurrent emits with identical
+            # client_emit_id) is acceptable per the "rare duplicates OK"
+            # philosophy; same client_emit_id means same emit call, not
+            # a true concurrent race in practice.
+            if client_emit_id:
+                existing = await db.execute(
+                    text("""
+                        SELECT 1 FROM platform_events
+                        WHERE organization_id = :org AND client_emit_id = :cid
+                        LIMIT 1
+                    """),
+                    {"org": organization_id, "cid": client_emit_id},
+                )
+                if existing.first() is not None:
+                    return  # duplicate — silently skip
+
+            # 4. Insert
             await db.execute(
                 text("""
                     INSERT INTO platform_events
@@ -271,7 +301,6 @@ class PlatformEventService:
                      request_id, session_id, job_run_id, client_emit_id, created_at)
                     VALUES (:id, :org, :actor, :acting, :role, :atype, :aagent,
                             :etype, :level, :refs, :payload, :rid, :sid, :jid, :cid, NOW())
-                    ON CONFLICT (organization_id, client_emit_id) DO NOTHING
                 """),
                 {
                     "id": str(uuid.uuid4()),
@@ -798,9 +827,10 @@ Ordered commits, each independently deployable and verifiable:
 8. **Activation funnel tracker** — one-per-org-ever guard + milestone checkpoints.
 9. **Backfill script + cutover** — run against production.
 10. **APScheduler jobs: partition manager + retention purge** — enable.
-11. **Purge-on-request endpoint + `data_deletion_requests` table**.
-12. **Completeness audit script + CI integration** — fails build if undocumented mutations.
-13. **Phase 1 DoD verification** — 11-item checklist from taxonomy §16 walked through and confirmed.
+11. **Purge-on-request endpoint** — `POST /v1/admin/users/{id}/purge-events`. Writes to the `data_deletion_requests` audit table (already created in Step 1). Updates `platform_events` to null identifiers.
+12. **Admin read-only event query endpoint** — `GET /v1/admin/events` for ad-hoc debugging + future Sonar consumption. Filter params: `org_id`, `event_type`, `from`, `to`, `entity_ref`, `limit`. Platform-admin gated.
+13. **Completeness audit script + CI integration** — fails build if undocumented mutations.
+14. **Phase 1 DoD verification** — 11-item checklist from taxonomy §16 walked through and confirmed.
 
 Each step gets its own commit message + deploy via `scripts/deploy.sh`. After each step, verify via a targeted query (e.g., after step 4: `SELECT count(*), event_type FROM platform_events WHERE event_type LIKE 'thread.%' GROUP BY event_type`).
 

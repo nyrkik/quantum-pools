@@ -55,7 +55,14 @@ class ChemicalService:
             raise NotFoundError("Chemical reading not found")
         return reading
 
-    async def create(self, org_id: str, pool_gallons: Optional[int] = None, **kwargs) -> ChemicalReading:
+    async def create(
+        self,
+        org_id: str,
+        pool_gallons: Optional[int] = None,
+        actor=None,
+        source: str = "manual",
+        **kwargs,
+    ) -> ChemicalReading:
         reading = ChemicalReading(id=str(uuid.uuid4()), organization_id=org_id, **kwargs)
 
         # Auto-fetch pool_gallons: prefer WF, fall back to property
@@ -79,6 +86,17 @@ class ChemicalService:
 
         self.db.add(reading)
         await self.db.flush()
+
+        # Instrumentation: chemical_reading.logged + any out-of-range events.
+        # Must run AFTER flush so reading.id is populated, BEFORE commit so
+        # the emit shares the txn with the reading insert.
+        from src.services.events.chemistry import (
+            emit_chemical_reading_logged,
+            emit_chemistry_out_of_range_events,
+        )
+        await emit_chemical_reading_logged(self.db, reading, source=source, actor=actor)
+        await emit_chemistry_out_of_range_events(self.db, reading, actor=actor)
+
         await self.db.refresh(reading)
         return reading
 

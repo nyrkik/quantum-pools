@@ -388,8 +388,14 @@ async def create_reading(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = ChemicalService(db)
-    reading = await svc.create(ctx.organization_id, **body.model_dump())
+    reading = await svc.create(
+        ctx.organization_id,
+        actor=actor_from_org_ctx(ctx),
+        source="manual",
+        **body.model_dump(),
+    )
     return ChemicalReadingResponse.model_validate(reading)
 
 

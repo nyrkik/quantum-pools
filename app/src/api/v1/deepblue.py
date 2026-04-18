@@ -964,6 +964,21 @@ async def confirm_log_reading(
         notes=req.notes,
     )
     db.add(reading)
+    await db.flush()
+
+    # Instrumentation — user confirmed a DeepBlue-proposed reading via chat.
+    # Attribute to the user (they confirmed) with source="deepblue" so the
+    # event stream distinguishes DeepBlue-originated readings from manual
+    # entry or vision-extracted test strips.
+    from src.services.events.chemistry import (
+        emit_chemical_reading_logged,
+        emit_chemistry_out_of_range_events,
+    )
+    from src.services.events.actor_factory import actor_from_org_ctx
+    actor = actor_from_org_ctx(ctx)
+    await emit_chemical_reading_logged(db, reading, source="deepblue", actor=actor)
+    await emit_chemistry_out_of_range_events(db, reading, actor=actor)
+
     await db.commit()
     return {"reading_id": reading.id, "saved": True}
 

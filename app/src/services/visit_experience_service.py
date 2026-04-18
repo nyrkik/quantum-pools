@@ -327,6 +327,19 @@ class VisitExperienceService:
 
         self.db.add(reading)
         await self.db.flush()
+
+        # Instrumentation — source="visit" attributes the reading to the
+        # tech-completed visit workflow (distinct from manual /readings
+        # POST or deepblue chat). Actor is system here because the service
+        # method doesn't take a caller context; the visit itself identifies
+        # the tech via visit.assigned_to.
+        from src.services.events.chemistry import (
+            emit_chemical_reading_logged,
+            emit_chemistry_out_of_range_events,
+        )
+        await emit_chemical_reading_logged(self.db, reading, source="visit")
+        await emit_chemistry_out_of_range_events(self.db, reading)
+
         await self.db.refresh(reading)
         return _reading_to_dict(reading)
 

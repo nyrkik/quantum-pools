@@ -58,21 +58,10 @@ export function PageEmitter() {
   useEffect(() => {
     if (!pathname) return;
 
-    // Emit page.exited for the PREVIOUS page, if it was dwell-tracked.
-    const prev = currentRef.current;
-    if (prev && prev.path !== pathname && isDwellTracked(prev.path)) {
-      const dwellMs = Date.now() - prev.enteredAt;
-      events.emit("page.exited", {
-        level: "user_action",
-        payload: {
-          path: normalizeRouteTemplate(prev.path),
-          raw_path: prev.path,
-          dwell_ms: dwellMs,
-        },
-      });
-    }
-
-    // Emit page.viewed for the CURRENT page.
+    // Emit page.viewed for the CURRENT page. (page.exited for the previous
+    // page is handled by the cleanup function below — React runs cleanup
+    // BEFORE re-running the effect, so we don't need to duplicate the
+    // "exit-previous-page" logic in this body.)
     events.emit("page.viewed", {
       level: "user_action",
       payload: {
@@ -83,8 +72,10 @@ export function PageEmitter() {
 
     currentRef.current = { path: pathname, enteredAt: Date.now() };
 
-    // On unmount (tab close, SPA logout-redirect), emit final page.exited
-    // if on a dwell-tracked surface.
+    // Cleanup fires on: pathname change (React invokes the prior effect's
+    // cleanup before re-running), component unmount, tab close. In all
+    // three cases, emit page.exited for whatever page we're currently on
+    // if it's dwell-tracked.
     return () => {
       const state = currentRef.current;
       if (state && state.path === pathname && isDwellTracked(pathname)) {

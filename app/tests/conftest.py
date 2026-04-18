@@ -56,16 +56,48 @@ _TestSessionLocal = async_sessionmaker(_test_engine, class_=AsyncSession, expire
 _SCHEMA_READY = False
 
 
+def _assert_test_database():
+    """Safety rail: refuse to drop schema on anything other than a test DB.
+
+    The test DB URL must contain 'test' in the database name. Without this
+    check, a misconfigured TEST_DATABASE_URL could DROP SCHEMA on production.
+    """
+    url = os.environ["DATABASE_URL"]
+    # Extract the database name after the last '/'
+    db_name = url.rsplit("/", 1)[-1].split("?", 1)[0]
+    if "test" not in db_name.lower():
+        raise RuntimeError(
+            f"Refusing to run tests against database '{db_name}' — "
+            f"name must contain 'test'. Check TEST_DATABASE_URL."
+        )
+
+
 async def _ensure_schema():
-    """Create schema once per process. We don't drop_all because the model
-    has circular FKs (estimate_approvals ↔ invoices) that confuse SQLAlchemy's
-    DROP ordering. Instead we create_all (a no-op for existing tables) and
-    TRUNCATE CASCADE between tests for isolation."""
+    """Drop + recreate schema once per process.
+
+    We DROP SCHEMA public CASCADE then CREATE SCHEMA public — this sidesteps
+    the circular-FK problem (estimate_approvals ↔ invoices) that prevents
+    SQLAlchemy's Base.metadata.drop_all from working, while guaranteeing
+    the test DB always matches the current model state.
+
+    Previous approach (create_all only, no drop) silently let column
+    additions drift out of sync with prod schema — discovered 2026-04-18
+    when `invoices.internal_notes` was missing from the test DB.
+
+    Cost: ~5-10 seconds at session start. Runs once per pytest process,
+    amortized across all tests in the run.
+    """
     global _SCHEMA_READY
     if _SCHEMA_READY:
         return
+    _assert_test_database()
     import src.models  # noqa: F401  — triggers all model imports for metadata
+    from sqlalchemy import text
     async with _test_engine.begin() as conn:
+        # Drop everything, then rebuild from current model metadata.
+        await conn.execute(text("DROP SCHEMA public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
         await conn.run_sync(Base.metadata.create_all)
     _SCHEMA_READY = True
 

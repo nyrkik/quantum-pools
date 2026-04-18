@@ -112,6 +112,7 @@ async def get_thread(
     await service.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
 
     # Instrumentation: thread.opened — a user viewed the thread detail.
+    # get_db auto-commits on successful return — no explicit commit needed.
     await PlatformEventService.emit(
         db=db,
         event_type="thread.opened",
@@ -120,7 +121,6 @@ async def get_thread(
         organization_id=ctx.organization_id,
         entity_refs={"thread_id": thread_id},
     )
-    await db.commit()
 
     return result
 

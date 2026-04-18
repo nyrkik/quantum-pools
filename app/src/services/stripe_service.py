@@ -290,6 +290,16 @@ class StripeService:
         inv_svc = InvoiceService(self.db)
         await inv_svc.record_payment(invoice, amount_total)
 
+        # Activation funnel — first-payment-received (via Stripe Checkout)
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_payment_received",
+            organization_id=org_id,
+            entity_refs={"customer_id": invoice.customer_id, "invoice_id": invoice.id},
+            source="stripe_checkout",
+        )
+
         await self.db.commit()
         logger.info(f"Payment recorded: ${amount_total:.2f} for invoice {invoice.invoice_number} (intent: {payment_intent_id})")
 
@@ -341,6 +351,16 @@ class StripeService:
 
         inv_svc = InvoiceService(self.db)
         await inv_svc.record_payment(invoice, amount)
+
+        # Activation funnel — first-payment-received (via Stripe AutoPay webhook)
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_payment_received",
+            organization_id=invoice.organization_id,
+            entity_refs={"customer_id": invoice.customer_id, "invoice_id": invoice.id},
+            source="stripe_autopay_webhook",
+        )
 
         # Update autopay attempt record
         attempt = (await self.db.execute(
@@ -493,6 +513,16 @@ class StripeService:
 
         inv_svc = InvoiceService(self.db)
         await inv_svc.record_payment(invoice, amount)
+
+        # Activation funnel — first-payment-received (via _record_autopay_payment)
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_payment_received",
+            organization_id=invoice.organization_id,
+            entity_refs={"customer_id": customer.id, "invoice_id": invoice.id},
+            source="stripe_autopay_internal",
+        )
 
         # Reset dunning
         customer.autopay_failure_count = 0

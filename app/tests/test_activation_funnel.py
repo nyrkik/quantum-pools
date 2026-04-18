@@ -264,6 +264,58 @@ async def test_invoice_send_real_invoice_fires_activation(
 
 
 @pytest.mark.asyncio
+async def test_estimate_conversion_fires_first_invoice_sent(
+    db_session, org_a, event_recorder
+):
+    """When an estimate gets converted to an invoice via the API
+    /invoices/{id}/convert-to-invoice path, that's the org's first sent
+    invoice if they had no prior — activation.first_invoice_sent should
+    fire from that path even though it bypasses InvoiceService.send.
+
+    We test the core emit path (not the full HTTP route), since the
+    estimate-conversion endpoint is thin and the activation logic lives
+    in the emit_if_first helper + the source tag."""
+    await emit_if_first(
+        db_session,
+        "activation.first_invoice_sent",
+        organization_id=org_a.id,
+        entity_refs={"invoice_id": "inv-1"},
+        source="estimate_conversion",
+    )
+    await db_session.commit()
+    event = await event_recorder.assert_emitted("activation.first_invoice_sent")
+    assert event["payload"]["source"] == "estimate_conversion"
+
+
+@pytest.mark.asyncio
+async def test_stripe_source_variants_all_count_as_first_payment(
+    db_session, org_a, event_recorder
+):
+    """The 3 Stripe creation sites each pass a different `source`
+    (stripe_checkout / stripe_autopay_webhook / stripe_autopay_internal),
+    but they all count toward the same activation.first_payment_received
+    milestone — only ONE fires per org ever."""
+    first = await emit_if_first(
+        db_session, "activation.first_payment_received",
+        organization_id=org_a.id, source="stripe_checkout",
+    )
+    await db_session.commit()
+    second = await emit_if_first(
+        db_session, "activation.first_payment_received",
+        organization_id=org_a.id, source="stripe_autopay_webhook",
+    )
+    third = await emit_if_first(
+        db_session, "activation.first_payment_received",
+        organization_id=org_a.id, source="stripe_autopay_internal",
+    )
+    await db_session.commit()
+    assert (first, second, third) == (True, False, False)
+    events = await event_recorder.all_of_type("activation.first_payment_received")
+    assert len(events) == 1
+    assert events[0]["payload"]["source"] == "stripe_checkout"
+
+
+@pytest.mark.asyncio
 async def test_auth_service_register_fires_account_created(
     db_session, event_recorder
 ):

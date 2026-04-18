@@ -549,6 +549,18 @@ async def convert_to_invoice(
     invoice.converted_by = user_name
     invoice.converted_at = datetime.now(timezone.utc)
     await log_job_activity(db, invoice_id, f"Estimate {old_number} converted to invoice {invoice.invoice_number}")
+
+    # Activation funnel — if the org's first sent invoice was created via
+    # estimate→invoice conversion (not InvoiceService.send), catch it here.
+    from src.services.events.activation_tracker import emit_if_first
+    await emit_if_first(
+        db,
+        "activation.first_invoice_sent",
+        organization_id=ctx.organization_id,
+        entity_refs={"invoice_id": invoice.id},
+        source="estimate_conversion",
+    )
+
     await db.commit()
     await db.refresh(invoice)
     return _invoice_to_response(invoice)

@@ -50,6 +50,41 @@ INTERNAL_PATTERNS = ["sapphire-pools.com", "sapphire_pools", "quantumpoolspro.co
 # Gratitude patterns removed — AI triage handles all edge cases now
 
 
+async def _emit_agent_message_received(db, agent_msg, had_attachments: bool, has_cc: bool):
+    """Emit `agent_message.received` for a newly-created inbound AgentMessage.
+
+    Called from each of the 3 AgentMessage-creation branches in
+    process_incoming_email. Must be invoked AFTER db.flush() so agent_msg.id
+    is populated, and BEFORE db.commit() so the event shares the txn.
+
+    Actor is system — inbound emails don't have a user actor. Event is a
+    system_action (the backend processed an incoming webhook).
+    """
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_system
+
+    provider = "gmail" if (agent_msg.email_uid or "").startswith("gmail-") else "webhook"
+    refs = {
+        "thread_id": agent_msg.thread_id,
+        "agent_message_id": agent_msg.id,
+    }
+    if agent_msg.matched_customer_id:
+        refs["customer_id"] = agent_msg.matched_customer_id
+    await PlatformEventService.emit(
+        db=db,
+        event_type="agent_message.received",
+        level="system_action",
+        actor=actor_system(),
+        organization_id=agent_msg.organization_id,
+        entity_refs=refs,
+        payload={
+            "provider": provider,
+            "had_attachments": had_attachments,
+            "has_cc": has_cc,
+        },
+    )
+
+
 async def _persist_inbound_attachments(db, msg, agent_message_id: str, organization_id: str) -> None:
     """Walk an email.message.EmailMessage and persist any attachments as
     MessageAttachment rows + files on disk.
@@ -435,6 +470,12 @@ async def process_incoming_email(
                 delivered_to=delivered_to_addr,
             )
             db.add(agent_msg)
+            await db.flush()
+            await _emit_agent_message_received(
+                db, agent_msg,
+                had_attachments=bool(getattr(msg, "attachments", None)),
+                has_cc=bool(msg.get("Cc") if hasattr(msg, "get") else False),
+            )
             await db.commit()
         await update_thread_status(thread.id)
         return
@@ -474,6 +515,12 @@ async def process_incoming_email(
                     delivered_to=delivered_to_addr,
                 )
                 db.add(agent_msg)
+                await db.flush()
+                await _emit_agent_message_received(
+                    db, agent_msg,
+                    had_attachments=bool(getattr(msg, "attachments", None)),
+                    has_cc=bool(msg.get("Cc") if hasattr(msg, "get") else False),
+                )
                 await db.commit()
 
                 # Route spam + auto_reply to the Spam system folder unless the
@@ -538,6 +585,12 @@ async def process_incoming_email(
         )
         db.add(agent_msg)
         await db.flush()
+
+        await _emit_agent_message_received(
+            db, agent_msg,
+            had_attachments=bool(getattr(msg, "attachments", None)),
+            has_cc=bool(msg.get("Cc") if hasattr(msg, "get") else False),
+        )
 
         # Persist any inbound attachments as MessageAttachment rows so the inbox
         # reading pane can render images/docs the customer sent us.

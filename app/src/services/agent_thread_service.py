@@ -675,8 +675,39 @@ class AgentThreadService:
         await self.db.commit()
         return {"archived": True}
 
-    async def delete_thread(self, org_id: str, thread_id: str) -> dict:
+    async def delete_thread(self, org_id: str, thread_id: str, actor=None) -> dict:
         """Permanently delete a thread and all its messages."""
+        from src.services.events.platform_event_service import PlatformEventService
+        from src.services.events.actor_factory import actor_system
+
+        # Capture thread metadata for the audit event BEFORE we destroy it.
+        thread_row = await self.db.execute(
+            select(AgentThread).where(
+                AgentThread.id == thread_id,
+                AgentThread.organization_id == org_id,
+            )
+        )
+        thread_obj = thread_row.scalar_one_or_none()
+        status_at_delete = thread_obj.status if thread_obj else None
+        message_count_at_delete = thread_obj.message_count if thread_obj else 0
+
+        # Emit the deleted event BEFORE the destructive ops so the audit
+        # trail survives even though the thread itself won't. Transactional
+        # semantics still apply — if the delete fails downstream, the event
+        # rolls back with it.
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="thread.deleted",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"thread_id": thread_id},
+            payload={
+                "message_count": message_count_at_delete,
+                "status_at_delete": status_at_delete,
+            },
+        )
+
         # Get message IDs in this thread
         msg_result = await self.db.execute(
             select(AgentMessage.id).where(

@@ -196,9 +196,20 @@ class ThreadActionService:
             )
             return {"error": "send_failed", "detail": f"{type(exc).__name__}: {exc}"}
 
-    async def dismiss_thread(self, org_id: str, thread_id: str, user_name: str) -> dict:
+    async def dismiss_thread(self, org_id: str, thread_id: str, user_name: str, actor=None) -> dict:
         """Dismiss all pending messages in a thread."""
         from src.services.agents.thread_manager import update_thread_status
+        from src.services.events.platform_event_service import PlatformEventService
+        from src.services.events.actor_factory import actor_system
+
+        # Load the thread to capture prior status for the event payload.
+        prior_status_row = await self.db.execute(
+            select(AgentThread.status).where(
+                AgentThread.id == thread_id,
+                AgentThread.organization_id == org_id,
+            )
+        )
+        prior_status = prior_status_row.scalar_one_or_none()
 
         result = await self.db.execute(
             select(AgentMessage).where(
@@ -209,6 +220,7 @@ class ThreadActionService:
         )
         from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
         learner = AgentLearningService(self.db)
+        dismissed_count = 0
         for msg in result.scalars().all():
             # Record rejection for learning
             if msg.draft_response:
@@ -222,6 +234,23 @@ class ThreadActionService:
             msg.status = "ignored"
             msg.notes = (msg.notes or "") + f"\nDismissed by {user_name}"
             msg.notes = msg.notes.strip()
+            dismissed_count += 1
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="thread.status_changed",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"thread_id": thread_id},
+            payload={
+                "from": prior_status,
+                "to": "ignored",
+                "reason": "dismissed",
+                "messages_dismissed": dismissed_count,
+            },
+        )
+
         await self.db.commit()
         await update_thread_status(thread_id)
         return {"dismissed": True}

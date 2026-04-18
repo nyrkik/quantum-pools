@@ -57,6 +57,7 @@ EVENT_CATALOG: dict[str, EventSpec] = {
     "thread.opened": EventSpec(levels=_U, frontend_emittable=True),
     "thread.closed": EventSpec(levels=_U, frontend_emittable=True),
     "thread.archived": EventSpec(levels=_U, frontend_emittable=True),
+    "thread.deleted": EventSpec(levels=_U, frontend_emittable=True),
     "thread.snoozed": EventSpec(levels=_U, frontend_emittable=True),
     "thread.unsnoozed": EventSpec(levels=_S),
     "thread.assigned": EventSpec(levels=_U, frontend_emittable=True),

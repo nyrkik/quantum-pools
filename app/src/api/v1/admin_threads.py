@@ -157,11 +157,13 @@ async def dismiss_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Dismiss all pending messages in a thread."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     service = ThreadActionService(db)
     result = await service.dismiss_thread(
         org_id=ctx.organization_id,
         thread_id=thread_id,
         user_name=f"{ctx.user.first_name} {ctx.user.last_name}",
+        actor=actor_from_org_ctx(ctx),
     )
     await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "dismissed"})
     return result
@@ -191,8 +193,12 @@ async def delete_thread(
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a thread and all messages. Owner only."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     service = AgentThreadService(db)
-    result = await service.delete_thread(org_id=ctx.organization_id, thread_id=thread_id)
+    result = await service.delete_thread(
+        org_id=ctx.organization_id, thread_id=thread_id,
+        actor=actor_from_org_ctx(ctx),
+    )
     await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "deleted"})
     return result
 

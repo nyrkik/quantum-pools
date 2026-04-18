@@ -385,6 +385,256 @@ async def test_inbound_helper_detects_gmail_provider(
 
 
 @pytest.mark.asyncio
+async def test_classified_emits_agent_action_with_category_payload(
+    db_session, org_a, seeded_thread
+):
+    """After classification lands on an AgentMessage, emit
+    agent_message.classified with the chosen category/urgency/confidence.
+    Actor is the email_classifier agent, level=agent_action."""
+    from src.models.agent_message import AgentMessage
+    from src.services.agents.orchestrator import _emit_agent_message_classified
+    from tests.fixtures.event_recorder import EventRecorder
+    import uuid as _uuid
+
+    agent_msg = AgentMessage(
+        id=str(_uuid.uuid4()),
+        organization_id=org_a.id,
+        email_uid="webhook-cls",
+        direction="inbound",
+        from_email="sender@test.com",
+        to_email="recipient@test.com",
+        subject="Pool issue",
+        body="There's a problem",
+        thread_id=seeded_thread,
+        category="service_request",
+        urgency="high",
+        status="pending",
+    )
+    db_session.add(agent_msg)
+    await db_session.flush()
+
+    await _emit_agent_message_classified(db_session, agent_msg, classification_confidence="high")
+    await db_session.commit()
+
+    recorder = EventRecorder(db_session)
+    event = await recorder.assert_emitted(
+        "agent_message.classified",
+        agent_message_id=agent_msg.id,
+    )
+    assert event["level"] == "agent_action"
+    assert event["actor_type"] == "agent"
+    assert event["actor_agent_type"] == "email_classifier"
+    assert event["payload"]["category"] == "service_request"
+    assert event["payload"]["urgency"] == "high"
+    assert event["payload"]["confidence"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_classified_skipped_when_no_category(
+    db_session, org_a, seeded_thread
+):
+    """If classification didn't produce a category, emit nothing —
+    don't record a classification that didn't happen."""
+    from src.models.agent_message import AgentMessage
+    from src.services.agents.orchestrator import _emit_agent_message_classified
+    from tests.fixtures.event_recorder import EventRecorder
+    import uuid as _uuid
+
+    agent_msg = AgentMessage(
+        id=str(_uuid.uuid4()),
+        organization_id=org_a.id,
+        email_uid="webhook-no-cls",
+        direction="inbound",
+        from_email="sender@test.com",
+        to_email="recipient@test.com",
+        subject="",
+        body="",
+        thread_id=seeded_thread,
+        category=None,  # unclassified
+        status="pending",
+    )
+    db_session.add(agent_msg)
+    await db_session.flush()
+
+    await _emit_agent_message_classified(db_session, agent_msg, classification_confidence=None)
+    await db_session.commit()
+
+    recorder = EventRecorder(db_session)
+    await recorder.assert_not_emitted("agent_message.classified", agent_message_id=agent_msg.id)
+
+
+@pytest.mark.asyncio
+async def test_customer_matched_emits_with_method_and_customer_ref(
+    db_session, org_a, seeded_thread
+):
+    from src.models.agent_message import AgentMessage
+    from src.models.customer import Customer
+    from src.services.agents.orchestrator import _emit_agent_message_customer_matched
+    from tests.fixtures.event_recorder import EventRecorder
+    import uuid as _uuid
+
+    cust = Customer(
+        id=str(_uuid.uuid4()),
+        organization_id=org_a.id,
+        first_name="Matched",
+        last_name="Cust",
+        email="m@test.com",
+        customer_type="residential",
+    )
+    db_session.add(cust)
+    await db_session.flush()
+
+    agent_msg = AgentMessage(
+        id=str(_uuid.uuid4()),
+        organization_id=org_a.id,
+        email_uid="webhook-matched",
+        direction="inbound",
+        from_email="m@test.com",
+        to_email="recipient@test.com",
+        subject="",
+        body="",
+        thread_id=seeded_thread,
+        matched_customer_id=cust.id,
+        status="pending",
+    )
+    db_session.add(agent_msg)
+    await db_session.flush()
+
+    await _emit_agent_message_customer_matched(db_session, agent_msg, match_method="email")
+    await db_session.commit()
+
+    recorder = EventRecorder(db_session)
+    event = await recorder.assert_emitted(
+        "agent_message.customer_matched",
+        agent_message_id=agent_msg.id,
+        customer_id=cust.id,
+    )
+    assert event["level"] == "agent_action"
+    assert event["actor_agent_type"] == "customer_matcher"
+    assert event["payload"]["method"] == "email"
+
+
+@pytest.mark.asyncio
+async def test_compose_sent_emits_user_action_events_on_success(
+    db_session, org_a, monkeypatch
+):
+    """compose_and_send emits compose.sent + agent_message.sent when the
+    provider send succeeds. Both carry the sender's user_id."""
+    from src.services.email_compose_service import EmailComposeService
+    from src.services.email_service import EmailResult
+
+    async def fake_send(self, *args, **kwargs):
+        return EmailResult(success=True, message_id="postmark-test-id")
+
+    monkeypatch.setattr(
+        "src.services.email_service.EmailService.send_agent_reply",
+        fake_send,
+        raising=True,
+    )
+
+    service = EmailComposeService(db_session)
+    out = await service.compose_and_send(
+        org_id=org_a.id,
+        to="customer@test.com",
+        subject="Test",
+        body="Hello",
+        sender_user_id="user-abc",
+        sender_name="Test User",
+    )
+    assert out["success"] is True
+
+    from tests.fixtures.event_recorder import EventRecorder
+    recorder = EventRecorder(db_session)
+
+    compose_sent = await recorder.assert_emitted("compose.sent")
+    assert compose_sent["level"] == "user_action"
+    assert compose_sent["actor_user_id"] == "user-abc"
+    assert compose_sent["payload"]["cc_added"] is False
+    assert compose_sent["payload"]["attachments"] == 0
+
+    agent_sent = await recorder.assert_emitted("agent_message.sent")
+    assert agent_sent["level"] == "user_action"
+    assert agent_sent["actor_user_id"] == "user-abc"
+
+
+@pytest.mark.asyncio
+async def test_compose_failed_emits_error_events_and_no_success_events(
+    db_session, org_a, monkeypatch
+):
+    """Provider failure must fire agent_message.send_failed +
+    error.email_send_failed — and NOT compose.sent / agent_message.sent."""
+    from src.services.email_compose_service import EmailComposeService
+    from src.services.email_service import EmailResult
+
+    async def fake_send(self, *args, **kwargs):
+        return EmailResult(success=False, error="Postmark rejected: invalid sender")
+
+    monkeypatch.setattr(
+        "src.services.email_service.EmailService.send_agent_reply",
+        fake_send,
+        raising=True,
+    )
+
+    service = EmailComposeService(db_session)
+    out = await service.compose_and_send(
+        org_id=org_a.id,
+        to="customer@test.com",
+        subject="Test",
+        body="Hello",
+        sender_user_id="user-xyz",
+    )
+    assert out["success"] is False
+
+    from tests.fixtures.event_recorder import EventRecorder
+    recorder = EventRecorder(db_session)
+
+    # Both error events fire
+    send_failed = await recorder.assert_emitted("agent_message.send_failed")
+    assert send_failed["level"] == "error"
+    assert "invalid sender" in send_failed["payload"]["short_error"]
+
+    err = await recorder.assert_emitted("error.email_send_failed")
+    assert err["level"] == "error"
+    assert err["payload"]["provider"] == "postmark"
+
+    # Success events must NOT fire
+    await recorder.assert_not_emitted("compose.sent")
+    await recorder.assert_not_emitted("agent_message.sent")
+
+
+@pytest.mark.asyncio
+async def test_customer_matched_skipped_when_no_match(
+    db_session, org_a, seeded_thread
+):
+    from src.models.agent_message import AgentMessage
+    from src.services.agents.orchestrator import _emit_agent_message_customer_matched
+    from tests.fixtures.event_recorder import EventRecorder
+    import uuid as _uuid
+
+    agent_msg = AgentMessage(
+        id=str(_uuid.uuid4()),
+        organization_id=org_a.id,
+        email_uid="webhook-unmatched",
+        direction="inbound",
+        from_email="unknown@test.com",
+        to_email="recipient@test.com",
+        subject="",
+        body="",
+        thread_id=seeded_thread,
+        matched_customer_id=None,  # no match
+        status="pending",
+    )
+    db_session.add(agent_msg)
+    await db_session.flush()
+
+    await _emit_agent_message_customer_matched(db_session, agent_msg, match_method=None)
+    await db_session.commit()
+
+    recorder = EventRecorder(db_session)
+    await recorder.assert_not_emitted("agent_message.customer_matched", agent_message_id=agent_msg.id)
+
+
+@pytest.mark.asyncio
 async def test_inbound_helper_includes_customer_id_when_matched(
     db_session, org_a, seeded_thread
 ):

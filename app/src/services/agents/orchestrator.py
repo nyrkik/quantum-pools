@@ -117,6 +117,65 @@ async def _emit_agent_message_received(db, agent_msg, msg=None):
     )
 
 
+async def _emit_agent_message_classified(db, agent_msg, classification_confidence: str | None = None):
+    """Emit `agent_message.classified` after AI classification runs.
+
+    Called after AgentMessage is persisted with category + urgency set by
+    the classifier. Actor is agent (email_classifier). Safe to call for
+    messages with no category — we skip emission in that case.
+    """
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_agent
+
+    if not agent_msg.category:
+        return  # Not classified — nothing to record.
+
+    await PlatformEventService.emit(
+        db=db,
+        event_type="agent_message.classified",
+        level="agent_action",
+        actor=actor_agent("email_classifier"),
+        organization_id=agent_msg.organization_id,
+        entity_refs={
+            "thread_id": agent_msg.thread_id,
+            "agent_message_id": agent_msg.id,
+        },
+        payload={
+            "category": agent_msg.category,
+            "urgency": agent_msg.urgency,
+            "confidence": classification_confidence,
+        },
+    )
+
+
+async def _emit_agent_message_customer_matched(db, agent_msg, match_method: str | None):
+    """Emit `agent_message.customer_matched` when a customer was matched.
+
+    Skipped when no match was made. Actor is the customer_matcher agent.
+    """
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_agent
+
+    if not agent_msg.matched_customer_id:
+        return  # No match to record.
+
+    await PlatformEventService.emit(
+        db=db,
+        event_type="agent_message.customer_matched",
+        level="agent_action",
+        actor=actor_agent("customer_matcher"),
+        organization_id=agent_msg.organization_id,
+        entity_refs={
+            "thread_id": agent_msg.thread_id,
+            "agent_message_id": agent_msg.id,
+            "customer_id": agent_msg.matched_customer_id,
+        },
+        payload={
+            "method": match_method,
+        },
+    )
+
+
 async def _persist_inbound_attachments(db, msg, agent_message_id: str, organization_id: str) -> None:
     """Walk an email.message.EmailMessage and persist any attachments as
     MessageAttachment rows + files on disk.
@@ -504,6 +563,8 @@ async def process_incoming_email(
             db.add(agent_msg)
             await db.flush()
             await _emit_agent_message_received(db, agent_msg, msg=msg)
+            await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
+            await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
             await db.commit()
         await update_thread_status(thread.id)
         return
@@ -545,6 +606,8 @@ async def process_incoming_email(
                 db.add(agent_msg)
                 await db.flush()
                 await _emit_agent_message_received(db, agent_msg, msg=msg)
+                await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
+                await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
                 await db.commit()
 
                 # Route spam + auto_reply to the Spam system folder unless the
@@ -611,6 +674,8 @@ async def process_incoming_email(
         await db.flush()
 
         await _emit_agent_message_received(db, agent_msg, msg=msg)
+        await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
+        await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
 
         # Persist any inbound attachments as MessageAttachment rows so the inbox
         # reading pane can render images/docs the customer sent us.

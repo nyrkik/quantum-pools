@@ -216,12 +216,83 @@ class EmailComposeService:
             )
 
             # ── Step 3: Update status based on result ──
+            from src.services.events.platform_event_service import PlatformEventService, Actor
+            from src.services.events.actor_factory import actor_system
+
+            actor = Actor(actor_type="user", user_id=sender_user_id) if sender_user_id else actor_system()
+            refs = {
+                "thread_id": thread.id,
+                "agent_message_id": message.id,
+            }
+            if customer_id:
+                refs["customer_id"] = customer_id
+            if case_id:
+                refs["case_id"] = case_id
+            if job_id:
+                refs["job_id"] = job_id
+
             if result.success:
                 message.status = "sent"
                 message.sent_at = datetime.now(timezone.utc)
+
+                # User clicked Send and it landed — compose.sent is the user
+                # action; agent_message.sent is the system outcome.
+                await PlatformEventService.emit(
+                    db=self.db,
+                    event_type="compose.sent",
+                    level="user_action" if actor.actor_type == "user" else "system_action",
+                    actor=actor,
+                    organization_id=org_id,
+                    entity_refs=refs,
+                    payload={
+                        "edited_from_draft": False,  # Step 7 wires draft-correction detection
+                        "cc_added": bool(cc),
+                        "attachments": len(attachment_ids or []),
+                    },
+                )
+                await PlatformEventService.emit(
+                    db=self.db,
+                    event_type="agent_message.sent",
+                    level="user_action" if actor.actor_type == "user" else "system_action",
+                    actor=actor,
+                    organization_id=org_id,
+                    entity_refs=refs,
+                    payload={
+                        "draft_was_ai_generated": False,  # Step 7
+                        "edited_before_send": False,
+                    },
+                )
             else:
                 message.status = "failed"
                 message.delivery_error = (result.error or "unknown send error")[:500]
+
+                await PlatformEventService.emit(
+                    db=self.db,
+                    event_type="agent_message.send_failed",
+                    level="error",
+                    actor=actor,
+                    organization_id=org_id,
+                    entity_refs=refs,
+                    payload={
+                        "provider": "postmark",
+                        "error_class": type(result.error).__name__ if result.error else "unknown",
+                        "short_error": (result.error or "unknown")[:200],
+                    },
+                )
+                await PlatformEventService.emit(
+                    db=self.db,
+                    event_type="error.email_send_failed",
+                    level="error",
+                    actor=actor,
+                    organization_id=org_id,
+                    entity_refs=refs,
+                    payload={
+                        "provider": "postmark",
+                        "error_class": type(result.error).__name__ if result.error else "unknown",
+                        "short_error": (result.error or "unknown")[:200],
+                    },
+                )
+
             await self.db.commit()
             await update_thread_status(thread.id)
 

@@ -562,7 +562,9 @@ async def test_compose_failed_emits_error_events_and_no_success_events(
     db_session, org_a, monkeypatch
 ):
     """Provider failure must fire agent_message.send_failed +
-    error.email_send_failed — and NOT compose.sent / agent_message.sent."""
+    error.email_send_failed — and NOT compose.sent / agent_message.sent.
+    Error payload carries a grouped error_class (not str from type())
+    plus the verbatim short_error."""
     from src.services.email_compose_service import EmailComposeService
     from src.services.email_service import EmailResult
 
@@ -588,18 +590,32 @@ async def test_compose_failed_emits_error_events_and_no_success_events(
     from tests.fixtures.event_recorder import EventRecorder
     recorder = EventRecorder(db_session)
 
-    # Both error events fire
+    # Both error events fire with the grouped class
     send_failed = await recorder.assert_emitted("agent_message.send_failed")
     assert send_failed["level"] == "error"
     assert "invalid sender" in send_failed["payload"]["short_error"]
+    assert send_failed["payload"]["error_class"] == "invalid_sender_or_content"
 
     err = await recorder.assert_emitted("error.email_send_failed")
     assert err["level"] == "error"
     assert err["payload"]["provider"] == "postmark"
+    assert err["payload"]["error_class"] == "invalid_sender_or_content"
 
     # Success events must NOT fire
     await recorder.assert_not_emitted("compose.sent")
     await recorder.assert_not_emitted("agent_message.sent")
+
+
+def test_classify_send_error_groups_common_patterns():
+    from src.services.email_compose_service import _classify_send_error
+    assert _classify_send_error("Postmark rejected: invalid sender") == "invalid_sender_or_content"
+    assert _classify_send_error("401 Unauthorized") == "auth_error"
+    assert _classify_send_error("Rate limit exceeded") == "rate_limited"
+    assert _classify_send_error("550 user does not exist") == "bounce"
+    assert _classify_send_error("timeout after 30s") == "timeout"
+    assert _classify_send_error("DNS lookup failed") == "network_error"
+    assert _classify_send_error("something totally unexpected") == "send_error"
+    assert _classify_send_error("") == "unknown"
 
 
 @pytest.mark.asyncio

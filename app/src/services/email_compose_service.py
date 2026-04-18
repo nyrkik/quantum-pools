@@ -35,6 +35,32 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 from src.utils.thread_utils import normalize_subject as _normalize_subject, make_thread_key as _make_thread_key
 
 
+def _classify_send_error(short_error: str) -> str:
+    """Group raw Postmark/provider error strings into a small set of
+    dashboard-friendly classes. Callers see the full error in `short_error`;
+    `error_class` is for aggregation ("% of sends that failed due to
+    auth vs rate-limit vs bounce"). Defaults to a generic class when no
+    pattern matches — honest about not knowing beats a fake type name
+    like 'str'.
+    """
+    if not short_error:
+        return "unknown"
+    s = short_error.lower()
+    if any(k in s for k in ("invalid", "rejected", "malformed", "invalid sender", "from address")):
+        return "invalid_sender_or_content"
+    if any(k in s for k in ("auth", "unauthorized", "forbidden", "credentials", "token")):
+        return "auth_error"
+    if any(k in s for k in ("rate", "throttle", "quota", "limit")):
+        return "rate_limited"
+    if any(k in s for k in ("bounce", "undeliverable", "no such user", "550", "554")):
+        return "bounce"
+    if any(k in s for k in ("timeout", "timed out")):
+        return "timeout"
+    if any(k in s for k in ("dns", "network", "connection")):
+        return "network_error"
+    return "send_error"
+
+
 class EmailComposeService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -237,6 +263,9 @@ class EmailComposeService:
 
                 # User clicked Send and it landed — compose.sent is the user
                 # action; agent_message.sent is the system outcome.
+                # draft-correction / AI-origin fields intentionally absent
+                # until Step 7 wires them with real signal — better to omit
+                # than to emit always-False placeholders that corrupt analytics.
                 await PlatformEventService.emit(
                     db=self.db,
                     event_type="compose.sent",
@@ -245,7 +274,6 @@ class EmailComposeService:
                     organization_id=org_id,
                     entity_refs=refs,
                     payload={
-                        "edited_from_draft": False,  # Step 7 wires draft-correction detection
                         "cc_added": bool(cc),
                         "attachments": len(attachment_ids or []),
                     },
@@ -257,15 +285,18 @@ class EmailComposeService:
                     actor=actor,
                     organization_id=org_id,
                     entity_refs=refs,
-                    payload={
-                        "draft_was_ai_generated": False,  # Step 7
-                        "edited_before_send": False,
-                    },
+                    payload={},  # populated in Step 7 with draft-origin + edit signals
                 )
             else:
                 message.status = "failed"
                 message.delivery_error = (result.error or "unknown send error")[:500]
 
+                err_short = (result.error or "unknown")[:200]
+                err_payload = {
+                    "provider": "postmark",
+                    "error_class": _classify_send_error(err_short),
+                    "short_error": err_short,
+                }
                 await PlatformEventService.emit(
                     db=self.db,
                     event_type="agent_message.send_failed",
@@ -273,11 +304,7 @@ class EmailComposeService:
                     actor=actor,
                     organization_id=org_id,
                     entity_refs=refs,
-                    payload={
-                        "provider": "postmark",
-                        "error_class": type(result.error).__name__ if result.error else "unknown",
-                        "short_error": (result.error or "unknown")[:200],
-                    },
+                    payload=err_payload,
                 )
                 await PlatformEventService.emit(
                     db=self.db,
@@ -286,11 +313,7 @@ class EmailComposeService:
                     actor=actor,
                     organization_id=org_id,
                     entity_refs=refs,
-                    payload={
-                        "provider": "postmark",
-                        "error_class": type(result.error).__name__ if result.error else "unknown",
-                        "short_error": (result.error or "unknown")[:200],
-                    },
+                    payload=err_payload,
                 )
 
             await self.db.commit()

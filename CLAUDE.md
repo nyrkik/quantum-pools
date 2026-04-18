@@ -269,6 +269,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/inbox-folders-plan.md` | 3-phase inbox folders: folders + filter rules + Gmail label sync. **Remove when complete.** |
 | `docs/entity-connections-plan.md` | 5-phase plan to unify entity linking via ServiceCase hub, line-item case attribution, physical-work connections, equipment axis, discovery. Phase 1 shipped 2026-04-14. **Remove when complete.** |
 | `docs/ai-platform-plan.md` | 8-phase plan to rebuild QP around a unified AI platform: event instrumentation, agent_proposals, inbox summarizer, post-creation handlers, workflow_observer, and Sonar (dev-facing intelligence). Every phase has a "Why" block. **Remove when complete.** |
+| `docs/event-taxonomy.md` | Canonical catalog of event types for `platform_events`. Every new event added to code requires updating this doc in the same PR. Phase 0 of ai-platform-plan. **Lives as long as platform_events does** (not a "remove when complete" doc — permanent reference). |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |

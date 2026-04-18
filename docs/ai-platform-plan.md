@@ -686,7 +686,7 @@ Each phase goes through two gates: **Refinement spec** (detailed design written 
 
 | Phase | Refinement spec | Implementation | Notes |
 |---|---|---|---|
-| 0 — Decisions & taxonomy | Not started | — | This IS the refinement for Phase 1's event layer |
+| 0 — Decisions & taxonomy | Shipped 2026-04-18 | — | `docs/event-taxonomy.md` written; serves as Phase 1's spec |
 | 1 — Event instrumentation | Not started | Not started | Prerequisite for everything |
 | 2 — `agent_proposals` system | Not started | Not started | Includes DeepBlue migration |
 | 3 — Inbox summarizer | Not started | Not started | First proposal consumer; validates architecture |

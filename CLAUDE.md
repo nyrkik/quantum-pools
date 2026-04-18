@@ -123,12 +123,21 @@ After touching any email-sending path, send a test email to brian.parrotte@pm.me
 Nightly pg_dump + weekly restore-verification via Brian's crontab; ntfy on failure/staleness and on verify success. Runbook: `docs/backup-and-restore.md`.
 
 ### Testing
+
+**Backend (pytest):**
 - **Runner**: `pytest` from `app/` dir. Async via pytest-asyncio (auto mode, session-scoped event loop).
-- **Test DB**: `quantumpools_test` on port 7062; `create_all` on first run, TRUNCATE CASCADE between tests.
+- **Test DB**: `quantumpools_test` on port 7062; drops + recreates schema on each session start (`DROP SCHEMA public CASCADE` + `create_all`) so model changes never drift. TRUNCATE CASCADE between tests. Safety rail: DB name must contain "test".
 - **Run**: `cd /srv/quantumpools/app && /home/brian/00_MyProjects/QuantumPools/venv/bin/pytest tests/ -W ignore::DeprecationWarning`
-- **Coverage**: see `tests/` for current suite.
-- **When to add**: new security gate (auth/org filter), new send path, new shared failure-handling helper. Red-test-first for bug fixes.
-- **Fixtures** (`tests/conftest.py`): `db_session`, `org_a`, `org_b` (for isolation tests).
+- **Fixtures** (`tests/conftest.py`): `db_session`, `org_a`, `org_b`, `event_recorder` (re-exported from `tests/fixtures/event_recorder.py` for platform-events assertions).
+- **When to add**: new security gate (auth/org filter), new send path, new shared failure-handling helper, new emit path. Red-test-first for bug fixes.
+
+**Frontend (vitest + React Testing Library):**
+- **Runner**: `vitest` with jsdom. Added 2026-04-18 as Step 7b of the AI Platform rollout.
+- **Run**: `cd /srv/quantumpools/frontend && npm run test` (one-shot) or `npm run test:watch` (live).
+- **Setup**: `tests/setup.ts` installs `@testing-library/jest-dom` matchers + auto-cleanup. Path aliases (`@/*`) via Vite's native tsconfigPaths resolution.
+- **Test file convention**: `*.test.tsx` co-located with the component (e.g., `components/events/page-emitter.test.tsx`).
+- **When to add**: new components with lifecycle / state logic worth verifying (effect ordering, event emission, conditional rendering). Component rendering smoke isn't enough — test the observable behavior that matters.
+- **Npm install quirk**: use `--legacy-peer-deps` for dev-dependency installs (React 19 vs. `@emoji-mart/react`'s older peer range — project-wide).
 
 ### Documentation Alignment (MANDATORY)
 

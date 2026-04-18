@@ -287,6 +287,22 @@ async def test_delete_thread_without_actor_emits_system_action(
 # ---------------------------------------------------------------------------
 
 
+def _make_email(cc: str = "", with_attachment: bool = False):
+    """Tiny email.message helper for testing the orchestrator's emit helper."""
+    from email.message import EmailMessage
+    em = EmailMessage()
+    em["From"] = "sender@external.com"
+    em["To"] = "recipient@test.com"
+    em["Subject"] = "Test"
+    if cc:
+        em["Cc"] = cc
+    em.set_content("body")
+    if with_attachment:
+        em.add_attachment(b"hello", maintype="application", subtype="octet-stream",
+                          filename="test.bin")
+    return em
+
+
 @pytest.mark.asyncio
 async def test_inbound_agent_message_received_helper_populates_refs(
     db_session, org_a, seeded_thread
@@ -301,7 +317,7 @@ async def test_inbound_agent_message_received_helper_populates_refs(
 
     recorder = EventRecorder(db_session)
 
-    msg = AgentMessage(
+    agent_msg = AgentMessage(
         id=str(_uuid.uuid4()),
         organization_id=org_a.id,
         email_uid="webhook-abc",
@@ -314,16 +330,18 @@ async def test_inbound_agent_message_received_helper_populates_refs(
         matched_customer_id=None,
         status="pending",
     )
-    db_session.add(msg)
+    db_session.add(agent_msg)
     await db_session.flush()
 
-    await _emit_agent_message_received(db_session, msg, had_attachments=True, has_cc=False)
+    # Email with an attachment — helper should pick it up via walk()
+    email_obj = _make_email(with_attachment=True)
+    await _emit_agent_message_received(db_session, agent_msg, msg=email_obj)
     await db_session.commit()
 
     event = await recorder.assert_emitted(
         "agent_message.received",
         thread_id=seeded_thread,
-        agent_message_id=msg.id,
+        agent_message_id=agent_msg.id,
     )
     assert event["level"] == "system_action"
     assert event["actor_type"] == "system"
@@ -342,7 +360,7 @@ async def test_inbound_helper_detects_gmail_provider(
     from tests.fixtures.event_recorder import EventRecorder
     import uuid as _uuid
 
-    msg = AgentMessage(
+    agent_msg = AgentMessage(
         id=str(_uuid.uuid4()),
         organization_id=org_a.id,
         email_uid="gmail-xyz123",  # gmail- prefix → provider=gmail
@@ -354,14 +372,14 @@ async def test_inbound_helper_detects_gmail_provider(
         thread_id=seeded_thread,
         status="pending",
     )
-    db_session.add(msg)
+    db_session.add(agent_msg)
     await db_session.flush()
 
-    await _emit_agent_message_received(db_session, msg, had_attachments=False, has_cc=False)
+    await _emit_agent_message_received(db_session, agent_msg, msg=_make_email())
     await db_session.commit()
 
     recorder = EventRecorder(db_session)
-    event = await recorder.find("agent_message.received", agent_message_id=msg.id)
+    event = await recorder.find("agent_message.received", agent_message_id=agent_msg.id)
     assert event is not None
     assert event["payload"]["provider"] == "gmail"
 
@@ -389,7 +407,7 @@ async def test_inbound_helper_includes_customer_id_when_matched(
     db_session.add(cust)
     await db_session.flush()
 
-    msg = AgentMessage(
+    agent_msg = AgentMessage(
         id=str(_uuid.uuid4()),
         organization_id=org_a.id,
         email_uid="webhook-match",
@@ -402,14 +420,17 @@ async def test_inbound_helper_includes_customer_id_when_matched(
         matched_customer_id=cust.id,
         status="pending",
     )
-    db_session.add(msg)
+    db_session.add(agent_msg)
     await db_session.flush()
 
-    await _emit_agent_message_received(db_session, msg, had_attachments=False, has_cc=True)
+    # Email with a Cc — helper should detect via msg.get("Cc")
+    email_with_cc = _make_email(cc="another@test.com")
+    await _emit_agent_message_received(db_session, agent_msg, msg=email_with_cc)
     await db_session.commit()
 
     recorder = EventRecorder(db_session)
-    event = await recorder.find("agent_message.received", agent_message_id=msg.id)
+    event = await recorder.find("agent_message.received", agent_message_id=agent_msg.id)
     assert event is not None
     assert event["entity_refs"]["customer_id"] == cust.id
     assert event["payload"]["has_cc"] is True
+    assert event["payload"]["had_attachments"] is False

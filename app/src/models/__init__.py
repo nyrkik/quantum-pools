@@ -72,6 +72,7 @@ from src.models.internal_message import InternalThread, InternalMessage
 from src.models.customer_contact import CustomerContact
 from src.models.agent_correction import AgentCorrection
 from src.models.thread_read import ThreadRead
+from src.models.platform_event import PlatformEvent, DataDeletionRequest
 from src.models.job_invoice import JobInvoice
 from src.models.message_attachment import MessageAttachment
 from src.models.service_case import ServiceCase

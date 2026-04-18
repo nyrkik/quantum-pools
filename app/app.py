@@ -19,6 +19,7 @@ from src.core.redis_client import get_redis, close_redis, check_redis
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from src.middleware.error_tracking import ErrorTrackingMiddleware
+from src.middleware.request_id import RequestIDMiddleware
 from src.core.rate_limiter import limiter
 from src.api.router import api_router
 
@@ -259,6 +260,12 @@ def create_app() -> FastAPI:
 
     # Error tracking
     app.add_middleware(ErrorTrackingMiddleware)
+
+    # Request ID — registered AFTER error tracking so it runs FIRST (outermost).
+    # Sets request_id contextvar read by PlatformEventService.emit() and by
+    # the error tracking middleware for correlation. See
+    # docs/ai-platform-phase-1.md §5.2.
+    app.add_middleware(RequestIDMiddleware)
 
     # Security headers
     @app.middleware("http")

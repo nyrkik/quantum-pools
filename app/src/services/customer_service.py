@@ -96,6 +96,17 @@ class CustomerService:
         customer = Customer(id=str(uuid.uuid4()), organization_id=org_id, **kwargs)
         self.db.add(customer)
         await self.db.flush()
+
+        # Activation funnel: first-customer-added for this org.
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_customer_added",
+            organization_id=org_id,
+            entity_refs={"customer_id": customer.id},
+            source="customer_service",
+        )
+
         await self.db.refresh(customer)
         return customer
 
@@ -148,6 +159,17 @@ class CustomerService:
         self.db.add(wf)
 
         await self.db.flush()
+
+        # Activation funnel — covers the create_with_property entry point too.
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_customer_added",
+            organization_id=org_id,
+            entity_refs={"customer_id": customer.id, "property_id": prop.id},
+            source="customer_service_with_property",
+        )
+
         await self.db.refresh(customer)
         await self.db.refresh(prop)
         return customer, prop

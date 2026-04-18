@@ -105,6 +105,17 @@ class VisitService:
             if value is not None:
                 setattr(visit, key, value)
         await self.db.flush()
+
+        # Activation funnel — first-visit-completed.
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_visit_completed",
+            organization_id=org_id,
+            entity_refs={"visit_id": visit.id, "property_id": visit.property_id},
+            source="visit_service",
+        )
+
         await self.db.refresh(visit)
         return visit
 

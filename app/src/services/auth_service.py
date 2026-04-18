@@ -68,6 +68,17 @@ class AuthService:
             is_active=True,
         )
         self.db.add(org_user)
+        await self.db.flush()
+
+        # Activation funnel: first milestone for this org.
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.account_created",
+            organization_id=org.id,
+            entity_refs={"user_id": user.id},
+            source="register",
+        )
 
         await self.db.commit()
         await self.db.refresh(user)

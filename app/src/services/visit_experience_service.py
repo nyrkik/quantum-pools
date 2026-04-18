@@ -448,6 +448,17 @@ class VisitExperienceService:
         # is tracked via the visit's status + route_stop_id link.
 
         await self.db.flush()
+
+        # Activation funnel — first-visit-completed for this org.
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_visit_completed",
+            organization_id=org_id,
+            entity_refs={"visit_id": visit.id, "property_id": visit.property_id},
+            source="visit_experience",
+        )
+
         await self.db.refresh(visit)
 
         return {

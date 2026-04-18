@@ -85,6 +85,20 @@ class PaymentService:
         customer.balance = round(customer.balance - payment.amount, 2)
 
         await self.db.flush()
+
+        # Activation funnel — first-payment-received for this org.
+        from src.services.events.activation_tracker import emit_if_first
+        await emit_if_first(
+            self.db,
+            "activation.first_payment_received",
+            organization_id=org_id,
+            entity_refs={
+                "customer_id": customer_id,
+                **({"invoice_id": invoice_id} if invoice_id else {}),
+            },
+            source="payment_service",
+        )
+
         await self.db.refresh(payment)
         return payment
 

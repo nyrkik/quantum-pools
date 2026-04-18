@@ -384,6 +384,18 @@ class InvoiceService:
         if sent_by:
             invoice.sent_by = sent_by
         await self.db.flush()
+
+        # Activation funnel — first-invoice-sent (NOT estimate.sent).
+        if invoice.document_type == "invoice":
+            from src.services.events.activation_tracker import emit_if_first
+            await emit_if_first(
+                self.db,
+                "activation.first_invoice_sent",
+                organization_id=org_id,
+                entity_refs={"invoice_id": invoice.id},
+                source="invoice_service",
+            )
+
         return invoice
 
     async def void(self, org_id: str, invoice_id: str, voided_by: str | None = None) -> Invoice:

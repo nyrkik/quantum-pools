@@ -14,6 +14,22 @@ For every email/DNS/infra/billing/customer-facing decision, ask: "Is this a QP c
 
 **Past mistake (2026-04-09):** Set up Cloudflare Workers + Postmark managed mode for Sapphire. Sapphire belongs on Google Workspace. See `docs/sapphire-recovery-plan.md`.
 
+## Product DNA (NON-NEGOTIABLE)
+
+These are product-level rules. They override "easier to build" reasoning every single time. If a proposed design conflicts with any of these, the design is wrong — redesign, don't rationalize.
+
+1. **Build for the 1,000th customer, not the 1st.** Sapphire is the dogfood customer, not the target. Every architecture/UX/data decision is evaluated as if a customer we haven't met will configure it. If a design only makes sense because Brian owns both businesses, it's wrong. See `feedback_building_for_market_not_sapphire.md`.
+
+2. **Every AI agent learns — no static agents.** Any feature with AI output that a human reviews MUST be wired into `AgentLearningService` — inject lessons before generation, record every acceptance/edit/rejection after. Design the common UX path against the week-3+ accuracy assumption (85-95%+), not the week-1 assumption. The competitive moat is continuous domain-specific learning per org/customer/category — static AI features are commoditized. See `feedback_every_agent_learns.md` and `agent-learning-system.md`.
+
+3. **The product learns the org, not just the agents.** Beyond per-agent accuracy, QP observes each org's behavior patterns (what modes they actually use, what defaults they repeatedly set, what they auto-do vs. manually do) and proposes org-level configuration, workflow, and default changes through the same `agent_proposals` system. Every feature must answer: "What's its efficiency ceiling after 6 months of use?" Config UIs are a last resort — auto-detect the right mode from behavior first. When config is unavoidable, plain-language opinionated choices with recommendations, never engineer-vocabulary enums. See `feedback_product_learns_the_org.md`.
+
+4. **Never optimize for ease of build.** "Zero new UI," "reuses existing screens," "fastest to ship," and "minimal code" are NOT pros. Options are judged on user outcome, architectural soundness, and fit with DNA rules — never on implementation cost. If the right answer requires rebuilding existing code or inventing a seventh option, do it. See `feedback_never_optimize_for_ease.md`.
+
+5. **AI never commits to the customer.** AI drafts; humans send. This applies to email (`feedback_no_auto_send.md`) AND to every AI-suggested action pill in the product (`feedback_action_pills_no_customer_commit.md`). Action pills open drafts or navigate. Internal-only actions (archive, snooze, assign) can be one-click with undo.
+
+6. **Less work for the USER, not the engineer.** Engineering work is never the constraint. Every feature must reduce customer-facing user effort. If a feature adds clicks/approvals/review steps without a corresponding reduction elsewhere, it's wrong. See `feedback_less_work.md`.
+
 ## Architecture
 
 | Concern | Choice |
@@ -252,6 +268,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/ai-agents-plan.md` | 10 planned AI agents (product roadmap), current implementation status |
 | `docs/inbox-folders-plan.md` | 3-phase inbox folders: folders + filter rules + Gmail label sync. **Remove when complete.** |
 | `docs/entity-connections-plan.md` | 5-phase plan to unify entity linking via ServiceCase hub, line-item case attribution, physical-work connections, equipment axis, discovery. Phase 1 shipped 2026-04-14. **Remove when complete.** |
+| `docs/ai-platform-plan.md` | 8-phase plan to rebuild QP around a unified AI platform: event instrumentation, agent_proposals, inbox summarizer, post-creation handlers, workflow_observer, and Sonar (dev-facing intelligence). Every phase has a "Why" block. **Remove when complete.** |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |

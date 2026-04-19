@@ -339,6 +339,32 @@ async def test_emit_explicit_value_overrides_contextvar(db_session, org_a):
 
 
 @pytest.mark.asyncio
+async def test_emit_historical_created_at_override(db_session, org_a):
+    """Backfill use case: emit() with explicit created_at persists that
+    exact timestamp, not NOW(). Live-emitted events always pass None
+    (server-clock authoritative); this override only exists for
+    backfill/migration scripts."""
+    from datetime import datetime, timezone, timedelta
+
+    historical = datetime(2024, 8, 15, 12, 30, 0, tzinfo=timezone.utc)
+    await PlatformEventService.emit(
+        db=db_session,
+        event_type="test.historical",
+        level="system_action",
+        actor=Actor(actor_type="system"),
+        organization_id=org_a.id,
+        created_at=historical,
+    )
+    await db_session.commit()
+
+    events = await _all_events(db_session)
+    assert len(events) == 1
+    # Compare at millisecond precision to dodge float rounding in asyncpg.
+    delta = abs(events[0]["created_at"] - historical)
+    assert delta < timedelta(seconds=1), f"Expected ~{historical}, got {events[0]['created_at']}"
+
+
+@pytest.mark.asyncio
 async def test_emit_impersonation_fields_round_trip(db_session, org_a):
     await PlatformEventService.emit(
         db=db_session,

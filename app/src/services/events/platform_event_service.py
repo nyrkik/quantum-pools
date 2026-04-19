@@ -26,6 +26,7 @@ import logging
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime  # noqa: F401 — referenced as forward-ref in emit signature
 from typing import Literal, Optional
 
 from sqlalchemy import text
@@ -105,6 +106,7 @@ class PlatformEventService:
         session_id: Optional[str] = None,
         job_run_id: Optional[str] = None,
         client_emit_id: Optional[str] = None,
+        created_at: Optional["datetime"] = None,
     ) -> None:
         """Emit an event. Never raises; never blocks.
 
@@ -120,6 +122,10 @@ class PlatformEventService:
             request_id / session_id / job_run_id: correlation. Auto-read
                 from contextvars if not supplied.
             client_emit_id: idempotency key. Deduped before insert.
+            created_at: overrides the default NOW() timestamp. Intended
+                for backfill/migration scripts replaying historical events.
+                Never use this for live-emitted events — always pass None
+                for those so the server clock is authoritative.
         """
         try:
             payload_obj = payload or {}
@@ -162,7 +168,8 @@ class PlatformEventService:
                 if existing.first() is not None:
                     return  # duplicate — silently skip
 
-            # 4. Insert.
+            # 4. Insert. `created_at` defaults to server-now; backfill
+            #    callers may override with a historical timestamp.
             await db.execute(
                 text(
                     """
@@ -174,7 +181,7 @@ class PlatformEventService:
                     VALUES
                       (:id, :org, :actor_uid, :acting_uid, :view_role,
                        :atype, :aagent, :etype, :level, :refs, :payload,
-                       :rid, :sid, :jid, :cid, NOW())
+                       :rid, :sid, :jid, :cid, COALESCE(:created_at, NOW()))
                     """
                 ),
                 {
@@ -193,6 +200,7 @@ class PlatformEventService:
                     "sid": session_id,
                     "jid": job_run_id,
                     "cid": client_emit_id,
+                    "created_at": created_at,
                 },
             )
         except Exception as e:  # noqa: BLE001 — by design, never raise

@@ -66,8 +66,23 @@ async def lifespan(app: FastAPI):
     # Spam retention: purge category='spam' threads older than 30 days.
     # Keeps synced Gmail spam actionable without letting it grow unbounded.
     scheduler.add_job(_run_spam_retention, CronTrigger(hour=4, minute=30), id="spam_retention")
+    # platform_events partition manager: on the 25th of every month, create
+    # the next month's partition ahead of time so month-end inserts never
+    # hit a missing-partition error.
+    scheduler.add_job(
+        _run_platform_events_partition,
+        CronTrigger(day=25, hour=2, minute=0),
+        id="platform_events_partition",
+    )
+    # platform_events retention purge: daily at 03:15 UTC, delete rows
+    # older than each org's event_retention_days.
+    scheduler.add_job(
+        _run_platform_events_retention,
+        CronTrigger(hour=3, minute=15),
+        id="platform_events_retention",
+    )
     scheduler.start()
-    logger.info("Scheduler started (outbound send janitor; spam retention; billing dormant; auto-send removed)")
+    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; billing dormant; auto-send removed)")
 
     yield
 
@@ -233,6 +248,35 @@ async def _run_spam_retention():
             )
     except Exception as e:
         logger.error(f"Spam retention error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_platform_events_partition():
+    """Create next month's `platform_events` partition ahead of time.
+
+    Runs on the 25th of every month so there's always a buffer before
+    month-end. Missing-partition INSERT errors would silently drop
+    events (emit is fail-soft), so this job guards observability.
+    """
+    from src.core.database import get_db_context
+    from src.services.events.partition_manager import ensure_next_partition
+    try:
+        async with get_db_context() as db:
+            await ensure_next_partition(db)
+    except Exception as e:
+        logger.error(f"platform_events partition job error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_platform_events_retention():
+    """Per-org `platform_events` purge older than `event_retention_days`."""
+    from src.core.database import get_db_context
+    from src.services.events.retention_purge import purge_expired_events
+    try:
+        async with get_db_context() as db:
+            await purge_expired_events(db)
+    except Exception as e:
+        logger.error(f"platform_events retention job error: {e}")
         sentry_sdk.capture_exception(e)
 
 

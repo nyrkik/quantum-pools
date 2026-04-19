@@ -65,6 +65,12 @@ class Organization(Base):
     # Contact learning — show modal/banner for unknown email senders
     email_contact_learning: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # platform_events retention — how long this org's events stick
+    # before the daily retention-purge job deletes them. Sapphire
+    # (dogfood) defaults to 10 years; paying orgs default to 3 years
+    # via migration. Read by `retention_purge.purge_expired_events`.
+    event_retention_days: Mapped[int] = mapped_column(Integer, default=1095)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

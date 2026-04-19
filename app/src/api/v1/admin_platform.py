@@ -394,6 +394,138 @@ async def query_events(
     }
 
 
+# ---------------------------------------------------------------------------
+# Proposals query endpoint (Phase 2 Step 7)
+# ---------------------------------------------------------------------------
+#
+# Mirrors /events — same cursor pagination, same platform-admin gate.
+# Sonar + operator triage read here to see the proposal stream across
+# orgs: "what's the inbox summarizer proposing today and how often is
+# the user accepting?"
+
+
+@router.get("/proposals", status_code=200)
+async def query_proposals(
+    org_id: Optional[str] = Query(None, description="Filter by organization_id (UUID)."),
+    agent_type: Optional[str] = Query(None, description="Filter by agent_type (e.g. 'inbox_summarizer')."),
+    entity_type: Optional[str] = Query(None, description="Filter by entity_type (e.g. 'job', 'estimate', 'equipment_item')."),
+    status_: Optional[str] = Query(
+        None, alias="status",
+        description="Filter by status (staged|accepted|edited|rejected|expired|superseded).",
+    ),
+    source_type: Optional[str] = Query(None, description="Filter by source_type (e.g. 'deepblue_conversation')."),
+    source_id: Optional[str] = Query(None, description="Filter by source_id exact match."),
+    from_: Optional[datetime] = Query(None, alias="from", description="Lower bound on created_at. Defaults to 30 days ago."),
+    to: Optional[datetime] = Query(None, description="Upper bound on created_at."),
+    cursor: Optional[str] = Query(None, description="Opaque cursor from a prior response."),
+    limit: int = Query(50, ge=1, le=500, description="Max rows. 1..500."),
+    ctx: PlatformAdminContext = Depends(get_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Cross-org read-only proposals query.
+
+    Pagination same as /events (cursor over `(created_at DESC, id DESC)`).
+    `from` defaults to 30 days back to avoid accidental full-table scans.
+    """
+    now = datetime.now(timezone.utc)
+    if from_ is None:
+        from_ = now - timedelta(days=30)
+    if to is None:
+        to = now
+    if from_.tzinfo is None:
+        from_ = from_.replace(tzinfo=timezone.utc)
+    if to.tzinfo is None:
+        to = to.replace(tzinfo=timezone.utc)
+
+    where_clauses = ["created_at >= :from_", "created_at < :to"]
+    params: dict[str, Any] = {"from_": from_, "to": to}
+
+    if org_id:
+        where_clauses.append("organization_id = :org_id")
+        params["org_id"] = org_id
+    if agent_type:
+        where_clauses.append("agent_type = :atype")
+        params["atype"] = agent_type
+    if entity_type:
+        where_clauses.append("entity_type = :etype")
+        params["etype"] = entity_type
+    if status_:
+        where_clauses.append("status = :st")
+        params["st"] = status_
+    if source_type:
+        where_clauses.append("source_type = :src_t")
+        params["src_t"] = source_type
+    if source_id:
+        where_clauses.append("source_id = :src_id")
+        params["src_id"] = source_id
+
+    if cursor:
+        cur_ts, cur_id = _decode_cursor(cursor)
+        where_clauses.append("(created_at, id) < (:cur_ts, :cur_id)")
+        params["cur_ts"] = cur_ts
+        params["cur_id"] = cur_id
+
+    sql = (
+        "SELECT id, organization_id, agent_type, entity_type, "
+        "source_type, source_id, proposed_payload, confidence, "
+        "status, rejected_permanently, superseded_by_id, "
+        "outcome_entity_type, outcome_entity_id, user_delta, "
+        "resolved_at, resolved_by_user_id, resolution_note, "
+        "created_at, updated_at "
+        "FROM agent_proposals "
+        f"WHERE {' AND '.join(where_clauses)} "
+        "ORDER BY created_at DESC, id DESC "
+        "LIMIT :limit"
+    )
+    params["limit"] = limit
+
+    logger.info(
+        "admin_proposals.query by=%s filters=%s limit=%d",
+        ctx.user.id,
+        {k: v for k, v in params.items() if k not in {"limit", "cur_ts", "cur_id"}},
+        limit,
+    )
+
+    rows = (await db.execute(text(sql), params)).all()
+    items = [
+        {
+            "id": r[0],
+            "organization_id": r[1],
+            "agent_type": r[2],
+            "entity_type": r[3],
+            "source_type": r[4],
+            "source_id": r[5],
+            "proposed_payload": r[6],
+            "confidence": r[7],
+            "status": r[8],
+            "rejected_permanently": r[9],
+            "superseded_by_id": r[10],
+            "outcome_entity_type": r[11],
+            "outcome_entity_id": r[12],
+            "user_delta": r[13],
+            "resolved_at": r[14].isoformat() if r[14] else None,
+            "resolved_by_user_id": r[15],
+            "resolution_note": r[16],
+            "created_at": r[17].isoformat() if r[17] else None,
+            "updated_at": r[18].isoformat() if r[18] else None,
+        }
+        for r in rows
+    ]
+
+    next_cursor = None
+    if len(rows) == limit:
+        last = rows[-1]
+        # Use created_at + id for cursor. Column positions: 17 = created_at, 0 = id.
+        next_cursor = _encode_cursor(last[17], last[0])
+
+    return {
+        "proposals": items,
+        "next_cursor": next_cursor,
+        "window": {"from": from_.isoformat(), "to": to.isoformat()},
+        "count": len(items),
+    }
+
+
 @router.get("/data-deletion-requests", status_code=200)
 async def list_data_deletion_requests(
     limit: int = 50,

@@ -23,6 +23,7 @@ AGENT_JOB_EVALUATOR = "job_evaluator"
 AGENT_ESTIMATE_GENERATOR = "estimate_generator"
 AGENT_CUSTOMER_MATCHER = "customer_matcher"
 AGENT_EQUIPMENT_RESOLVER = "equipment_resolver"
+AGENT_INBOX_SUMMARIZER = "inbox_summarizer"
 
 
 class AgentLearningService:

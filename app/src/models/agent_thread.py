@@ -2,7 +2,8 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -56,6 +57,16 @@ class AgentThread(Base):
     assigned_to_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     assigned_to_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Phase 3 — AI inbox summary cache. Populated by InboxSummarizerService
+    # on inbound messages and a daily stale sweep. See
+    # docs/ai-platform-phase-3.md §4 for payload shape.
+    ai_summary_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ai_summary_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_summary_version: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False,
+    )
+    ai_summary_debounce_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

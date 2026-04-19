@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, Integer, ForeignKey
+from sqlalchemy import String, Boolean, DateTime, Text, Integer, ForeignKey, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -70,6 +70,13 @@ class Organization(Base):
     # (dogfood) defaults to 10 years; paying orgs default to 3 years
     # via migration. Read by `retention_purge.purge_expired_events`.
     event_retention_days: Mapped[int] = mapped_column(Integer, default=1095)
+
+    # Phase 3 — inbox redesign feature flag. Per-org rollout so the
+    # new summary-first layout enables for Sapphire before any paying
+    # customer sees it. Platform-admin toggles via the admin endpoint.
+    inbox_v2_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False,
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

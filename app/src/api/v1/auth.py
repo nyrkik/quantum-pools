@@ -280,6 +280,7 @@ async def get_me(
         branding=_branding(org),
         role_version=ctx.org_user.role_version or 0,
         permissions=permissions,
+        inbox_v2_enabled=bool(getattr(org, "inbox_v2_enabled", False)) if org else False,
     )
 
 

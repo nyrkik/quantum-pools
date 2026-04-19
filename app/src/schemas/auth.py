@@ -81,6 +81,9 @@ class OrgUserResponse(BaseModel):
     branding: Optional[OrgBrandingResponse] = None
     role_version: int = 0
     permissions: dict[str, str] = {}
+    # Phase 3 — per-org UX rollout flags. Frontend reads to decide
+    # which inbox layout to render (v1 table vs. v2 summary-first).
+    inbox_v2_enabled: bool = False
 
 
 class MessageResponse(BaseModel):

@@ -112,6 +112,18 @@ export interface Thread {
   delivered_to: string | null;
   sender_tag: string | null;
   contact_person_name?: string | null;
+  // Phase 3 — cached AI summary payload. Null when no summary has been
+  // generated (short thread, low confidence, or inbox_v2 off for org).
+  ai_summary_payload?: {
+    version: number;
+    ask: string | null;
+    state: string;
+    open_items: string[];
+    red_flags: string[];
+    linked_refs: { type: string; id: string; label?: string | null }[];
+    confidence: number;
+    proposal_ids: string[];
+  } | null;
 }
 
 export interface TimelineMessage {

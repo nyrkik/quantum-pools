@@ -280,4 +280,8 @@ class ThreadPresenter(Presenter):
             "case_number": (t.case.case_number if getattr(t, "case", None) else None),
             "case_title": (t.case.title if getattr(t, "case", None) else None),
             "folder_id": t.folder_id,
+            # Phase 3 — AI summary cache. Null for short threads, orgs
+            # without inbox_v2, and threads below the confidence floor.
+            # Frontend falls back to last_snippet when null.
+            "ai_summary_payload": t.ai_summary_payload if hasattr(t, "ai_summary_payload") else None,
         }

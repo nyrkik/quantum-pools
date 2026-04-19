@@ -36,6 +36,9 @@ interface AuthState {
   branding: Branding;
   roleVersion: number;
   permissions: Record<string, string>;
+  // Phase 3 — inbox redesign rollout flag. Frontend reads this on mount
+  // and chooses v1 or v2 inbox layout.
+  inboxV2Enabled: boolean;
   isLoading: boolean;
 }
 
@@ -69,6 +72,7 @@ interface OrgUserResponse {
   } | null;
   role_version?: number;
   permissions?: Record<string, string>;
+  inbox_v2_enabled?: boolean;
 }
 
 const DEFAULT_BRANDING: Branding = { logoUrl: null, primaryColor: null, tagline: null };
@@ -87,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     branding: DEFAULT_BRANDING,
     roleVersion: 0,
     permissions: {},
+    inboxV2Enabled: false,
     isLoading: true,
   });
 
@@ -106,6 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } : DEFAULT_BRANDING,
       roleVersion: data.role_version ?? 0,
       permissions: data.permissions ?? {},
+      inboxV2Enabled: data.inbox_v2_enabled ?? false,
       isLoading: false,
     });
   }, []);
@@ -115,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api.get<OrgUserResponse>("/v1/auth/me");
       setFromResponse(data);
     } catch {
-      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], inspectionTier: null, branding: DEFAULT_BRANDING, roleVersion: 0, permissions: {}, isLoading: false }));
+      setState((prev) => ({ ...prev, user: null, isDeveloper: false, features: [], inspectionTier: null, branding: DEFAULT_BRANDING, roleVersion: 0, permissions: {}, inboxV2Enabled: false, isLoading: false }));
     }
   }, [setFromResponse]);
 
@@ -149,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       branding: DEFAULT_BRANDING,
       roleVersion: 0,
       permissions: {},
+      inboxV2Enabled: false,
       isLoading: false,
     });
   };

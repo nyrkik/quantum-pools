@@ -248,6 +248,8 @@ Comprehensive capture from day 1 — because **storing is cheap, backfilling is 
 
 ## Phase 2: `agent_proposals` system
 
+> **Status: SHIPPED 2026-04-19.** All 12 rollout steps complete + 12-item DoD green. See `docs/ai-platform-phase-2.md` for implementation spec; remove that file when this phase is archived. Creators registered: 9 entity_types (job, estimate, equipment_item, org_config, chemical_reading, case, customer_note_update, broadcast_email, customer_email). All 7 DeepBlue tool sites migrated; `requires_confirmation` pattern fully retired + CI-enforced (R6). Sapphire entity_type distribution deferred — measure within 1 week of cutover as organic usage populates.
+
 ### Why this phase exists
 
 Today, AI suggestions are ephemeral UI state (inbox draft reply) or inconsistent domain-specific records (DeepBlue `requires_confirmation` tool cards). This produces three problems:

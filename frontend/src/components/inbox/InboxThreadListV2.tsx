@@ -3,18 +3,23 @@
 /**
  * Phase 3 — Inbox V2 list.
  *
- * Standardized single-line row: every thread renders with the same
- * skeleton, so the user learns the shape once. Main row content is
- * the AI synthesis (ask → state → top open_item → snippet → subject),
- * not the raw email subject ("Re: Re: Fwd:" is noise). Hover/focus
- * reveals the full summary + staged proposals in a uniform panel.
+ * Each thread is a compact card (~3-5 rows) with identity on top and
+ * an AI-generated bullet digest as the body. The identity chunk
+ * (customer name + address) is shown ONCE — the summarizer prompt is
+ * told to never repeat either, so bullets read clean:
+ *     Marty Reed                                        12:34p
+ *     7210 Crocker Road
+ *     • Filter cleaning — Approved
+ *     • Pool sweep tail — Approved
+ *     [Client • Category • Status]
+ *
+ * Hover/focus reveals the full payload (ask, red flags, linked refs,
+ * proposals) in InboxRowHoverPanel.
  *
  * Design rules:
  *   - `has_pending` → amber left border (pending reply from us).
  *   - `is_unread` → bold customer name + blue unread dot.
- *   - Customer name is the primary typography; badges are secondary.
  *   - Click opens the existing reading pane — unchanged from v1.
- *   - Hover/focus opens InboxRowHoverPanel with uniform shape.
  */
 
 import { useEffect, useState } from "react";
@@ -46,18 +51,23 @@ interface Props {
   onSelectThread: (id: string) => void;
 }
 
-/** Priority-ordered main-row content — the AI synthesis is what the
- *  user reads at a glance, not the email subject. */
-function mainRowContent(t: Thread): { text: string; source: string } {
+/** Body content for a row. Returns either `bullets` (primary display)
+ *  or `line` (fallback single-line gist from state/ask/snippet/subject).
+ *  Never both. */
+function rowBody(t: Thread): { bullets: string[] } | { line: string } {
   const p = t.ai_summary_payload as InboxSummaryPayload | null | undefined;
   if (p && p.version === SUPPORTED_SUMMARY_VERSION) {
-    if (p.ask) return { text: p.ask, source: "ask" };
-    if (p.state) return { text: p.state, source: "state" };
-    if (p.open_items.length > 0) return { text: p.open_items[0], source: "open_item" };
+    // Primary: the bullet digest — cap at 5 for card height.
+    if (p.open_items.length > 0) {
+      return { bullets: p.open_items.slice(0, 5) };
+    }
+    // Fallback order when no bullets: ask, then state, then snippet.
+    if (p.ask) return { line: p.ask };
+    if (p.state) return { line: p.state };
   }
-  if (t.last_snippet) return { text: t.last_snippet, source: "snippet" };
-  if (t.subject) return { text: t.subject, source: "subject" };
-  return { text: "(no content)", source: "empty" };
+  if (t.last_snippet) return { line: t.last_snippet };
+  if (t.subject) return { line: t.subject };
+  return { line: "(no content)" };
 }
 
 export function InboxThreadListV2({
@@ -125,7 +135,7 @@ export function InboxThreadListV2({
   return (
     <ul className="divide-y rounded-md border bg-background">
       {threads.map((t) => {
-        const main = mainRowContent(t);
+        const body = rowBody(t);
         const isSelected = selectedThreadId === t.id;
         const payload = (t.ai_summary_payload as InboxSummaryPayload | null | undefined) ?? null;
         const hasPayload = !!payload && payload.version === SUPPORTED_SUMMARY_VERSION;
@@ -174,7 +184,7 @@ export function InboxThreadListV2({
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    {/* Top row: customer name + meta chips + time */}
+                    {/* Identity row: customer name + contact + time */}
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="min-w-0 flex items-center gap-1.5">
                         <span
@@ -202,25 +212,52 @@ export function InboxThreadListV2({
                       </span>
                     </div>
 
-                    {/* Main synthesis line — the whole point of v2 */}
-                    <div className="flex items-center gap-1.5 mt-0.5">
+                    {/* Address — under the name, muted */}
+                    {t.customer_address && (
+                      <div className="text-xs text-muted-foreground truncate mt-0.5">
+                        {t.customer_address}
+                      </div>
+                    )}
+
+                    {/* Body: bullet digest (primary) or fallback gist line */}
+                    <div className="mt-1.5 flex items-start gap-1.5">
                       {redFlagCount > 0 && (
                         <AlertTriangle
-                          className="h-3.5 w-3.5 text-amber-600 shrink-0"
+                          className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5"
                           aria-label={`${redFlagCount} red flag${redFlagCount > 1 ? "s" : ""}`}
                         />
                       )}
-                      <span
-                        className={`truncate text-sm ${
-                          hasPayload ? "text-foreground" : "text-muted-foreground"
-                        }`}
-                      >
-                        {main.text}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        {"bullets" in body ? (
+                          <ul className="space-y-0.5">
+                            {body.bullets.map((b, i) => (
+                              <li
+                                key={i}
+                                className="text-sm text-foreground truncate"
+                              >
+                                <span className="text-muted-foreground mr-1.5">
+                                  •
+                                </span>
+                                {b}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div
+                            className={`text-sm truncate ${
+                              hasPayload
+                                ? "text-foreground"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {body.line}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Meta row: tag / category / status / counts / stale */}
-                    <div className="flex items-center flex-wrap gap-1 mt-1">
+                    <div className="flex items-center flex-wrap gap-1 mt-1.5">
                       {effectiveTag && tagStyle && (
                         <span
                           className={`px-1.5 py-0 rounded text-[9px] font-medium ${tagStyle.bg} ${tagStyle.text}`}

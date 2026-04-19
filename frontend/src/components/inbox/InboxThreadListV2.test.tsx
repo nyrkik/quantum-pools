@@ -67,7 +67,65 @@ describe("InboxThreadListV2", () => {
     expect(screen.getByText("Pinebrook HOA")).toBeInTheDocument();
   });
 
-  it("shows the AI `ask` in the main row when payload has one", () => {
+  it("renders open_items as bullets in the body (primary display)", () => {
+    render(
+      <InboxThreadListV2
+        threads={[
+          makeThread({
+            ai_summary_payload: {
+              version: 1,
+              ask: null,
+              state: null,
+              open_items: [
+                "Filter cleaning — Approved",
+                "Pool sweep tail — Approved",
+              ],
+              red_flags: [],
+              linked_refs: [],
+              confidence: 0.9,
+              proposal_ids: [],
+            },
+          }),
+        ]}
+        loading={false}
+        onSelectThread={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Filter cleaning — Approved")).toBeInTheDocument();
+    expect(screen.getByText("Pool sweep tail — Approved")).toBeInTheDocument();
+    // Email subject stays hidden in the row (only shown on hover)
+    expect(screen.queryByText("Re: Re: Fwd: pool stuff")).toBeNull();
+  });
+
+  it("caps bullets at 5 when open_items has more", () => {
+    render(
+      <InboxThreadListV2
+        threads={[
+          makeThread({
+            ai_summary_payload: {
+              version: 1,
+              ask: null,
+              state: null,
+              open_items: ["a", "b", "c", "d", "e", "f", "g"],
+              red_flags: [],
+              linked_refs: [],
+              confidence: 0.9,
+              proposal_ids: [],
+            },
+          }),
+        ]}
+        loading={false}
+        onSelectThread={vi.fn()}
+      />,
+    );
+    ["a", "b", "c", "d", "e"].forEach((b) =>
+      expect(screen.getByText(b)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("f")).toBeNull();
+    expect(screen.queryByText("g")).toBeNull();
+  });
+
+  it("falls back to `ask` when no bullets", () => {
     render(
       <InboxThreadListV2
         threads={[
@@ -75,8 +133,8 @@ describe("InboxThreadListV2", () => {
             ai_summary_payload: {
               version: 1,
               ask: "Please reschedule Thursday",
-              state: "Quote pending",
-              open_items: ["Send revised quote"],
+              state: null,
+              open_items: [],
               red_flags: [],
               linked_refs: [],
               confidence: 0.9,
@@ -89,11 +147,9 @@ describe("InboxThreadListV2", () => {
       />,
     );
     expect(screen.getByText("Please reschedule Thursday")).toBeInTheDocument();
-    // Email subject stays hidden in the row (only shown on hover)
-    expect(screen.queryByText("Re: Re: Fwd: pool stuff")).toBeNull();
   });
 
-  it("falls back to `state` when ask is null", () => {
+  it("falls back to `state` when no bullets and no ask", () => {
     render(
       <InboxThreadListV2
         threads={[
@@ -101,7 +157,7 @@ describe("InboxThreadListV2", () => {
             ai_summary_payload: {
               version: 1,
               ask: null,
-              state: "We owe them a callback",
+              state: "Informational update",
               open_items: [],
               red_flags: [],
               linked_refs: [],
@@ -114,32 +170,18 @@ describe("InboxThreadListV2", () => {
         onSelectThread={vi.fn()}
       />,
     );
-    expect(screen.getByText("We owe them a callback")).toBeInTheDocument();
+    expect(screen.getByText("Informational update")).toBeInTheDocument();
   });
 
-  it("falls back to first open_item when ask and state are empty", () => {
+  it("renders customer_address under the name when present", () => {
     render(
       <InboxThreadListV2
-        threads={[
-          makeThread({
-            ai_summary_payload: {
-              version: 1,
-              ask: null,
-              state: "",
-              open_items: ["Send revised quote", "Schedule next visit"],
-              red_flags: [],
-              linked_refs: [],
-              confidence: 0.8,
-              proposal_ids: [],
-            },
-          }),
-        ]}
+        threads={[makeThread({ customer_address: "7210 Crocker Road" })]}
         loading={false}
         onSelectThread={vi.fn()}
       />,
     );
-    // state is empty string, falls through to open_items[0]
-    expect(screen.getByText("Send revised quote")).toBeInTheDocument();
+    expect(screen.getByText("7210 Crocker Road")).toBeInTheDocument();
   });
 
   it("falls back to last_snippet when payload is null", () => {

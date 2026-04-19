@@ -298,23 +298,33 @@ Related state for this customer:
 - Outstanding invoices: {invoices_line}
 
 Rules:
-- `ask` in the customer's voice; null if purely informational or if the
-  customer is responding/approving/declining rather than asking.
-- `state` is the ONE-LINE SYNTHESIS a triager reads to decide "do I need
-  to open this?". It must be SPECIFIC — name the person, the action, the
-  equipment/invoice/location. Never restate the latest snippet verbatim.
+- The UI ALREADY shows: customer name, contact person, and property
+  address. NEVER repeat these in any summary field. The customer's name
+  is redundant; the address is redundant. Writing "Marty Reed approved
+  filter cleaning at 7210 Crocker Road" is WRONG — write "Filter
+  cleaning — Approved" instead.
+- `ask`: null unless the customer is posing a direct question we owe an
+  answer on. Null if they're approving, declining, informing, or thanking.
+- `state`: null in most cases. Only populate when the thread has no
+  discrete items to enumerate (e.g. a single informational reply with
+  nothing actionable). Short fragment, no name/address.
+- `open_items` is the PRIMARY display field. 3-5 terse bullets in
+  `<thing> — <status/action>` form. Each bullet ≤ 55 chars. No person
+  names, no addresses, no fluff. One concept per bullet.
   Good examples (follow this form):
-    "Al approved replacing the flowmeter for Office Spa"
-    "Maria declined the $450 heater quote; wants cheaper options"
-    "Pinebrook paid invoice 4412; $0 balance"
-    "No reply in 6 days — second follow-up owed on pump quote"
-    "Gene asks when we can reschedule Thursday's service"
+    "Filter cleaning — Approved"
+    "Pool sweep tail — Approved"
+    "$450 heater quote — Declined; wants cheaper"
+    "Invoice 4412 — Paid in full"
+    "Pump quote — Follow up (6 days silent)"
+    "SDS sheet — Resend (delivery failed)"
+    "LED fixture type — Awaiting confirmation"
   Bad examples (never do this):
-    "Yes. Please proceed. Thanks." (raw quote — useless)
-    "Customer replied" (too vague)
-    "Thank you email" (no actionable info)
-- `open_items`: all remaining to-dos go here — routine overdue invoices,
-  pending replies, follow-ups the team owes. Use imperative voice.
+    "Marty Reed approved filter cleaning" (repeats customer name)
+    "Filter cleaning at 7210 Crocker Rd" (repeats address)
+    "Approved" (too vague — what was approved?)
+    "Yes" (raw quote)
+    "Customer responded with thanks" (no info)
 - `red_flags`: reserved for GENUINE escalation signals ONLY. Examples that
   qualify: explicit legal/attorney/lawsuit mention; threats of chargeback,
   BBB, or public review; a third+ escalation or repeated ignored contact;

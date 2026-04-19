@@ -749,37 +749,22 @@ async def process_incoming_email(
             # Cases are created manually by users from the inbox (Create Case / Create Job buttons).
             # Auto-creating cases from every email action clutters the case list with noise.
 
-            new_action = AgentAction(
-                organization_id=organization_id,
-                agent_message_id=agent_msg.id,
-                thread_id=thread.id,
-                case_id=case_id,
+            from src.services.agent_action_service import AgentActionService
+            from src.services.events.actor_factory import actor_agent
+            await AgentActionService(db).add_job(
+                org_id=organization_id,
                 action_type=action.get("action_type", "other"),
                 description=action["description"][:80],
-                due_date=due_date,
-                status="open",
-                created_by="DeepBlue",
+                source="thread_ai",
+                actor=actor_agent("email_classifier"),
+                case_id=case_id,
+                thread_id=thread.id,
+                agent_message_id=agent_msg.id,
                 customer_id=cust_id,
                 customer_name=cust_name,
                 property_address=prop_addr,
-            )
-            db.add(new_action)
-            await db.flush()
-            from src.services.events.platform_event_service import PlatformEventService
-            from src.services.events.actor_factory import actor_agent
-            refs = {"job_id": new_action.id, "thread_id": thread.id, "agent_message_id": agent_msg.id}
-            if case_id:
-                refs["case_id"] = case_id
-            if cust_id:
-                refs["customer_id"] = cust_id
-            await PlatformEventService.emit(
-                db=db,
-                event_type="job.created",
-                level="agent_action",
-                actor=actor_agent("email_classifier"),
-                organization_id=organization_id,
-                entity_refs=refs,
-                payload={"job_type": action.get("action_type", "other"), "source": "thread_ai"},
+                due_date=due_date,
+                created_by="DeepBlue",
             )
 
         await db.commit()

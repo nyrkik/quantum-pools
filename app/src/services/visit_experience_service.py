@@ -452,20 +452,8 @@ class VisitExperienceService:
 
         await self.db.flush()
 
-        refs = {"visit_id": visit.id}
-        if visit.property_id:
-            refs["property_id"] = visit.property_id
-        if visit.customer_id:
-            refs["customer_id"] = visit.customer_id
-        await PlatformEventService.emit(
-            db=self.db,
-            event_type="visit.completed",
-            level="user_action" if actor and actor.actor_type == "user" else "system_action",
-            actor=actor or actor_system(),
-            organization_id=org_id,
-            entity_refs=refs,
-            payload={"duration_minutes": visit.duration_minutes} if visit.duration_minutes is not None else {},
-        )
+        from src.services.visit_service import emit_visit_completed
+        await emit_visit_completed(self.db, visit, actor=actor)
 
         # Activation funnel — first-visit-completed for this org.
         from src.services.events.activation_tracker import emit_if_first

@@ -362,18 +362,18 @@ async def convert_to_job(
         except Exception:
             pass
 
-    action = AgentAction(
-        id=str(uuid.uuid4()),
-        organization_id=ctx.organization_id,
-        case_id=case_id,
+    from src.services.agent_action_service import AgentActionService
+    from src.services.events.actor_factory import actor_from_org_ctx
+    action = await AgentActionService(db).add_job(
+        org_id=ctx.organization_id,
         action_type="follow_up",
         description=description,
+        source="manual",
+        actor=actor_from_org_ctx(ctx),
+        case_id=case_id,
         customer_id=thread.customer_id,
-        status="open",
         created_by=user_name,
     )
-    db.add(action)
-    await db.flush()
 
     thread.converted_to_action_id = action.id
 

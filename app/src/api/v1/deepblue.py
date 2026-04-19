@@ -1128,6 +1128,7 @@ async def confirm_create_case(
         billing_name=req.billing_name,
         priority=req.priority,
         created_by=user_name,
+        manager_user_id=ctx.user.id,
         actor=actor_from_org_ctx(ctx),
     )
 

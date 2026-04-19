@@ -44,6 +44,83 @@ class AgentActionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def add_job(
+        self,
+        *,
+        org_id: str,
+        action_type: str,
+        description: str,
+        source: str,
+        actor: Actor | None = None,
+        case_id: str | None = None,
+        thread_id: str | None = None,
+        customer_id: str | None = None,
+        customer_name: str | None = None,
+        assigned_to: str | None = None,
+        due_date: "datetime | None" = None,
+        property_address: str | None = None,
+        notes: str | None = None,
+        status: str = "open",
+        job_path: str = "internal",
+        created_by: str | None = None,
+        agent_message_id: str | None = None,
+    ) -> AgentAction:
+        """Single canonical path for creating a job row + emitting `job.created`.
+
+        All callers (services, API routes, agents) flow through here so
+        the event stream never misses a creation. Every field the model
+        supports is plumbed through, keeping call sites from having to
+        build rows by hand.
+
+        `source` must match the taxonomy enum for `job.created`:
+        manual | thread_ai | case_auto | proposal_accepted | deepblue_tool | estimate_approval.
+        """
+        import uuid as _uuid
+
+        action = AgentAction(
+            id=str(_uuid.uuid4()),
+            organization_id=org_id,
+            agent_message_id=agent_message_id,
+            case_id=case_id,
+            thread_id=thread_id,
+            customer_id=customer_id,
+            customer_name=customer_name,
+            action_type=action_type,
+            description=description,
+            assigned_to=assigned_to,
+            due_date=due_date,
+            property_address=property_address,
+            notes=notes,
+            status=status,
+            job_path=job_path,
+            created_by=created_by,
+        )
+        self.db.add(action)
+        await self.db.flush()
+
+        refs: dict = {"job_id": action.id}
+        if case_id:
+            refs["case_id"] = case_id
+        if thread_id:
+            refs["thread_id"] = thread_id
+        if customer_id:
+            refs["customer_id"] = customer_id
+        if agent_message_id:
+            refs["agent_message_id"] = agent_message_id
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="job.created",
+            level=("user_action" if actor and actor.actor_type == "user"
+                   else "agent_action" if actor and actor.actor_type == "agent"
+                   else "system_action"),
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={"job_type": action_type, "source": source},
+        )
+        return action
+
     async def _next_estimate_number(self, org_id: str) -> str:
         """Generate next EST-YYYY-NNNN number."""
         from src.services.invoice_service import InvoiceService
@@ -193,41 +270,21 @@ class AgentActionService:
         )
         case_id = case.id
 
-        action = AgentAction(
-            organization_id=org_id,
-            agent_message_id=agent_message_id or None,
-            case_id=case_id,
+        action = await self.add_job(
+            org_id=org_id,
             action_type=action_type,
             description=description,
-            assigned_to=assigned_to,
-            due_date=due,
+            source=source,
+            actor=actor,
+            case_id=case_id,
             customer_id=customer_id,
             customer_name=customer_name,
+            assigned_to=assigned_to,
+            due_date=due,
             property_address=property_address,
-            created_by=created_by,
             job_path=job_path,
-            status="open",
-        )
-        self.db.add(action)
-        await self.db.flush()
-
-        refs: dict = {"job_id": action.id, "case_id": case_id}
-        if agent_message_id:
-            refs["thread_id"] = agent_message_id  # thread/message linkage
-        if customer_id:
-            refs["customer_id"] = customer_id
-        await PlatformEventService.emit(
-            db=self.db,
-            event_type="job.created",
-            level="user_action" if actor and actor.actor_type == "user" else "system_action",
-            actor=actor or actor_system(),
-            organization_id=org_id,
-            entity_refs=refs,
-            payload={
-                "job_type": action_type,
-                "source": source,
-                "job_path": job_path,
-            },
+            created_by=created_by,
+            agent_message_id=agent_message_id or None,
         )
 
         # Customer path: create a draft estimate linked to this job

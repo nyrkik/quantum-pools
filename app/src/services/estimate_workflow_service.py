@@ -236,18 +236,17 @@ class EstimateWorkflowService:
         if action:
             action.status = "open"
         else:
-            action = AgentAction(
-                organization_id=org_id,
-                customer_id=invoice.customer_id,
-                case_id=invoice.case_id,
+            from src.services.agent_action_service import AgentActionService
+            action = await AgentActionService(self.db).add_job(
+                org_id=org_id,
                 action_type="repair",
                 description=f"Approved: {invoice.subject or 'Service Estimate'}",
-                status="open",
+                source="estimate_approval",
+                case_id=invoice.case_id,
+                customer_id=invoice.customer_id,
                 job_path="customer",
                 created_by=user_name,
             )
-            self.db.add(action)
-            await self.db.flush()
             await link_job_invoice(self.db, action.id, invoice.id, linked_by=user_name)
 
         await log_job_activity(self.db, invoice.id, f"Estimate approved by {user_name} (on behalf of client)")
@@ -322,19 +321,17 @@ class EstimateWorkflowService:
             if action:
                 action.status = "open"
             else:
-                action = AgentAction(
-                    id=str(uuid.uuid4()),
-                    organization_id=approval.organization_id,
-                    customer_id=invoice.customer_id,
-                    case_id=invoice.case_id,
+                from src.services.agent_action_service import AgentActionService
+                action = await AgentActionService(self.db).add_job(
+                    org_id=approval.organization_id,
                     action_type="repair",
                     description=f"Approved: {invoice.subject or 'Service Estimate'}",
-                    status="open",
+                    source="estimate_approval",
+                    case_id=invoice.case_id,
+                    customer_id=invoice.customer_id,
                     job_path="customer",
                     created_by=name.strip(),
                 )
-                self.db.add(action)
-                await self.db.flush()
                 await link_job_invoice(self.db, action.id, invoice.id, linked_by=name.strip())
 
             # Update case status

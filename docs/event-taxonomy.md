@@ -217,7 +217,7 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | `case.created` | user_action \| system_action | case_id, customer_id? | Payload: `{source, linked_thread_count, linked_job_count}`. |
 | `case.closed` | user_action \| system_action | case_id | Payload: `{reason, auto_closed: bool, cascade_jobs_closed}`. |
 | `case.reopened` | user_action | case_id | Payload: `{cascade_jobs_reopened}`. |
-| `case.manager_changed` | user_action | case_id, user_id | Payload: `{prior_manager_id}`. |
+| `case.manager_changed` | user_action | case_id, user_id? | `user_id` ref = new manager's id (may be null when setting unassigned). Payload: `{prior_manager_user_id, prior_manager_name, new_manager_user_id, new_manager_name}` — id + name both emitted because `service_cases.manager_name` is a display-side denorm that callers may set directly when the manager isn't a QP user yet. |
 
 ### 8.6 Invoices / Estimates
 
@@ -266,7 +266,7 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | `customer_contact.edited` | user_action | customer_id | Payload: `{fields_changed: [...]}`. |
 | `property.created` | user_action | property_id, customer_id | |
 | `property.edited` | user_action | property_id | Payload: `{fields_changed: [...]}`. |
-| `water_feature.created` | user_action | water_feature_id, property_id | Payload: `{type, is_primary}`. |
+| `water_feature.created` | user_action | water_feature_id, property_id | Payload: `{water_type}` — matches the `water_features.water_type` column (pool \| spa \| hot_tub \| wading_pool \| fountain \| water_feature). QP does not track a primary-water-feature column; if added later, emit `{water_type, is_primary}`. |
 | `water_feature.edited` | user_action | water_feature_id | Payload: `{fields_changed: [...]}`. |
 | `equipment_item.added` | user_action \| agent_action | equipment_item_id, property_id | Payload: `{catalog_equipment_id?, source}`. |
 | `equipment_item.removed` | user_action | equipment_item_id | |

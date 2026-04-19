@@ -187,34 +187,20 @@ Respond with JSON:
 
         case_id = thread.case_id
 
-        action = AgentAction(
-            organization_id=org_id,
-            thread_id=thread_id,
-            case_id=case_id,
-            customer_id=thread.matched_customer_id,
-            customer_name=thread.customer_name,
+        from src.services.agent_action_service import AgentActionService
+        from src.services.events.actor_factory import actor_agent
+        action = await AgentActionService(self.db).add_job(
+            org_id=org_id,
             action_type=data.get("action_type", "follow_up"),
             description=data.get("description", thread.subject or "Follow up")[:60],
-            status="open",
+            source="thread_ai",
+            actor=actor_agent("email_drafter"),
+            case_id=case_id,
+            thread_id=thread_id,
+            customer_id=thread.matched_customer_id,
+            customer_name=thread.customer_name,
             job_path="customer",
             created_by=created_by,
-        )
-        self.db.add(action)
-        await self.db.flush()
-
-        from src.services.events.platform_event_service import PlatformEventService
-        from src.services.events.actor_factory import actor_agent
-        refs = {"job_id": action.id, "thread_id": thread_id, "case_id": case_id}
-        if action.customer_id:
-            refs["customer_id"] = action.customer_id
-        await PlatformEventService.emit(
-            db=self.db,
-            event_type="job.created",
-            level="agent_action",
-            actor=actor_agent("email_drafter"),
-            organization_id=org_id,
-            entity_refs=refs,
-            payload={"job_type": action.action_type, "source": "thread_ai"},
         )
 
         await self.db.commit()
@@ -357,19 +343,21 @@ Rules:
         if existing_job:
             await link_job_invoice(self.db, existing_job.id, invoice.id, linked_by=created_by)
         else:
-            job = AgentAction(
-                organization_id=org_id,
+            from src.services.agent_action_service import AgentActionService
+            from src.services.events.actor_factory import actor_agent
+            job = await AgentActionService(self.db).add_job(
+                org_id=org_id,
+                action_type="bid",
+                description=data.get("subject", thread.subject or "Service Estimate")[:60],
+                source="thread_ai",
+                actor=actor_agent("email_drafter"),
+                case_id=thread.case_id,
                 thread_id=thread_id,
                 customer_id=thread.matched_customer_id,
                 customer_name=thread.customer_name,
-                action_type="bid",
-                description=data.get("subject", thread.subject or "Service Estimate")[:60],
-                status="open",
                 job_path="customer",
                 created_by=created_by,
             )
-            self.db.add(job)
-            await self.db.flush()
             await link_job_invoice(self.db, job.id, invoice.id, linked_by=created_by)
 
         await self.db.commit()

@@ -84,8 +84,15 @@ class ServiceCaseService:
         status: str = "new",
         priority: str = "normal",
         created_by: str | None = None,
+        manager_user_id: str | None = None,
         actor: Actor | None = None,
     ) -> ServiceCase:
+        # Derive manager_user_id from actor when not explicit. Keeps the
+        # joinable user-id authoritative; manager_name stays as a display
+        # cache fed from the same actor when possible.
+        if manager_user_id is None and actor and actor.actor_type == "user" and actor.user_id:
+            manager_user_id = actor.user_id
+
         case = ServiceCase(
             id=str(uuid.uuid4()),
             organization_id=org_id,
@@ -97,6 +104,7 @@ class ServiceCaseService:
             priority=priority,
             source=source,
             created_by=created_by,
+            manager_user_id=manager_user_id,
             manager_name=created_by,
             current_actor_name=created_by,
         )
@@ -113,7 +121,13 @@ class ServiceCaseService:
             actor=actor or actor_system(),
             organization_id=org_id,
             entity_refs=refs,
-            payload={"source": source, "status_at_create": status, "priority": priority},
+            payload={
+                "source": source,
+                "linked_thread_count": 0,  # New case has no links yet
+                "linked_job_count": 0,
+                "priority": priority,
+                "status_at_create": status,
+            },
         )
 
         return case
@@ -449,11 +463,18 @@ class ServiceCaseService:
                 refs = {"case_id": case.id}
                 if case.customer_id:
                     refs["customer_id"] = case.customer_id
+                # Auto-close fires only when all jobs are already terminal —
+                # no cascade closes needed, so the count is 0.
                 await PlatformEventService.emit(
                     db=self.db, event_type="case.closed", level="system_action",
                     actor=actor_system(), organization_id=case.organization_id,
                     entity_refs=refs,
-                    payload={"reason": "auto_all_jobs_done", "auto_closed": True, "prior_status": prior_status},
+                    payload={
+                        "reason": "auto_all_jobs_done",
+                        "auto_closed": True,
+                        "cascade_jobs_closed": 0,
+                        "prior_status": prior_status,
+                    },
                 )
             elif case.closed_at:
                 case.closed_at = None

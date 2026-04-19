@@ -47,6 +47,7 @@ async def create_case(
         billing_name=body.billing_name,
         priority=body.priority,
         created_by=user_name,
+        manager_user_id=ctx.user.id,
         actor=actor_from_org_ctx(ctx),
     )
     await db.commit()
@@ -338,9 +339,12 @@ async def update_case(
     if "title" in body:
         case.title = body["title"][:300]
     status_override = "status" in body
-    prior_manager = case.manager_name
+    prior_manager_user_id = case.manager_user_id
+    prior_manager_name = case.manager_name
     closed_this_request = False
     reopened_this_request = False
+    cascade_jobs_closed = 0
+    cascade_jobs_reopened = 0  # reserved; manual reopen doesn't cascade here (explicit API lives in /reopen-jobs)
     if status_override:
         prior_status = case.status
         case.status = body["status"]
@@ -355,17 +359,25 @@ async def update_case(
         # When transitioning to a terminal state, mirror it onto any open jobs.
         # Closing a case with open work underneath would leave orphaned actionable items.
         if body["status"] in ("closed", "cancelled") and prior_status not in ("closed", "cancelled"):
-            await svc.close_open_jobs(case_id, new_status="done" if body["status"] == "closed" else "cancelled")
+            cascade_jobs_closed = await svc.close_open_jobs(
+                case_id, new_status="done" if body["status"] == "closed" else "cancelled",
+            )
     if "priority" in body:
         case.priority = body["priority"]
     if "assigned_to_name" in body:
         case.assigned_to_name = body["assigned_to_name"]
     manager_changed = False
-    if "manager_name" in body:
-        manager_changed = (body["manager_name"] != prior_manager)
-        case.manager_name = body["manager_name"]
-        case.assigned_to_name = body.get("assigned_to_name", body["manager_name"])
-        case.assigned_to_user_id = body.get("assigned_to_user_id")
+    if "manager_name" in body or "manager_user_id" in body:
+        new_manager_user_id = body.get("manager_user_id")
+        new_manager_name = body.get("manager_name")
+        manager_changed = (
+            new_manager_user_id != prior_manager_user_id
+            or new_manager_name != prior_manager_name
+        )
+        case.manager_user_id = new_manager_user_id
+        case.manager_name = new_manager_name
+        case.assigned_to_name = body.get("assigned_to_name", new_manager_name)
+        case.assigned_to_user_id = body.get("assigned_to_user_id", new_manager_user_id)
 
     await db.flush()
     # Skip child-state re-derivation if the user explicitly set status in this
@@ -385,19 +397,31 @@ async def update_case(
         await PlatformEventService.emit(
             db=db, event_type="case.closed", level="user_action", actor=actor,
             organization_id=ctx.organization_id, entity_refs=refs,
-            payload={"reason": "manual", "auto_closed": False},
+            payload={
+                "reason": "manual",
+                "auto_closed": False,
+                "cascade_jobs_closed": cascade_jobs_closed,
+            },
         )
     if reopened_this_request:
         await PlatformEventService.emit(
             db=db, event_type="case.reopened", level="user_action", actor=actor,
             organization_id=ctx.organization_id, entity_refs=refs,
-            payload={},
+            payload={"cascade_jobs_reopened": cascade_jobs_reopened},
         )
     if manager_changed:
+        mgr_refs = dict(refs)
+        if case.manager_user_id:
+            mgr_refs["user_id"] = case.manager_user_id
         await PlatformEventService.emit(
             db=db, event_type="case.manager_changed", level="user_action", actor=actor,
-            organization_id=ctx.organization_id, entity_refs=refs,
-            payload={"prior_manager_name": prior_manager, "new_manager_name": case.manager_name},
+            organization_id=ctx.organization_id, entity_refs=mgr_refs,
+            payload={
+                "prior_manager_user_id": prior_manager_user_id,
+                "prior_manager_name": prior_manager_name,
+                "new_manager_user_id": case.manager_user_id,
+                "new_manager_name": case.manager_name,
+            },
         )
 
     await db.commit()
@@ -429,6 +453,25 @@ async def reopen_cascade_jobs(
     count = await svc.reopen_cascade_jobs(case_id, [str(j) for j in job_ids])
     if count:
         await svc.update_status_from_children(case_id)
+
+    # Emit case.reopened when the case came back from terminal state —
+    # update_status_from_children may have flipped status from closed.
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_from_org_ctx
+    refs = {"case_id": case_id}
+    if case.customer_id:
+        refs["customer_id"] = case.customer_id
+    await db.refresh(case)
+    if count and case.status not in ("closed", "cancelled"):
+        await PlatformEventService.emit(
+            db=db, event_type="case.reopened",
+            level="user_action",
+            actor=actor_from_org_ctx(ctx),
+            organization_id=ctx.organization_id,
+            entity_refs=refs,
+            payload={"cascade_jobs_reopened": count},
+        )
+
     await db.commit()
     from src.core.events import EventType, publish
     try:
@@ -554,20 +597,21 @@ async def create_job_in_case(
     if body.due_date:
         due = datetime.fromisoformat(body.due_date)
 
-    action = AgentAction(
-        id=str(uuid.uuid4()),
-        organization_id=ctx.organization_id,
-        case_id=case_id,
-        customer_id=case.customer_id,
+    from src.services.agent_action_service import AgentActionService
+    from src.services.events.actor_factory import actor_from_org_ctx
+    action = await AgentActionService(db).add_job(
+        org_id=ctx.organization_id,
         action_type=body.action_type,
         description=body.description,
+        source="manual",
+        actor=actor_from_org_ctx(ctx),
+        case_id=case_id,
+        customer_id=case.customer_id,
         assigned_to=body.assigned_to,
         due_date=due,
         notes=body.notes,
-        status="open",
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}".strip(),
     )
-    db.add(action)
     await svc.update_counts(case_id)
     await db.commit()
 

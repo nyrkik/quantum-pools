@@ -27,7 +27,8 @@ class ServiceCase(Base):
     billing_name: Mapped[str | None] = mapped_column(String(200))  # For non-DB customers (one-off jobs)
 
     # Ownership
-    manager_name: Mapped[str | None] = mapped_column(String(100))  # Case coordinator
+    manager_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), index=True)  # Case coordinator — joinable
+    manager_name: Mapped[str | None] = mapped_column(String(100))  # Denorm cache for display — kept in sync on write
     current_actor_name: Mapped[str | None] = mapped_column(String(100))  # Who needs to act next (derived)
 
     # Denormalized counts

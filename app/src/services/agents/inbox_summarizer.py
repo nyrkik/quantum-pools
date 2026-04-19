@@ -300,7 +300,16 @@ Related state for this customer:
 Rules:
 - `ask` in the customer's voice; null if purely informational.
 - `state` in the team's voice; one sentence of what WE do next.
-- `red_flags`: only real concerns — don't manufacture drama.
+- `open_items`: all remaining to-dos go here — routine overdue invoices,
+  pending replies, follow-ups the team owes. Use imperative voice.
+- `red_flags`: reserved for GENUINE escalation signals ONLY. Examples that
+  qualify: explicit legal/attorney/lawsuit mention; threats of chargeback,
+  BBB, or public review; a third+ escalation or repeated ignored contact;
+  material lost-revenue or safety risk (liability, injury, equipment damage);
+  hostile/abusive language; demand for refund beyond routine dispute.
+  Examples that DO NOT qualify and must go to open_items: overdue balance,
+  AR follow-up, customer waiting on a reply, missed appointment, late quote,
+  mild frustration. Empty list is the common case — err toward empty.
 - `proposals`: stage actions only when clearly warranted by the thread. Otherwise empty.
 - `confidence`: your certainty in the summary itself, 0.0-1.0.
 {lessons}"""

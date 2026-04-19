@@ -548,12 +548,18 @@ async def toggle_inbox_v2(
 ) -> dict:
     """Turn the inbox-v2 redesign on or off for a single org.
 
-    Flipping this on starts the summarizer sweep for the org's threads;
-    existing threads get summarized as they receive new inbound mail
-    (or via the nightly stale sweep). Flipping off: new inbounds stop
-    queueing summaries, cached payloads stay — front end honors the
-    flag so the redesigned layout simply hides.
+    On flip-on, queue every existing thread that doesn't yet have a
+    cached summary by setting ai_summary_debounce_until = NOW(). The
+    sweep (bounded ~80/min) drains the backlog gradually without
+    spiking Anthropic rate limits. Without this backfill the inbox
+    would show "awaiting summary" indefinitely until each thread
+    received a new inbound message.
+
+    Flip-off: new inbounds stop queueing summaries, cached payloads
+    stay put — the frontend honors the flag so the redesigned layout
+    simply hides.
     """
+    from sqlalchemy import text as _text
     from src.models.organization import Organization
 
     org = await db.get(Organization, org_id)
@@ -562,11 +568,32 @@ async def toggle_inbox_v2(
 
     prior = org.inbox_v2_enabled
     org.inbox_v2_enabled = bool(body.enabled)
+
+    queued = 0
+    if (not prior) and org.inbox_v2_enabled:
+        # Only queue threads that (a) haven't been summarized yet and
+        # (b) aren't already queued. Threads with cached summaries stay
+        # put; the nightly stale sweep will refresh them on schedule.
+        result = await db.execute(
+            _text(
+                """
+                UPDATE agent_threads
+                   SET ai_summary_debounce_until = NOW()
+                 WHERE organization_id = :org_id
+                   AND ai_summary_payload IS NULL
+                   AND ai_summary_debounce_until IS NULL
+                   AND message_count > 0
+                """
+            ),
+            {"org_id": org_id},
+        )
+        queued = result.rowcount or 0
+
     await db.commit()
 
     logger.info(
-        "inbox_v2 toggled for org %s by platform-admin %s: %s → %s",
-        org_id, ctx.user.id, prior, org.inbox_v2_enabled,
+        "inbox_v2 toggled for org %s by platform-admin %s: %s → %s (backfill queued=%d)",
+        org_id, ctx.user.id, prior, org.inbox_v2_enabled, queued,
     )
 
     return {
@@ -574,6 +601,7 @@ async def toggle_inbox_v2(
         "org_name": org.name,
         "inbox_v2_enabled": org.inbox_v2_enabled,
         "changed": prior != org.inbox_v2_enabled,
+        "backfill_queued": queued,
     }
 
 

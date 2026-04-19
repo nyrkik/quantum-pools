@@ -866,10 +866,17 @@ async def mark_gap_reviewed(
 
 
 class ConfirmAddEquipmentRequest(BaseModel):
-    bow_id: str
-    equipment_type: str
-    brand: str
-    model: str
+    """Accept-path for DeepBlue's add_equipment_to_pool proposal.
+
+    `proposal_id` is required (Phase 2 Step 5 migration). The other
+    fields flow through from the legacy preview payload but are no
+    longer authoritative — the proposal's proposed_payload is.
+    """
+    proposal_id: str
+    bow_id: Optional[str] = None           # kept for UX continuity
+    equipment_type: Optional[str] = None
+    brand: Optional[str] = None
+    model: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -879,39 +886,44 @@ async def confirm_add_equipment(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Confirm adding equipment to a body of water."""
-    import uuid as _uuid
-    from src.models.equipment_item import EquipmentItem
-    from src.models.water_feature import WaterFeature
-    from src.models.property import Property
+    """Accept the DeepBlue-staged add-equipment proposal.
 
-    # Verify water feature belongs to this org
-    wf = (await db.execute(
-        select(WaterFeature).where(WaterFeature.id == req.bow_id)
-    )).scalar_one_or_none()
-    if not wf:
-        raise HTTPException(status_code=404, detail="Body of water not found")
-    prop = (await db.execute(
-        select(Property).where(
-            Property.id == wf.property_id,
-            Property.organization_id == ctx.organization_id,
+    Routes through ProposalService.accept → the registered
+    equipment_item creator → EquipmentItemService.add_item, which
+    emits `equipment_item.added` and the proposal resolve stamps
+    learning record + `proposal.accepted` event.
+    """
+    from src.models.agent_proposal import AgentProposal
+    from src.services.events.actor_factory import actor_from_org_ctx
+    from src.services.proposals import ProposalService
+    from src.services.proposals.proposal_service import ProposalStateError
+
+    # Cross-org guard — a user can only accept proposals in their own org.
+    proposal = await db.get(AgentProposal, req.proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.organization_id != ctx.organization_id:
+        raise HTTPException(status_code=403, detail="Proposal belongs to a different org")
+    if proposal.entity_type != "equipment_item":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected equipment_item proposal, got {proposal.entity_type!r}",
         )
-    )).scalar_one_or_none()
-    if not prop:
-        raise HTTPException(status_code=403, detail="Not authorized")
 
-    item = EquipmentItem(
-        id=str(_uuid.uuid4()),
-        water_feature_id=req.bow_id,
-        equipment_type=req.equipment_type,
-        brand=req.brand,
-        model=req.model,
-        notes=req.notes,
-        is_active=True,
-    )
-    db.add(item)
+    service = ProposalService(db)
+    try:
+        _, created = await service.accept(
+            proposal_id=req.proposal_id,
+            actor=actor_from_org_ctx(ctx),
+        )
+    except ProposalStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     await db.commit()
-    return {"equipment_id": item.id, "saved": True}
+
+    if created is None:
+        # Creator returned None → conflict soft-reject path fired.
+        return {"saved": False, "reason": "user_created_already"}
+    return {"equipment_id": created.id, "saved": True}
 
 
 class ConfirmLogReadingRequest(BaseModel):

@@ -208,16 +208,28 @@ async def _exec_search_catalog(inp: dict, ctx: ToolContext) -> dict:
 
 
 async def _exec_add_equipment(inp: dict, ctx: ToolContext) -> dict:
-    """Preview adding equipment to a water feature. Does NOT save — returns confirmation request."""
+    """Stage an add-equipment proposal. Does NOT save the equipment —
+    returns a proposal_id that the user confirms via the UI card,
+    which then invokes ProposalService.accept.
+
+    Phase 2 Step 5 dogfood — this is the first live DeepBlue tool on
+    the proposals pipeline. Pattern repeats across the other 7 tools
+    in steps 8-9.
+    """
     from src.models.water_feature import WaterFeature
     from src.models.property import Property
+    from src.services.proposals import ProposalService
 
     bow_id = inp.get("bow_id")
     if not bow_id:
         return {"error": "bow_id required. Use find_property to locate it first."}
 
+    # Scope-check: only propose against a WF that belongs to this org.
     wf = (await ctx.db.execute(
-        select(WaterFeature).where(WaterFeature.id == bow_id)
+        select(WaterFeature).where(
+            WaterFeature.id == bow_id,
+            WaterFeature.organization_id == ctx.organization_id,
+        )
     )).scalar_one_or_none()
     if not wf:
         return {"error": "Body of water not found. Verify bow_id with find_property."}
@@ -226,9 +238,34 @@ async def _exec_add_equipment(inp: dict, ctx: ToolContext) -> dict:
         select(Property).where(Property.id == wf.property_id)
     )).scalar_one_or_none()
 
+    # Stage the proposal. Schema validation runs here — missing fields
+    # surface as an error the user sees before clicking confirm.
+    try:
+        proposal = await ProposalService(ctx.db).stage(
+            org_id=ctx.organization_id,
+            agent_type="deepblue_responder",
+            entity_type="equipment_item",
+            source_type="deepblue_conversation",
+            source_id=getattr(ctx, "conversation_id", None),
+            proposed_payload={
+                "water_feature_id": bow_id,
+                "equipment_type": inp.get("equipment_type"),
+                "brand": inp.get("brand"),
+                "model": inp.get("model"),
+                "notes": inp.get("notes"),
+            },
+            confidence=inp.get("confidence"),
+        )
+        await ctx.db.commit()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Could not stage add-equipment proposal: {e}"}
+
     return {
         "action": "add_equipment",
+        # requires_confirmation retained until Step 8 ships ProposalCard
+        # (frontend still keys off this to render the legacy confirm UI).
         "requires_confirmation": True,
+        "proposal_id": proposal.id,
         "preview": {
             "bow_id": bow_id,
             "bow_name": wf.name or wf.water_type,
@@ -237,6 +274,9 @@ async def _exec_add_equipment(inp: dict, ctx: ToolContext) -> dict:
             "brand": inp.get("brand"),
             "model": inp.get("model"),
             "notes": inp.get("notes"),
+            # proposal_id flows through to the ConfirmCard payload and
+            # then to the /confirm-add-equipment endpoint.
+            "proposal_id": proposal.id,
         },
     }
 

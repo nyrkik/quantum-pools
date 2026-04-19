@@ -298,7 +298,7 @@ export function InboxThreadListV2({
               </HoverCardTrigger>
               <HoverCardContent
                 side="bottom"
-                align="start"
+                align="center"
                 sideOffset={4}
                 collisionPadding={16}
                 className="w-[28rem]"

@@ -148,6 +148,15 @@ class InboxSummarizerService:
             await self._emit_error(thread, str(e)[:200])
             return None
 
+        # Validate linked_refs against the DB before caching. The model
+        # likes to put case_numbers ("SC-26-0042") or invoice_numbers
+        # where we need UUIDs, so the click-to-navigate in the UI 404s.
+        # Rewrite known case_numbers/invoice_numbers → UUIDs and drop
+        # any ref we can't resolve.
+        summary.linked_refs = await self._resolve_linked_refs(
+            thread.organization_id, summary.linked_refs,
+        )
+
         # Stage any proposals the model suggested inline.
         proposal_drafts = self._extract_proposals(raw)
         proposal_ids = await self._stage_proposals(thread, proposal_drafts)
@@ -230,14 +239,16 @@ class InboxSummarizerService:
 
         cases_line = "(none)"
         if open_cases:
-            cases_line = ", ".join(
-                f"{c.case_number}: {c.title[:50]} ({c.status})"
+            # Include the real UUID so the model can wire up linked_refs
+            # correctly. Server-side validation still runs as a safety net.
+            cases_line = " ; ".join(
+                f"id={c.id} number={c.case_number} title={c.title[:50]!r} status={c.status}"
                 for c in open_cases
             )
         invoices_line = "(none)"
         if open_invoices:
-            invoices_line = ", ".join(
-                f"{i.invoice_number or 'draft'}: ${(i.balance or 0):.0f} balance, {i.status}"
+            invoices_line = " ; ".join(
+                f"id={i.id} number={i.invoice_number or 'draft'} balance=${(i.balance or 0):.0f} status={i.status}"
                 for i in open_invoices
             )
 
@@ -318,6 +329,12 @@ Rules:
   Examples that DO NOT qualify and must go to open_items: overdue balance,
   AR follow-up, customer waiting on a reply, missed appointment, late quote,
   mild frustration. Empty list is the common case — err toward empty.
+- `linked_refs`: ONLY include entities listed above in "Open cases" or
+  "Outstanding invoices". Copy the EXACT `id=...` UUID verbatim — never
+  invent or guess an id, never use the case_number or invoice_number in
+  place of the id. `label` should be the human-readable case_number or
+  invoice_number ("SC-26-0042"). If no listed entity is relevant to the
+  thread, return an empty array.
 - `proposals`: stage actions only when clearly warranted by the thread. Otherwise empty.
 - `confidence`: your certainty in the summary itself, 0.0-1.0.
 {lessons}"""
@@ -348,6 +365,115 @@ Rules:
         # at this layer — it's staged separately.
         obj.pop("proposals", None)
         return InboxSummary.model_validate(obj)
+
+    async def _resolve_linked_refs(
+        self, org_id: str, refs: list[_LinkedRef],
+    ) -> list[_LinkedRef]:
+        """Coerce AI-emitted linked_refs to real DB UUIDs scoped to org.
+
+        The model is given `open_cases` / `open_invoices` as human-readable
+        lines like "SC-26-0042: Title (status)" and it tends to stuff the
+        case_number (or the invoice_number, or a guessed slug) into the
+        `id` field. That breaks click-to-navigate because the UI routes
+        to `/cases/{id}` expecting a UUID.
+
+        Resolution rules (per type):
+        - customer: pass through only if id is a UUID that exists in
+          customers for this org.
+        - case: if id is a UUID that exists → keep. Else if id looks
+          like a case_number and matches service_cases.case_number
+          for this org → rewrite id to the UUID. Else drop.
+        - invoice: id UUID exists → keep. Else match invoice_number → rewrite.
+          Else drop.
+        - job: always drop — jobs don't have standalone pages (they live
+          inside cases), so a link would 404 even with a real id.
+        - other/unknown type: drop.
+        """
+        if not refs:
+            return []
+
+        from src.models.service_case import ServiceCase
+        from src.models.invoice import Invoice
+        from src.models.customer import Customer
+
+        # Batch the ids per type so we make at most a few queries total.
+        by_type: dict[str, list[_LinkedRef]] = {}
+        for r in refs:
+            by_type.setdefault(r.type, []).append(r)
+
+        out: list[_LinkedRef] = []
+
+        # Customers — id must exist as UUID in this org.
+        for r in by_type.get("customer", []):
+            if not r.id:
+                continue
+            hit = await self.db.execute(
+                select(Customer.id).where(
+                    Customer.id == r.id, Customer.organization_id == org_id,
+                )
+            )
+            if hit.scalar_one_or_none():
+                out.append(r)
+
+        # Cases — try UUID, then case_number fallback.
+        for r in by_type.get("case", []):
+            if not r.id:
+                continue
+            rid = (
+                await self.db.execute(
+                    select(ServiceCase.id, ServiceCase.case_number).where(
+                        ServiceCase.id == r.id,
+                        ServiceCase.organization_id == org_id,
+                    )
+                )
+            ).first()
+            if rid:
+                out.append(_LinkedRef(type="case", id=rid[0], label=r.label or rid[1]))
+                continue
+            # Fall back: treat r.id as a case_number
+            rid = (
+                await self.db.execute(
+                    select(ServiceCase.id, ServiceCase.case_number).where(
+                        ServiceCase.case_number == r.id,
+                        ServiceCase.organization_id == org_id,
+                    )
+                )
+            ).first()
+            if rid:
+                out.append(_LinkedRef(type="case", id=rid[0], label=r.label or rid[1]))
+
+        # Invoices — UUID then invoice_number fallback.
+        for r in by_type.get("invoice", []):
+            if not r.id:
+                continue
+            rid = (
+                await self.db.execute(
+                    select(Invoice.id, Invoice.invoice_number).where(
+                        Invoice.id == r.id,
+                        Invoice.organization_id == org_id,
+                    )
+                )
+            ).first()
+            if rid:
+                out.append(_LinkedRef(
+                    type="invoice", id=rid[0], label=r.label or str(rid[1] or ""),
+                ))
+                continue
+            rid = (
+                await self.db.execute(
+                    select(Invoice.id, Invoice.invoice_number).where(
+                        Invoice.invoice_number == r.id,
+                        Invoice.organization_id == org_id,
+                    )
+                )
+            ).first()
+            if rid:
+                out.append(_LinkedRef(
+                    type="invoice", id=rid[0], label=r.label or str(rid[1] or ""),
+                ))
+
+        # Drop everything else (job, unknown types).
+        return out
 
     def _extract_proposals(self, raw: str) -> list[_ProposalDraft]:
         try:

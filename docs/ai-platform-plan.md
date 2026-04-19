@@ -344,6 +344,8 @@ A first-class proposals system fixes all three simultaneously: learning is enfor
 
 ## Phase 3: Inbox summarizer agent (first real proposal producer)
 
+> **Status: SHIPPED 2026-04-19.** All 11 steps complete; DoD green with #11 (1-week Sapphire metric) deferred by design. Sapphire flag flipped — inbox_v2_enabled=true. Live verification: a real 2-message Sapphire thread produced a Haiku-backed summary with confidence 0.85, 3 open_items, 0 staged proposals in ~5s. 15-second debounce sweep + daily 05:30 UTC stale sweep both firing. `case_link` creator (10th registered entity_type) handles "link this thread to existing case X." Spec: `docs/ai-platform-phase-3.md`.
+
 ### Why this phase exists
 
 Two reasons:

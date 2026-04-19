@@ -117,7 +117,7 @@ export interface Thread {
   ai_summary_payload?: {
     version: number;
     ask: string | null;
-    state: string;
+    state: string | null;
     open_items: string[];
     red_flags: string[];
     linked_refs: { type: string; id: string; label?: string | null }[];

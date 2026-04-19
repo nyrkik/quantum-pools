@@ -30,7 +30,7 @@ interface LinkedRef {
 export interface InboxSummaryPayload {
   version: number;
   ask: string | null;
-  state: string;
+  state: string | null;
   open_items: string[];
   red_flags: string[];
   linked_refs: LinkedRef[];

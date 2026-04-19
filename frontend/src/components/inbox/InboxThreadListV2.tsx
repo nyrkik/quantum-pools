@@ -183,10 +183,10 @@ export function InboxThreadListV2({
                     />
                   </div>
 
-                  <div className="min-w-0 flex-1">
-                    {/* Identity row: customer name + contact + time */}
-                    <div className="flex items-baseline justify-between gap-2">
-                      <div className="min-w-0 flex items-center gap-1.5">
+                  <div className="min-w-0 flex-1 grid grid-cols-[minmax(0,11rem)_1fr] gap-3">
+                    {/* Left column: identity (name → address → badges) */}
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-1.5">
                         <span
                           className={`truncate text-sm ${
                             t.is_unread ? "font-semibold" : "font-medium"
@@ -195,11 +195,6 @@ export function InboxThreadListV2({
                         >
                           {t.customer_name || t.contact_name || t.contact_email}
                         </span>
-                        {t.customer_name && t.contact_person_name && (
-                          <span className="text-xs text-muted-foreground truncate">
-                            ({t.contact_person_name})
-                          </span>
-                        )}
                         {t.visibility_permission && (
                           <Lock
                             className="h-3 w-3 text-muted-foreground shrink-0"
@@ -207,90 +202,96 @@ export function InboxThreadListV2({
                           />
                         )}
                       </div>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                        {formatTime(t.last_message_at)}
-                      </span>
-                    </div>
-
-                    {/* Address — under the name, muted */}
-                    {t.customer_address && (
-                      <div className="text-xs text-muted-foreground truncate mt-0.5">
-                        {t.customer_address}
-                      </div>
-                    )}
-
-                    {/* Body: bullet digest (primary) or fallback gist line */}
-                    <div className="mt-1.5 flex items-start gap-1.5">
-                      {redFlagCount > 0 && (
-                        <AlertTriangle
-                          className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5"
-                          aria-label={`${redFlagCount} red flag${redFlagCount > 1 ? "s" : ""}`}
-                        />
+                      {t.customer_name && t.contact_person_name && (
+                        <div className="text-xs text-muted-foreground truncate">
+                          {t.contact_person_name}
+                        </div>
                       )}
-                      <div className="min-w-0 flex-1">
-                        {"bullets" in body ? (
-                          <ul className="space-y-0.5">
-                            {body.bullets.map((b, i) => (
-                              <li
-                                key={i}
-                                className="text-sm text-foreground truncate"
-                              >
-                                <span className="text-muted-foreground mr-1.5">
-                                  •
-                                </span>
-                                {b}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <div
-                            className={`text-sm truncate ${
-                              hasPayload
-                                ? "text-foreground"
-                                : "text-muted-foreground"
-                            }`}
+                      {t.customer_address && (
+                        <div className="text-xs text-muted-foreground truncate">
+                          {t.customer_address}
+                        </div>
+                      )}
+                      {/* Badges directly under address */}
+                      <div className="flex items-center flex-wrap gap-1 pt-0.5">
+                        {effectiveTag && tagStyle && (
+                          <span
+                            className={`px-1.5 py-0 rounded text-[9px] font-medium ${tagStyle.bg} ${tagStyle.text}`}
                           >
-                            {body.line}
-                          </div>
+                            {effectiveTag.charAt(0).toUpperCase() +
+                              effectiveTag.slice(1)}
+                          </span>
+                        )}
+                        <CategoryBadge category={t.category} />
+                        <StatusBadge status={t.status} />
+                        {isStale && (
+                          <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                            Stale
+                          </span>
+                        )}
+                        {stagedCount > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] border-primary/40 text-primary"
+                          >
+                            {stagedCount} proposal{stagedCount > 1 ? "s" : ""}
+                          </Badge>
+                        )}
+                        {t.assigned_to_name && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            {t.assigned_to_name}
+                          </Badge>
                         )}
                       </div>
                     </div>
 
-                    {/* Meta row: tag / category / status / counts / stale */}
-                    <div className="flex items-center flex-wrap gap-1 mt-1.5">
-                      {effectiveTag && tagStyle && (
-                        <span
-                          className={`px-1.5 py-0 rounded text-[9px] font-medium ${tagStyle.bg} ${tagStyle.text}`}
-                        >
-                          {effectiveTag.charAt(0).toUpperCase() +
-                            effectiveTag.slice(1)}
+                    {/* Right column: bullets + time */}
+                    <div className="min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex items-start gap-1.5 flex-1">
+                          {redFlagCount > 0 && (
+                            <AlertTriangle
+                              className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5"
+                              aria-label={`${redFlagCount} red flag${redFlagCount > 1 ? "s" : ""}`}
+                            />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            {"bullets" in body ? (
+                              <ul className="space-y-0.5">
+                                {body.bullets.map((b, i) => (
+                                  <li
+                                    key={i}
+                                    className="text-sm text-foreground truncate"
+                                  >
+                                    <span className="text-muted-foreground mr-1.5">
+                                      •
+                                    </span>
+                                    {b}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <div
+                                className={`text-sm truncate ${
+                                  hasPayload
+                                    ? "text-foreground"
+                                    : "text-muted-foreground"
+                                }`}
+                              >
+                                {body.line}
+                              </div>
+                            )}
+                            {t.message_count > 1 && (
+                              <div className="text-[10px] text-muted-foreground mt-1">
+                                {t.message_count} msgs
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                          {formatTime(t.last_message_at)}
                         </span>
-                      )}
-                      <CategoryBadge category={t.category} />
-                      <StatusBadge status={t.status} />
-                      {isStale && (
-                        <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400">
-                          Stale
-                        </span>
-                      )}
-                      {t.message_count > 1 && (
-                        <span className="text-[10px] text-muted-foreground">
-                          {t.message_count} msgs
-                        </span>
-                      )}
-                      {stagedCount > 0 && (
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] border-primary/40 text-primary"
-                        >
-                          {stagedCount} proposal{stagedCount > 1 ? "s" : ""}
-                        </Badge>
-                      )}
-                      {t.assigned_to_name && (
-                        <Badge variant="secondary" className="text-[10px]">
-                          {t.assigned_to_name}
-                        </Badge>
-                      )}
+                      </div>
                     </div>
                   </div>
                 </button>
@@ -299,7 +300,7 @@ export function InboxThreadListV2({
                 side="right"
                 align="start"
                 sideOffset={12}
-                avoidCollisions={false}
+                collisionPadding={16}
                 className="w-[28rem]"
               >
                 <InboxRowHoverPanel

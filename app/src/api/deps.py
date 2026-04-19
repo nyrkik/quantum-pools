@@ -212,6 +212,37 @@ async def get_current_org_user(
     return ctx
 
 
+class PlatformAdminContext:
+    """Authenticated platform-admin context. Distinct from OrgUserContext
+    because platform admins operate across orgs — not bound to one.
+    Used for CCPA data-subject purges, cross-org event queries (Sonar),
+    and other QP-staff-only operations."""
+
+    def __init__(self, user: User):
+        self.user = user
+
+
+async def get_platform_admin(
+    user: User = Depends(get_current_user),
+) -> PlatformAdminContext:
+    """Require the caller's User.is_platform_admin = True.
+
+    403 otherwise — a customer-admin (OrgRole.owner/admin) scoped to a
+    single org is NOT a platform admin. Platform-admin is a separate
+    axis set only by the migration / internal tooling, never by the
+    app UI.
+    """
+    if not getattr(user, "is_platform_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "platform_admin_required",
+                "message": "This endpoint requires platform-admin privileges.",
+            },
+        )
+    return PlatformAdminContext(user=user)
+
+
 def require_roles(*roles: OrgRole):
     """Dependency factory: require one of the specified roles."""
     async def _check_role(ctx: OrgUserContext = Depends(get_current_org_user)):

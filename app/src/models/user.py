@@ -22,6 +22,10 @@ class User(Base):
     zip_code: Mapped[str | None] = mapped_column(String(20))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Platform-admin marker — cross-org ops (CCPA purges, admin event
+    # queries, Sonar). Separate from OrganizationUser.role which gates
+    # customer-admin permissions within a single org.
+    is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     verification_token: Mapped[str | None] = mapped_column(String(255))

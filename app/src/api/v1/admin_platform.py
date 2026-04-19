@@ -11,12 +11,14 @@ a non-platform-admin user gets 403, not an org-scoped fallback.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -198,6 +200,198 @@ async def purge_user_events(
         breakdown=breakdown,
         completed_at=completed_at.isoformat(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Event query endpoint (Phase 1 Step 12)
+# ---------------------------------------------------------------------------
+
+# Opaque pagination cursors encode (created_at_iso, id) so the next page
+# condition — `(created_at, id) < (cursor.created_at, cursor.id)` — uses
+# the composite partition+PK index cleanly. Base64 encoding is just so
+# callers treat it as opaque; the value is not secret.
+
+
+def _encode_cursor(created_at: datetime, row_id: str) -> str:
+    raw = json.dumps({"ts": created_at.isoformat(), "id": row_id}).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, str]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode(cursor + padding)
+        obj = json.loads(raw)
+        return datetime.fromisoformat(obj["ts"]), obj["id"]
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_cursor", "message": f"Could not decode cursor: {e}"},
+        )
+
+
+def _parse_entity_ref(raw: str) -> tuple[str, str]:
+    """`customer_id:abc-123` → ('customer_id', 'abc-123')."""
+    if ":" not in raw:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_entity_ref",
+                "message": f"entity_ref must be 'key:value', got: {raw!r}",
+            },
+        )
+    key, _, value = raw.partition(":")
+    if not key or not value:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_entity_ref", "message": "key and value both required"},
+        )
+    return key, value
+
+
+@router.get("/events", status_code=200)
+async def query_events(
+    org_id: Optional[str] = Query(None, description="Filter by organization_id (UUID). Omit for cross-org (platform-level events included)."),
+    event_type: Optional[str] = Query(None, description="Exact event_type match (e.g. 'thread.archived')."),
+    event_type_prefix: Optional[str] = Query(None, description="Prefix match (e.g. 'thread.' matches thread.archived, thread.opened, etc.). Exclusive with event_type."),
+    entity_ref: Optional[list[str]] = Query(None, description="Entity-ref filter as 'key:value' (e.g. 'customer_id:abc'). Repeat the param to AND multiple filters."),
+    actor_user_id: Optional[str] = Query(None, description="Filter by actor_user_id exact match."),
+    actor_type: Optional[str] = Query(None, description="Filter by actor_type enum (user|system|agent)."),
+    level: Optional[str] = Query(None, description="Filter by level (user_action|system_action|agent_action|error)."),
+    from_: Optional[datetime] = Query(None, alias="from", description="Lower bound on created_at (inclusive). ISO 8601. Defaults to 30 days ago when omitted."),
+    to: Optional[datetime] = Query(None, description="Upper bound on created_at (exclusive). ISO 8601. Defaults to now."),
+    cursor: Optional[str] = Query(None, description="Opaque pagination cursor from a prior response. Advances past that row."),
+    limit: int = Query(50, ge=1, le=500, description="Max rows to return. 1..500."),
+    ctx: PlatformAdminContext = Depends(get_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Cross-org read-only event query.
+
+    For Sonar's ad-hoc analysis and Brian's debugging. Rows are returned
+    newest-first. Pagination is cursor-based over `(created_at DESC, id DESC)`
+    so the response can be resumed efficiently across partition boundaries.
+
+    A `from` default of 30 days is applied when omitted so a forgotten
+    filter doesn't accidentally scan 2+ years of partitions. Pass
+    `from=1970-01-01T00:00:00Z` to query across the full history.
+    """
+    if event_type and event_type_prefix:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "conflicting_filters", "message": "event_type and event_type_prefix are exclusive"},
+        )
+
+    now = datetime.now(timezone.utc)
+    if from_ is None:
+        from_ = now - timedelta(days=30)
+    if to is None:
+        to = now
+
+    # Normalize to UTC so asyncpg/Postgres timestamptz binding is consistent.
+    if from_.tzinfo is None:
+        from_ = from_.replace(tzinfo=timezone.utc)
+    if to.tzinfo is None:
+        to = to.replace(tzinfo=timezone.utc)
+
+    where_clauses = ["created_at >= :from_", "created_at < :to"]
+    params: dict[str, Any] = {"from_": from_, "to": to}
+
+    if org_id is not None:
+        # Explicit "" (empty) means "platform events only"; None means no filter.
+        if org_id == "":
+            where_clauses.append("organization_id IS NULL")
+        else:
+            where_clauses.append("organization_id = :org_id")
+            params["org_id"] = org_id
+
+    if event_type:
+        where_clauses.append("event_type = :etype")
+        params["etype"] = event_type
+
+    if event_type_prefix:
+        where_clauses.append("event_type LIKE :etype_prefix")
+        params["etype_prefix"] = event_type_prefix + "%"
+
+    if actor_user_id:
+        where_clauses.append("actor_user_id = :actor_uid")
+        params["actor_uid"] = actor_user_id
+
+    if actor_type:
+        where_clauses.append("actor_type = :atype")
+        params["atype"] = actor_type
+
+    if level:
+        where_clauses.append("level = :lvl")
+        params["lvl"] = level
+
+    if entity_ref:
+        for i, raw in enumerate(entity_ref):
+            k, v = _parse_entity_ref(raw)
+            # JSONB containment against {k: v} — uses the GIN index on entity_refs.
+            where_clauses.append(f"entity_refs @> cast(:er_{i} AS jsonb)")
+            params[f"er_{i}"] = json.dumps({k: v})
+
+    if cursor:
+        cur_ts, cur_id = _decode_cursor(cursor)
+        # Row-value comparison uses (created_at DESC, id DESC) ordering.
+        where_clauses.append("(created_at, id) < (:cur_ts, :cur_id)")
+        params["cur_ts"] = cur_ts
+        params["cur_id"] = cur_id
+
+    sql = (
+        "SELECT id, organization_id, actor_user_id, acting_as_user_id, "
+        "view_as_role, actor_type, actor_agent_type, event_type, level, "
+        "entity_refs, payload, request_id, session_id, job_run_id, "
+        "client_emit_id, created_at "
+        "FROM platform_events "
+        f"WHERE {' AND '.join(where_clauses)} "
+        "ORDER BY created_at DESC, id DESC "
+        "LIMIT :limit"
+    )
+    params["limit"] = limit
+
+    logger.info(
+        "admin_events.query by=%s filters=%s limit=%d",
+        ctx.user.id,
+        {k: v for k, v in params.items() if k not in {"limit", "cur_ts", "cur_id"}},
+        limit,
+    )
+
+    rows = (await db.execute(text(sql), params)).all()
+
+    events = [
+        {
+            "id": r[0],
+            "organization_id": r[1],
+            "actor_user_id": r[2],
+            "acting_as_user_id": r[3],
+            "view_as_role": r[4],
+            "actor_type": r[5],
+            "actor_agent_type": r[6],
+            "event_type": r[7],
+            "level": r[8],
+            "entity_refs": r[9],
+            "payload": r[10],
+            "request_id": r[11],
+            "session_id": r[12],
+            "job_run_id": r[13],
+            "client_emit_id": r[14],
+            "created_at": r[15].isoformat() if r[15] else None,
+        }
+        for r in rows
+    ]
+
+    next_cursor = None
+    if len(rows) == limit:
+        last = rows[-1]
+        next_cursor = _encode_cursor(last[15], last[0])
+
+    return {
+        "events": events,
+        "next_cursor": next_cursor,
+        "window": {"from": from_.isoformat(), "to": to.isoformat()},
+        "count": len(events),
+    }
 
 
 @router.get("/data-deletion-requests", status_code=200)

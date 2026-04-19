@@ -84,8 +84,16 @@ async def lifespan(app: FastAPI):
         CronTrigger(hour=3, minute=15, timezone="UTC"),
         id="platform_events_retention",
     )
+    # Proposals expire-stale: daily at 04:00 UTC, mark staged proposals
+    # older than 30 days as expired. Emits proposal.expired + records a
+    # rejection-class learning signal per row.
+    scheduler.add_job(
+        _run_proposals_expire_stale,
+        CronTrigger(hour=4, minute=0, timezone="UTC"),
+        id="proposals_expire_stale",
+    )
     scheduler.start()
-    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; billing dormant; auto-send removed)")
+    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; proposals expire; billing dormant; auto-send removed)")
 
     yield
 
@@ -280,6 +288,28 @@ async def _run_platform_events_retention():
             await purge_expired_events(db)
     except Exception as e:
         logger.error(f"platform_events retention job error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_proposals_expire_stale():
+    """Mark staged agent_proposals older than 30 days as expired.
+
+    Each expired row gets a proposal.expired event + a rejection-class
+    learning record ("user never got around to acting on this"). Feeds
+    back into agent tuning — patterns that keep expiring are patterns
+    the agent should stop proposing.
+    """
+    from src.core.database import get_db_context
+    from src.services.proposals import ProposalService
+    try:
+        async with get_db_context() as db:
+            service = ProposalService(db)
+            n = await service.expire_stale(age_days=30)
+            await db.commit()
+            if n:
+                logger.info(f"proposals: expired {n} stale proposals")
+    except Exception as e:
+        logger.error(f"proposals expire-stale job error: {e}")
         sentry_sdk.capture_exception(e)
 
 

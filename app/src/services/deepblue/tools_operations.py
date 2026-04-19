@@ -321,7 +321,6 @@ async def _exec_create_case(inp: dict, ctx: ToolContext) -> dict:
         return {"error": f"Could not stage create-case proposal: {e}"}
 
     return {
-        "requires_confirmation": True,  # retained for UI until Step 10
         "proposal_id": proposal.id,
         "preview": {
             "type": "create_case",

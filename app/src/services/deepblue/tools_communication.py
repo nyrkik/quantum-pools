@@ -39,7 +39,6 @@ async def _exec_broadcast(inp: dict, ctx: ToolContext) -> dict:
             return {"error": f"Could not stage broadcast proposal: {e}"}
         return {
             "action": "broadcast_email",
-            "requires_confirmation": True,  # UI compat until Step 10
             "proposal_id": proposal.id,
             "preview": {
                 "subject": subject,
@@ -150,7 +149,6 @@ async def _exec_draft_customer_email(inp: dict, ctx: ToolContext) -> dict:
         return {"error": f"Could not stage customer-email proposal: {e}"}
 
     return {
-        "requires_confirmation": True,  # UI compat until Step 10
         "proposal_id": proposal.id,
         "preview": {
             "type": "customer_email",

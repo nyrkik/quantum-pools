@@ -31,6 +31,12 @@ Rules enforced:
       accompanied by `AgentLearningService` usage in the same module.
       Static AI agents are commoditized; learning is the moat.
 
+  R6. **No stale `requires_confirmation` strings** (Phase 2 Step 11).
+      After Phase 2 Step 10 migrated all DeepBlue tools to the proposals
+      pipeline, any lingering `requires_confirmation` string in
+      app/src/ signals a regression — either a not-yet-migrated tool
+      was re-added or someone restored the legacy pattern. Block at CI.
+
 Exit code:
   0 — no violations
   1 — one or more violations found
@@ -265,6 +271,28 @@ def rule_4_single_emit_path(report: AuditReport):
 _ANTHROPIC_CALL_RE = re.compile(r"\.messages\.create\s*\(")
 
 
+_REQUIRES_CONFIRM_RE = re.compile(r'\brequires_confirmation\b')
+
+
+def rule_6_no_stale_requires_confirmation(report: AuditReport):
+    """The requires_confirmation pattern is retired as of Phase 2 Step 10.
+    Any occurrence in app/src/ signals a regression."""
+    for py in _iter_py_files(APP_SRC):
+        rel = _rel(py)
+        text = py.read_text()
+        for m in _REQUIRES_CONFIRM_RE.finditer(text):
+            # Allow mention in this script's own comments + docstrings
+            # (we have to name the pattern to detect it).
+            if rel == "app/scripts/audit_event_discipline.py":
+                continue
+            line = text[:m.start()].count("\n") + 1
+            report.add(
+                "R6", rel, line,
+                "'requires_confirmation' pattern is retired — use ProposalService.stage "
+                "and return proposal_id instead",
+            )
+
+
 def rule_5_every_agent_learns(report: AuditReport):
     """Each `.messages.create(` in a service must have AgentLearningService
     imported + used in the same file (heuristic — the learner needs to be
@@ -350,6 +378,7 @@ def main():
     rule_3_single_job_path(report)
     rule_4_single_emit_path(report)
     rule_5_every_agent_learns(report)
+    rule_6_no_stale_requires_confirmation(report)
 
     if args.write_baseline:
         _write_baseline(report.violations)
@@ -368,6 +397,7 @@ def main():
         "R3": "Single job-creation path",
         "R4": "Single emit path",
         "R5": "Every AI agent learns",
+        "R6": "No stale requires_confirmation",
     }
 
     if resolved:
@@ -377,7 +407,7 @@ def main():
     if not new_violations:
         print(f"✓ Event discipline audit PASSED")
         print(f"  Taxonomy: {len(taxonomy)} documented event types")
-        print(f"  Rules checked: R1 R2 R3 R4 R5")
+        print(f"  Rules checked: R1 R2 R3 R4 R5 R6")
         print(f"  Baseline debt: {len(baseline)} (allowlisted)")
         return 0
 

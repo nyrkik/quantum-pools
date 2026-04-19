@@ -281,7 +281,6 @@ async def _exec_update_note(inp: dict, ctx: ToolContext) -> dict:
 
     return {
         "action": "update_note",
-        "requires_confirmation": True,  # retained for UI until Step 10
         "proposal_id": proposal.id,
         "preview": {
             "customer_id": customer_id,

@@ -87,11 +87,11 @@ async def test_tool_stages_proposal_with_proposal_id(db_session, org_a):
         ctx=ctx,
     )
 
-    # Tool returns the preview + proposal_id; UI still keys off
-    # requires_confirmation until Step 8.
+    # Tool returns the preview + proposal_id; frontend keys off proposal_id.
     assert "error" not in result, result
     assert result["action"] == "add_equipment"
-    assert result["requires_confirmation"] is True
+    # After Step 10, requires_confirmation is fully removed.
+    assert "requires_confirmation" not in result
     assert "proposal_id" in result
     pid = result["proposal_id"]
     assert result["preview"]["proposal_id"] == pid

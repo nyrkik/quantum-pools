@@ -262,9 +262,6 @@ async def _exec_add_equipment(inp: dict, ctx: ToolContext) -> dict:
 
     return {
         "action": "add_equipment",
-        # requires_confirmation retained until Step 8 ships ProposalCard
-        # (frontend still keys off this to render the legacy confirm UI).
-        "requires_confirmation": True,
         "proposal_id": proposal.id,
         "preview": {
             "bow_id": bow_id,

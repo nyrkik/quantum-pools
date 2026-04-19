@@ -130,19 +130,19 @@ export function ToolResultCard({ name, result, stale = false, isLastOfType = tru
     );
   }
 
-  if (name === "draft_broadcast_email" && result.requires_confirmation) {
+  if (name === "draft_broadcast_email" && result.proposal_id) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
     return <BroadcastPreviewCard preview={preview} stale={stale} isLastOfType={isLastOfType} />;
   }
 
-  if (name === "draft_customer_email" && result.requires_confirmation) {
+  if (name === "draft_customer_email" && result.proposal_id) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
     return <CustomerEmailPreviewCard preview={preview} stale={stale} isLastOfType={isLastOfType} />;
   }
 
-  if (name === "add_equipment_to_pool" && result.requires_confirmation) {
+  if (name === "add_equipment_to_pool" && result.proposal_id) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
     return <ConfirmCard
@@ -156,7 +156,7 @@ export function ToolResultCard({ name, result, stale = false, isLastOfType = tru
     />;
   }
 
-  if (name === "log_chemical_reading" && result.requires_confirmation) {
+  if (name === "log_chemical_reading" && result.proposal_id) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
     const readings = preview.readings as Record<string, number>;
@@ -172,7 +172,7 @@ export function ToolResultCard({ name, result, stale = false, isLastOfType = tru
     />;
   }
 
-  if (name === "update_customer_note" && result.requires_confirmation) {
+  if (name === "update_customer_note" && result.proposal_id) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
     return <ConfirmCard
@@ -186,7 +186,7 @@ export function ToolResultCard({ name, result, stale = false, isLastOfType = tru
     />;
   }
 
-  if (name === "create_case" && result.requires_confirmation) {
+  if (name === "create_case" && result.proposal_id) {
     const preview = result.preview as Record<string, unknown> | undefined;
     if (!preview) return null;
     return <CreateCaseCard preview={preview} stale={stale} isLastOfType={isLastOfType} conversationId={conversationId} />;

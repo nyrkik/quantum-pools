@@ -110,7 +110,6 @@ async def _exec_log_reading(inp: dict, ctx: ToolContext) -> dict:
 
     return {
         "action": "log_reading",
-        "requires_confirmation": True,  # retained for UI until Step 10
         "proposal_id": proposal.id,
         "preview": {
             "property_id": property_id,

@@ -149,6 +149,8 @@ The single biggest reason these systems fail in practice is inconsistent event t
 
 ## Phase 1: Event instrumentation foundation
 
+> **Status: SHIPPED 2026-04-19.** All 14 rollout steps complete + 11-item DoD green. See `docs/ai-platform-phase-1.md` for implementation spec; remove that file when this phase is archived. Known debt: 18 AI agents across the fleet (customer_matcher, triage_agent, deepblue engine, parts agents, satellite service, eval harnesses) don't yet wire into AgentLearningService. Frozen in `app/scripts/audit_event_discipline_baseline.txt`; CI blocks new R5 drift. Debt pays down in Phase 5 (unify existing agents into proposals).
+
 ### Why this phase exists
 
 Nothing else in this plan works without the event stream. Workflow-observer has nothing to observe. Sonar has nothing to analyze. `feedback_product_learns_the_org` is impossible. Even basic debugging ("how did this customer get into this state?") is impossible.

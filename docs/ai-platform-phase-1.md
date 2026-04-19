@@ -633,14 +633,16 @@ export const events = new EventClient();
 
 File: `app/scripts/backfill_platform_events.py`
 
-**Usage**: `./venv/bin/python app/scripts/backfill_platform_events.py [--dry-run] [--since YYYY-MM-DD] [--org-id UUID]`
+**Usage**: `./venv/bin/python app/scripts/backfill_platform_events.py [--commit] [--since YYYY-MM-DD] [--org-id UUID]` (dry-run is default; `--commit` writes).
 
 **Flow:**
-1. For each entity type listed in taxonomy §14, run a query that SELECTs existing rows and derives events.
-2. Insert events with `actor_type = 'system'`, `payload.source = 'backfill'`, `client_emit_id = 'backfill:<entity_type>:<entity_id>'` (deterministic so re-runs are idempotent).
-3. Batch inserts (1,000 rows per transaction).
-4. Progress logging every 1,000 rows.
-5. Summary emitted at end: total events created per entity type.
+1. For each entity type listed in taxonomy §14, run a query that SELECTs existing rows and derives events. Per-org iteration so minutes_since_prior_milestone is computed relative to each org's own timeline.
+2. Insert events with `actor_type = 'system'`, `payload.source = 'backfill'`, and a deterministic `client_emit_id = uuid5(BACKFILL_NAMESPACE, "backfill:<event_type>:<entity_id>")` — 36-char UUID (literal string form exceeded the `VARCHAR(36)` column limit).
+3. Each event's `created_at` passed through the new `PlatformEventService.emit(..., created_at=...)` override so events land at the historical timestamp, not NOW().
+4. Progress logging per org per pass.
+5. Summary emitted at end: total events created per type, activation milestones by org.
+
+**Shipped outcome (2026-04-17):** 8022 events across 13 event types spanning 2024-08 → 2026-04, committed via `--commit`. Second run returned 0 new events (idempotency verified).
 
 **Example — jobs backfill:**
 
@@ -675,9 +677,10 @@ async def backfill_jobs(db: AsyncSession):
 
 **Cutover procedure:**
 1. Deploy code with `PlatformEventService` + middleware + frontend client + instrumentation (NOT the scheduler jobs yet).
-2. Run backfill script against production DB. ~1-2 minutes expected.
-3. Enable APScheduler jobs (partition manager, retention purge) on next deploy.
-4. Monitor emit error rate for 24h.
+2. **Pre-create historical partitions.** Initial partitions only cover the ship-forward range; backfill replays events from the earliest customer (2024-08). Before `--commit`, create monthly partitions covering the full `min(created_at)` → current month range. Step 10's APScheduler partition manager only creates forward partitions, so backward coverage is a manual one-time op. (Done: 31 partitions created Jan 2024 → Jul 2026.)
+3. Run backfill script against production DB. ~1-2 minutes expected.
+4. Enable APScheduler jobs (partition manager, retention purge) on next deploy.
+5. Monitor emit error rate for 24h.
 
 ---
 
@@ -849,7 +852,7 @@ Each step gets its own commit message + deploy via `scripts/deploy.sh`. After ea
 | CCPA deletion request arrives while event partition is being rotated | Single transaction for purge updates. Partition rotation is append-only (creates new, doesn't touch existing). Non-conflict. |
 | Completeness audit becomes an allowlist dumpster fire | Allowlist entries require justification in PR. Weekly audit report (manual for now) lists top N allowlisted items to review. |
 | Dev/test databases accumulate events endlessly | Test fixtures TRUNCATE `platform_events` between tests (already standard for other tables in the suite). |
-| Backfill creates duplicates on re-run | Deterministic `client_emit_id` (`backfill:<type>:<id>`) + unique constraint = idempotent. |
+| Backfill creates duplicates on re-run | Deterministic `client_emit_id` via `uuid5(BACKFILL_NAMESPACE, "backfill:<type>:<id>")` + idempotency check in `emit()` = idempotent (verified: second run inserts 0). |
 | Privacy regression: PII sneaks into a payload | Code review + a pattern-match test in CI that scans event_type + payload combinations against known PII field names (email, phone, address, name). |
 
 ---

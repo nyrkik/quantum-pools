@@ -261,6 +261,8 @@ export function InboxThreadListV2({
               <HoverCardContent
                 side="right"
                 align="start"
+                sideOffset={12}
+                avoidCollisions={false}
                 className="w-[28rem]"
               >
                 <InboxRowHoverPanel

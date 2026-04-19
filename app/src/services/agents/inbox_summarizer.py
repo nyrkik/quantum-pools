@@ -298,8 +298,21 @@ Related state for this customer:
 - Outstanding invoices: {invoices_line}
 
 Rules:
-- `ask` in the customer's voice; null if purely informational.
-- `state` in the team's voice; one sentence of what WE do next.
+- `ask` in the customer's voice; null if purely informational or if the
+  customer is responding/approving/declining rather than asking.
+- `state` is the ONE-LINE SYNTHESIS a triager reads to decide "do I need
+  to open this?". It must be SPECIFIC — name the person, the action, the
+  equipment/invoice/location. Never restate the latest snippet verbatim.
+  Good examples (follow this form):
+    "Al approved replacing the flowmeter for Office Spa"
+    "Maria declined the $450 heater quote; wants cheaper options"
+    "Pinebrook paid invoice 4412; $0 balance"
+    "No reply in 6 days — second follow-up owed on pump quote"
+    "Gene asks when we can reschedule Thursday's service"
+  Bad examples (never do this):
+    "Yes. Please proceed. Thanks." (raw quote — useless)
+    "Customer replied" (too vague)
+    "Thank you email" (no actionable info)
 - `open_items`: all remaining to-dos go here — routine overdue invoices,
   pending replies, follow-ups the team owes. Use imperative voice.
 - `red_flags`: reserved for GENUINE escalation signals ONLY. Examples that

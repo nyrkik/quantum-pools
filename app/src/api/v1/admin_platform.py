@@ -526,6 +526,57 @@ async def query_proposals(
     }
 
 
+# ---------------------------------------------------------------------------
+# Org feature-flag toggles (Phase 3+)
+# ---------------------------------------------------------------------------
+#
+# Per-org UX rollout flags live on the `organizations` table as
+# booleans (not FeatureService slugs — these are rollout gates, not
+# paywalls). Platform admins toggle them here.
+
+
+class InboxV2FlagRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/orgs/{org_id}/inbox-v2", status_code=200)
+async def toggle_inbox_v2(
+    org_id: str,
+    body: InboxV2FlagRequest,
+    ctx: PlatformAdminContext = Depends(get_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Turn the inbox-v2 redesign on or off for a single org.
+
+    Flipping this on starts the summarizer sweep for the org's threads;
+    existing threads get summarized as they receive new inbound mail
+    (or via the nightly stale sweep). Flipping off: new inbounds stop
+    queueing summaries, cached payloads stay — front end honors the
+    flag so the redesigned layout simply hides.
+    """
+    from src.models.organization import Organization
+
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    prior = org.inbox_v2_enabled
+    org.inbox_v2_enabled = bool(body.enabled)
+    await db.commit()
+
+    logger.info(
+        "inbox_v2 toggled for org %s by platform-admin %s: %s → %s",
+        org_id, ctx.user.id, prior, org.inbox_v2_enabled,
+    )
+
+    return {
+        "org_id": org_id,
+        "org_name": org.name,
+        "inbox_v2_enabled": org.inbox_v2_enabled,
+        "changed": prior != org.inbox_v2_enabled,
+    }
+
+
 @router.get("/data-deletion-requests", status_code=200)
 async def list_data_deletion_requests(
     limit: int = 50,

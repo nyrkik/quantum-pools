@@ -8,6 +8,8 @@ from sqlalchemy import select, func
 
 from src.models.property import Property
 from src.core.exceptions import NotFoundError
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 
 class PropertyService:
@@ -41,7 +43,9 @@ class PropertyService:
             raise NotFoundError("Property not found")
         return prop
 
-    async def create(self, org_id: str, **kwargs) -> Property:
+    async def create(
+        self, org_id: str, *, actor: Optional[Actor] = None, **kwargs,
+    ) -> Property:
         # Auto-populate county from zip if not provided
         if not kwargs.get("county") and kwargs.get("zip_code"):
             from src.utils.zip_county import get_county
@@ -49,6 +53,20 @@ class PropertyService:
         prop = Property(id=str(uuid.uuid4()), organization_id=org_id, **kwargs)
         self.db.add(prop)
         await self.db.flush()
+
+        refs = {"property_id": prop.id}
+        if prop.customer_id:
+            refs["customer_id"] = prop.customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="property.created",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={},
+        )
+
         await self.db.refresh(prop)
         return prop
 

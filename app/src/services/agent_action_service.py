@@ -23,6 +23,8 @@ from src.models.user import User
 from src.models.water_feature import WaterFeature
 
 from src.presenters.action_presenter import ActionPresenter
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +161,8 @@ class AgentActionService:
         property_address: str | None = None,
         job_path: str = "internal",
         line_items: list | None = None,
+        actor: Actor | None = None,
+        source: str = "manual",
     ) -> dict:
         """Create a new action/job. For customer path, auto-creates a draft estimate."""
         from src.models.customer import Customer
@@ -206,6 +210,25 @@ class AgentActionService:
         )
         self.db.add(action)
         await self.db.flush()
+
+        refs: dict = {"job_id": action.id, "case_id": case_id}
+        if agent_message_id:
+            refs["thread_id"] = agent_message_id  # thread/message linkage
+        if customer_id:
+            refs["customer_id"] = customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="job.created",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={
+                "job_type": action_type,
+                "source": source,
+                "job_path": job_path,
+            },
+        )
 
         # Customer path: create a draft estimate linked to this job
         if job_path == "customer" and line_items:

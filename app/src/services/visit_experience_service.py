@@ -21,6 +21,8 @@ from src.models.tech import Tech
 from src.models.route import RouteStop
 from src.core.config import get_settings
 from src.core.exceptions import NotFoundError
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 
 ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -423,7 +425,8 @@ class VisitExperienceService:
     # ------------------------------------------------------------------
 
     async def complete_visit(
-        self, org_id: str, visit_id: str, notes: Optional[str] = None
+        self, org_id: str, visit_id: str, notes: Optional[str] = None,
+        *, actor: Optional[Actor] = None,
     ) -> dict:
         """Complete the visit, calculate duration, mark route stop."""
         visit = await self._get_visit(org_id, visit_id)
@@ -448,6 +451,21 @@ class VisitExperienceService:
         # is tracked via the visit's status + route_stop_id link.
 
         await self.db.flush()
+
+        refs = {"visit_id": visit.id}
+        if visit.property_id:
+            refs["property_id"] = visit.property_id
+        if visit.customer_id:
+            refs["customer_id"] = visit.customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="visit.completed",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={"duration_minutes": visit.duration_minutes} if visit.duration_minutes is not None else {},
+        )
 
         # Activation funnel — first-visit-completed for this org.
         from src.services.events.activation_tracker import emit_if_first

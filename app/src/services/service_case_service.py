@@ -14,6 +14,8 @@ from src.models.agent_thread import AgentThread
 from src.models.invoice import Invoice
 from src.models.internal_message import InternalThread
 from src.models.deepblue_conversation import DeepBlueConversation
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,7 @@ class ServiceCaseService:
         status: str = "new",
         priority: str = "normal",
         created_by: str | None = None,
+        actor: Actor | None = None,
     ) -> ServiceCase:
         case = ServiceCase(
             id=str(uuid.uuid4()),
@@ -99,6 +102,20 @@ class ServiceCaseService:
         )
         self.db.add(case)
         await self.db.flush()
+
+        refs = {"case_id": case.id}
+        if customer_id:
+            refs["customer_id"] = customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="case.created",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={"source": source, "status_at_create": status, "priority": priority},
+        )
+
         return case
 
     async def get(self, org_id: str, case_id: str) -> ServiceCase | None:
@@ -425,9 +442,19 @@ class ServiceCaseService:
             new_status = case.status
 
         if new_status != case.status:
+            prior_status = case.status
             case.status = new_status
             if new_status == "closed":
                 case.closed_at = datetime.now(timezone.utc)
+                refs = {"case_id": case.id}
+                if case.customer_id:
+                    refs["customer_id"] = case.customer_id
+                await PlatformEventService.emit(
+                    db=self.db, event_type="case.closed", level="system_action",
+                    actor=actor_system(), organization_id=case.organization_id,
+                    entity_refs=refs,
+                    payload={"reason": "auto_all_jobs_done", "auto_closed": True, "prior_status": prior_status},
+                )
             elif case.closed_at:
                 case.closed_at = None
 

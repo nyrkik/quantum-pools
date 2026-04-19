@@ -11,6 +11,8 @@ from src.models.customer import Customer
 from src.models.property import Property
 from src.models.water_feature import WaterFeature
 from src.core.exceptions import NotFoundError
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 
 class CustomerService:
@@ -92,10 +94,23 @@ class CustomerService:
             raise NotFoundError("Customer not found")
         return customer
 
-    async def create(self, org_id: str, **kwargs) -> Customer:
+    async def create(
+        self, org_id: str, *, actor: Optional[Actor] = None, source: str = "api",
+        **kwargs,
+    ) -> Customer:
         customer = Customer(id=str(uuid.uuid4()), organization_id=org_id, **kwargs)
         self.db.add(customer)
         await self.db.flush()
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="customer.created",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"customer_id": customer.id},
+            payload={"source": source, "customer_type": customer.customer_type},
+        )
 
         # Activation funnel: first-customer-added for this org.
         from src.services.events.activation_tracker import emit_if_first
@@ -159,6 +174,27 @@ class CustomerService:
         self.db.add(wf)
 
         await self.db.flush()
+
+        # Emit the three create events so backfill isn't the only source.
+        sys = actor_system()
+        await PlatformEventService.emit(
+            db=self.db, event_type="customer.created", level="user_action",
+            actor=sys, organization_id=org_id,
+            entity_refs={"customer_id": customer.id},
+            payload={"source": "api_with_property", "customer_type": customer.customer_type},
+        )
+        await PlatformEventService.emit(
+            db=self.db, event_type="property.created", level="user_action",
+            actor=sys, organization_id=org_id,
+            entity_refs={"property_id": prop.id, "customer_id": customer.id},
+            payload={},
+        )
+        await PlatformEventService.emit(
+            db=self.db, event_type="water_feature.created", level="user_action",
+            actor=sys, organization_id=org_id,
+            entity_refs={"water_feature_id": wf.id, "property_id": prop.id},
+            payload={"water_type": bow_data.get("water_type", "pool")},
+        )
 
         # Activation funnel — covers the create_with_property entry point too.
         from src.services.events.activation_tracker import emit_if_first

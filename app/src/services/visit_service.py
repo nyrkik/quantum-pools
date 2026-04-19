@@ -13,6 +13,8 @@ from src.models.property import Property
 from src.models.tech import Tech
 from src.models.customer import Customer
 from src.core.exceptions import NotFoundError
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 
 class VisitService:
@@ -91,7 +93,10 @@ class VisitService:
         await self.db.refresh(visit)
         return visit
 
-    async def complete(self, org_id: str, visit_id: str, **kwargs) -> Visit:
+    async def complete(
+        self, org_id: str, visit_id: str, *,
+        actor: Optional[Actor] = None, **kwargs,
+    ) -> Visit:
         visit = await self.get(org_id, visit_id)
         now = datetime.now(timezone.utc)
         visit.status = VisitStatus.completed.value
@@ -105,6 +110,21 @@ class VisitService:
             if value is not None:
                 setattr(visit, key, value)
         await self.db.flush()
+
+        refs = {"visit_id": visit.id}
+        if visit.property_id:
+            refs["property_id"] = visit.property_id
+        if visit.customer_id:
+            refs["customer_id"] = visit.customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="visit.completed",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={"duration_minutes": visit.duration_minutes} if visit.duration_minutes is not None else {},
+        )
 
         # Activation funnel — first-visit-completed.
         from src.services.events.activation_tracker import emit_if_first

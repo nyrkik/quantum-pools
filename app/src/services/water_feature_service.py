@@ -11,6 +11,8 @@ from src.models.property import Property
 from src.models.customer import Customer
 from src.core.exceptions import NotFoundError
 from src.services.rate_sync import sync_rates_for_property
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 
 class WaterFeatureService:
@@ -37,7 +39,10 @@ class WaterFeatureService:
             raise NotFoundError("Body of water not found")
         return wf
 
-    async def create(self, org_id: str, property_id: str, **kwargs) -> WaterFeature:
+    async def create(
+        self, org_id: str, property_id: str, *,
+        actor: Optional[Actor] = None, **kwargs,
+    ) -> WaterFeature:
         # Verify property exists and belongs to org
         prop_result = await self.db.execute(
             select(Property).where(Property.id == property_id, Property.organization_id == org_id)
@@ -105,6 +110,16 @@ class WaterFeatureService:
 
         await self.db.flush()
         await self.db.refresh(wf)
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="water_feature.created",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"water_feature_id": wf.id, "property_id": property_id},
+            payload={"water_type": kwargs.get("water_type", "pool")},
+        )
 
         # Reallocate customer rate across all WFs (including new one)
         await self._reallocate_customer_rate(property_id, org_id)

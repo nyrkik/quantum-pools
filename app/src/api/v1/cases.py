@@ -36,6 +36,7 @@ async def create_case(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new case."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = ServiceCaseService(db)
     user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
     case = await svc.create(
@@ -46,6 +47,7 @@ async def create_case(
         billing_name=body.billing_name,
         priority=body.priority,
         created_by=user_name,
+        actor=actor_from_org_ctx(ctx),
     )
     await db.commit()
     return {"id": case.id, "case_number": case.case_number, "title": case.title}
@@ -336,15 +338,20 @@ async def update_case(
     if "title" in body:
         case.title = body["title"][:300]
     status_override = "status" in body
+    prior_manager = case.manager_name
+    closed_this_request = False
+    reopened_this_request = False
     if status_override:
         prior_status = case.status
         case.status = body["status"]
         if body["status"] == "closed":
             from datetime import datetime, timezone
             case.closed_at = datetime.now(timezone.utc)
+            closed_this_request = prior_status not in ("closed", "cancelled")
         elif body["status"] not in ("closed", "cancelled"):
             # Reopening: clear closed_at.
             case.closed_at = None
+            reopened_this_request = prior_status in ("closed", "cancelled")
         # When transitioning to a terminal state, mirror it onto any open jobs.
         # Closing a case with open work underneath would leave orphaned actionable items.
         if body["status"] in ("closed", "cancelled") and prior_status not in ("closed", "cancelled"):
@@ -353,7 +360,9 @@ async def update_case(
         case.priority = body["priority"]
     if "assigned_to_name" in body:
         case.assigned_to_name = body["assigned_to_name"]
+    manager_changed = False
     if "manager_name" in body:
+        manager_changed = (body["manager_name"] != prior_manager)
         case.manager_name = body["manager_name"]
         case.assigned_to_name = body.get("assigned_to_name", body["manager_name"])
         case.assigned_to_user_id = body.get("assigned_to_user_id")
@@ -365,6 +374,32 @@ async def update_case(
     # in_progress etc. based on open invoices, done jobs, and so on.
     if not status_override:
         await svc.update_status_from_children(case_id)
+
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_from_org_ctx
+    actor = actor_from_org_ctx(ctx)
+    refs = {"case_id": case_id}
+    if case.customer_id:
+        refs["customer_id"] = case.customer_id
+    if closed_this_request:
+        await PlatformEventService.emit(
+            db=db, event_type="case.closed", level="user_action", actor=actor,
+            organization_id=ctx.organization_id, entity_refs=refs,
+            payload={"reason": "manual", "auto_closed": False},
+        )
+    if reopened_this_request:
+        await PlatformEventService.emit(
+            db=db, event_type="case.reopened", level="user_action", actor=actor,
+            organization_id=ctx.organization_id, entity_refs=refs,
+            payload={},
+        )
+    if manager_changed:
+        await PlatformEventService.emit(
+            db=db, event_type="case.manager_changed", level="user_action", actor=actor,
+            organization_id=ctx.organization_id, entity_refs=refs,
+            payload={"prior_manager_name": prior_manager, "new_manager_name": case.manager_name},
+        )
+
     await db.commit()
     presenter = CasePresenter(db)
     return await presenter.one(case)

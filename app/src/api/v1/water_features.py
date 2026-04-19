@@ -29,8 +29,9 @@ async def create_water_feature(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = WaterFeatureService(db)
-    wf = await svc.create(ctx.organization_id, property_id, **body.model_dump())
+    wf = await svc.create(ctx.organization_id, property_id, actor=actor_from_org_ctx(ctx), **body.model_dump())
     return WaterFeatureResponse.model_validate(wf)
 
 

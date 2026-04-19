@@ -49,6 +49,7 @@ async def create_agent_action(
     db: AsyncSession = Depends(get_db),
 ):
     """Create an action item — standalone or linked to a message."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     service = AgentActionService(db)
     return await service.create_action(
         org_id=ctx.organization_id,
@@ -63,6 +64,8 @@ async def create_agent_action(
         property_address=body.property_address,
         job_path=body.job_path,
         line_items=[li.model_dump() for li in body.line_items] if body.line_items else None,
+        actor=actor_from_org_ctx(ctx),
+        source="manual",
     )
 
 

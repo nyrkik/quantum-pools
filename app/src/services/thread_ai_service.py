@@ -200,6 +200,23 @@ Respond with JSON:
             created_by=created_by,
         )
         self.db.add(action)
+        await self.db.flush()
+
+        from src.services.events.platform_event_service import PlatformEventService
+        from src.services.events.actor_factory import actor_agent
+        refs = {"job_id": action.id, "thread_id": thread_id, "case_id": case_id}
+        if action.customer_id:
+            refs["customer_id"] = action.customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="job.created",
+            level="agent_action",
+            actor=actor_agent("email_drafter"),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={"job_type": action.action_type, "source": "thread_ai"},
+        )
+
         await self.db.commit()
         await self.db.refresh(action)
 

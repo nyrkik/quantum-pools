@@ -1116,6 +1116,7 @@ async def confirm_create_case(
     """Create a case from DeepBlue and optionally link the conversation."""
     from src.services.service_case_service import ServiceCaseService
     from src.models.deepblue_conversation import DeepBlueConversation
+    from src.services.events.actor_factory import actor_from_org_ctx
 
     svc = ServiceCaseService(db)
     user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
@@ -1127,6 +1128,7 @@ async def confirm_create_case(
         billing_name=req.billing_name,
         priority=req.priority,
         created_by=user_name,
+        actor=actor_from_org_ctx(ctx),
     )
 
     # Link conversation to case if provided

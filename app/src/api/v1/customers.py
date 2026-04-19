@@ -115,8 +115,9 @@ async def create_customer(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = CustomerService(db)
-    customer = await svc.create(ctx.organization_id, **body.model_dump())
+    customer = await svc.create(ctx.organization_id, actor=actor_from_org_ctx(ctx), **body.model_dump())
     return CustomerResponse.model_validate(customer)
 
 

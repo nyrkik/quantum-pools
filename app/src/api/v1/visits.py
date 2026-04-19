@@ -220,8 +220,9 @@ async def complete_visit_legacy(
     db: AsyncSession = Depends(get_db),
 ):
     """Legacy complete endpoint — kept for backward compat."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = VisitService(db)
-    visit = await svc.complete(ctx.organization_id, visit_id, **body.model_dump(exclude_unset=True))
+    visit = await svc.complete(ctx.organization_id, visit_id, actor=actor_from_org_ctx(ctx), **body.model_dump(exclude_unset=True))
     return VisitResponse.model_validate(visit)
 
 
@@ -355,9 +356,10 @@ async def finish_visit(
     db: AsyncSession = Depends(get_db),
 ):
     """Enhanced complete — calculates duration, marks route stop."""
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = VisitExperienceService(db)
     try:
-        result = await svc.complete_visit(ctx.organization_id, visit_id, notes=body.notes)
+        result = await svc.complete_visit(ctx.organization_id, visit_id, notes=body.notes, actor=actor_from_org_ctx(ctx))
         await publish(EventType.VISIT_COMPLETED, ctx.organization_id, {"visit_id": visit_id})
         return result
     except NotFoundError as e:

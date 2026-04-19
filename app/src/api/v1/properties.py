@@ -68,8 +68,9 @@ async def create_property(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from src.services.events.actor_factory import actor_from_org_ctx
     svc = PropertyService(db)
-    prop = await svc.create(ctx.organization_id, **body.model_dump())
+    prop = await svc.create(ctx.organization_id, actor=actor_from_org_ctx(ctx), **body.model_dump())
     background_tasks.add_task(_geocode_property, prop.id, prop.full_address)
     background_tasks.add_task(_inspection_auto_match, ctx.organization_id)
     return PropertyResponse.model_validate(prop)

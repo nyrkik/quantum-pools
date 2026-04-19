@@ -797,14 +797,22 @@ class AgentThreadService:
             thread.assigned_to_name = None
             thread.assigned_at = None
 
+        # Taxonomy §6: user IDs only in entity_refs, never in payload.
+        # Both "new" and "prior" assignee IDs go under distinct keys so
+        # the CCPA purge-by-value UPDATE reaches both.
+        refs: dict = {"thread_id": thread_id}
+        if user_id:
+            refs["user_id"] = user_id
+        if prior_assignee_id:
+            refs["prior_assignee_user_id"] = prior_assignee_id
         await PlatformEventService.emit(
             db=self.db,
             event_type="thread.assigned",
             level="user_action" if actor and actor.actor_type == "user" else "system_action",
             actor=actor or actor_system(),
             organization_id=org_id,
-            entity_refs={"thread_id": thread_id, **({"user_id": user_id} if user_id else {})},
-            payload={"prior_assignee_id": prior_assignee_id},
+            entity_refs=refs,
+            payload={},
         )
 
         await self.db.commit()

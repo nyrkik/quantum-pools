@@ -51,6 +51,19 @@ Rules:
 - Never admit fault or accept blame
 - Return ONLY the revised email text, nothing else"""
 
+        # Inject lessons from prior corrections (DNA rule: every agent learns).
+        try:
+            from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_DRAFTER
+            learner = AgentLearningService(self.db)
+            lessons = await learner.build_lessons_prompt(
+                org_id, AGENT_EMAIL_DRAFTER,
+                category=thread.category, customer_id=thread.matched_customer_id,
+            )
+            if lessons:
+                prompt += "\n\n" + lessons
+        except Exception:
+            pass
+
         try:
             client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
             response = await client.messages.create(
@@ -169,6 +182,19 @@ Subject: {thread.subject}
 Respond with JSON:
 {{"action_type": "repair|follow_up|bid|site_visit|callback|schedule_change|equipment|other", "description": "MAXIMUM 8 WORDS. Format: verb + what — location. Example: 'Replace pump seal — Sierra Oaks'. NO addresses, emails, phone numbers, or extra details."}}"""
 
+        # Inject lessons from prior corrections (DNA rule: every agent learns).
+        try:
+            from src.services.agent_learning_service import AgentLearningService, AGENT_JOB_EVALUATOR
+            learner = AgentLearningService(self.db)
+            lessons = await learner.build_lessons_prompt(
+                org_id, AGENT_JOB_EVALUATOR,
+                category=thread.category, customer_id=thread.matched_customer_id,
+            )
+            if lessons:
+                prompt += "\n\n" + lessons
+        except Exception:
+            pass
+
         try:
             client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
             response = await client.messages.create(
@@ -272,6 +298,19 @@ Rules:
 - Subject: short description of the work. NEVER include pricing language like "Price TBD", "TBD", "TBA", or dollar amounts in the subject.
 - Descriptions: professional, no addresses, no customer names in line items.
 - Every line item MUST have a real price. If unsure, use a reasonable market estimate. Never use $0 or placeholder pricing."""
+
+        # Inject lessons from prior corrections (DNA rule: every agent learns).
+        try:
+            from src.services.agent_learning_service import AgentLearningService, AGENT_ESTIMATE_GENERATOR
+            learner = AgentLearningService(self.db)
+            lessons = await learner.build_lessons_prompt(
+                org_id, AGENT_ESTIMATE_GENERATOR,
+                category=thread.category, customer_id=thread.matched_customer_id,
+            )
+            if lessons:
+                prompt += "\n\n" + lessons
+        except Exception:
+            pass
 
         try:
             client = AsyncAnthropic(api_key=ANTHROPIC_KEY)

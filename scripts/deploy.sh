@@ -6,7 +6,20 @@ set -e
 
 echo "=== QuantumPools Deploy ==="
 
+# 0. Event-discipline audit — blocks deploy on NEW drift from taxonomy,
+#    canonical paths, PII-in-payload rule, or the agent-learning DNA rule.
+#    Pre-existing debt is allowlisted via the baseline; only new
+#    regressions fail. See app/scripts/audit_event_discipline.py.
+echo "Running event-discipline audit..."
+if ! /home/brian/00_MyProjects/QuantumPools/venv/bin/python /srv/quantumpools/app/scripts/audit_event_discipline.py > /tmp/qp_discipline.out 2>&1; then
+  echo "FAILED: event-discipline audit found new drift — fix before deploying"
+  cat /tmp/qp_discipline.out
+  exit 1
+fi
+tail -5 /tmp/qp_discipline.out
+
 # 1. Build frontend
+echo ""
 echo "Building frontend..."
 cd /srv/quantumpools/frontend
 npm run build --silent 2>&1 | tail -3

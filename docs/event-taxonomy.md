@@ -112,12 +112,21 @@ Any event may reference any of these. An event may add additional keys beyond th
 - Photo file contents or recognizable dimensions
 - Any raw text the customer authored
 
-Allowed:
-- IDs (see §5)
+**Also forbidden in payloads: user identifiers (`user_id`, `assignee_id`, `manager_id`, any key whose value is a QP user's id).**
+User IDs live ONLY in these three canonical locations, and the purge-on-request endpoint (§11 / Step 11) relies on this:
+1. `actor_user_id` column
+2. `acting_as_user_id` column
+3. `entity_refs` values (under any key — the purge scrubs by value, not by key, so `entity_refs.user_id` / `entity_refs.prior_assignee_user_id` / `entity_refs.prior_manager_user_id` are all legal and all purgeable)
+
+If an event needs both "current" and "prior" user-id slots (e.g., `case.manager_changed`, `job.assigned`), BOTH go into `entity_refs` under distinct keys. The payload stays user-ID-free and may carry display-only denorm fields (`prior_manager_name`, etc.) that are text, not identifiers.
+
+Allowed in payloads:
+- IDs that are NOT user-ids (invoice_id in unusual cases, etc. — prefer `entity_refs`)
 - Enum values (status strings, category strings)
 - Numeric dimensions (durations, counts, percentages, confidence scores)
 - Boolean flags
 - Short `reason` strings from a whitelisted set (e.g., `rejection_reason: "wrong_part"`)
+- Display-only name strings (denorm caches: `prior_manager_name`, etc. — NOT user IDs)
 
 **Exception — `error.*` events** may include a truncated error message (≤200 chars) for debugging. Never raw user text inside the error message — strip before logging.
 
@@ -146,7 +155,7 @@ Organized by subsystem. Each event specifies level and minimum expected `entity_
 | `thread.deleted` | user_action | thread_id | Destructive — thread + all messages removed. Owner-only action. Payload: `{message_count, status_at_delete}`. Emitted BEFORE the delete so the audit trail survives. |
 | `thread.snoozed` | user_action | thread_id | Payload: `{until_date}`. |
 | `thread.unsnoozed` | system_action | thread_id | Background wake. |
-| `thread.assigned` | user_action | thread_id, user_id | `user_id` = new assignee. Payload: `{prior_assignee_id}`. |
+| `thread.assigned` | user_action | thread_id, user_id, prior_assignee_user_id? | `user_id` = new assignee (may be null when unassigning). `prior_assignee_user_id` present when the thread had a prior assignee. Payload: `{}` (both user ids go in entity_refs per §6). |
 | `thread.status_changed` | user_action \| system_action | thread_id | Payload: `{from, to, reason}`. |
 | `thread.category_changed` | user_action | thread_id | Payload: `{from, to}`. User override of AI classification. |
 | `thread.summarized` | agent_action | thread_id | Inbox summarizer wrote/refreshed summary. Payload: `{tokens_in, tokens_out, duration_ms, confidence, proposals_staged}`. |
@@ -205,7 +214,7 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 |---|---|---|---|
 | `job.created` | user_action \| system_action \| agent_action | job_id, case_id?, thread_id? | Payload: `{job_type, source}` where source ∈ (manual, thread_ai, case_auto, proposal_accepted, deepblue_tool). |
 | `job.status_changed` | user_action \| system_action | job_id | Payload: `{from, to, reason?}`. |
-| `job.assigned` | user_action | job_id, user_id | Payload: `{prior_assignee_id}`. |
+| `job.assigned` | user_action | job_id, user_id, prior_assignee_user_id? | `user_id` = new assignee. `prior_assignee_user_id` present when job had a prior assignee. Payload: `{}` (user ids live in entity_refs per §6). |
 | `job.scheduled` | user_action \| system_action | job_id | Payload: `{scheduled_date, prior_date?}`. |
 | `job.completed` | user_action | job_id, visit_id? | Payload: `{duration_days_since_created}`. |
 | `job.cancelled` | user_action | job_id | Payload: `{reason?}`. |
@@ -217,7 +226,7 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | `case.created` | user_action \| system_action | case_id, customer_id? | Payload: `{source, linked_thread_count, linked_job_count}`. |
 | `case.closed` | user_action \| system_action | case_id | Payload: `{reason, auto_closed: bool, cascade_jobs_closed}`. |
 | `case.reopened` | user_action | case_id | Payload: `{cascade_jobs_reopened}`. |
-| `case.manager_changed` | user_action | case_id, user_id? | `user_id` ref = new manager's id (may be null when setting unassigned). Payload: `{prior_manager_user_id, prior_manager_name, new_manager_user_id, new_manager_name}` — id + name both emitted because `service_cases.manager_name` is a display-side denorm that callers may set directly when the manager isn't a QP user yet. |
+| `case.manager_changed` | user_action | case_id, user_id?, prior_manager_user_id? | `user_id` ref = new manager's id (null when setting unassigned or when the manager isn't a QP user yet, e.g. just a name). `prior_manager_user_id` present iff the prior manager had a user id. Payload: `{prior_manager_name, new_manager_name}` — display-only denorm; user IDs stay in entity_refs per §6. |
 
 ### 8.6 Invoices / Estimates
 
@@ -248,7 +257,7 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | `chemical_reading.logged` | user_action \| agent_action | chemical_reading_id, water_feature_id, visit_id? | Payload: `{source: manual \| test_strip_vision \| deepblue}`. No chemistry values in payload (those are on the reading row). |
 | `chemistry.reading.out_of_range` | agent_action \| system_action | chemical_reading_id, water_feature_id | A parameter (FC, CC, pH, TA, CYA, calcium, etc.) fell outside MAHC / CA Title 22 thresholds. Compliance event + anomaly signal. Payload: `{parameter, severity: warning\|critical\|closure_required, threshold_source: mahc\|title22\|custom}`. Values themselves live on the reading row, not the event. |
 | `chemistry.dose.applied` | user_action | chemical_reading_id, water_feature_id, visit_id? | A chemical dose was applied. Payload: `{chemical_type, expected_delta_ppm, prior_reading_id?}`. Pair with next reading to compute actual-vs-expected delta (→ tech dosing accuracy + SWG/cell health). |
-| `chemistry.dose.expected_vs_actual` | system_action | chemical_reading_id, water_feature_id | Periodic rollup — after the next reading is logged, compute expected-vs-actual delta. Payload: `{chemical_type, expected_delta, actual_delta, tech_user_id, prior_dose_event_id}`. Training signal for dosing agent + QC flag. |
+| `chemistry.dose.expected_vs_actual` | system_action | chemical_reading_id, water_feature_id, user_id? | Periodic rollup — after the next reading is logged, compute expected-vs-actual delta. `user_id` ref = the tech who dosed (null if unknown). Payload: `{chemical_type, expected_delta, actual_delta, prior_dose_event_id}`. Training signal for dosing agent + QC flag. User id moved to entity_refs per §6. |
 | `photo.uploaded` | user_action | property_id, visit_id?, water_feature_id? | Payload: `{purpose: measurement \| before_after \| issue_report \| test_strip, size_kb}`. |
 
 ### 8.8 Customers / Properties / Equipment

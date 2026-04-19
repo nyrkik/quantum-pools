@@ -410,16 +410,18 @@ async def update_case(
             payload={"cascade_jobs_reopened": cascade_jobs_reopened},
         )
     if manager_changed:
+        # User IDs live in entity_refs only (taxonomy §6). Payload gets
+        # display-name denorms so analytics can format without a join.
         mgr_refs = dict(refs)
         if case.manager_user_id:
             mgr_refs["user_id"] = case.manager_user_id
+        if prior_manager_user_id:
+            mgr_refs["prior_manager_user_id"] = prior_manager_user_id
         await PlatformEventService.emit(
             db=db, event_type="case.manager_changed", level="user_action", actor=actor,
             organization_id=ctx.organization_id, entity_refs=mgr_refs,
             payload={
-                "prior_manager_user_id": prior_manager_user_id,
                 "prior_manager_name": prior_manager_name,
-                "new_manager_user_id": case.manager_user_id,
                 "new_manager_name": case.manager_name,
             },
         )

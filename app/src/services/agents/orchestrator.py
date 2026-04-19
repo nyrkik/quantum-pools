@@ -79,6 +79,28 @@ def _msg_has_cc(msg) -> bool:
         return False
 
 
+async def _queue_summary_if_inbox_v2(db, thread, organization_id: str) -> None:
+    """If the org is on inbox v2, mark this thread to be summarized by
+    the InboxSummarizerService on the next APScheduler sweep.
+
+    Uses a 30-second debounce: if three quick inbounds land on the same
+    thread within 30s, they all just push the debounce time forward —
+    one summary regen per burst.
+
+    No-op when the flag is off (org pays no Claude costs).
+    """
+    from datetime import datetime, timedelta, timezone
+    from src.models.organization import Organization
+
+    org = await db.get(Organization, organization_id)
+    if not org or not getattr(org, "inbox_v2_enabled", False):
+        return
+
+    # Re-debounce every time an inbound arrives.
+    thread.ai_summary_debounce_until = datetime.now(timezone.utc) + timedelta(seconds=30)
+    await db.flush()
+
+
 async def _emit_agent_message_received(db, agent_msg, msg=None):
     """Emit `agent_message.received` for a newly-created inbound AgentMessage.
 
@@ -676,6 +698,14 @@ async def process_incoming_email(
         await _emit_agent_message_received(db, agent_msg, msg=msg)
         await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
         await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
+
+        # Phase 3 — queue a summary regeneration for this thread if the
+        # org is on inbox v2. 30-second debounce coalesces reply bursts.
+        # Actual regen runs via APScheduler sweep (app.py job).
+        try:
+            await _queue_summary_if_inbox_v2(db, thread, organization_id)
+        except Exception as e:
+            logger.warning(f"inbox-v2 summary queue failed for thread {thread.id}: {e}")
 
         # Persist any inbound attachments as MessageAttachment rows so the inbox
         # reading pane can render images/docs the customer sent us.

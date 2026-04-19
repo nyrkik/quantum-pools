@@ -92,8 +92,24 @@ async def lifespan(app: FastAPI):
         CronTrigger(hour=4, minute=0, timezone="UTC"),
         id="proposals_expire_stale",
     )
+    # Phase 3 inbox summarizer: every 15 seconds, pick up threads whose
+    # debounce window has passed and regenerate their summaries. Only
+    # orgs with inbox_v2_enabled have debounce_until set (see the hook
+    # in orchestrator.py), so this is a no-op for non-opted-in orgs.
+    scheduler.add_job(
+        _run_inbox_summarizer_sweep,
+        IntervalTrigger(seconds=15),
+        id="inbox_summarizer_sweep",
+    )
+    # Stale sweep: daily at 05:30 UTC, regenerate summaries older than
+    # 7 days on threads that aren't closed — picks up new learning.
+    scheduler.add_job(
+        _run_inbox_summarizer_stale,
+        CronTrigger(hour=5, minute=30, timezone="UTC"),
+        id="inbox_summarizer_stale",
+    )
     scheduler.start()
-    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; proposals expire; billing dormant; auto-send removed)")
+    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; proposals expire; inbox_v2 summarizer; billing dormant; auto-send removed)")
 
     yield
 
@@ -288,6 +304,108 @@ async def _run_platform_events_retention():
             await purge_expired_events(db)
     except Exception as e:
         logger.error(f"platform_events retention job error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_inbox_summarizer_sweep():
+    """Phase 3 — every 15s, regenerate summaries for threads whose
+    debounce window has passed. Only inbox_v2-enabled orgs have rows
+    with ai_summary_debounce_until set, so this is cheap when off.
+
+    Bounded: processes at most N threads per tick so a large backlog
+    can't starve the scheduler. The remainder catches up on the next
+    tick.
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from src.core.database import get_db_context
+    from src.models.agent_thread import AgentThread
+    from src.models.organization import Organization
+    from src.services.agents.inbox_summarizer import InboxSummarizerService
+
+    PER_TICK = 20
+
+    try:
+        async with get_db_context() as db:
+            now = datetime.now(timezone.utc)
+            # Join to orgs so we filter out any thread whose org got
+            # opted out after the debounce was set. Avoids stale runs.
+            result = await db.execute(
+                select(AgentThread.id).join(
+                    Organization,
+                    Organization.id == AgentThread.organization_id,
+                ).where(
+                    AgentThread.ai_summary_debounce_until.isnot(None),
+                    AgentThread.ai_summary_debounce_until <= now,
+                    Organization.inbox_v2_enabled == True,  # noqa: E712
+                ).limit(PER_TICK)
+            )
+            thread_ids = [row[0] for row in result.all()]
+
+            if not thread_ids:
+                return
+
+            svc = InboxSummarizerService(db)
+            for tid in thread_ids:
+                try:
+                    await svc.summarize_thread(tid)
+                    await db.commit()
+                except Exception as e:
+                    logger.error(f"inbox_summarizer tick failed for {tid}: {e}")
+                    await db.rollback()
+    except Exception as e:
+        logger.error(f"inbox_summarizer sweep error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_inbox_summarizer_stale():
+    """Daily 05:30 UTC — regenerate stale summaries (>7 days old) on
+    threads that aren't closed. Picks up new learning without waiting
+    for the next inbound.
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select
+    from src.core.database import get_db_context
+    from src.models.agent_thread import AgentThread
+    from src.models.organization import Organization
+    from src.services.agents.inbox_summarizer import InboxSummarizerService
+
+    STALE_DAYS = 7
+    PER_RUN = 500
+
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=STALE_DAYS)
+        async with get_db_context() as db:
+            result = await db.execute(
+                select(AgentThread.id).join(
+                    Organization,
+                    Organization.id == AgentThread.organization_id,
+                ).where(
+                    AgentThread.ai_summary_generated_at.isnot(None),
+                    AgentThread.ai_summary_generated_at < cutoff,
+                    AgentThread.status.notin_(["archived", "closed"]),
+                    Organization.inbox_v2_enabled == True,  # noqa: E712
+                ).limit(PER_RUN)
+            )
+            thread_ids = [row[0] for row in result.all()]
+
+            if not thread_ids:
+                logger.info("inbox_summarizer_stale: nothing to refresh")
+                return
+
+            svc = InboxSummarizerService(db)
+            refreshed = 0
+            for tid in thread_ids:
+                try:
+                    await svc.summarize_thread(tid)
+                    await db.commit()
+                    refreshed += 1
+                except Exception as e:
+                    logger.error(f"inbox_summarizer_stale {tid}: {e}")
+                    await db.rollback()
+            logger.info(f"inbox_summarizer_stale: refreshed {refreshed} threads")
+    except Exception as e:
+        logger.error(f"inbox_summarizer stale job error: {e}")
         sentry_sdk.capture_exception(e)
 
 

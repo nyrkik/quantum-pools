@@ -58,15 +58,25 @@ async def _exec_chemical_history(inp: dict, ctx: ToolContext) -> dict:
 
 
 async def _exec_log_reading(inp: dict, ctx: ToolContext) -> dict:
-    """Preview logging a chemical reading."""
+    """Stage a log-chemical-reading proposal. Phase 2 Step 9 migration.
+
+    Same proposal pattern as add_equipment — user confirms via the UI
+    card → ProposalService.accept → ChemicalService.create (emits
+    chemical_reading.logged + any out-of-range events).
+    """
     from src.models.property import Property
+    from src.services.proposals import ProposalService
 
     property_id = inp.get("property_id") or ctx.property_id
     if not property_id:
         return {"error": "property_id required. Use find_property first."}
 
+    # Scope-check: property must belong to this org.
     prop = (await ctx.db.execute(
-        select(Property).where(Property.id == property_id)
+        select(Property).where(
+            Property.id == property_id,
+            Property.organization_id == ctx.organization_id,
+        )
     )).scalar_one_or_none()
     if not prop:
         return {"error": "Property not found."}
@@ -80,15 +90,35 @@ async def _exec_log_reading(inp: dict, ctx: ToolContext) -> dict:
     if not readings:
         return {"error": "At least one chemical reading must be provided."}
 
+    try:
+        proposal = await ProposalService(ctx.db).stage(
+            org_id=ctx.organization_id,
+            agent_type="deepblue_responder",
+            entity_type="chemical_reading",
+            source_type="deepblue_conversation",
+            source_id=getattr(ctx, "conversation_id", None),
+            proposed_payload={
+                "property_id": property_id,
+                "water_feature_id": inp.get("bow_id"),
+                **readings,
+                "notes": inp.get("notes"),
+            },
+        )
+        await ctx.db.commit()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Could not stage log-reading proposal: {e}"}
+
     return {
         "action": "log_reading",
-        "requires_confirmation": True,
+        "requires_confirmation": True,  # retained for UI until Step 10
+        "proposal_id": proposal.id,
         "preview": {
             "property_id": property_id,
             "bow_id": inp.get("bow_id"),
             "property_address": prop.full_address,
             "readings": readings,
             "notes": inp.get("notes"),
+            "proposal_id": proposal.id,
         },
     }
 

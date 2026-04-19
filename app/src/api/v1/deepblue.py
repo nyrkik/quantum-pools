@@ -927,7 +927,13 @@ async def confirm_add_equipment(
 
 
 class ConfirmLogReadingRequest(BaseModel):
-    property_id: str
+    """Accept-path for log_chemical_reading proposal (Phase 2 Step 9).
+
+    proposal_id is required; the legacy fields are kept optional for
+    UX continuity but are no longer authoritative (the staged payload is).
+    """
+    proposal_id: str
+    property_id: Optional[str] = None
     bow_id: Optional[str] = None
     ph: Optional[float] = None
     free_chlorine: Optional[float] = None
@@ -946,53 +952,40 @@ async def confirm_log_reading(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Confirm logging a chemical reading."""
-    import uuid as _uuid
-    from src.models.chemical_reading import ChemicalReading
-    from src.models.property import Property
+    """Accept a DeepBlue-staged chemical_reading proposal.
 
-    prop = (await db.execute(
-        select(Property).where(
-            Property.id == req.property_id,
-            Property.organization_id == ctx.organization_id,
-        )
-    )).scalar_one_or_none()
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    reading = ChemicalReading(
-        id=str(_uuid.uuid4()),
-        organization_id=ctx.organization_id,
-        property_id=req.property_id,
-        water_feature_id=req.bow_id,
-        ph=req.ph,
-        free_chlorine=req.free_chlorine,
-        combined_chlorine=req.combined_chlorine,
-        alkalinity=req.alkalinity,
-        calcium_hardness=req.calcium_hardness,
-        cyanuric_acid=req.cyanuric_acid,
-        phosphates=req.phosphates,
-        water_temp=req.water_temp,
-        notes=req.notes,
-    )
-    db.add(reading)
-    await db.flush()
-
-    # Instrumentation — user confirmed a DeepBlue-proposed reading via chat.
-    # Attribute to the user (they confirmed) with source="deepblue" so the
-    # event stream distinguishes DeepBlue-originated readings from manual
-    # entry or vision-extracted test strips.
-    from src.services.events.chemistry import (
-        emit_chemical_reading_logged,
-        emit_chemistry_out_of_range_events,
-    )
+    Routes through ProposalService.accept → chemical_reading creator →
+    ChemicalService.create (emits chemical_reading.logged + out-of-range
+    events + proposal.accepted).
+    """
+    from src.models.agent_proposal import AgentProposal
     from src.services.events.actor_factory import actor_from_org_ctx
-    actor = actor_from_org_ctx(ctx)
-    await emit_chemical_reading_logged(db, reading, source="deepblue", actor=actor)
-    await emit_chemistry_out_of_range_events(db, reading, actor=actor)
+    from src.services.proposals import ProposalService
+    from src.services.proposals.proposal_service import ProposalStateError
 
+    proposal = await db.get(AgentProposal, req.proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.organization_id != ctx.organization_id:
+        raise HTTPException(status_code=403, detail="Proposal belongs to a different org")
+    if proposal.entity_type != "chemical_reading":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected chemical_reading proposal, got {proposal.entity_type!r}",
+        )
+
+    try:
+        _, created = await ProposalService(db).accept(
+            proposal_id=req.proposal_id,
+            actor=actor_from_org_ctx(ctx),
+        )
+    except ProposalStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     await db.commit()
-    return {"reading_id": reading.id, "saved": True}
+
+    if created is None:
+        return {"saved": False, "reason": "user_created_already"}
+    return {"reading_id": created.id, "saved": True}
 
 
 class ConfirmUpdateNoteRequest(BaseModel):

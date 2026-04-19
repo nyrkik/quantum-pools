@@ -66,19 +66,22 @@ async def lifespan(app: FastAPI):
     # Spam retention: purge category='spam' threads older than 30 days.
     # Keeps synced Gmail spam actionable without letting it grow unbounded.
     scheduler.add_job(_run_spam_retention, CronTrigger(hour=4, minute=30), id="spam_retention")
+    # platform_events jobs run on UTC explicitly — the rest of the event
+    # pipeline timestamps in UTC, and fixing the trigger timezone avoids
+    # the twice-yearly DST jitter the host's local zone introduces.
     # platform_events partition manager: on the 25th of every month, create
     # the next month's partition ahead of time so month-end inserts never
     # hit a missing-partition error.
     scheduler.add_job(
         _run_platform_events_partition,
-        CronTrigger(day=25, hour=2, minute=0),
+        CronTrigger(day=25, hour=2, minute=0, timezone="UTC"),
         id="platform_events_partition",
     )
     # platform_events retention purge: daily at 03:15 UTC, delete rows
     # older than each org's event_retention_days.
     scheduler.add_job(
         _run_platform_events_retention,
-        CronTrigger(hour=3, minute=15),
+        CronTrigger(hour=3, minute=15, timezone="UTC"),
         id="platform_events_retention",
     )
     scheduler.start()

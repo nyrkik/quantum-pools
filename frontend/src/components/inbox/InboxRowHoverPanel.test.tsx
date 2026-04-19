@@ -39,7 +39,11 @@ describe("InboxRowHoverPanel", () => {
         payload={payload()}
         subject="Pool pump quote"
         customerName="Maple HOA"
+        contactPersonName={null}
         contactEmail="mgr@example.com"
+        lastMessageAt="2026-04-18T10:00:00Z"
+        messageCount={3}
+        customerAddress={null}
         proposals={[]}
         fallbackSnippet={null}
       />,
@@ -57,7 +61,11 @@ describe("InboxRowHoverPanel", () => {
         })}
         subject="x"
         customerName="Maple"
+        contactPersonName={null}
         contactEmail="mgr@example.com"
+        lastMessageAt="2026-04-18T10:00:00Z"
+        messageCount={1}
+        customerAddress={null}
         proposals={[]}
         fallbackSnippet={null}
       />,
@@ -76,7 +84,11 @@ describe("InboxRowHoverPanel", () => {
         })}
         subject="x"
         customerName="Maple"
+        contactPersonName={null}
         contactEmail="mgr@example.com"
+        lastMessageAt="2026-04-18T10:00:00Z"
+        messageCount={1}
+        customerAddress={null}
         proposals={[]}
         fallbackSnippet={null}
       />,
@@ -91,7 +103,11 @@ describe("InboxRowHoverPanel", () => {
         payload={null}
         subject={null}
         customerName="Maple"
+        contactPersonName={null}
         contactEmail="mgr@example.com"
+        lastMessageAt={null}
+        messageCount={0}
+        customerAddress={null}
         proposals={[]}
         fallbackSnippet="See you Tuesday"
       />,
@@ -105,7 +121,11 @@ describe("InboxRowHoverPanel", () => {
         payload={null}
         subject={null}
         customerName="Maple"
+        contactPersonName={null}
         contactEmail="mgr@example.com"
+        lastMessageAt={null}
+        messageCount={0}
+        customerAddress={null}
         proposals={[]}
         fallbackSnippet={null}
       />,

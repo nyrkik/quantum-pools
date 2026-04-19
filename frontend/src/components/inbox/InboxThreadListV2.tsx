@@ -307,7 +307,11 @@ export function InboxThreadListV2({
                   payload={hasPayload ? payload : null}
                   subject={t.subject}
                   customerName={t.customer_name}
+                  contactPersonName={t.contact_person_name ?? null}
                   contactEmail={t.contact_email}
+                  lastMessageAt={t.last_message_at}
+                  messageCount={t.message_count}
+                  customerAddress={t.customer_address}
                   proposals={proposalsByThread[t.id] ?? []}
                   fallbackSnippet={t.last_snippet}
                 />

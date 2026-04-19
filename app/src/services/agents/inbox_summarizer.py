@@ -50,11 +50,6 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 SUMMARY_SCHEMA_VERSION = 1
-# Threads shorter than this (character count of all inbound+outbound
-# body text combined) skip summarization — a "thanks!" reply doesn't
-# need a triage card.
-SHORT_THREAD_CHAR_THRESHOLD = 500
-SHORT_THREAD_MSG_THRESHOLD = 2
 # Summaries with confidence below this are treated as "not useful enough"
 # and the cached payload is left null (frontend falls back to snippet).
 CONFIDENCE_FLOOR = 0.4
@@ -101,14 +96,6 @@ class InboxSummary(BaseModel):
         return s or None
 
 
-# Helper for deciding whether to skip a thread based on size.
-def _is_short_thread(messages: list[AgentMessage]) -> bool:
-    if len(messages) < SHORT_THREAD_MSG_THRESHOLD:
-        return True
-    total_chars = sum(len(m.body or "") for m in messages)
-    return total_chars < SHORT_THREAD_CHAR_THRESHOLD
-
-
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -137,14 +124,9 @@ class InboxSummarizerService:
         if not messages:
             return None
 
-        if _is_short_thread(messages):
-            # Explicitly clear any prior stale cache + mark the sweep done.
-            thread.ai_summary_payload = None
-            thread.ai_summary_generated_at = datetime.now(timezone.utc)
-            thread.ai_summary_debounce_until = None
-            await self.db.flush()
-            await self._emit_summarized(thread, skipped_reason="short_thread")
-            return None
+        # Every thread summarizes — even a one-line "thanks!" is more
+        # useful as "Thanks acknowledgment — Received" than as a raw
+        # snippet. Consistency beats saving a few Haiku tokens.
 
         # Gather related state for the prompt.
         customer, open_cases, open_invoices = await self._load_context(thread)

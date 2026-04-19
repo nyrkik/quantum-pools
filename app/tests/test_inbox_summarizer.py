@@ -19,7 +19,6 @@ from src.models.agent_thread import AgentThread
 from src.services.agents.inbox_summarizer import (
     InboxSummarizerService,
     InboxSummary,
-    _is_short_thread,
 )
 
 
@@ -108,24 +107,6 @@ def test_inbox_summary_confidence_bounds():
         })
 
 
-# -- Short-thread heuristic ------------------------------------------------
-
-
-class _FakeMsg:
-    """Duck-typed stand-in — _is_short_thread only reads .body."""
-    def __init__(self, body: str):
-        self.body = body
-
-
-def test_is_short_thread_true_for_single_msg():
-    assert _is_short_thread([_FakeMsg("Thanks!")]) is True
-
-
-def test_is_short_thread_false_for_meaty_thread():
-    msgs = [_FakeMsg("x" * 1000) for _ in range(3)]
-    assert _is_short_thread(msgs) is False
-
-
 # -- Output parsing --------------------------------------------------------
 
 
@@ -178,26 +159,43 @@ async def test_parse_raises_on_missing_json(db_session):
 
 
 @pytest.mark.asyncio
-async def test_summarize_short_thread_skips_and_emits(
-    db_session, org_a, event_recorder,
+async def test_summarize_short_thread_still_summarizes(
+    db_session, org_a, event_recorder, monkeypatch,
 ):
-    """Short thread: no summary cached, thread.summarized fires with
-    skipped_reason='short_thread'."""
+    """Short threads are no longer skipped — every thread summarizes
+    for UI consistency. Even a one-liner gets bullets."""
     tid = await _seed_thread(db_session, org_a.id)
     await _seed_message(db_session, tid, org_a.id, "Thanks!")
     await db_session.commit()
+
+    fake_response = json.dumps({
+        "version": 1,
+        "ask": None,
+        "state": None,
+        "open_items": ["Thanks acknowledgment — Received"],
+        "red_flags": [],
+        "linked_refs": [],
+        "confidence": 0.7,
+        "proposals": [],
+    })
+
+    async def fake_call(self, prompt):
+        return fake_response
+
+    monkeypatch.setattr(
+        InboxSummarizerService, "_call_model", fake_call,
+    )
 
     svc = InboxSummarizerService(db_session)
     result = await svc.summarize_thread(tid)
     await db_session.commit()
 
-    assert result is None
+    assert result is not None
     thread = await db_session.get(AgentThread, tid)
-    assert thread.ai_summary_payload is None
-    assert thread.ai_summary_generated_at is not None  # short-circuit was marked done
-
-    event = await event_recorder.assert_emitted("thread.summarized", thread_id=tid)
-    assert event["payload"]["skipped_reason"] == "short_thread"
+    assert thread.ai_summary_payload is not None
+    assert thread.ai_summary_payload["open_items"] == [
+        "Thanks acknowledgment — Received",
+    ]
 
 
 @pytest.mark.asyncio

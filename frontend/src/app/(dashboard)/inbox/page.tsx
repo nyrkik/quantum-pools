@@ -17,6 +17,7 @@ import { InboxSettingsSheet } from "@/components/inbox/inbox-settings-sheet";
 import { InboxFilters } from "@/components/inbox/inbox-filters";
 import { InboxMobileList } from "@/components/inbox/inbox-mobile-list";
 import { InboxThreadTable } from "@/components/inbox/inbox-thread-table";
+import { InboxThreadListV2 } from "@/components/inbox/InboxThreadListV2";
 import { InboxPagination } from "@/components/inbox/inbox-pagination";
 import { InboxFolderSidebar } from "@/components/inbox/inbox-folder-sidebar";
 import { InboxFolderPills } from "@/components/inbox/inbox-folder-pills";
@@ -61,7 +62,7 @@ type AssignFilter = "all" | "mine";
 // --- Main Page ---
 
 export default function InboxPage() {
-  const { user } = useAuth();
+  const { user, inboxV2Enabled } = useAuth();
   const perms = usePermissions();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -481,16 +482,28 @@ export default function InboxPage() {
 
           <InboxMobileList threads={threads} loading={loading} currentUserId={user.id} />
 
-          <InboxThreadTable
-            threads={threads}
-            loading={loading}
-            currentUserId={user.id}
-            onSelectThread={handleSelectThread}
-            selectedThreadId={selectedThreadId}
-            onBulkAction={() => { loadThreads(); loadStats(); setFolderRefreshKey((k) => k + 1); }}
-            compact={!!selectedThreadId}
-            groupByClient={groupByClient}
-          />
+          {inboxV2Enabled ? (
+            /* Phase 3 V2 layout — card-per-thread with AI summary */
+            <div className="hidden md:block">
+              <InboxThreadListV2
+                threads={threads}
+                loading={loading}
+                selectedThreadId={selectedThreadId}
+                onSelectThread={handleSelectThread}
+              />
+            </div>
+          ) : (
+            <InboxThreadTable
+              threads={threads}
+              loading={loading}
+              currentUserId={user.id}
+              onSelectThread={handleSelectThread}
+              selectedThreadId={selectedThreadId}
+              onBulkAction={() => { loadThreads(); loadStats(); setFolderRefreshKey((k) => k + 1); }}
+              compact={!!selectedThreadId}
+              groupByClient={groupByClient}
+            />
+          )}
 
           <InboxPagination
             page={page}

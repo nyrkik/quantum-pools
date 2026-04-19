@@ -285,7 +285,8 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | Event | Level | Expected entity_refs | Notes |
 |---|---|---|---|
 | `user.login` | user_action | user_id | `organization_id` may be null (pre-org selection). Payload: `{method: password \| oauth}`. |
-| `user.login_failed` | error | — | `organization_id` null. Payload: `{reason: bad_password \| locked \| inactive \| not_found, email_domain}`. Domain only, not full email. |
+| `user.login_failed` | error | user_id? | `organization_id` null. `user_id` ref present when the email matched a real user; absent when `reason=user_not_found`. Payload: `{reason: bad_password \| account_locked \| inactive \| user_not_found}`. |
+| `user.registered` | user_action | user_id | Self-service signup. `organization_id` = the new org created for them. Payload: `{method: password \| oauth}`. |
 | `user.logout` | user_action | user_id | |
 | `user.session_expired` | system_action | user_id | |
 | `user.password_reset_requested` | user_action | — | `organization_id` null. Payload: `{email_domain}`. |

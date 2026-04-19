@@ -13,6 +13,8 @@ from src.models.customer import Customer
 from src.models.agent_action import AgentAction, AgentActionComment
 from src.core.exceptions import NotFoundError, ValidationError
 from src.services.job_invoice_service import get_first_job_for_invoice, unlink_all_for_invoice
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 
 async def log_job_activity(db: AsyncSession, invoice_id: str, message: str):
@@ -232,7 +234,12 @@ class InvoiceService:
             raise NotFoundError("Invoice")
         return invoice
 
-    async def create(self, org_id: str, customer_id: str | None = None, line_items_data: List[dict] = [], **kwargs) -> Invoice:
+    async def create(
+        self, org_id: str, customer_id: str | None = None,
+        line_items_data: List[dict] = [],
+        *, actor: Optional[Actor] = None, source: str = "manual",
+        **kwargs,
+    ) -> Invoice:
         # Verify customer exists (if provided)
         if customer_id:
             cust_result = await self.db.execute(
@@ -282,6 +289,22 @@ class InvoiceService:
 
         self._recalculate_totals(invoice, items)
         await self.db.flush()
+
+        refs: dict = {"invoice_id": invoice.id}
+        if customer_id:
+            refs["customer_id"] = customer_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="invoice.created",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={
+                "document_type": invoice.document_type,
+                "source": source,
+            },
+        )
 
         # Reload with relationships
         return await self.get(org_id, invoice.id)
@@ -363,7 +386,11 @@ class InvoiceService:
         await self.db.flush()
         return await self.get(org_id, invoice.id)
 
-    async def send(self, org_id: str, invoice_id: str, sent_by: str | None = None) -> Invoice:
+    async def send(
+        self, org_id: str, invoice_id: str, sent_by: str | None = None,
+        *, actor: Optional[Actor] = None,
+        recipient_count: int = 1, resolver_used: str = "contacts",
+    ) -> Invoice:
         """Mark invoice as sent. Assigns document number on first send."""
         invoice = await self.get(org_id, invoice_id)
         if invoice.status == InvoiceStatus.void.value:
@@ -385,6 +412,25 @@ class InvoiceService:
             invoice.sent_by = sent_by
         await self.db.flush()
 
+        refs: dict = {"invoice_id": invoice.id}
+        if invoice.customer_id:
+            refs["customer_id"] = invoice.customer_id
+        if invoice.case_id:
+            refs["case_id"] = invoice.case_id
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="invoice.sent",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs=refs,
+            payload={
+                "document_type": invoice.document_type,
+                "recipient_count": recipient_count,
+                "resolver_used": resolver_used,
+            },
+        )
+
         # Activation funnel — first-invoice-sent (NOT estimate.sent).
         if invoice.document_type == "invoice":
             from src.services.events.activation_tracker import emit_if_first
@@ -398,7 +444,10 @@ class InvoiceService:
 
         return invoice
 
-    async def void(self, org_id: str, invoice_id: str, voided_by: str | None = None) -> Invoice:
+    async def void(
+        self, org_id: str, invoice_id: str, voided_by: str | None = None,
+        *, actor: Optional[Actor] = None,
+    ) -> Invoice:
         """Void a sent invoice/estimate. Preserves record for audit."""
         from datetime import datetime, timezone
         invoice = await self.get(org_id, invoice_id)
@@ -411,6 +460,16 @@ class InvoiceService:
         invoice.voided_by = voided_by
         invoice.voided_at = datetime.now(timezone.utc)
         await self.db.flush()
+
+        refs: dict = {"invoice_id": invoice.id}
+        if invoice.customer_id:
+            refs["customer_id"] = invoice.customer_id
+        await PlatformEventService.emit(
+            db=self.db, event_type="invoice.voided",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id, entity_refs=refs, payload={},
+        )
         return invoice
 
     async def delete(self, org_id: str, invoice_id: str) -> None:
@@ -423,7 +482,10 @@ class InvoiceService:
         await self.db.delete(invoice)
         await self.db.flush()
 
-    async def write_off(self, org_id: str, invoice_id: str, written_off_by: str | None = None) -> Invoice:
+    async def write_off(
+        self, org_id: str, invoice_id: str, written_off_by: str | None = None,
+        *, actor: Optional[Actor] = None,
+    ) -> Invoice:
         """Write off an invoice."""
         from datetime import datetime, timezone
         invoice = await self.get(org_id, invoice_id)
@@ -434,6 +496,16 @@ class InvoiceService:
         invoice.written_off_by = written_off_by
         invoice.written_off_at = datetime.now(timezone.utc)
         await self.db.flush()
+
+        refs: dict = {"invoice_id": invoice.id}
+        if invoice.customer_id:
+            refs["customer_id"] = invoice.customer_id
+        await PlatformEventService.emit(
+            db=self.db, event_type="invoice.write_off",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id, entity_refs=refs, payload={},
+        )
         return invoice
 
     async def mark_viewed(self, token: str) -> Invoice:
@@ -446,17 +518,52 @@ class InvoiceService:
             await self.db.flush()
         return invoice
 
-    async def record_payment(self, invoice: Invoice, amount: float) -> None:
-        """Update invoice after a payment is recorded."""
+    async def record_payment(
+        self, invoice: Invoice, amount: float,
+        *, actor: Optional[Actor] = None,
+        method: str = "unknown", auto_pay: bool = False,
+    ) -> None:
+        """Update invoice after a payment is recorded. Fires invoice.paid
+        + invoice.days_to_paid when this payment closes the balance."""
         invoice.amount_paid = round(invoice.amount_paid + amount, 2)
         invoice.balance = round(invoice.total - invoice.amount_paid, 2)
 
+        just_paid = False
         if invoice.balance <= 0:
             invoice.status = InvoiceStatus.paid.value
             invoice.paid_date = date.today()
             invoice.balance = 0.0
+            just_paid = True
 
         await self.db.flush()
+
+        if just_paid:
+            refs: dict = {"invoice_id": invoice.id}
+            if invoice.customer_id:
+                refs["customer_id"] = invoice.customer_id
+            await PlatformEventService.emit(
+                db=self.db, event_type="invoice.paid",
+                level="user_action" if actor and actor.actor_type == "user" else "system_action",
+                actor=actor or actor_system(),
+                organization_id=invoice.organization_id, entity_refs=refs,
+                payload={"method": method, "auto_pay": auto_pay},
+            )
+            # Derived analytics: AR cycle time. Fires alongside invoice.paid
+            # so Sonar can answer "avg days-to-paid by customer segment" in
+            # one query.
+            if invoice.sent_at:
+                days = (invoice.paid_date - invoice.sent_at.date()).days
+                await PlatformEventService.emit(
+                    db=self.db, event_type="invoice.days_to_paid",
+                    level="system_action", actor=actor_system(),
+                    organization_id=invoice.organization_id,
+                    entity_refs={"invoice_id": invoice.id},
+                    payload={
+                        "days_to_paid": max(days, 0),
+                        "document_type": invoice.document_type,
+                        "auto_pay": auto_pay,
+                    },
+                )
 
     async def get_stats(self, org_id: str) -> dict:
         """Get invoice statistics for dashboard."""

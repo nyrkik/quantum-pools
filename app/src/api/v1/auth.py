@@ -386,10 +386,21 @@ async def reset_password(
     user.locked_until = None
 
     # Invalidate all existing sessions so an attacker already logged in is ejected.
-    await db.execute(
+    sessions_result = await db.execute(
         update(UserSession)
         .where(UserSession.user_id == user.id, UserSession.is_revoked == False)
         .values(is_revoked=True)
+    )
+    sessions_invalidated = sessions_result.rowcount or 0
+
+    from src.services.events.platform_event_service import PlatformEventService, Actor
+    await PlatformEventService.emit(
+        db=db, event_type="user.password_reset_completed",
+        level="user_action",
+        actor=Actor(actor_type="user", user_id=user.id),
+        organization_id=None,
+        entity_refs={"user_id": user.id},
+        payload={"sessions_invalidated": sessions_invalidated},
     )
     await db.commit()
 

@@ -6,7 +6,7 @@ with the right entity_refs, actor, level, and payload.
 
 Scenarios covered:
 - archive_thread → `thread.archived` with prior_status in payload + correct actor
-- assign_thread (assign + unassign) → `thread.assigned` with prior_assignee_id
+- assign_thread (assign + unassign) → `thread.assigned` with prior_assignee_user_id in entity_refs (taxonomy §6: user ids in refs, not payload)
 - archive_thread called without actor → `system_action` level
 
 Not covered yet (Step 5+): thread.opened via HTTP route (requires async
@@ -132,7 +132,7 @@ async def test_assign_thread_emits_with_prior_assignee(
     actor = Actor(actor_type="user", user_id="assigner-123")
 
     service = AgentThreadService(db_session)
-    # First assignment — prior_assignee_id should be None in payload
+    # First assignment — no prior, so entity_refs has no prior_assignee_user_id key
     result = await service.assign_thread(
         org_id=org_a.id,
         thread_id=seeded_thread,
@@ -146,7 +146,9 @@ async def test_assign_thread_emits_with_prior_assignee(
         "thread.assigned", thread_id=seeded_thread, user_id=seeded_user.id
     )
     assert first["actor_user_id"] == "assigner-123"
-    assert first["payload"]["prior_assignee_id"] is None
+    # Taxonomy §6: user ids in entity_refs, not payload.
+    assert "prior_assignee_user_id" not in first["entity_refs"]
+    assert first["payload"] == {}
 
 
 @pytest.mark.asyncio
@@ -160,7 +162,7 @@ async def test_reassign_emits_with_prior_assignee_populated(
         user_name="Tech A", actor=Actor(actor_type="user", user_id="mgr"),
     )
 
-    # Unassign — should emit with prior_assignee_id = seeded_user.id
+    # Unassign — should emit with prior_assignee_user_id in entity_refs
     await service.assign_thread(
         org_id=org_a.id, thread_id=seeded_thread, user_id=None, user_name=None,
         actor=Actor(actor_type="user", user_id="mgr"),
@@ -168,8 +170,13 @@ async def test_reassign_emits_with_prior_assignee_populated(
 
     events = await event_recorder.all_of_type("thread.assigned")
     assert len(events) == 2
-    assert events[0]["payload"]["prior_assignee_id"] is None
-    assert events[1]["payload"]["prior_assignee_id"] == seeded_user.id
+    # First event: no prior_assignee in refs
+    assert "prior_assignee_user_id" not in events[0]["entity_refs"]
+    # Second event: prior_assignee_user_id = the originally-assigned user, in entity_refs
+    assert events[1]["entity_refs"]["prior_assignee_user_id"] == seeded_user.id
+    # Neither event should have user ids leaking into payload
+    for e in events:
+        assert e["payload"] == {}
 
 
 @pytest.mark.asyncio

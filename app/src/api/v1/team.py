@@ -130,6 +130,20 @@ async def invite_member(
         role=OrgRole(body.role),
     )
     db.add(org_user)
+    await db.flush()
+
+    # user.invited event — actor is the inviter, entity_refs include both
+    # the inviter (in actor) and the new user (in refs).
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_from_org_ctx
+    await PlatformEventService.emit(
+        db=db, event_type="user.invited",
+        level="user_action",
+        actor=actor_from_org_ctx(ctx),
+        organization_id=ctx.organization_id,
+        entity_refs={"user_id": user.id},
+        payload={"role": body.role},
+    )
     await db.commit()
 
     # Reload with user relationship

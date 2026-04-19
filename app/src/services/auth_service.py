@@ -22,6 +22,8 @@ from src.models.user import User
 from src.models.organization import Organization
 from src.models.organization_user import OrganizationUser, OrgRole
 from src.models.user_session import UserSession
+from src.services.events.platform_event_service import Actor, PlatformEventService
+from src.services.events.actor_factory import actor_system
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,16 @@ class AuthService:
         self.db.add(org_user)
         await self.db.flush()
 
-        # Activation funnel: first milestone for this org.
+        # Per-event: user.registered fires on every register.
+        # Activation funnel also logs the first-per-org milestone.
+        await PlatformEventService.emit(
+            db=self.db, event_type="user.registered",
+            level="user_action",
+            actor=Actor(actor_type="user", user_id=user.id),
+            organization_id=org.id,
+            entity_refs={"user_id": user.id},
+            payload={"method": "password"},
+        )
         from src.services.events.activation_tracker import emit_if_first
         await emit_if_first(
             self.db,
@@ -91,10 +102,26 @@ class AuthService:
         user = result.scalar_one_or_none()
 
         if not user:
+            # Pre-auth failure — organization_id is null (no user, no org).
+            await PlatformEventService.emit(
+                db=self.db, event_type="user.login_failed",
+                level="error", actor=actor_system(),
+                organization_id=None, entity_refs={},
+                payload={"reason": "user_not_found"},
+            )
+            await self.db.commit()
             raise AuthenticationError("Invalid email or password.")
 
         if user.locked_until and user.locked_until > datetime.now(timezone.utc):
             remaining = int((user.locked_until - datetime.now(timezone.utc)).total_seconds() / 60) + 1
+            await PlatformEventService.emit(
+                db=self.db, event_type="user.login_failed",
+                level="error", actor=actor_system(),
+                organization_id=None,
+                entity_refs={"user_id": user.id},
+                payload={"reason": "account_locked"},
+            )
+            await self.db.commit()
             raise AuthenticationError(f"Account locked. Try again in {remaining} minutes.")
 
         if not verify_password(password, user.hashed_password):
@@ -103,10 +130,25 @@ class AuthService:
                 user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
                 user.failed_login_attempts = 0
                 logger.warning(f"Account locked for user {user.email}")
+            await PlatformEventService.emit(
+                db=self.db, event_type="user.login_failed",
+                level="error", actor=actor_system(),
+                organization_id=None,
+                entity_refs={"user_id": user.id},
+                payload={"reason": "bad_password"},
+            )
             await self.db.commit()
             raise AuthenticationError("Invalid email or password.")
 
         if not user.is_active:
+            await PlatformEventService.emit(
+                db=self.db, event_type="user.login_failed",
+                level="error", actor=actor_system(),
+                organization_id=None,
+                entity_refs={"user_id": user.id},
+                payload={"reason": "inactive"},
+            )
+            await self.db.commit()
             raise AuthenticationError("Account is inactive.")
 
         # Reset failed attempts on successful login
@@ -125,6 +167,18 @@ class AuthService:
             expires_at=expire,
         )
         self.db.add(session)
+
+        # user.login fires on successful auth. organization_id null — login
+        # is pre-org-selection (the user may belong to multiple orgs; the
+        # choice happens at request time via X-Organization-Id).
+        await PlatformEventService.emit(
+            db=self.db, event_type="user.login",
+            level="user_action",
+            actor=Actor(actor_type="user", user_id=user.id),
+            organization_id=None,
+            entity_refs={"user_id": user.id},
+            payload={"method": "password"},
+        )
         await self.db.commit()
 
         return user, access_token, refresh_token

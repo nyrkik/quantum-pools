@@ -246,7 +246,10 @@ async def _exec_update_note(inp: dict, ctx: ToolContext) -> dict:
         return {"error": "customer_id required. Use find_customer first."}
 
     cust = (await ctx.db.execute(
-        select(Customer).where(Customer.id == customer_id)
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == ctx.org_id,
+        )
     )).scalar_one_or_none()
     if not cust:
         return {"error": "Customer not found."}
@@ -258,15 +261,35 @@ async def _exec_update_note(inp: dict, ctx: ToolContext) -> dict:
     current = cust.notes or ""
     resulting = (current + "\n\n" + note_text).strip() if current else note_text
 
+    # Phase 2 Step 9 migration — stage a proposal instead of preview-only.
+    from src.services.proposals import ProposalService
+    try:
+        proposal = await ProposalService(ctx.db).stage(
+            org_id=ctx.org_id,
+            agent_type="deepblue_responder",
+            entity_type="customer_note_update",
+            source_type="deepblue_conversation",
+            source_id=getattr(ctx, "conversation_id", None),
+            proposed_payload={
+                "customer_id": customer_id,
+                "note_text": note_text,
+            },
+        )
+        await ctx.db.commit()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Could not stage note-update proposal: {e}"}
+
     return {
         "action": "update_note",
-        "requires_confirmation": True,
+        "requires_confirmation": True,  # retained for UI until Step 10
+        "proposal_id": proposal.id,
         "preview": {
             "customer_id": customer_id,
             "customer_name": cust.display_name,
             "current_notes": current[:500] if current else None,
             "appending": note_text,
             "resulting_notes_preview": resulting[:800],
+            "proposal_id": proposal.id,
         },
     }
 

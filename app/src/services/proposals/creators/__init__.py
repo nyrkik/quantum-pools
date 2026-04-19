@@ -13,3 +13,6 @@ customer_note_update, and more.
 from . import job, estimate, equipment_item, org_config  # noqa: F401
 from . import chemical_reading  # noqa: F401
 from . import case  # noqa: F401
+from . import customer_note_update  # noqa: F401
+from . import broadcast_email  # noqa: F401
+from . import customer_email  # noqa: F401

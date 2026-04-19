@@ -989,8 +989,10 @@ async def confirm_log_reading(
 
 
 class ConfirmUpdateNoteRequest(BaseModel):
-    customer_id: str
-    note_text: str
+    """Accept-path for customer_note_update proposal (Phase 2 Step 9)."""
+    proposal_id: str
+    customer_id: Optional[str] = None  # legacy pass-through
+    note_text: Optional[str] = None
 
 
 @router.post("/confirm-update-note")
@@ -999,28 +1001,44 @@ async def confirm_update_note(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Append a note to a customer record."""
-    from src.models.customer import Customer
+    """Accept a DeepBlue-staged note-append proposal."""
+    from src.models.agent_proposal import AgentProposal
+    from src.services.events.actor_factory import actor_from_org_ctx
+    from src.services.proposals import ProposalService
+    from src.services.proposals.proposal_service import ProposalStateError
 
-    cust = (await db.execute(
-        select(Customer).where(
-            Customer.id == req.customer_id,
-            Customer.organization_id == ctx.organization_id,
+    proposal = await db.get(AgentProposal, req.proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.organization_id != ctx.organization_id:
+        raise HTTPException(status_code=403, detail="Proposal belongs to a different org")
+    if proposal.entity_type != "customer_note_update":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected customer_note_update proposal, got {proposal.entity_type!r}",
         )
-    )).scalar_one_or_none()
-    if not cust:
-        raise HTTPException(status_code=404, detail="Customer not found")
 
-    current = cust.notes or ""
-    cust.notes = (current + "\n\n" + req.note_text).strip() if current else req.note_text
+    try:
+        _, cust = await ProposalService(db).accept(
+            proposal_id=req.proposal_id,
+            actor=actor_from_org_ctx(ctx),
+        )
+    except ProposalStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     await db.commit()
+
+    if cust is None:
+        return {"saved": False, "reason": "user_created_already"}
     return {"saved": True}
 
 
 class ConfirmBroadcastRequest(BaseModel):
-    subject: str
-    body: str
-    filter_type: str = "all_active"
+    """Accept-path for broadcast_email proposal (Phase 2 Step 9)."""
+    proposal_id: str
+    # Legacy pass-through for UI payload compat.
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    filter_type: Optional[str] = None
     customer_ids: Optional[list[str]] = None
     test_recipient: Optional[str] = None
 
@@ -1031,32 +1049,40 @@ async def confirm_broadcast(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Confirm and send a broadcast email drafted by DeepBlue."""
-    import json as _json
-    from src.services.broadcast_service import BroadcastService
+    """Accept a DeepBlue-staged broadcast_email proposal — sends the broadcast."""
+    from src.models.agent_proposal import AgentProposal
+    from src.services.events.actor_factory import actor_from_org_ctx
+    from src.services.proposals import ProposalService
+    from src.services.proposals.proposal_service import ProposalStateError
 
-    # Default test recipient to current user's email
-    test_recipient = req.test_recipient
-    if req.filter_type == "test" and not test_recipient:
-        test_recipient = ctx.user.email
+    proposal = await db.get(AgentProposal, req.proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.organization_id != ctx.organization_id:
+        raise HTTPException(status_code=403, detail="Proposal belongs to a different org")
+    if proposal.entity_type != "broadcast_email":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected broadcast_email proposal, got {proposal.entity_type!r}",
+        )
 
-    filter_data = None
-    if req.filter_type == "custom":
-        if not req.customer_ids:
-            raise HTTPException(status_code=400, detail="customer_ids required for custom filter")
-        filter_data = _json.dumps(req.customer_ids)
+    # Default test recipient to current user's email if unset (stage-time
+    # payload may not have a recipient for the 'test' filter — fill from ctx).
+    if proposal.proposed_payload.get("filter_type") == "test" and not proposal.proposed_payload.get("test_recipient"):
+        proposal.proposed_payload = {**proposal.proposed_payload, "test_recipient": ctx.user.email}
+        await db.flush()
 
-    svc = BroadcastService(db)
-    broadcast = await svc.create_broadcast(
-        org_id=ctx.organization_id,
-        subject=req.subject,
-        body=req.body,
-        filter_type=req.filter_type,
-        filter_data=filter_data,
-        created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
-        test_recipient=test_recipient,
-    )
+    try:
+        _, broadcast = await ProposalService(db).accept(
+            proposal_id=req.proposal_id,
+            actor=actor_from_org_ctx(ctx),
+        )
+    except ProposalStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await db.commit()
 
+    if broadcast is None:
+        return {"saved": False, "reason": "user_created_already"}
     return {
         "broadcast_id": broadcast.id,
         "status": broadcast.status,
@@ -1067,9 +1093,12 @@ async def confirm_broadcast(
 
 
 class ConfirmCustomerEmailRequest(BaseModel):
-    customer_id: str
-    subject: str
-    body: str
+    """Accept-path for customer_email proposal (Phase 2 Step 9)."""
+    proposal_id: str
+    # Legacy pass-through for UI payload compat.
+    customer_id: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
 
 
 @router.post("/confirm-customer-email")
@@ -1078,30 +1107,39 @@ async def confirm_customer_email(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Send a customer email drafted by DeepBlue."""
-    from src.models.customer import Customer
-    from src.services.email_compose_service import EmailComposeService
+    """Accept a DeepBlue-staged customer_email proposal — sends the email."""
+    from src.models.agent_proposal import AgentProposal
+    from src.services.events.actor_factory import actor_from_org_ctx
+    from src.services.proposals import ProposalService
+    from src.services.proposals.proposal_service import ProposalStateError
 
-    customer = (await db.execute(
-        select(Customer).where(Customer.id == req.customer_id, Customer.organization_id == ctx.organization_id)
-    )).scalar_one_or_none()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    if not customer.email:
-        raise HTTPException(status_code=400, detail="Customer has no email address")
+    proposal = await db.get(AgentProposal, req.proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.organization_id != ctx.organization_id:
+        raise HTTPException(status_code=403, detail="Proposal belongs to a different org")
+    if proposal.entity_type != "customer_email":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected customer_email proposal, got {proposal.entity_type!r}",
+        )
 
-    svc = EmailComposeService(db)
-    sender_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
-    result = await svc.compose_and_send(
-        org_id=ctx.organization_id,
-        to=customer.email,
-        subject=req.subject,
-        body=req.body,
-        customer_id=req.customer_id,
-        sender_name=sender_name,
-        sender_user_id=ctx.user.id,
+    try:
+        _, result = await ProposalService(db).accept(
+            proposal_id=req.proposal_id,
+            actor=actor_from_org_ctx(ctx),
+        )
+    except ProposalStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await db.commit()
+
+    if result is None:
+        return {"saved": False, "reason": "user_created_already"}
+    # send_agent_reply returns an EmailResult-like object; expose the message id.
+    msg_id = getattr(result, "message_id", None) or (
+        result.get("message_id") if isinstance(result, dict) else None
     )
-    return {"sent": True, "message_id": result.get("message_id") if isinstance(result, dict) else None}
+    return {"sent": True, "message_id": msg_id}
 
 
 class ConfirmCreateCaseRequest(BaseModel):

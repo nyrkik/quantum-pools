@@ -825,7 +825,8 @@ Ordered commits, each independently deployable and verifiable:
 2. **`PlatformEventService.emit()` + unit tests + middleware + `request_id` propagation** — service exists, no callers yet.
 3. **Frontend `lib/events.ts` + `POST /v1/events` backend receiver** — frontend can emit but nothing does yet. Verify: manual POST via curl lands an event.
 4. **Inbox subsystem instrumentation + integration test** — inbox emits events for real operations. Verify: Sapphire inbox actions show up in the table.
-5. **Job + Case + Invoice + Visit subsystems** (one PR per subsystem; each shippable independently).
+5. **Job + Case + Invoice + Visit subsystems** (one PR per subsystem; each shippable independently). ⚠️ Partially shipped in Step 5 (Invoice emits live; Job/Case/Visit deferred) — fully shipped as **Step 5b** (see below).
+5b. **Entity-creation emits** — `customer.created`, `property.created`, `water_feature.created`, `case.created/closed/reopened/manager_changed`, `job.created`, `visit.completed`. Wired into services + API routes + orchestrator + thread_ai. Each service accepts `actor: Actor | None` defaulting to system; API routes thread `actor_from_org_ctx(ctx)` through. Closes DoD #9.
 6. **Chemistry subsystem** — out-of-range check + threshold seeds + dose tracking.
 7. **Frontend event emission hookup** — route-change emitter, inbox/compose/case action emitters.
 8. **Activation funnel tracker** — one-per-org-ever guard + milestone checkpoints.

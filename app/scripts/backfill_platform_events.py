@@ -6,18 +6,25 @@ QP has ~20 months of real historical data. This script replays that
 history into the event stream so Sonar + workflow-observer see a full
 funnel instead of a month-old cold start.
 
-What gets emitted, in what order:
+What gets emitted, in what order (pass ordering matters so entity-create
+events land before the activation pass and before "X per Y" queries run):
 
-  1. customer.created      — one per customer, created_at = customers.created_at
-  2. customer.cancelled    — one per inactive customer (status != active)
-  3. invoice.created       — one per invoice
-  4. invoice.sent          — per invoice with sent_at populated
-  5. invoice.paid          — per invoice with paid_date populated
-  6. invoice.days_to_paid  — per paid invoice (derived analytics event)
-  7. invoice.write_off     — per invoice with status=write_off
-  8. invoice.voided        — per invoice with status=void
-  9. activation.*          — 5 milestones, first-per-org-ever from
-                             the oldest qualifying source record
+   1. customer.created       — one per customer
+   2. customer.cancelled     — one per inactive customer (timestamp_is_approximate)
+   3. property.created       — one per property
+   4. water_feature.created  — one per water feature
+   5. case.created / closed  — per service case (closed if already terminal)
+   6. job.created            — per agent_action
+   7. visit.completed        — per completed visit with actual_departure
+   8. invoice.created        — per invoice
+   9. invoice.sent           — per invoice with sent_at (invoices only)
+  10. invoice.paid           — per invoice with paid_date + status=paid
+  11. invoice.days_to_paid   — per paid invoice (derived analytics event)
+  12. invoice.write_off      — per invoice with status=write_off
+  13. invoice.voided         — per invoice with status=void
+  14. activation.*           — 5 milestones, first-per-org-ever, clamped
+                               to >= account_created so pre-QP data doesn't
+                               produce negative funnel gaps
 
 Idempotency: every event carries a deterministic client_emit_id like
 "backfill:invoice.sent:<invoice-id>" so re-runs silently skip rows
@@ -132,8 +139,11 @@ async def _emit(
         report.already_exists[event_type] += 1
         return
 
-    # Stamp payload with source marker so downstream can filter if desired.
-    enriched = {"source": "backfill", **payload}
+    # Stamp payload with a backfill marker so downstream can filter.
+    # Use a namespaced key (not `source`) because several event types
+    # have `source` as a canonical taxonomy field (case.created,
+    # customer.created, etc.) — collapsing them would clobber real data.
+    enriched = {**payload, "_backfill": True}
 
     # Ensure timestamp is tz-aware — Postgres TIMESTAMPTZ requires it.
     if created_at.tzinfo is None:
@@ -174,6 +184,7 @@ async def backfill_customers(
             payload={
                 "customer_type": c.customer_type,
                 "is_active": c.is_active,
+                "source": "pss_import" if c.pss_id else "qp_native",
             },
             created_at=c.created_at,
             client_emit_id=_emit_id("customer.created", c.id),
@@ -181,20 +192,25 @@ async def backfill_customers(
             commit=commit,
         )
         # Emit customer.cancelled for already-inactive customers so the
-        # churn signal is present on day 1. Best approximation of cancel
-        # time: the customer's updated_at. If that's missing, fall back
-        # to created_at (zero-tenure entry — acceptable for stub data).
+        # churn signal is present on day 1. We don't have the true cancel
+        # time — PSS imports carry import-time timestamps, QP-native edits
+        # carry updated_at which is the last edit, not the cancel edit.
+        # Mark the timestamp as approximate so Sonar / charts don't render
+        # a spurious churn spike on import day.
         if not c.is_active or c.status == "inactive":
             cancel_time = c.updated_at or c.created_at
+            payload: dict = {
+                "reason_code": "other",
+                "timestamp_is_approximate": True,
+            }
+            if c.pss_id:
+                payload["source_note"] = "pss_imported_as_inactive"
             await _emit(
                 db,
                 event_type="customer.cancelled",
                 org_id=org.id,
                 entity_refs={"customer_id": c.id},
-                payload={
-                    "reason_code": "other",
-                    "notes": "backfilled from inactive status — PSS did not record cancel reason",
-                },
+                payload=payload,
                 created_at=cancel_time,
                 client_emit_id=_emit_id("customer.cancelled", c.id),
                 report=report,
@@ -305,6 +321,166 @@ async def backfill_invoices(
             )
 
 
+async def backfill_properties(
+    db: AsyncSession, org: Organization, report: BackfillReport, commit: bool
+) -> None:
+    from src.models.property import Property
+    result = await db.execute(
+        select(Property).where(Property.organization_id == org.id).order_by(Property.created_at)
+    )
+    for p in result.scalars():
+        await _emit(
+            db,
+            event_type="property.created",
+            org_id=org.id,
+            entity_refs={"property_id": p.id, "customer_id": p.customer_id} if p.customer_id else {"property_id": p.id},
+            payload={},
+            created_at=p.created_at,
+            client_emit_id=_emit_id("property.created", p.id),
+            report=report,
+            commit=commit,
+        )
+
+
+async def backfill_water_features(
+    db: AsyncSession, org: Organization, report: BackfillReport, commit: bool
+) -> None:
+    from src.models.water_feature import WaterFeature
+    result = await db.execute(
+        select(WaterFeature).where(WaterFeature.organization_id == org.id).order_by(WaterFeature.created_at)
+    )
+    for wf in result.scalars():
+        refs = {"water_feature_id": wf.id}
+        if wf.property_id:
+            refs["property_id"] = wf.property_id
+        payload: dict = {}
+        if wf.pool_type:
+            payload["pool_type"] = wf.pool_type
+        if wf.name:
+            payload["name"] = wf.name
+        await _emit(
+            db,
+            event_type="water_feature.created",
+            org_id=org.id,
+            entity_refs=refs,
+            payload=payload,
+            created_at=wf.created_at,
+            client_emit_id=_emit_id("water_feature.created", wf.id),
+            report=report,
+            commit=commit,
+        )
+
+
+async def backfill_cases(
+    db: AsyncSession, org: Organization, report: BackfillReport, commit: bool
+) -> None:
+    from src.models.service_case import ServiceCase
+    result = await db.execute(
+        select(ServiceCase).where(ServiceCase.organization_id == org.id).order_by(ServiceCase.created_at)
+    )
+    for case in result.scalars():
+        refs = {"case_id": case.id}
+        if case.customer_id:
+            refs["customer_id"] = case.customer_id
+        await _emit(
+            db,
+            event_type="case.created",
+            org_id=org.id,
+            entity_refs=refs,
+            payload={
+                "source": case.source or "unknown",
+                "status_at_create": case.status,
+            },
+            created_at=case.created_at,
+            client_emit_id=_emit_id("case.created", case.id),
+            report=report,
+            commit=commit,
+        )
+        # If the case is already closed, emit case.closed at closed_at.
+        if case.status == "closed" and case.closed_at:
+            await _emit(
+                db,
+                event_type="case.closed",
+                org_id=org.id,
+                entity_refs=refs,
+                payload={
+                    "reason": "backfill_snapshot",
+                    "auto_closed": False,
+                    "timestamp_is_approximate": False,
+                },
+                created_at=case.closed_at,
+                client_emit_id=_emit_id("case.closed", case.id),
+                report=report,
+                commit=commit,
+            )
+
+
+async def backfill_jobs(
+    db: AsyncSession, org: Organization, report: BackfillReport, commit: bool
+) -> None:
+    from src.models.agent_action import AgentAction
+    result = await db.execute(
+        select(AgentAction).where(AgentAction.organization_id == org.id).order_by(AgentAction.created_at)
+    )
+    for job in result.scalars():
+        refs: dict = {"job_id": job.id}
+        if job.case_id:
+            refs["case_id"] = job.case_id
+        if job.thread_id:
+            refs["thread_id"] = job.thread_id
+        if job.customer_id:
+            refs["customer_id"] = job.customer_id
+        await _emit(
+            db,
+            event_type="job.created",
+            org_id=org.id,
+            entity_refs=refs,
+            payload={
+                "job_type": job.action_type or "unknown",
+                "status_at_create": job.status,
+            },
+            created_at=job.created_at,
+            client_emit_id=_emit_id("job.created", job.id),
+            report=report,
+            commit=commit,
+        )
+
+
+async def backfill_visits(
+    db: AsyncSession, org: Organization, report: BackfillReport, commit: bool
+) -> None:
+    from src.models.visit import Visit
+    result = await db.execute(
+        select(Visit).where(
+            Visit.organization_id == org.id,
+            Visit.status == "completed",
+        ).order_by(Visit.actual_departure)
+    )
+    for v in result.scalars():
+        # visit.completed requires a departure timestamp — skip otherwise.
+        if not v.actual_departure:
+            continue
+        refs = {"visit_id": v.id}
+        if v.property_id:
+            refs["property_id"] = v.property_id
+        if v.customer_id:
+            refs["customer_id"] = v.customer_id
+        payload: dict = {}
+        if v.duration_minutes is not None:
+            payload["duration_minutes"] = v.duration_minutes
+        await _emit(
+            db,
+            event_type="visit.completed",
+            org_id=org.id,
+            entity_refs=refs,
+            payload=payload,
+            created_at=v.actual_departure,
+            client_emit_id=_emit_id("visit.completed", v.id),
+            report=report,
+            commit=commit,
+        )
+
+
 async def backfill_activation(
     db: AsyncSession, org: Organization, report: BackfillReport, commit: bool
 ) -> None:
@@ -395,6 +571,17 @@ async def backfill_activation(
             refs["invoice_id"] = row[2]
         milestones["activation.first_payment_received"] = (when, refs)
 
+    # Clamp every milestone to be >= account_created. PSS-imported data
+    # has customers/invoices with 2024 timestamps — those predate the QP
+    # org creation (Jan 2026 for Sapphire), which produces analytically
+    # garbage funnel gaps ("time to first customer = -17 months").
+    # We pull pre-account milestones forward to account_created and stamp
+    # `backfill_clamped: true` + `original_when` so Sonar can see that
+    # the floor was applied and filter these out of cohort analysis.
+    account_floor: Optional[datetime] = None
+    if "activation.account_created" in milestones:
+        account_floor = milestones["activation.account_created"][0]
+
     # Emit in canonical funnel order, carrying prior timestamp forward
     # so minutes_since_prior_milestone is computed right.
     prior_when: Optional[datetime] = None
@@ -402,7 +589,11 @@ async def backfill_activation(
         if event_type not in milestones:
             continue
         when, refs = milestones[event_type]
-        payload: dict = {"funnel_position": FUNNEL_ORDER.index(event_type)}
+        payload: dict = {}
+        if account_floor is not None and when < account_floor:
+            payload["backfill_clamped"] = True
+            payload["original_when"] = when.isoformat()
+            when = account_floor
         if prior_when is not None and when >= prior_when:
             delta_min = int((when - prior_when).total_seconds() / 60)
             payload["minutes_since_prior_milestone"] = delta_min
@@ -450,20 +641,24 @@ async def run(org_slug: Optional[str], commit: bool) -> BackfillReport:
         for org in orgs:
             logger.info(f"Backfilling org: {org.name} ({org.id}) slug={org.slug}")
 
-            await backfill_customers(db, org, report, commit)
-            if commit:
-                await db.commit()
-            logger.info(f"  customers pass complete")
-
-            await backfill_invoices(db, org, report, commit)
-            if commit:
-                await db.commit()
-            logger.info(f"  invoices pass complete")
-
-            await backfill_activation(db, org, report, commit)
-            if commit:
-                await db.commit()
-            logger.info(f"  activation pass complete")
+            # Pass order matters: entity-creation events first so they're
+            # in the stream when activation runs, and so downstream queries
+            # like "jobs per case" see both sides.
+            passes = [
+                ("customers", backfill_customers),
+                ("properties", backfill_properties),
+                ("water_features", backfill_water_features),
+                ("cases", backfill_cases),
+                ("jobs", backfill_jobs),
+                ("visits", backfill_visits),
+                ("invoices", backfill_invoices),
+                ("activation", backfill_activation),
+            ]
+            for name, fn in passes:
+                await fn(db, org, report, commit)
+                if commit:
+                    await db.commit()
+                logger.info(f"  {name} pass complete")
             logger.info("")
 
     await engine.dispose()

@@ -1105,11 +1105,21 @@ async def confirm_customer_email(
 
 
 class ConfirmCreateCaseRequest(BaseModel):
-    title: str
+    """Accept-path for DeepBlue's create_case proposal (Phase 2 Step 9).
+
+    proposal_id is required. Legacy fields optional for UX continuity;
+    conversation_id still used to drive the post-creation linking that
+    attaches the conversation + existing email threads to the new case.
+    """
+    proposal_id: str
+    # Kept for post-creation linking work.
+    conversation_id: Optional[str] = None
+    # Legacy fields — preview payload passes them through but staged
+    # proposal is authoritative.
+    title: Optional[str] = None
     customer_id: Optional[str] = None
     billing_name: Optional[str] = None
-    priority: str = "normal"
-    conversation_id: Optional[str] = None
+    priority: Optional[str] = None
 
 
 @router.post("/confirm-create-case")
@@ -1118,26 +1128,47 @@ async def confirm_create_case(
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a case from DeepBlue and optionally link the conversation."""
-    from src.services.service_case_service import ServiceCaseService
+    """Accept a DeepBlue-staged case proposal.
+
+    After proposal.accept creates the case, this endpoint still runs
+    the post-creation linking (conversation → case, existing email
+    threads → case) which is specific to DeepBlue's conversation flow
+    and not inherent to the proposal itself.
+    """
+    from src.models.agent_proposal import AgentProposal
+    from src.models.agent_thread import AgentThread
     from src.models.deepblue_conversation import DeepBlueConversation
     from src.services.events.actor_factory import actor_from_org_ctx
+    from src.services.proposals import ProposalService
+    from src.services.proposals.proposal_service import ProposalStateError
+    from sqlalchemy import update as sa_update
 
-    svc = ServiceCaseService(db)
-    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip()
-    case = await svc.create(
-        org_id=ctx.organization_id,
-        title=req.title,
-        source="deepblue",
-        customer_id=req.customer_id,
-        billing_name=req.billing_name,
-        priority=req.priority,
-        created_by=user_name,
-        manager_user_id=ctx.user.id,
-        actor=actor_from_org_ctx(ctx),
-    )
+    # Org-scope + entity_type guard.
+    proposal = await db.get(AgentProposal, req.proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.organization_id != ctx.organization_id:
+        raise HTTPException(status_code=403, detail="Proposal belongs to a different org")
+    if proposal.entity_type != "case":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected case proposal, got {proposal.entity_type!r}",
+        )
 
-    # Link conversation to case if provided
+    try:
+        _, case = await ProposalService(db).accept(
+            proposal_id=req.proposal_id,
+            actor=actor_from_org_ctx(ctx),
+        )
+    except ProposalStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    if case is None:
+        await db.commit()
+        return {"saved": False, "reason": "user_created_already"}
+
+    # Post-creation linking (DeepBlue-specific, stays here).
+    conv = None
     if req.conversation_id:
         conv = (await db.execute(
             select(DeepBlueConversation).where(
@@ -1148,15 +1179,12 @@ async def confirm_create_case(
         if conv:
             conv.case_id = case.id
 
-    # Link email threads created during this conversation to the case
-    if req.conversation_id and conv and req.customer_id:
-        from src.models.agent_thread import AgentThread
-        from sqlalchemy import update
-        # Only link threads created after the conversation started
+    customer_id = proposal.proposed_payload.get("customer_id")
+    if req.conversation_id and conv and customer_id:
         await db.execute(
-            update(AgentThread).where(
+            sa_update(AgentThread).where(
                 AgentThread.organization_id == ctx.organization_id,
-                AgentThread.matched_customer_id == req.customer_id,
+                AgentThread.matched_customer_id == customer_id,
                 AgentThread.case_id.is_(None),
                 AgentThread.created_at >= conv.created_at,
             ).values(case_id=case.id)

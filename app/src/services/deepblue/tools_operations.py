@@ -300,14 +300,36 @@ async def _exec_create_case(inp: dict, ctx: ToolContext) -> dict:
 
     priority = inp.get("priority", "normal")
 
+    # Phase 2 Step 9 migration — stage a proposal instead of preview-only.
+    from src.services.proposals import ProposalService
+    try:
+        proposal = await ProposalService(ctx.db).stage(
+            org_id=ctx.org_id,
+            agent_type="deepblue_responder",
+            entity_type="case",
+            source_type="deepblue_conversation",
+            source_id=getattr(ctx, "conversation_id", None),
+            proposed_payload={
+                "title": title,
+                "customer_id": customer_id,
+                "priority": priority,
+                "source": "deepblue",
+            },
+        )
+        await ctx.db.commit()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Could not stage create-case proposal: {e}"}
+
     return {
-        "requires_confirmation": True,
+        "requires_confirmation": True,  # retained for UI until Step 10
+        "proposal_id": proposal.id,
         "preview": {
             "type": "create_case",
             "title": title,
             "customer_id": customer_id,
             "customer_name": customer_name or "No customer linked",
             "priority": priority,
+            "proposal_id": proposal.id,
         },
     }
 

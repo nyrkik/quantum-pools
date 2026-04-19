@@ -12,3 +12,4 @@ customer_note_update, and more.
 # src.services.proposals.registry._REGISTRY.
 from . import job, estimate, equipment_item, org_config  # noqa: F401
 from . import chemical_reading  # noqa: F401
+from . import case  # noqa: F401

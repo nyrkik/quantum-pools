@@ -74,23 +74,37 @@ def test_inbox_summary_validates_minimal_payload():
     assert s.state.startswith("Scheduled")
 
 
-def test_inbox_summary_rejects_empty_state():
-    with pytest.raises(ValidationError):
-        InboxSummary.model_validate({
-            "version": 1,
-            "state": "   ",  # whitespace only
-            "confidence": 0.5,
-        })
+def test_inbox_summary_state_whitespace_becomes_none():
+    # Bullets are now the primary output; state is optional and only
+    # populated when the thread has no discrete items. Whitespace-only
+    # coerces to None rather than raising.
+    s = InboxSummary.model_validate({
+        "version": 1,
+        "state": "   ",
+        "confidence": 0.5,
+    })
+    assert s.state is None
+
+
+def test_inbox_summary_state_can_be_null():
+    s = InboxSummary.model_validate({
+        "version": 1,
+        "state": None,
+        "open_items": ["Filter cleaning — Approved"],
+        "confidence": 0.8,
+    })
+    assert s.state is None
+    assert s.open_items == ["Filter cleaning — Approved"]
 
 
 def test_inbox_summary_confidence_bounds():
     with pytest.raises(ValidationError):
         InboxSummary.model_validate({
-            "version": 1, "state": "ok", "confidence": 1.5,  # >1
+            "version": 1, "confidence": 1.5,  # >1
         })
     with pytest.raises(ValidationError):
         InboxSummary.model_validate({
-            "version": 1, "state": "ok", "confidence": -0.1,
+            "version": 1, "confidence": -0.1,
         })
 
 

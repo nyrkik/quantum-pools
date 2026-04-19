@@ -81,7 +81,9 @@ class _ProposalDraft(BaseModel):
 class InboxSummary(BaseModel):
     version: int = SUMMARY_SCHEMA_VERSION
     ask: Optional[str] = None
-    state: str
+    # state is optional now — bullets are primary, state is only populated
+    # when no bullets exist (informational-only threads).
+    state: Optional[str] = None
     open_items: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)
     linked_refs: list[_LinkedRef] = Field(default_factory=list)
@@ -92,10 +94,11 @@ class InboxSummary(BaseModel):
 
     @field_validator("state")
     @classmethod
-    def _state_nonempty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("state must be a non-empty summary of current status")
-        return v.strip()
+    def _state_trim(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        return s or None
 
 
 # Helper for deciding whether to skip a thread based on size.

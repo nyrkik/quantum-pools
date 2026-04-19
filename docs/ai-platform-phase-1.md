@@ -637,12 +637,13 @@ File: `app/scripts/backfill_platform_events.py`
 
 **Flow:**
 1. For each entity type listed in taxonomy §14, run a query that SELECTs existing rows and derives events. Per-org iteration so minutes_since_prior_milestone is computed relative to each org's own timeline.
-2. Insert events with `actor_type = 'system'`, `payload.source = 'backfill'`, and a deterministic `client_emit_id = uuid5(BACKFILL_NAMESPACE, "backfill:<event_type>:<entity_id>")` — 36-char UUID (literal string form exceeded the `VARCHAR(36)` column limit).
+2. Insert events with `actor_type = 'system'`, `payload._backfill = true` (namespaced marker — `source` is reserved for taxonomy fields), and a deterministic `client_emit_id = uuid5(BACKFILL_NAMESPACE, "backfill:<event_type>:<entity_id>")` — 36-char UUID (literal string form exceeded the `VARCHAR(36)` column limit).
 3. Each event's `created_at` passed through the new `PlatformEventService.emit(..., created_at=...)` override so events land at the historical timestamp, not NOW().
-4. Progress logging per org per pass.
-5. Summary emitted at end: total events created per type, activation milestones by org.
+4. Activation milestones are clamped to `>= account_created_ts` per org. Pre-account PSS data would otherwise produce negative funnel gaps. Clamped events stamp `backfill_clamped: true` + `original_when` in payload so Sonar can filter.
+5. Pass order: customers → properties → water_features → cases → jobs → visits → invoices → activation. Matters so the activation pass sees all qualifying source rows and "X per Y" queries see both sides of the relationship.
+6. Progress logging per org per pass; summary emitted at end.
 
-**Shipped outcome (2026-04-17):** 8022 events across 13 event types spanning 2024-08 → 2026-04, committed via `--commit`. Second run returned 0 new events (idempotency verified).
+**Shipped outcome (2026-04-19):** 8406 events across 19 event types spanning 2024-08 → 2026-04. All 13 source-table counts match backfill counts exactly. 8406 unique client_emit_ids (no uuid5 collisions). Second run = 0 new events (idempotency verified).
 
 **Example — jobs backfill:**
 

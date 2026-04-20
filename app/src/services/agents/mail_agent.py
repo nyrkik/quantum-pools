@@ -4,6 +4,7 @@ import os
 import re
 import email
 import logging
+import quopri
 from email.header import decode_header
 
 from imapclient import IMAPClient
@@ -328,6 +329,79 @@ def _unwrap_embedded_mime(text: str) -> str:
     return text
 
 
+# Quoted-printable soft line breaks (`=\n`) and hex escapes (`=3D`, `=09`, …).
+# Normal plain text almost never contains more than a couple of these; three
+# or more inside a single body is a strong signal the content wasn't decoded
+# upstream (see the Yardi-via-Postmark case).
+_QP_TOKEN_RE = re.compile(r"=[0-9A-Fa-f]{2}|=\r?\n")
+
+# Opening tags that prove a body the provider labeled `text/plain` is
+# actually HTML — broad enough to catch marketing emails, tight enough to
+# avoid false positives on code snippets that mention `<html` in prose.
+_HTML_TAG_RE = re.compile(
+    r"<(?:html|body|head|style|div|table|tbody|tr|td|p|span|img|a|h[1-6]|ul|ol|br|meta|link)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_quoted_printable(text: str) -> bool:
+    """True when the body carries ≥3 QP tokens — a soft line break or a
+    `=XX` hex escape. Mirrors the `_unwrap_embedded_mime` heuristic style:
+    err on the side of not rewriting clean text."""
+    if not text:
+        return False
+    return len(_QP_TOKEN_RE.findall(text)) >= 3
+
+
+def _decode_quoted_printable(text: str) -> str:
+    try:
+        decoded = quopri.decodestring(text.encode("utf-8", errors="replace"))
+        return decoded.decode("utf-8", errors="replace")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("_decode_quoted_printable failed: %s", e)
+        return text
+
+
+def _looks_like_html(text: str) -> bool:
+    """True when the first 500 chars contain an HTML structural tag."""
+    if not text:
+        return False
+    return bool(_HTML_TAG_RE.search(text[:500]))
+
+
+def _normalize_body(
+    text_raw: str, html_raw: str | None,
+) -> tuple[str, str | None]:
+    """Clean up TextBody quirks that slip past the MIME decoder.
+
+    Two quirks in the wild (verified against real Sapphire inbox
+    messages):
+
+    1. **Quoted-printable still encoded.** Some senders relayed via
+       Postmark arrive with `TextBody` that contains raw QP escapes
+       (`=3D`, `=09`, soft `=\\n` line breaks) — Postmark didn't
+       decode them because the upstream Content-Transfer-Encoding
+       header was missing or mis-declared. Decode with `quopri`
+       before anything else touches the text.
+
+    2. **HTML in TextBody, nothing in HtmlBody.** Once the QP is
+       decoded we sometimes see the result is actually an HTML
+       document. Treat that as HTML: promote to `html_raw` if we
+       didn't get one, and regenerate the plain-text body via
+       `_clean_html` so the inbox row isn't a wall of tags.
+
+    Runs regardless of ingest provider — living in `extract_bodies`
+    means every ingest path benefits without per-provider patching.
+    """
+    if text_raw and _looks_quoted_printable(text_raw):
+        text_raw = _decode_quoted_printable(text_raw)
+    if text_raw and _looks_like_html(text_raw):
+        if not html_raw:
+            html_raw = text_raw
+        text_raw = _clean_html(text_raw)
+    return text_raw, html_raw
+
+
 def extract_text_body(msg) -> str:
     """Extract plain text body from email message, stripping quoted reply chains."""
     raw, _ = extract_bodies(msg)
@@ -377,5 +451,6 @@ def extract_bodies(msg) -> tuple[str, str | None]:
 
     if text_raw:
         text_raw = _unwrap_embedded_mime(text_raw)
+    text_raw, html_raw = _normalize_body(text_raw, html_raw)
 
     return text_raw, html_raw

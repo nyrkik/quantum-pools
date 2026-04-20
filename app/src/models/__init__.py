@@ -80,6 +80,7 @@ from src.models.email_template import EmailTemplate
 from src.models.email_integration import EmailIntegration, IntegrationType, IntegrationStatus
 from src.models.autopay_attempt import AutopayAttempt
 from src.models.inbox_folder import InboxFolder, SYSTEM_FOLDERS
+from src.models.org_workflow_config import OrgWorkflowConfig
 
 __all__ = [
     "Base",
@@ -146,4 +147,5 @@ __all__ = [
     "IntegrationType",
     "IntegrationStatus",
     "AutopayAttempt",
+    "OrgWorkflowConfig",
 ]

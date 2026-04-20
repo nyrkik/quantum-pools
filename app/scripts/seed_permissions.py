@@ -101,6 +101,8 @@ PERMISSIONS = [
     ("agent_ops", "manage", "Manage AI agent configuration"),
     # notifications
     ("notifications", "view", "View notifications"),
+    # workflow (Phase 4)
+    ("workflow", "manage_config", "Configure post-creation handlers for new jobs"),
 ]
 
 

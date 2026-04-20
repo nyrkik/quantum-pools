@@ -259,6 +259,7 @@ function WfSection({
 
 function EquipmentRow({ item, onClick }: { item: EquipmentItem; onClick: () => void }) {
   const name = displayName(item);
+  const inService = formatInstallDate(item.install_date);
   return (
     <div
       className="flex items-center justify-between text-xs py-1 -mx-1 px-1 rounded cursor-pointer hover:bg-muted/50 transition-colors"
@@ -267,6 +268,11 @@ function EquipmentRow({ item, onClick }: { item: EquipmentItem; onClick: () => v
       <span className="text-muted-foreground">{typeLabel(item.equipment_type)}</span>
       <div className="flex items-center gap-1">
         <span className="font-medium">{name}</span>
+        {inService && (
+          <span className="text-[10px] text-muted-foreground ml-1">
+            · in service {inService}
+          </span>
+        )}
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
       </div>
     </div>
@@ -329,6 +335,7 @@ function EquipmentDetailOverlay({ item, open, onClose }: { item: EquipmentItem |
     { label: "Serial #", value: item.serial_number },
     { label: "HP", value: item.horsepower?.toString() || (catalogData?.specs as Record<string, unknown>)?.hp?.toString() },
     { label: "System", value: item.system_group },
+    { label: "In service", value: formatInstallDate(item.install_date) },
     { label: "Notes", value: item.notes },
   ].filter((d) => d.value);
 
@@ -410,6 +417,23 @@ const SYSTEM_TYPES = new Set(["pump", "filter", "chlorinator"]);
 // system group), route the select through this sentinel.
 const STANDALONE_SENTINEL = "__standalone__";
 
+
+function formatInstallDate(iso: string | null): string | null {
+  if (!iso) return null;
+  // Input is YYYY-MM-DD (a plain date, no timezone). Use UTC parts
+  // so the display doesn't shift by a day in the user's local tz.
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const now = new Date();
+  return dt.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: dt.getUTCFullYear() === now.getFullYear() ? undefined : "numeric",
+    timeZone: "UTC",
+  });
+}
+
 interface EditRow {
   id?: string;
   equipment_type: string;
@@ -417,6 +441,7 @@ interface EditRow {
   model: string;
   system_group: string;
   notes: string;
+  install_date: string;
   _deleted?: boolean;
 }
 
@@ -494,6 +519,7 @@ function AllWfEquipmentSheet({
           model: e.model || "",
           system_group: e.system_group || "",
           notes: e.notes || "",
+          install_date: e.install_date || "",
         }));
       }
       setRowsByWf(initial);
@@ -515,7 +541,7 @@ function AllWfEquipmentSheet({
   const showGroups = needsSystemGroups(rows);
 
   const addRow = () => {
-    setRows((prev) => autoAssignGroups([...prev, { equipment_type: "pump", brand: "", model: "", system_group: "", notes: "" }]));
+    setRows((prev) => autoAssignGroups([...prev, { equipment_type: "pump", brand: "", model: "", system_group: "", notes: "", install_date: "" }]));
   };
 
   const updateRow = (idx: number, field: keyof EditRow, value: string) => {
@@ -563,6 +589,7 @@ function AllWfEquipmentSheet({
             model: r.model || null,
             system_group: r.system_group || null,
             notes: r.notes || null,
+            install_date: r.install_date || null,
           };
           if (r.id) {
             await api.put(`/v1/equipment/${r.id}`, body);
@@ -714,6 +741,16 @@ function AllWfEquipmentSheet({
                       className="h-8 text-xs"
                     />
                   </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs">In service since</Label>
+                  <Input
+                    type="date"
+                    value={row.install_date}
+                    onChange={(e) => updateRow(realIdx, "install_date", e.target.value)}
+                    className="h-8 text-xs"
+                  />
                 </div>
               </div>
             );

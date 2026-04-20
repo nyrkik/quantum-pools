@@ -38,4 +38,5 @@ class EquipmentPresenter(Presenter):
             "is_active": ei.is_active,
             "catalog_equipment_id": ei.catalog_equipment_id,
             "catalog_canonical_name": catalog.canonical_name if catalog else None,
+            "install_date": ei.install_date.isoformat() if ei.install_date else None,
         }

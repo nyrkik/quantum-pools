@@ -144,6 +144,10 @@ export interface EquipmentItem {
   is_active: boolean;
   catalog_equipment_id: string | null;
   catalog_canonical_name: string | null;
+  /** ISO date string (YYYY-MM-DD) — the date this equipment was
+   * placed in service. Used for lifecycle tracking (PRX filter
+   * cartridge age, pump warranty windows, etc). */
+  install_date: string | null;
 }
 
 export interface CatalogEntry {

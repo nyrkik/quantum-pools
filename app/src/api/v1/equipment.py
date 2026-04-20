@@ -2,7 +2,7 @@
 
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
@@ -34,6 +34,7 @@ class EquipmentItemCreate(BaseModel):
     horsepower: Optional[float] = None
     notes: Optional[str] = None
     catalog_equipment_id: Optional[str] = None
+    install_date: Optional[date] = None
 
 
 class EquipmentItemUpdate(BaseModel):
@@ -46,6 +47,7 @@ class EquipmentItemUpdate(BaseModel):
     horsepower: Optional[float] = None
     notes: Optional[str] = None
     catalog_equipment_id: Optional[str] = None
+    install_date: Optional[date] = None
 
 
 class EquipmentItemResponse(BaseModel):
@@ -63,6 +65,7 @@ class EquipmentItemResponse(BaseModel):
     is_active: bool = True
     catalog_equipment_id: Optional[str] = None
     catalog_canonical_name: Optional[str] = None
+    install_date: Optional[date] = None
 
     model_config = {"from_attributes": True}
 
@@ -123,6 +126,7 @@ async def create_equipment(
         notes=body.notes or None,
         normalized_name=display,
         catalog_equipment_id=body.catalog_equipment_id,
+        install_date=body.install_date,
     )
     db.add(item)
     await db.commit()

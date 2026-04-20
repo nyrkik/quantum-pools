@@ -259,6 +259,22 @@ class InboundEmailService:
         Postmark JSON includes: FromFull, ToFull, Subject, TextBody, HtmlBody,
         Headers (list of {Name, Value}), Attachments (list of {Name, Content,
         ContentType, ContentLength}), OriginalRecipient, MessageID, Date.
+
+        **Body sourcing (priority order):**
+
+        1. ``RawEmail`` — if the Postmark Server has "Include raw email
+           content in JSON payload" enabled, we parse the RFC 5322 bytes
+           directly with ``email.message_from_string`` + ``extract_bodies``.
+           Same pipeline Gmail raw ingest uses, so MIME / Content-Transfer-
+           Encoding / charset quirks are handled by Python's email lib —
+           NOT by trusting Postmark's pre-parsed text.
+        2. ``TextBody`` / ``HtmlBody`` — fallback when ``RawEmail`` isn't
+           included. These are Postmark's best-effort decode of the
+           upstream MIME; some senders (confirmed: Yardi ACH notifications)
+           arrive with raw QP-encoded HTML in TextBody. ``_normalize_body``
+           inside ``extract_bodies`` catches that as defense-in-depth, but
+           the RawEmail path is the real fix — flip the Postmark setting
+           and this branch is rarely hit.
         """
         from_email = payload.get("FromFull", {}).get("Email", payload.get("From", ""))
         from_name = payload.get("FromFull", {}).get("Name", "")
@@ -293,20 +309,49 @@ class InboundEmailService:
                 "ContentLength": att.get("ContentLength", 0),
             })
 
-        # Raw-MIME-in-TextBody unwrap is now handled centrally inside
-        # extract_bodies (src/services/agents/mail_agent.py), so every
-        # ingest path benefits without provider-specific patching.
+        # Prefer RawEmail when available — gives us a real RFC 5322
+        # envelope to hand to Python's email lib, identical to the Gmail
+        # raw path. Provider-level body pre-parsing (TextBody/HtmlBody)
+        # becomes the fallback for Postmark servers that haven't enabled
+        # the raw-content option.
+        body_plain, body_html = self._postmark_bodies(payload)
+
         return ParsedEmail(
             from_email=from_email,
             from_name=from_name,
             to_email=to_email,
             subject=payload.get("Subject", ""),
-            body_plain=payload.get("TextBody", ""),
-            body_html=payload.get("HtmlBody", ""),
+            body_plain=body_plain,
+            body_html=body_html,
             headers=headers,
             raw_payload=payload,
             attachments=attachments,
         )
+
+    @staticmethod
+    def _postmark_bodies(payload: dict) -> tuple[str, str]:
+        """Resolve (text_plain, text_html) from a Postmark webhook payload.
+
+        RawEmail → parse MIME ourselves (authoritative).
+        TextBody/HtmlBody → fallback, still passes through
+        ``extract_bodies`` via the ``_build_email_message`` step downstream
+        so ``_normalize_body`` can still repair known quirks.
+        """
+        raw = payload.get("RawEmail") or ""
+        if raw:
+            try:
+                import email as _email
+                from email import policy as _policy
+                from src.services.agents.mail_agent import extract_bodies
+                msg = _email.message_from_string(raw, policy=_policy.default)
+                text, html = extract_bodies(msg)
+                return text or "", html or ""
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Postmark RawEmail parse failed, falling back to "
+                    "TextBody/HtmlBody: %s", e,
+                )
+        return payload.get("TextBody", "") or "", payload.get("HtmlBody", "") or ""
 
     def _parse_mailgun(self, payload: dict) -> ParsedEmail:
         """Parse Mailgun Routes webhook format."""

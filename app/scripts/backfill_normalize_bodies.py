@@ -131,7 +131,7 @@ async def main(dry_run: bool = False) -> None:
             original = msg.body or ""
             if not _needs_normalize(original, msg.body_html):
                 continue
-            new_body, new_html = _normalize_body(original, msg.body_html)
+            new_body, new_html, _diag = _normalize_body(original, msg.body_html)
             if new_body == original and (new_html or None) == (msg.body_html or None):
                 continue
 

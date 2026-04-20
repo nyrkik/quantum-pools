@@ -101,7 +101,9 @@ async def _queue_summary_if_inbox_v2(db, thread, organization_id: str) -> None:
     await db.flush()
 
 
-async def _emit_agent_message_received(db, agent_msg, msg=None):
+async def _emit_agent_message_received(
+    db, agent_msg, msg=None, body_normalize_flags: dict | None = None,
+):
     """Emit `agent_message.received` for a newly-created inbound AgentMessage.
 
     Called from each of the 3 AgentMessage-creation branches in
@@ -113,6 +115,11 @@ async def _emit_agent_message_received(db, agent_msg, msg=None):
 
     Optional `msg` is the underlying email.message object used to derive
     attachment/cc flags. Pass None if those signals aren't available.
+
+    When ``body_normalize_flags`` contains at least one ``True`` flag the
+    function also emits ``email.body_normalized`` — telemetry that lets us
+    see which senders' bodies needed repair and how often, so the next
+    Yardi-class quirk shows up in platform_events before a user asks.
     """
     from src.services.events.platform_event_service import PlatformEventService
     from src.services.events.actor_factory import actor_system
@@ -137,6 +144,33 @@ async def _emit_agent_message_received(db, agent_msg, msg=None):
             "has_cc": _msg_has_cc(msg) if msg is not None else False,
         },
     )
+
+    if body_normalize_flags and any(body_normalize_flags.values()):
+        # `from_email_domain` not `from_email` — R2 bans any shape that
+        # looks like a PII identifier (and the domain is what matters
+        # for pattern-spotting anyway).
+        domain = ""
+        fe = (agent_msg.from_email or "").strip()
+        if "@" in fe:
+            domain = fe.rsplit("@", 1)[-1].lower()
+        await PlatformEventService.emit(
+            db=db,
+            event_type="email.body_normalized",
+            level="system_action",
+            actor=actor_system(),
+            organization_id=agent_msg.organization_id,
+            entity_refs={
+                "thread_id": agent_msg.thread_id,
+                "agent_message_id": agent_msg.id,
+            },
+            payload={
+                "provider": provider,
+                "from_email_domain": domain,
+                # Only include flags that actually fired — keeps payload
+                # compact and lets the consumer filter by key presence.
+                **{k: True for k, v in body_normalize_flags.items() if v},
+            },
+        )
 
 
 async def _emit_agent_message_classified(db, agent_msg, classification_confidence: str | None = None):
@@ -342,12 +376,21 @@ async def process_incoming_email(
     gmail_flagged_spam = "SPAM" in gmail_labels
     from_header = decode_email_header(msg.get("From", ""))
     subject = decode_email_header(msg.get("Subject", ""))
-    from src.services.agents.mail_agent import extract_bodies
+    from src.services.agents.mail_agent import (
+        consume_last_body_normalize_flags,
+        extract_bodies,
+    )
     body, body_html = extract_bodies(msg)
+    # Capture right after extract_bodies — the ContextVar holds the
+    # flags until we read or clear them. Passed into
+    # `_emit_agent_message_received` so `email.body_normalized` can
+    # attach itself to a real agent_message_id.
+    body_normalize_flags = consume_last_body_normalize_flags()
     # Safety net: if body still looks like raw HTML, strip it now
     if body and "<html" in body.lower()[:200]:
         from src.services.agents.mail_agent import _clean_html
         body = _clean_html(body)
+        body_normalize_flags["html_stripped_from_text"] = True
     message_id_header = msg.get("Message-ID", "")
 
     # Parse actual email date
@@ -584,7 +627,7 @@ async def process_incoming_email(
             )
             db.add(agent_msg)
             await db.flush()
-            await _emit_agent_message_received(db, agent_msg, msg=msg)
+            await _emit_agent_message_received(db, agent_msg, msg=msg, body_normalize_flags=body_normalize_flags)
             await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
             await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
             await db.commit()
@@ -627,7 +670,7 @@ async def process_incoming_email(
                 )
                 db.add(agent_msg)
                 await db.flush()
-                await _emit_agent_message_received(db, agent_msg, msg=msg)
+                await _emit_agent_message_received(db, agent_msg, msg=msg, body_normalize_flags=body_normalize_flags)
                 await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
                 await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
                 await db.commit()
@@ -695,7 +738,7 @@ async def process_incoming_email(
         db.add(agent_msg)
         await db.flush()
 
-        await _emit_agent_message_received(db, agent_msg, msg=msg)
+        await _emit_agent_message_received(db, agent_msg, msg=msg, body_normalize_flags=body_normalize_flags)
         await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))
         await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
 

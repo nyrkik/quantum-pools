@@ -1,5 +1,6 @@
 """IMAP polling, email parsing, Gmail label management."""
 
+import contextvars
 import os
 import re
 import email
@@ -8,6 +9,14 @@ import quopri
 from email.header import decode_header
 
 from imapclient import IMAPClient
+
+# Per-task flags from the last ``extract_bodies`` call. Read + cleared
+# by ``consume_last_body_normalize_flags`` in the orchestrator so it can
+# emit ``email.body_normalized`` with payload `{mime_unwrapped,
+# qp_decoded, html_stripped_from_text}`. ContextVar isolates flags per
+# async task so concurrent ingests don't overwrite each other.
+_BODY_NORMALIZE_FLAGS: contextvars.ContextVar[dict[str, bool]] = \
+    contextvars.ContextVar("_body_normalize_flags", default={})
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +380,7 @@ def _looks_like_html(text: str) -> bool:
 
 def _normalize_body(
     text_raw: str, html_raw: str | None,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, dict[str, bool]]:
     """Clean up TextBody quirks that slip past the MIME decoder.
 
     Two quirks in the wild (verified against real Sapphire inbox
@@ -392,14 +401,22 @@ def _normalize_body(
 
     Runs regardless of ingest provider — living in `extract_bodies`
     means every ingest path benefits without per-provider patching.
+
+    Returns ``(text, html, diagnostics)`` where ``diagnostics`` names
+    each transform that actually fired (for telemetry — the orchestrator
+    emits `email.body_normalized` so new quirks show up in
+    platform_events before users report them).
     """
+    diagnostics = {"qp_decoded": False, "html_stripped_from_text": False}
     if text_raw and _looks_quoted_printable(text_raw):
         text_raw = _decode_quoted_printable(text_raw)
+        diagnostics["qp_decoded"] = True
     if text_raw and _looks_like_html(text_raw):
         if not html_raw:
             html_raw = text_raw
         text_raw = _clean_html(text_raw)
-    return text_raw, html_raw
+        diagnostics["html_stripped_from_text"] = True
+    return text_raw, html_raw, diagnostics
 
 
 def extract_text_body(msg) -> str:
@@ -450,7 +467,28 @@ def extract_bodies(msg) -> tuple[str, str | None]:
                 text_raw = text
 
     if text_raw:
+        before_unwrap = text_raw
         text_raw = _unwrap_embedded_mime(text_raw)
-    text_raw, html_raw = _normalize_body(text_raw, html_raw)
+        _BODY_NORMALIZE_FLAGS.set({
+            "mime_unwrapped": text_raw != before_unwrap,
+        })
+    else:
+        _BODY_NORMALIZE_FLAGS.set({"mime_unwrapped": False})
+
+    text_raw, html_raw, norm_flags = _normalize_body(text_raw, html_raw)
+    prior = _BODY_NORMALIZE_FLAGS.get()
+    _BODY_NORMALIZE_FLAGS.set({**prior, **norm_flags})
 
     return text_raw, html_raw
+
+
+def consume_last_body_normalize_flags() -> dict[str, bool]:
+    """Return and clear the diagnostic flags from the most recent
+    ``extract_bodies`` call in this context. Designed for the
+    orchestrator to read right after it calls ``extract_bodies`` so it
+    can emit ``email.body_normalized`` with an accurate payload. Uses
+    a ContextVar so concurrent ingests don't stomp each other's flags.
+    """
+    flags = _BODY_NORMALIZE_FLAGS.get()
+    _BODY_NORMALIZE_FLAGS.set({})
+    return flags

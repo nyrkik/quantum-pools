@@ -405,6 +405,10 @@ function EquipmentDetailOverlay({ item, open, onClose }: { item: EquipmentItem |
 
 // Types that get grouped into filter systems when multiples exist
 const SYSTEM_TYPES = new Set(["pump", "filter", "chlorinator"]);
+// Radix Select forbids empty-string SelectItem values — when the
+// backing field legitimately can be "" (standalone equipment, no
+// system group), route the select through this sentinel.
+const STANDALONE_SENTINEL = "__standalone__";
 
 interface EditRow {
   id?: string;
@@ -665,14 +669,26 @@ function AllWfEquipmentSheet({
                   {showGroups && isSystemType && (
                     <div className="space-y-1">
                       <Label className="text-xs">System</Label>
-                      <Select value={row.system_group} onValueChange={(v) => updateRow(realIdx, "system_group", v)}>
+                      <Select
+                        // Radix SelectItem forbids empty-string values —
+                        // route "standalone" through a sentinel and translate
+                        // at the boundary so the stored value stays "".
+                        value={row.system_group || STANDALONE_SENTINEL}
+                        onValueChange={(v) =>
+                          updateRow(
+                            realIdx,
+                            "system_group",
+                            v === STANDALONE_SENTINEL ? "" : v,
+                          )
+                        }
+                      >
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {systemGroups.map((g) => (
                             <SelectItem key={g} value={g}>{g}</SelectItem>
                           ))}
                           <SelectItem value={nextSystem}>{nextSystem} (new)</SelectItem>
-                          <SelectItem value="">Standalone</SelectItem>
+                          <SelectItem value={STANDALONE_SENTINEL}>Standalone</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

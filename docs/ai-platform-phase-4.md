@@ -122,7 +122,7 @@ Rationale for router-side lookup:
 - Frontend renders `<AssignInlineStep>` — popover with an assignee picker, Save / Skip buttons.
 - Save → `PUT /agent-actions/{id}` with `assigned_to=<uid>` + emits `handler.applied`.
 - Skip → dismisses + emits `handler.abandoned` with `reason: "skip"`.
-- Default assignee: derived from `default_assignee_strategy` on `org_workflow_config` — usually `last_used_by_user` (last assignee the acting user picked).
+- Default assignee: derived from `default_assignee_strategy` on `org_workflow_config` — usually `last_used_in_org` (assignee of the most recent job in the org; good proxy at small-team scale without per-user tracking infra).
 
 **`unassigned_pool`** (for dispatch-style orgs):
 - `next_step` = `{kind: "unassigned_pool", initial: {entity_id, pool_count}}`.
@@ -150,8 +150,8 @@ CREATE TABLE org_workflow_config (
     organization_id UUID PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
     post_creation_handlers JSONB NOT NULL DEFAULT '{}'::jsonb,
     -- e.g. {"job": "assign_inline"}
-    default_assignee_strategy JSONB NOT NULL DEFAULT '{"strategy":"last_used_by_user"}'::jsonb,
-    -- e.g. {"strategy":"last_used_by_user","fallback_user_id":"<uuid>"}
+    default_assignee_strategy JSONB NOT NULL DEFAULT '{"strategy":"last_used_in_org"}'::jsonb,
+    -- e.g. {"strategy":"last_used_in_org","fallback_user_id":"<uuid>"}
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by_user_id UUID REFERENCES users(id)
 );
@@ -167,7 +167,7 @@ Row created lazily on first read — orgs without a row fall through to **system
     "job": "assign_inline"
   },
   "default_assignee_strategy": {
-    "strategy": "last_used_by_user",
+    "strategy": "last_used_in_org",
     "fallback_user_id": null
   }
 }

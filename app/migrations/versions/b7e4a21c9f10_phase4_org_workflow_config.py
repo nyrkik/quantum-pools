@@ -46,7 +46,7 @@ def upgrade() -> None:
             pg.JSONB(),
             nullable=False,
             server_default=sa.text(
-                "'{\"strategy\":\"last_used_by_user\"}'::jsonb"
+                "'{\"strategy\":\"last_used_in_org\"}'::jsonb"
             ),
         ),
         sa.Column(

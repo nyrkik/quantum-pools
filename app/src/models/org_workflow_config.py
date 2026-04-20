@@ -31,11 +31,11 @@ class OrgWorkflowConfig(Base):
     post_creation_handlers: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict,
     )
-    # e.g. {"strategy": "last_used_by_user", "fallback_user_id": null}
+    # e.g. {"strategy": "last_used_in_org", "fallback_user_id": null}
     default_assignee_strategy: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
-        default=lambda: {"strategy": "last_used_by_user"},
+        default=lambda: {"strategy": "last_used_in_org"},
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

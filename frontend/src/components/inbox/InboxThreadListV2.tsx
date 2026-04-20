@@ -108,6 +108,20 @@ export function InboxThreadListV2({
     Record<string, Proposal[]>
   >({});
 
+  // Detect whether the primary pointer is a touch device. On touch we
+  // bypass HoverCard entirely — Radix opens it on focus, so tapping the
+  // row button used to double up with the mobile Info-button Popover.
+  // Default false so SSR + first paint on desktop don't flicker.
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(hover: none)");
+    setIsTouchDevice(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsTouchDevice(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   useEffect(() => {
     const wanted: Array<{ threadId: string; ids: string[] }> = [];
     for (const t of threads) {
@@ -182,10 +196,7 @@ export function InboxThreadListV2({
         else if (t.has_pending) borderClass = "border-l-4 border-amber-400";
         else if (t.is_unread) borderClass = "border-l-4 border-blue-500";
 
-        return (
-          <li key={t.id}>
-            <HoverCard openDelay={250} closeDelay={100}>
-              <HoverCardTrigger asChild>
+        const rowButton = (
                 <button
                   type="button"
                   onClick={() => onSelectThread(t.id)}
@@ -361,28 +372,40 @@ export function InboxThreadListV2({
                     </div>
                   </div>
                 </button>
-              </HoverCardTrigger>
-              <HoverCardContent
-                side="bottom"
-                align="center"
-                sideOffset={4}
-                collisionPadding={16}
-                className="w-[28rem]"
-              >
-                <InboxRowHoverPanel
-                  payload={hasPayload ? payload : null}
-                  subject={t.subject}
-                  customerName={t.customer_name}
-                  contactPersonName={t.contact_person_name ?? null}
-                  contactEmail={t.contact_email}
-                  lastMessageAt={t.last_message_at}
-                  messageCount={t.message_count}
-                  customerAddress={t.customer_address}
-                  proposals={proposalsByThread[t.id] ?? []}
-                  fallbackSnippet={t.last_snippet}
-                />
-              </HoverCardContent>
-            </HoverCard>
+        );
+
+        return (
+          <li key={t.id}>
+            {isTouchDevice ? (
+              // Touch devices: no hover, just the bare button. The
+              // mobile Info-button Popover (rendered inside the button
+              // header above) is the only tap-to-peek UI on touch.
+              rowButton
+            ) : (
+              <HoverCard openDelay={250} closeDelay={100}>
+                <HoverCardTrigger asChild>{rowButton}</HoverCardTrigger>
+                <HoverCardContent
+                  side="bottom"
+                  align="center"
+                  sideOffset={4}
+                  collisionPadding={16}
+                  className="w-[28rem]"
+                >
+                  <InboxRowHoverPanel
+                    payload={hasPayload ? payload : null}
+                    subject={t.subject}
+                    customerName={t.customer_name}
+                    contactPersonName={t.contact_person_name ?? null}
+                    contactEmail={t.contact_email}
+                    lastMessageAt={t.last_message_at}
+                    messageCount={t.message_count}
+                    customerAddress={t.customer_address}
+                    proposals={proposalsByThread[t.id] ?? []}
+                    fallbackSnippet={t.last_snippet}
+                  />
+                </HoverCardContent>
+              </HoverCard>
+            )}
           </li>
         );
   }

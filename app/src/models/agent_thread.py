@@ -40,6 +40,15 @@ class AgentThread(Base):
         DateTime(timezone=True), nullable=True,
     )
 
+    # Timestamp of the user's Yes/No acknowledgement on the auto-handled
+    # feedback banner (AutoHandledFeedbackBanner in the thread detail).
+    # Non-null means the user has reviewed the AI's auto-handle decision —
+    # the banner no longer shows. Keeps the decision persisted across
+    # sessions (the React `reviewed` state was local-only).
+    auto_handled_feedback_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
     case_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("service_cases.id", ondelete="SET NULL"), index=True)
 
     # Gmail sync

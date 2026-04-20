@@ -937,18 +937,25 @@ async def auto_handled_feedback(
         logger = __import__("logging").getLogger(__name__)
         logger.warning(f"Failed to record auto-handled feedback: {e}")
 
-    # If user said it should have been visible, restore it to inbox + mark pending
-    if not body.was_correct:
-        from src.models.agent_thread import AgentThread
-        thread = (await db.execute(
-            select(AgentThread).where(AgentThread.id == body.thread_id)
-        )).scalar_one_or_none()
-        if thread:
-            thread.folder_id = None  # back to Inbox
+    from datetime import datetime, timezone
+    from src.models.agent_thread import AgentThread
+    thread = (await db.execute(
+        select(AgentThread).where(AgentThread.id == body.thread_id)
+    )).scalar_one_or_none()
+    if thread:
+        # Persist the acknowledgement timestamp — suppresses the banner
+        # on future opens regardless of Yes/No. Prior code only updated
+        # the thread on No, so the Yes path lost the "reviewed" state
+        # the moment the React component unmounted.
+        thread.auto_handled_feedback_at = datetime.now(timezone.utc)
+        if not body.was_correct:
+            # User said it should have been visible — restore to Inbox +
+            # mark pending so it reappears in the unread list.
+            thread.folder_id = None
             thread.folder_override = True
             thread.status = "pending"
             thread.has_pending = True
-            await db.commit()
+        await db.commit()
 
     return {"ok": True}
 

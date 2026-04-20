@@ -208,11 +208,14 @@ class ThreadPresenter(Presenter):
         else:
             d["is_unread"] = False
 
-        # Auto-handled (AI hid this from inbox without human action)
+        # Auto-handled (AI hid this from inbox without human action).
+        # Suppressed after the user acknowledges via the banner so the
+        # banner doesn't reappear on every future open.
         d["is_auto_handled"] = (
             thread.last_direction == "inbound"
             and thread.status in ("ignored", "handled")
             and not thread.has_pending
+            and thread.auto_handled_feedback_at is None
         )
 
         # Sender tag via the unified rule engine

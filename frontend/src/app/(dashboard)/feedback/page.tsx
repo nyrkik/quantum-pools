@@ -158,6 +158,7 @@ export default function FeedbackPage() {
             <SelectItem value="new">New</SelectItem>
             <SelectItem value="triaged">Triaged</SelectItem>
             <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="planned">Planned</SelectItem>
             <SelectItem value="resolved">Resolved</SelectItem>
             <SelectItem value="closed">Closed</SelectItem>
           </SelectContent>

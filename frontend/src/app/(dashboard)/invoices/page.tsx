@@ -8,6 +8,13 @@ import { toast } from "sonner";
 import { Search } from "lucide-react";
 import { PageLayout, PageTabs } from "@/components/layout/page-layout";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   MonthlyChart,
   CreateInvoiceDialog,
   InvoiceTable,
@@ -23,6 +30,13 @@ const OPEN_STATUSES = "draft,sent,revised,viewed,overdue,approved";
 
 type DocView = "invoices" | "estimates";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
+type EstimateFilter =
+  | "all" | "open" | "draft" | "sent" | "approved" | "rejected" | "expired";
+const OPEN_ESTIMATE_STATUSES = ["draft", "sent", "revised", "viewed"];
+
+// Sentinel for "no management-company filter" — the Radix Select
+// won't accept empty-string values, so we route through this.
+const MC_ALL = "__all__";
 
 export default function InvoicesPage() {
   const searchParams = useSearchParams();
@@ -42,6 +56,11 @@ export default function InvoicesPage() {
   const [chartSegment, setChartSegment] = useState<"all" | "paid" | "open">("all");
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<TabFilter>("open");
+  const [estimateFilter, setEstimateFilter] = useState<EstimateFilter>("open");
+  const [managementCompany, setManagementCompany] = useState<string>(MC_ALL);
+  const [companyOptions, setCompanyOptions] = useState<
+    { name: string; customer_count: number }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -64,6 +83,9 @@ export default function InvoicesPage() {
       const params = new URLSearchParams();
       params.set("document_type", docView === "estimates" ? "estimate" : "invoice");
       if (search) params.set("search", search);
+      if (managementCompany && managementCompany !== MC_ALL) {
+        params.set("management_company", managementCompany);
+      }
 
       if (docView === "invoices") {
         // Chart segment overrides tab filter when a month is selected
@@ -84,6 +106,12 @@ export default function InvoicesPage() {
           params.set("date_from", from);
           params.set("date_to", to);
         }
+      } else {
+        // Estimates tab — single-status backend call unless "open"
+        // (umbrella) or "all" (no filter).
+        if (estimateFilter !== "all" && estimateFilter !== "open") {
+          params.set("status", estimateFilter);
+        }
       }
 
       params.set("limit", "100");
@@ -100,7 +128,14 @@ export default function InvoicesPage() {
         }
         setTotal(effectiveFilter === "open" ? items.length : data.total);
       } else {
-        setTotal(data.total);
+        if (estimateFilter === "open") {
+          items = items.filter((inv) =>
+            OPEN_ESTIMATE_STATUSES.includes(inv.status),
+          );
+          setTotal(items.length);
+        } else {
+          setTotal(data.total);
+        }
       }
       setInvoices(items);
     } catch {
@@ -108,7 +143,10 @@ export default function InvoicesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, activeTab, selectedMonth, chartYear, chartSegment, docView]);
+  }, [
+    search, activeTab, selectedMonth, chartYear, chartSegment, docView,
+    estimateFilter, managementCompany,
+  ]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -138,6 +176,16 @@ export default function InvoicesPage() {
   useEffect(() => {
     fetchMonthly();
   }, [fetchMonthly]);
+
+  // Management-company filter options — distinct list per org,
+  // deduped case-insensitively on the server.
+  useEffect(() => {
+    api.get<{ items: { name: string; customer_count: number }[] }>(
+      "/v1/invoices/management-companies",
+    )
+      .then((d) => setCompanyOptions(d.items || []))
+      .catch(() => setCompanyOptions([]));
+  }, []);
 
   const fetchCustomers = useCallback(async () => {
     try {
@@ -332,15 +380,61 @@ export default function InvoicesPage() {
         </>
       ) : undefined}
     >
-      {/* Search */}
-      <div className="flex items-center gap-2">
-        <Search className="h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={docView === "estimates" ? "Search estimates..." : "Search invoices..."}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-64"
-        />
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder={docView === "estimates" ? "Search estimates..." : "Search invoices..."}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-64"
+          />
+        </div>
+
+        {/* Estimates tab — status filter (Invoices tab has this already
+            via the PageTabs above the chart). */}
+        {docView === "estimates" && (
+          <Select
+            value={estimateFilter}
+            onValueChange={(v) => setEstimateFilter(v as EstimateFilter)}
+          >
+            <SelectTrigger className="h-9 w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="open">Open</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="sent">Sent</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Management company — customers.company_name, deduped
+            case-insensitively on the server. Only render the dropdown
+            when the org actually has any. */}
+        {companyOptions.length > 0 && (
+          <Select value={managementCompany} onValueChange={setManagementCompany}>
+            <SelectTrigger className="h-9 w-56">
+              <SelectValue placeholder="All management companies" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={MC_ALL}>All management companies</SelectItem>
+              {companyOptions.map((c) => (
+                <SelectItem key={c.name} value={c.name}>
+                  {c.name}
+                  <span className="text-muted-foreground ml-1">
+                    ({c.customer_count})
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       <InvoiceTable

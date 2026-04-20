@@ -111,6 +111,69 @@ async def test_search_matches_billing_name_on_non_db_customer(db_session, org_a)
 
 
 @pytest.mark.asyncio
+async def test_management_company_filter_case_insensitive(db_session, org_a):
+    """FB-45 — filter by management company (customers.company_name).
+    Inconsistent casing in the wild (CONAM vs Conam, BLVD vs BLVD
+    Residential) — the lowercase comparison treats them uniformly."""
+    conam_cust = await _seed_customer(
+        db_session, org_a.id,
+        first_name="Slate Creek Apartments",
+        company_name="CONAM",
+    )
+    await _seed_invoice(db_session, org_a.id, customer_id=conam_cust.id)
+
+    conam_cust2 = await _seed_customer(
+        db_session, org_a.id,
+        first_name="Other Conam Property",
+        company_name="Conam",  # different casing on purpose
+    )
+    await _seed_invoice(db_session, org_a.id, customer_id=conam_cust2.id)
+
+    blvd_cust = await _seed_customer(
+        db_session, org_a.id,
+        first_name="Some BLVD Property",
+        company_name="BLVD",
+    )
+    await _seed_invoice(db_session, org_a.id, customer_id=blvd_cust.id)
+    await db_session.commit()
+
+    svc = InvoiceService(db_session)
+
+    # Both "CONAM" and "Conam" match the same filter value.
+    _, n_conam = await svc.list(org_a.id, management_company="conam")
+    assert n_conam == 2
+
+    _, n_blvd = await svc.list(org_a.id, management_company="BLVD")
+    assert n_blvd == 1
+
+    # No filter → all.
+    _, n_all = await svc.list(org_a.id)
+    assert n_all == 3
+
+
+@pytest.mark.asyncio
+async def test_management_company_combines_with_search(db_session, org_a):
+    """Filter + search stack — narrow to CONAM clients, then search
+    within that set."""
+    conam_slate = await _seed_customer(
+        db_session, org_a.id,
+        first_name="Slate Creek Apartments", company_name="CONAM",
+    )
+    await _seed_invoice(db_session, org_a.id, customer_id=conam_slate.id)
+    conam_other = await _seed_customer(
+        db_session, org_a.id,
+        first_name="Other CONAM Property", company_name="CONAM",
+    )
+    await _seed_invoice(db_session, org_a.id, customer_id=conam_other.id)
+    await db_session.commit()
+
+    _, n = await InvoiceService(db_session).list(
+        org_a.id, management_company="CONAM", search="slate",
+    )
+    assert n == 1
+
+
+@pytest.mark.asyncio
 async def test_search_still_matches_invoice_number_and_subject(db_session, org_a):
     """Regression guard for the pre-fix behavior — these two fields
     must keep working."""

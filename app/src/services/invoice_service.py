@@ -161,6 +161,7 @@ class InvoiceService:
         skip: int = 0,
         limit: int = 50,
         document_type: Optional[str] = None,
+        management_company: Optional[str] = None,
     ) -> tuple[List[Invoice], int]:
         query = (
             select(Invoice)
@@ -185,19 +186,23 @@ class InvoiceService:
         if date_to:
             query = query.where(Invoice.issue_date <= date_to)
             count_query = count_query.where(Invoice.issue_date <= date_to)
-        if search:
-            # Join Customer so the UI's single search box can match by
-            # client name too — users type "slate" expecting to find
-            # Slate Creek Apartments' estimates, not just the invoice
-            # number or subject. Also matches `billing_name` (set on
-            # non-DB-customer invoices) so those aren't silently
-            # unsearchable. Outer join keeps billing_name-only rows.
-            from src.models.customer import Customer
-            search_filter = f"%{search}%"
+        from src.models.customer import Customer
+        # Both search and management_company filters need Customer —
+        # outer-join once so neither drops the customer-less rows.
+        needs_customer_join = bool(search or management_company)
+        if needs_customer_join:
             query = query.outerjoin(Customer, Customer.id == Invoice.customer_id)
             count_query = count_query.outerjoin(
                 Customer, Customer.id == Invoice.customer_id,
             )
+
+        if search:
+            # Single search box matches by client name too — users
+            # type "slate" expecting to find Slate Creek Apartments'
+            # estimates, not just the invoice number or subject. Also
+            # matches `billing_name` (set on non-DB-customer invoices)
+            # so those aren't silently unsearchable.
+            search_filter = f"%{search}%"
             pred = (
                 Invoice.invoice_number.ilike(search_filter)
                 | Invoice.subject.ilike(search_filter)
@@ -206,6 +211,16 @@ class InvoiceService:
                 | Customer.last_name.ilike(search_filter)
                 | Customer.company_name.ilike(search_filter)
             )
+            query = query.where(pred)
+            count_query = count_query.where(pred)
+
+        if management_company:
+            # Case-insensitive match on customers.company_name —
+            # inconsistent casing in the wild (CONAM vs Conam, BLVD vs
+            # BLVD Residential). Exact-match with lower() keeps the
+            # filter predictable; fuzzy-match stays in the search box.
+            mc = management_company.strip().lower()
+            pred = func.lower(Customer.company_name) == mc
             query = query.where(pred)
             count_query = count_query.where(pred)
 

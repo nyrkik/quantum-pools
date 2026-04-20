@@ -31,6 +31,7 @@ async def list_invoices(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     search: Optional[str] = Query(None),
+    management_company: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     ctx: OrgUserContext = Depends(get_current_org_user),
@@ -41,9 +42,44 @@ async def list_invoices(
         ctx.organization_id, status=status, customer_id=customer_id,
         date_from=date_from, date_to=date_to, search=search,
         skip=skip, limit=limit, document_type=document_type,
+        management_company=management_company,
     )
     results = [_invoice_to_response(inv) for inv in invoices]
     return {"items": results, "total": total}
+
+
+@router.get("/management-companies", response_model=dict)
+async def list_management_companies(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Distinct management companies (Customer.company_name) in the
+    org, deduped case-insensitively, sorted alphabetically. Each entry
+    also carries its customer_count so the filter dropdown can show
+    how many clients use that company — useful triage signal when the
+    list has CONAM (15 clients) vs. BrightPM (2).
+    """
+    from sqlalchemy import func
+    from src.models.customer import Customer
+    rows = (await db.execute(
+        select(
+            func.min(Customer.company_name).label("label"),
+            func.count(Customer.id).label("customer_count"),
+        )
+        .where(
+            Customer.organization_id == ctx.organization_id,
+            Customer.company_name.is_not(None),
+            Customer.company_name != "",
+        )
+        .group_by(func.lower(Customer.company_name))
+        .order_by(func.lower(Customer.company_name))
+    )).all()
+    return {
+        "items": [
+            {"name": r.label, "customer_count": r.customer_count}
+            for r in rows
+        ],
+    }
 
 
 @router.post("", status_code=201)

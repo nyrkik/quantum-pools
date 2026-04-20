@@ -28,8 +28,13 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertTriangle, Lock } from "lucide-react";
+import { Loader2, AlertTriangle, Lock, Info } from "lucide-react";
 
 import { formatTime } from "@/lib/format";
 import { StatusBadge, CategoryBadge } from "@/components/inbox/inbox-badges";
@@ -183,24 +188,66 @@ export function InboxThreadListV2({
                     />
                   </div>
 
-                  <div className="min-w-0 flex-1 grid grid-cols-[minmax(0,11rem)_1fr] gap-3">
+                  <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-[minmax(0,11rem)_1fr] gap-2 sm:gap-3">
                     {/* Left column: identity (name → address → badges) */}
                     <div className="min-w-0 space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`truncate text-sm ${
-                            t.is_unread ? "font-semibold" : "font-medium"
-                          }`}
-                          title={t.contact_email}
-                        >
-                          {t.customer_name || t.contact_name || t.contact_email}
-                        </span>
-                        {t.visibility_permission && (
-                          <Lock
-                            className="h-3 w-3 text-muted-foreground shrink-0"
-                            aria-label={`Restricted: ${t.visibility_permission}`}
-                          />
-                        )}
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <span
+                            className={`truncate text-sm ${
+                              t.is_unread ? "font-semibold" : "font-medium"
+                            }`}
+                            title={t.contact_email}
+                          >
+                            {t.customer_name || t.contact_name || t.contact_email}
+                          </span>
+                          {t.visibility_permission && (
+                            <Lock
+                              className="h-3 w-3 text-muted-foreground shrink-0"
+                              aria-label={`Restricted: ${t.visibility_permission}`}
+                            />
+                          )}
+                        </div>
+                        {/* Mobile-only: time + info tap-target. On desktop time
+                            renders on the right, and hover opens the panel. */}
+                        <div className="flex items-center gap-1 sm:hidden shrink-0">
+                          <span className="text-xs text-muted-foreground">
+                            {formatTime(t.last_message_at)}
+                          </span>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label="Show summary"
+                                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+                              >
+                                <Info className="h-3.5 w-3.5" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              align="end"
+                              side="bottom"
+                              sideOffset={4}
+                              collisionPadding={16}
+                              className="w-[22rem] p-4"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <InboxRowHoverPanel
+                                payload={hasPayload ? payload : null}
+                                subject={t.subject}
+                                customerName={t.customer_name}
+                                contactPersonName={t.contact_person_name ?? null}
+                                contactEmail={t.contact_email}
+                                lastMessageAt={t.last_message_at}
+                                messageCount={t.message_count}
+                                customerAddress={t.customer_address}
+                                proposals={proposalsByThread[t.id] ?? []}
+                                fallbackSnippet={t.last_snippet}
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
                       </div>
                       {t.customer_name && t.contact_person_name && (
                         <div className="text-xs text-muted-foreground truncate">
@@ -288,7 +335,7 @@ export function InboxThreadListV2({
                             )}
                           </div>
                         </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                        <span className="hidden sm:inline text-xs text-muted-foreground whitespace-nowrap shrink-0">
                           {formatTime(t.last_message_at)}
                         </span>
                       </div>

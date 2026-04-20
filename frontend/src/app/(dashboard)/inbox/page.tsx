@@ -250,6 +250,14 @@ export default function InboxPage() {
 
   useWSRefetch(["thread.new", "thread.updated", "thread.message.new"], loadThreads, 500);
   useWSRefetch(["thread.new", "thread.updated", "thread.message.new", "thread.read"], loadStats, 300);
+  // Folder sidebar reads counts from /v1/inbox-folders — bump the refresh
+  // key whenever thread state changes so the per-folder unread badges stay
+  // in sync with the stats pill.
+  useWSRefetch(
+    ["thread.new", "thread.updated", "thread.message.new", "thread.read"],
+    () => setFolderRefreshKey((k) => k + 1),
+    300,
+  );
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -480,29 +488,30 @@ export default function InboxPage() {
             canManageInbox={perms.can("inbox.manage")}
           />
 
-          <InboxMobileList threads={threads} loading={loading} currentUserId={user.id} />
-
           {inboxV2Enabled ? (
-            /* Phase 3 V2 layout — card-per-thread with AI summary */
-            <div className="hidden md:block">
-              <InboxThreadListV2
-                threads={threads}
-                loading={loading}
-                selectedThreadId={selectedThreadId}
-                onSelectThread={handleSelectThread}
-              />
-            </div>
-          ) : (
-            <InboxThreadTable
+            /* Phase 3 V2 layout — responsive card-per-thread with AI summary.
+                Renders on every screen size; mobile gets a tap-to-open
+                disclosure since hover doesn't exist on touch. */
+            <InboxThreadListV2
               threads={threads}
               loading={loading}
-              currentUserId={user.id}
-              onSelectThread={handleSelectThread}
               selectedThreadId={selectedThreadId}
-              onBulkAction={() => { loadThreads(); loadStats(); setFolderRefreshKey((k) => k + 1); }}
-              compact={!!selectedThreadId}
-              groupByClient={groupByClient}
+              onSelectThread={handleSelectThread}
             />
+          ) : (
+            <>
+              <InboxMobileList threads={threads} loading={loading} currentUserId={user.id} />
+              <InboxThreadTable
+                threads={threads}
+                loading={loading}
+                currentUserId={user.id}
+                onSelectThread={handleSelectThread}
+                selectedThreadId={selectedThreadId}
+                onBulkAction={() => { loadThreads(); loadStats(); setFolderRefreshKey((k) => k + 1); }}
+                compact={!!selectedThreadId}
+                groupByClient={groupByClient}
+              />
+            </>
           )}
 
           <InboxPagination

@@ -140,68 +140,76 @@ class AgentThreadService:
             items = await presenter.many(threads, read_map=read_map if current_user_id else None)
             return {"items": items, "total": total}
 
-        # Non-inbox folders (sent, spam, custom) show ALL threads in
-        # that folder without status/direction filtering — the folder IS the filter.
+        # Non-inbox folders (sent, spam, custom) show ALL threads in that
+        # folder without the default inbox shape filter (inbound-or-pending
+        # only). Explicit status filters from filter chips STILL apply —
+        # "Handled" / "Stale" / etc. should intersect with the folder.
         is_non_inbox_folder = (folder_key and folder_key != "inbox") or (folder_id and not folder_key)
 
+        # Apply the status filter unconditionally when one was passed.
+        # Only the default-inbox shape (last-inbound + no archived) is
+        # skipped in non-inbox folders.
+        if status in ("stale", "pending"):
+            base = base.where(AgentThread.has_pending == True)
+        elif status == "auto_sent":
+            base = base.where(
+                AgentThread.id.in_(
+                    select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
+                )
+            )
+        elif status == "auto_handled":
+            # AI hid the email without sending a reply. Most-recent first.
+            base = base.where(
+                AgentThread.last_direction == "inbound",
+                AgentThread.status.in_(("ignored", "handled")),
+                AgentThread.has_pending == False,  # noqa: E712
+                AgentThread.id.notin_(
+                    select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
+                ),
+            )
+        elif status == "failed":
+            # A thread is "failed" only if its MOST RECENT outbound attempt
+            # is in a failure state. If the user retried and a later send
+            # succeeded, the thread is resolved and should NOT appear here.
+            # (Counting any-failed-ever made this filter useless — a 4-fail
+            # 4-success retry storm showed the same as 4 actual losses.)
+            latest_outbound = (
+                select(
+                    AgentMessage.thread_id.label("tid"),
+                    AgentMessage.status.label("st"),
+                    AgentMessage.delivery_status.label("ds"),
+                    AgentMessage.delivery_error.label("de"),
+                )
+                .where(AgentMessage.direction == "outbound")
+                .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+                .distinct(AgentMessage.thread_id)
+                .subquery()
+            )
+            base = base.where(
+                AgentThread.id.in_(
+                    select(latest_outbound.c.tid).where(
+                        latest_outbound.c.ds.in_(("bounced", "spam_complaint"))
+                        | latest_outbound.c.de.isnot(None)
+                        | latest_outbound.c.st.in_(("failed", "queued"))
+                    )
+                )
+            )
+        elif status == "handled":
+            base = base.where(AgentThread.status == "handled")
+        elif status == "ignored":
+            base = base.where(AgentThread.status == "ignored")
+        elif status == "archived":
+            base = base.where(AgentThread.status == "archived")
+        elif not is_non_inbox_folder:
+            # Default inbox shape (no explicit status): exclude archived and
+            # outbound-only threads. Non-inbox folders skip this — the folder
+            # is already the scoping signal.
+            base = base.where(
+                AgentThread.status != "archived",
+                or_(AgentThread.last_direction == "inbound", AgentThread.has_pending == True),
+            )
+
         if not is_non_inbox_folder:
-            if status in ("stale", "pending"):
-                base = base.where(AgentThread.has_pending == True)
-            elif status == "auto_sent":
-                base = base.where(
-                    AgentThread.id.in_(
-                        select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
-                    )
-                )
-            elif status == "auto_handled":
-                # AI hid the email without sending a reply. Most-recent first.
-                base = base.where(
-                    AgentThread.last_direction == "inbound",
-                    AgentThread.status.in_(("ignored", "handled")),
-                    AgentThread.has_pending == False,  # noqa: E712
-                    AgentThread.id.notin_(
-                        select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
-                    ),
-                )
-            elif status == "failed":
-                # A thread is "failed" only if its MOST RECENT outbound attempt
-                # is in a failure state. If the user retried and a later send
-                # succeeded, the thread is resolved and should NOT appear here.
-                # (Counting any-failed-ever made this filter useless — a 4-fail
-                # 4-success retry storm showed the same as 4 actual losses.)
-                latest_outbound = (
-                    select(
-                        AgentMessage.thread_id.label("tid"),
-                        AgentMessage.status.label("st"),
-                        AgentMessage.delivery_status.label("ds"),
-                        AgentMessage.delivery_error.label("de"),
-                    )
-                    .where(AgentMessage.direction == "outbound")
-                    .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
-                    .distinct(AgentMessage.thread_id)
-                    .subquery()
-                )
-                base = base.where(
-                    AgentThread.id.in_(
-                        select(latest_outbound.c.tid).where(
-                            latest_outbound.c.ds.in_(("bounced", "spam_complaint"))
-                            | latest_outbound.c.de.isnot(None)
-                            | latest_outbound.c.st.in_(("failed", "queued"))
-                        )
-                    )
-                )
-            elif status == "handled":
-                base = base.where(AgentThread.status == "handled")
-            elif status == "ignored":
-                base = base.where(AgentThread.status == "ignored")
-            elif status == "archived":
-                base = base.where(AgentThread.status == "archived")
-            else:
-                # Default inbox: exclude archived and outbound-only threads
-                base = base.where(
-                    AgentThread.status != "archived",
-                    or_(AgentThread.last_direction == "inbound", AgentThread.has_pending == True),
-                )
             if exclude_spam:
                 base = base.where(AgentThread.category.notin_(["spam", "auto_reply"]) | AgentThread.category.is_(None))
             if exclude_ignored:
@@ -875,6 +883,23 @@ class AgentThreadService:
                 self.db.add(ThreadRead(user_id=user_id, thread_id=thread_id))
 
         await self.db.flush()
+
+        # Publish thread.read so the inbox + folder sidebar counts refresh
+        # on WS subscribers. Must come after the flush so the read row is
+        # visible to any subscriber's immediate refetch.
+        if org_id:
+            try:
+                from src.core.events import EventType, publish
+                await publish(
+                    EventType.THREAD_READ, org_id,
+                    {
+                        "thread_id": thread_id,
+                        "user_id": user_id,
+                        "broadcast": broadcast,
+                    },
+                )
+            except Exception:
+                pass  # Non-blocking — WS is best-effort
 
         # Sync to Gmail (non-blocking)
         try:

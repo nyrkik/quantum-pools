@@ -30,6 +30,7 @@ from src.api.v1.admin_actions import router as admin_actions_router
 from src.api.v1.admin_webhooks import router as admin_webhooks_router
 from src.api.v1.admin_platform import router as admin_platform_router
 from src.api.v1.proposals import router as proposals_router
+from src.api.v1.workflow import router as workflow_router
 from src.api.v1.charge_templates import router as charge_templates_router
 from src.api.v1.visit_charges import router as visit_charges_router
 from src.api.v1.charge_settings import router as charge_settings_router
@@ -83,6 +84,7 @@ api_router.include_router(admin_actions_router)
 api_router.include_router(admin_webhooks_router)
 api_router.include_router(admin_platform_router)
 api_router.include_router(proposals_router)
+api_router.include_router(workflow_router)
 api_router.include_router(charge_templates_router)
 api_router.include_router(visit_charges_router)
 api_router.include_router(charge_settings_router)

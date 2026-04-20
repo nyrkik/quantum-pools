@@ -300,7 +300,9 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 |---|---|---|---|
 | `settings.changed` | user_action | — | Generic. Payload: `{area, fields_changed: [...]}`. Field names only. |
 | `feature_flag.toggled` | user_action | — | Payload: `{flag, value}`. |
-| `workflow_config.changed` | user_action | user_id | Payload: `{handler_area, from, to, via: manual \| proposal_accepted, proposal_id?}`. |
+| `workflow_config.changed` | user_action | — | Payload: `{before, after}` — both are full config snapshots (`{post_creation_handlers, default_assignee_strategy}`). Emitted by `WorkflowConfigService.put` on every org-config upsert. Actor (user_id) rides on the envelope, not in payload. |
+| `handler.applied` | user_action | `entity_id`, `entity_type`, `assignee_user_id?` | Phase 4 post-creation handler completed. Payload: `{handler, input?}`. `handler` is the registry key (`assign_inline` / `schedule_inline` / `unassigned_pool`). `input` holds non-PII user choices (e.g., `{due_date}` for schedule_inline, `{pool_count}` for unassigned_pool); any user-id-as-value lives in `assignee_user_id` on entity_refs, never in payload. |
+| `handler.abandoned` | user_action | `entity_id`, `entity_type` | Phase 4 post-creation handler dismissed without applying. Payload: `{handler, reason: "skip" \| "dismiss"}`. Currently only `"skip"` is emitted (user clicks Skip); `"dismiss"` is reserved for closing the card without an explicit action. Failed saves are NOT abandoned — they stay on the card for retry. |
 
 ### 8.11 Navigation
 

@@ -26,7 +26,13 @@ from src.models.user import User
 async def load_assignee_options(
     org_id: str, db: AsyncSession,
 ) -> list[dict]:
-    """Every org user as `{id, name}` for the picker. Active users only."""
+    """Every org user as `{id, name, first_name}` for the picker.
+
+    `first_name` is included because `AgentAction.assigned_to` stores
+    the first name string, not a user_id — the frontend needs it to
+    build the PUT /agent-actions/{id} payload after the user picks.
+    Active users only.
+    """
     rows = (await db.execute(
         select(User.id, User.first_name, User.last_name, OrganizationUser.role)
         .join(OrganizationUser, OrganizationUser.user_id == User.id)
@@ -40,7 +46,11 @@ async def load_assignee_options(
     for uid, fn, ln, role in rows:
         name = " ".join(filter(None, [fn, ln])).strip() or fn or "Unknown"
         label = f"{name} ({role.capitalize()})" if role else name
-        options.append({"id": uid, "name": label})
+        options.append({
+            "id": uid,
+            "name": label,
+            "first_name": fn or "Unknown",
+        })
     return options
 
 
@@ -68,8 +78,11 @@ async def resolve_default_assignee(
         return fallback
     if kind == "last_used_in_org":
         # "Who was the assignee of the most recent job in this org?"
-        # Crude but accurate for small teams; good enough until a
-        # per-user variant is justified by dogfood data.
+        # AgentAction.assigned_to is a first_name string (legacy), so
+        # translate it back to a user_id via User.first_name + the org
+        # membership table. Crude but accurate for small teams where
+        # first names are unique; good enough until per-user tracking
+        # is justified by dogfood data.
         row = (await db.execute(
             select(AgentAction.assigned_to)
             .where(
@@ -79,8 +92,27 @@ async def resolve_default_assignee(
             .order_by(desc(AgentAction.created_at))
             .limit(1)
         )).first()
-        if row and row[0]:
-            return row[0]
+        if not (row and row[0]):
+            return fallback
+        last_name = row[0]
+        # If the stored value already looks like a user_id (e.g., test
+        # fixtures seed it that way), return it directly so the matching
+        # path in the handler stays simple.
+        if len(last_name) == 36 and last_name.count("-") == 4:
+            return last_name
+        # Translate first_name → user_id.
+        uid_row = (await db.execute(
+            select(User.id)
+            .join(OrganizationUser, OrganizationUser.user_id == User.id)
+            .where(
+                OrganizationUser.organization_id == org_id,
+                User.first_name == last_name,
+                User.is_active == True,  # noqa: E712
+            )
+            .limit(1)
+        )).first()
+        if uid_row and uid_row[0]:
+            return uid_row[0]
         return fallback
 
     # Unknown strategy → safe no-default fallback.

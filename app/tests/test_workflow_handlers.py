@@ -138,6 +138,27 @@ async def test_assign_inline_last_used_in_org_default(db_session, org_a):
 
 
 @pytest.mark.asyncio
+async def test_assign_inline_last_used_first_name_resolves_to_user_id(db_session, org_a):
+    """Real production data stores AgentAction.assigned_to as a first_name
+    string, not a user_id. Verify the resolver translates that back to
+    a user_id so the default can pre-select in the picker."""
+    uid_actor = await _seed_user(db_session, org_a.id, first_name="Brian")
+    uid_kim = await _seed_user(db_session, org_a.id, first_name="Kim")
+    # Last action assigned to the raw first_name string, as production does.
+    await _seed_action(db_session, org_a.id, assigned_to="Kim")
+    action = await _seed_action(db_session, org_a.id)
+    await db_session.commit()
+
+    step = await AssignInlineHandler().next_step_for(
+        created=action, org_id=org_a.id, actor=_actor(uid_actor), db=db_session,
+    )
+    assert step.initial["default_assignee_id"] == uid_kim
+    # Options now carry first_name so the frontend can build the PUT.
+    kim_opt = next(o for o in step.initial["assignee_options"] if o["id"] == uid_kim)
+    assert kim_opt["first_name"] == "Kim"
+
+
+@pytest.mark.asyncio
 async def test_assign_inline_fixed_strategy_uses_fallback(db_session, org_a):
     uid_actor = await _seed_user(db_session, org_a.id, first_name="Brian")
     uid_fallback = await _seed_user(db_session, org_a.id, first_name="Kim")

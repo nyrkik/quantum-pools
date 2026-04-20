@@ -158,7 +158,7 @@ Organized by subsystem. Each event specifies level and minimum expected `entity_
 | `thread.assigned` | user_action | thread_id, user_id, prior_assignee_user_id? | `user_id` = new assignee (may be null when unassigning). `prior_assignee_user_id` present when the thread had a prior assignee. Payload: `{}` (both user ids go in entity_refs per §6). |
 | `thread.status_changed` | user_action \| system_action | thread_id | Payload: `{from, to, reason}`. |
 | `thread.category_changed` | user_action | thread_id | Payload: `{from, to}`. User override of AI classification. |
-| `thread.summarized` | agent_action | thread_id | Inbox summarizer wrote/refreshed summary. Payload: `{tokens_in, tokens_out, duration_ms, confidence, proposals_staged}`. |
+| `thread.summarized` | agent_action | thread_id | Inbox summarizer wrote/refreshed summary. Payload: `{tokens_in, tokens_out, duration_ms, confidence, proposals_staged, skipped_reason?}`. `skipped_reason` present (`low_confidence`) when the model returned a summary below the confidence floor and the payload was left null. |
 | `thread.linked_to_case` | user_action \| system_action | thread_id, case_id | |
 | `thread.unlinked_from_case` | user_action | thread_id, case_id | |
 | `thread.resolved` | user_action \| system_action | thread_id | Thread reached a done state (handled/archived/closed). Payload: `{handled_by: ai_only \| ai_drafted_human_sent \| human_only, time_to_resolve_minutes}`. `handled_by` correctly attributes AI deflection — the core AI ROI metric for the inbox. |

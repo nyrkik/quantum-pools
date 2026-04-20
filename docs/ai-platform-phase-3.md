@@ -33,21 +33,23 @@ Ship the redesigned inbox. Every thread that matters gets an AI-generated summar
 ```jsonc
 {
   "version": 1,
-  "ask": "<1-sentence question or need>",            // null if thread is informational-only
-  "state": "<1-sentence status>",                    // never null; e.g., "awaiting parts ETA from vendor"
-  "open_items": ["string", ...],                     // actionable TODOs; empty array if none
-  "red_flags": ["string", ...],                      // urgency markers, complaints, legal risk; empty ok
-  "linked_refs": [                                   // entity pointers Sonar + UI can chase
-    {"type": "customer", "id": "..."},
-    {"type": "case", "id": "...", "case_number": "SC-25-0042"},
-    {"type": "invoice", "id": "...", "invoice_number": "INV-25-0101"}
+  "ask": "<1-sentence question or need>",            // null unless customer is asking
+  "state": "<1-sentence status> | null",             // null in most cases — bullets carry the content
+  "open_items": ["<thing> — <status>", ...],         // PRIMARY display field: 3-5 terse bullets
+  "red_flags": ["string", ...],                      // GENUINE escalation only — legal/threats/3rd-escalation/lost revenue
+  "linked_refs": [                                   // entity pointers; server validates UUIDs exist in org
+    {"type": "customer", "id": "<uuid>"},
+    {"type": "case", "id": "<uuid>", "label": "SC-25-0042"},
+    {"type": "invoice", "id": "<uuid>", "label": "INV-25-0101"}
   ],
-  "confidence": 0.0,                                 // 0..1; drives "short-thread → skip summary" logic
+  "confidence": 0.0,                                 // 0..1; below CONFIDENCE_FLOOR (0.4) → don't cache
   "proposal_ids": ["...", ...]                       // agent_proposals staged by this summary run
 }
 ```
 
-Shape chosen to work across residential-heavy (ad-hoc requests), commercial-heavy (contracts + disputes), and dispatch orgs (appointment coordination). `ask` captures "what do they want"; `state` captures "what's happening right now"; `open_items` is the actionable list. Red flags are the scan-fast urgency vector.
+Shape chosen to work across residential-heavy (ad-hoc requests), commercial-heavy (contracts + disputes), and dispatch orgs (appointment coordination). `open_items` is the primary display field (the row shows them as bullets); `ask` is the explicit customer question when one exists; `state` is an optional fallback line for informational-only threads with no discrete items. Red flags are reserved for genuine escalation signals only — routine AR/overdue invoices go to `open_items`, not red flags.
+
+**Linked-ref resolution**: `InboxSummarizerService._resolve_linked_refs` validates every ref against the DB in the thread's org *after* parsing. Case/invoice refs resolve UUID-first, then fall back to case_number/invoice_number lookup (the model tends to emit the number verbatim). Unresolvable refs and `job`-type refs are dropped — `job` has no standalone page, so a link would 404 even with a real id. The prompt also surfaces real UUIDs (`id=<uuid>`) in the context lines so the model can copy them verbatim.
 
 ## 5. Trigger design
 
@@ -63,13 +65,16 @@ This is cheaper than Redis-backed debounce and keeps the summarizer single-path 
 
 Daily APScheduler job at 05:30 UTC: regenerate summaries older than 7 days on threads that aren't closed/archived. Picks up new learning corrections without requiring a new inbound message. Same rate-limit rules.
 
-### 5.3 Short-thread heuristic
+### 5.3 Skip heuristic
 
-A thread gets NO summary (payload stays null) when:
-- `message_count < 2` AND `body_length_total < 500 chars`, OR
-- `confidence < 0.4` on the first run
+A thread gets NO cached summary (payload stays null) only when:
+- `confidence < CONFIDENCE_FLOOR` (0.4) on the run
 
-Frontend detects null payload → falls back to the snippet. No stub summary ever renders. Prevents uncanny-valley summaries on "thanks!" replies.
+**Every thread summarizes**, including single-message / under-500-char threads. Rationale: consistency beats saving a few Haiku tokens. A one-liner "Thanks!" reply becomes `open_items: ["Thanks acknowledgment — Received"]`, which keeps the inbox visually uniform (no mixed bullet/raw-snippet rows). Original short-thread skip was removed in dogfood after the mixed presentation was worse than the marginal summary-quality risk.
+
+### 5.4 Flag-flip backfill
+
+`POST /v1/admin/platform/orgs/{id}/inbox-v2` with `enabled: true` queues every thread in the org that has no cached summary by setting `ai_summary_debounce_until = NOW()`. The bounded sweep (~80/min) drains the backlog without spiking Anthropic rate limits. Without this, newly-opted-in orgs would sit on empty bullets until each thread received a new inbound message.
 
 ## 6. Prompt + model
 
@@ -99,11 +104,15 @@ Lessons from prior corrections:
 {AgentLearningService.build_lessons_prompt output}
 
 Rules:
-- `ask`: one sentence, in the voice of what the CUSTOMER wants. Null if purely informational.
-- `state`: one sentence, what WE need to do next.
-- `open_items`: short imperative phrases.
-- `red_flags`: only real concerns — legal, threatening tone, 3rd escalation, lost revenue.
-- Propose actions via the proposals section when an action is clearly indicated. Don't propose speculatively.
+- The UI ALREADY shows customer name, contact person, and property address — NEVER repeat them in any summary field.
+- `ask`: null unless the customer is posing a direct question we owe an answer on.
+- `state`: null in most cases. Only populate when the thread has no discrete items to enumerate.
+- `open_items` is the PRIMARY display field: 3-5 terse bullets in `<thing> — <status/action>` form, ≤55 chars each, no names, no addresses.
+  - Good: "Filter cleaning — Approved", "Invoice 4412 — Paid in full", "Pump quote — Follow up (6 days silent)"
+  - Bad: "Marty Reed approved filter cleaning", "Yes", "Customer responded with thanks"
+- `red_flags`: GENUINE escalation only — explicit legal/attorney mention; chargeback/BBB/public-review threats; 3rd+ escalation; material lost-revenue or safety risk; hostile/abusive language. Routine overdue AR → `open_items`, never `red_flags`.
+- `linked_refs`: only for entities the prompt context lists as open_cases or outstanding_invoices. Copy the exact `id=<uuid>` verbatim; never invent or substitute the number.
+- Propose actions via `proposals` only when clearly indicated.
 - `confidence` reflects your certainty in the summary, not the proposals.
 
 Proposals to stage (if any — otherwise empty):
@@ -140,29 +149,38 @@ Idempotent — if thread is already linked to the target case, creator returns a
 
 ### 8.1 Inbox row redesign
 
-New component `InboxRowV2` replaces `InboxRow` when `org.inbox_v2_enabled = true`.
+`InboxThreadListV2` replaces `InboxThreadTable` when `org.inbox_v2_enabled = true`. Rendered on all screen sizes (mobile collapses the two-column grid to a single stacked column; `InboxMobileList` is skipped entirely under V2).
 
-Layout:
+Layout (desktop):
 ```
-┌───────────────────────────────────────────────────────────┐
-│ [avatar] Customer Name / Subject         │  Summary card  │
-│ <badges: sender tag | category | status> │  Ask: ...      │
-│ 2 msgs • 4h ago                          │  State: ...    │
-│                                          │  Open: ...     │
-│                                          │  [proposal ×2] │
-│                                          │  [Accept All]  │
-└───────────────────────────────────────────────────────────┘
+┌──────────────────────┬──────────────────────────────────┐
+│ Customer Name        │ • Filter cleaning — Approved     │  12:34p
+│ Property Address     │ • Pool sweep tail — Approved     │
+│ [Client][Cat][Status]│ • $450 quote — Awaiting sign-off │
+└──────────────────────┴──────────────────────────────────┘
 ```
 
-Compact mode: single-line collapsed (ask + customer + time), expand on click.
+Mobile: single column stack (customer → address → badges → bullets → time), plus an Info (ⓘ) tap-target that opens `InboxRowHoverPanel` in a click-triggered Popover.
 
-### 8.2 Inline `ProposalCardMini`
+Left border priority (mutually exclusive): selected (primary) > pending (amber) > unread (blue).
 
-A compact variant of `ProposalCard` used in the row. Shows entity_type badge + one-line summary + the 3 action buttons. No header, no confidence pill. Full `ProposalCard` opens when the user expands the row.
+**Grouping**: `groupByClient` prop groups rows by `customer_name || contact_email` with a primary-colored header bar per group; pending-bearing groups sort first, then alphabetical.
 
-### 8.3 "Accept All" button
+### 8.2 `InboxRowHoverPanel` (desktop hover + mobile tap)
 
-Only visible when every staged proposal in the row has an enabled Accept path (no edit required). Fires `acceptProposal` for each in parallel. On partial failure, shows which succeeded + which need attention.
+Email-chrome–styled detail panel, used by both the desktop `HoverCard` (opens on hover) and the mobile `Popover` (opens on Info-button click). `(hover: none)` media query gates which one is rendered — touch devices never mount the `HoverCard` so the two popouts can't stack.
+
+Sections (uniform skeleton; absent sections collapse):
+- Header: ✉ customer name + labeled From / Address / Subject / Date rows
+- Summary: bullets (`open_items`) or `state` fallback line
+- Customer asks: `ask` in a muted pill
+- Red flags: amber banner
+- Linked: clickable chips routing to `/customers/:id`, `/cases/:id`, `/invoices/:id`
+- Proposals: inline `ProposalCardMini` list with Accept/Reject
+
+### 8.3 `ProposalCardMini`
+
+A compact variant of `ProposalCard` used in the hover panel. Shows entity_type badge + one-line summary + Accept/Reject icon buttons. No header, no confidence pill. Full `ProposalCard` is used elsewhere (e.g., DeepBlue tool cards, proposal admin).
 
 ### 8.4 Per-org feature flag UI
 
@@ -192,17 +210,19 @@ Per-org monthly cap: none this phase. Phase 6 (workflow_observer) adds this when
 
 ## 11. Definition of Done
 
-1. `agent_threads.ai_summary_payload` populated for every inbound-triggered thread on Sapphire within 60 s of message arrival (excluding short-thread skips).
+1. `agent_threads.ai_summary_payload` populated for every inbound-triggered thread on Sapphire within 60 s of message arrival (confidence-floor skips excluded).
 2. Stale-sweep runs daily at 05:30 UTC; regenerates ≥1 thread on a day with aged summaries (verified by journal).
 3. Summarizer outputs conform to the schema in §4; invalid JSON → no cached payload, `agent.error` event, retry on next trigger.
 4. `case_link` entity_type registered + tested; creator idempotent when target case already linked.
 5. Learning wiring: `AgentLearningService.build_lessons_prompt` called with `agent_type="inbox_summarizer"` on every run. Every proposal resolution writes an `agent_corrections` row via the existing `ProposalService` path.
-6. `inbox_v2_enabled` flag exists on orgs; admin endpoint toggles it; frontend honors it (new layout if true, legacy if false).
-7. `InboxRowV2` renders summary + inline `ProposalCardMini` + Accept All. Compact-mode toggle swaps between tall + single-line layouts.
-8. `thread.summarized` event emits per run (including failed runs, with error field).
+6. `inbox_v2_enabled` flag exists on orgs; admin endpoint toggles it, queues a backfill sweep on false→true; frontend honors it (V2 list if true, legacy table if false).
+7. `InboxThreadListV2` renders identity/address/bullets/badges in the two-column card; desktop hover + mobile Info-button popover both show the email-chrome `InboxRowHoverPanel`; `groupByClient` wires through.
+8. `thread.summarized` event emits per run (including skipped + failed runs, with `skipped_reason` or error field).
 9. R1 enforcer passes: `case_link` and `thread.summarized` referenced in taxonomy; all new emits documented.
-10. Vitest covers `InboxRowV2` rendering (3 state matrix: null-payload → snippet, full summary with proposals, summary without proposals).
-11. After 1 week Sapphire dogfood: `thread.summarized` count > 0, `proposal.staged` count (agent_type=inbox_summarizer) > 0, no Sentry errors from the agent path.
+10. `mark_thread_read` publishes `thread.read`; inbox page refetches stats + folder counts on the event.
+11. Linked-ref UUID resolver strips hallucinated ids and rewrites case_number/invoice_number to real UUIDs before caching.
+12. Vitest covers `InboxThreadListV2` rendering (bullets priority, state/ask fallbacks, v99 unsupported-version fallback, address rendering, bullet cap, hover panel routing).
+13. After 1 week Sapphire dogfood: `thread.summarized` count > 0, `proposal.staged` count (agent_type=inbox_summarizer) > 0, no Sentry errors from the agent path.
 
 ## 12. Resolved decisions (§14 equivalent — DNA-grounded judgment calls)
 

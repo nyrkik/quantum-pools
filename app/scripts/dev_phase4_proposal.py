@@ -117,8 +117,8 @@ async def _get_or_create_dev_customer(
     return c
 
 
-def _format_thread_url(host: str, thread_id: str) -> str:
-    return f"{host}/inbox/{thread_id}"
+def _format_inbox_url(host: str) -> str:
+    return f"{host}/inbox"
 
 
 # ---------------------------------------------------------------------------
@@ -236,13 +236,17 @@ async def cmd_seed(org_name: str, host: str) -> None:
     print(f"  Thread id: {thread.id}")
     print(f"  Proposal:  {proposal.id}  (entity_type=job, status=staged)")
     print()
-    print(f"  Open in UI: {_format_thread_url(host, thread.id)}")
+    print(f"  Open inbox: {_format_inbox_url(host)}")
     print()
-    print("  1. Open the thread → the right-side summary card shows the proposal.")
-    print("  2. Click Accept on the mini card.")
-    print("  3. The Phase 4 post-creation step renders (depends on your")
-    print("     /settings/workflows handler choice).")
-    print("  4. Save or Skip — check /admin/platform/events for")
+    print("  The ProposalCardMini lives in the Phase 3 hover panel, NOT the")
+    print("  thread detail page. To test:")
+    print("  1. Open /inbox (the list, not the thread).")
+    print(f"  2. Find the row with subject '{DEV_PREFIX} Phase4 Test — Pump won't prime'.")
+    print("  3. Hover the row (desktop) or tap the info icon (mobile)")
+    print("     → hover panel shows the mini card with Accept/Reject.")
+    print("  4. Click Accept → the Phase 4 step renders inline, driven by")
+    print("     your /settings/workflows handler choice.")
+    print("  5. Save or Skip → check /admin/platform/events for")
     print("     `handler.applied` / `handler.abandoned`.")
     print()
     print("  Re-run `seed` to create another fresh test thread+proposal.")

@@ -36,6 +36,16 @@ anthropic>=0.40.0
 # Email
 aiosmtplib>=3.0.1
 
+# Email body pipeline — docs/email-body-pipeline-refactor.md
+# ftfy: mojibake repair (UTF-8-as-Latin-1 → clean unicode)
+# charset-normalizer: declared-charset fallback when sender lies
+# inscriptis: HTML→plaintext (layout-aware; beats html2text/BeautifulSoup)
+# mail-parser-reply: quoted-reply + signature stripping, multi-language
+ftfy>=6.3.1
+charset-normalizer>=3.4.0
+inscriptis>=2.7.0
+mail-parser-reply>=1.36
+
 # Background Jobs
 APScheduler>=3.10.4
 

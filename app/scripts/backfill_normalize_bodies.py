@@ -35,20 +35,22 @@ from src.core.database import get_db_context  # noqa: E402
 from src.models.agent_message import AgentMessage  # noqa: E402
 from src.models.agent_thread import AgentThread  # noqa: E402
 from src.services.agents.mail_agent import (  # noqa: E402
-    _normalize_body,
-    _looks_like_html,
-    _looks_quoted_printable,
+    renormalize_stored_body,
     strip_email_signature,
     strip_quoted_reply,
 )
 
 
 def _needs_normalize(body: str | None, body_html: str | None) -> bool:
-    """Only touch rows where `_normalize_body` would actually change
-    something. Keeps the dry-run count honest and avoids no-op writes."""
+    """Only touch rows where the new pipeline actually changes
+    something. Call ``renormalize_stored_body`` and see if the
+    output differs. Slightly more expensive than the old heuristic
+    but always correct — catches mojibake + zero-widths, not just
+    QP/HTML."""
     if not body:
         return False
-    return _looks_quoted_printable(body) or _looks_like_html(body)
+    new_body, new_html, _ = renormalize_stored_body(body, body_html)
+    return new_body != body or (new_html or None) != (body_html or None)
 
 
 def _recompute_snippet(body: str) -> str:
@@ -72,9 +74,12 @@ async def _refresh_thread_snippets(db, dry_run: bool) -> int:
             or_(
                 AgentThread.last_snippet.like("%=3D%"),
                 AgentThread.last_snippet.like("%=09%"),
+                AgentThread.last_snippet.like("%=%\n%"),
                 AgentThread.last_snippet.op("~*")(
                     r"<(html|body|div|table|tbody|tr|td|style|head|p|span)\b"
                 ),
+                AgentThread.last_snippet.op("~")(r"â[\x80-\x9f]"),
+                AgentThread.last_snippet.op("~")(r"[\u200b\u200c\u200d\ufeff]"),
             )
         )
     )).scalars().all()
@@ -109,6 +114,10 @@ async def main(dry_run: bool = False) -> None:
         # structural tag in `body`. This is a superset of rows
         # `_normalize_body` will actually rewrite (the Python check is
         # authoritative).
+        # Candidate query — broad set of "suspicious" patterns. Python
+        # then runs the canonical pipeline and decides which rows
+        # actually need updating. Broadened from the initial QP-only
+        # set to include mojibake signatures + zero-widths + HTML.
         result = await db.execute(
             select(AgentMessage).where(
                 or_(
@@ -118,6 +127,12 @@ async def main(dry_run: bool = False) -> None:
                     AgentMessage.body.op("~*")(
                         r"<(html|body|div|table|tbody|tr|td|style|head|p|span)\b"
                     ),
+                    # UTF-8-as-Latin-1 mojibake signatures — `â` +
+                    # following control byte is the classic pattern
+                    # for the smart-quote / em-dash / ellipsis chars.
+                    AgentMessage.body.op("~")(r"â[\x80-\x9f]"),
+                    # Zero-width marketer padding.
+                    AgentMessage.body.op("~")(r"[\u200b\u200c\u200d\ufeff]"),
                 )
             )
         )
@@ -131,7 +146,7 @@ async def main(dry_run: bool = False) -> None:
             original = msg.body or ""
             if not _needs_normalize(original, msg.body_html):
                 continue
-            new_body, new_html, _diag = _normalize_body(original, msg.body_html)
+            new_body, new_html, _diag = renormalize_stored_body(original, msg.body_html)
             if new_body == original and (new_html or None) == (msg.body_html or None):
                 continue
 

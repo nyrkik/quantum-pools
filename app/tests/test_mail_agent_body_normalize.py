@@ -113,13 +113,25 @@ def test_extract_bodies_plain_html_in_textbody_is_converted_to_text():
     assert "<b>Brian</b>" in html
 
 
-def test_looks_quoted_printable_is_conservative():
-    """Fewer than 3 QP tokens must not trip the heuristic — guards against
-    rewriting normal prose that happens to contain a stray `=XX`."""
-    from src.services.agents.mail_agent import _looks_quoted_printable
+def test_qp_safety_net_is_conservative():
+    """Prose with fewer than 3 QP-looking tokens must pass through
+    unchanged — guards against the safety net rewriting clean text
+    that happens to contain a stray `=XX`. With 3+ tokens the safety
+    net fires + repairs.
+    """
+    from src.services.agents.mail_agent import extract_bodies
 
-    assert not _looks_quoted_printable("plain")
-    # A single `=3D` or one soft break — not enough.
-    assert not _looks_quoted_printable("Totals are due =3D net 30.")
-    # Three+ tokens — treat as encoded.
-    assert _looks_quoted_printable("a=3Db=3Dc=3Dd")
+    def _decode(body: str) -> str:
+        m = _msg_with_text(body)
+        text, _ = extract_bodies(m)
+        return text
+
+    # One legit `=` — passes through.
+    assert "=3D" not in _decode("plain prose")
+    assert "Totals are due =3D net 30." in _decode(
+        "Totals are due =3D net 30.",
+    )
+    # Three+ QP tokens — decoded to their real chars.
+    decoded = _decode("key1=3Dvalue1 key2=3Dvalue2 key3=3Dvalue3")
+    assert "=3D" not in decoded
+    assert "key1=value1" in decoded

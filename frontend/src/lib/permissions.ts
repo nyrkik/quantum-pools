@@ -94,6 +94,7 @@ const FALLBACK_ROLE_PERMS: Record<string, string[]> = {
     "team.view", "team.manage", "settings.view",
     "branding.view", "branding.edit", "billing.view",
     "notifications.view",
+    "workflow.manage_config",
   ],
   manager: [
     "customers.view", "customers.create", "customers.edit", "customers.delete",

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, type FormEvent } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { api, getBackendOrigin } from "@/lib/api";
+import { usePermissions } from "@/lib/permissions";
 import { toast } from "sonner";
-import { Loader2, Save, Pencil, Upload } from "lucide-react";
+import { Loader2, Save, Pencil, Upload, Workflow, ChevronRight } from "lucide-react";
 import { PageLayout } from "@/components/layout/page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -378,7 +380,9 @@ function BrandingSection() {
 
 export default function SettingsPage() {
   const { user, organizationName, role } = useAuth();
+  const { can } = usePermissions();
   const canEdit = role === "owner" || role === "admin";
+  const canManageWorkflows = can("workflow.manage_config");
   const [tab, setTab] = useState<SettingsTab>("general");
   const [editMode, setEditMode] = useState(false);
 
@@ -446,6 +450,20 @@ export default function SettingsPage() {
           </div>
           {canEdit && <BrandingSection />}
           {canEdit && <AddressesSection />}
+          {canManageWorkflows && (
+            <Link href="/settings/workflows" className="block">
+              <Card className="shadow-sm hover:border-muted-foreground/40 transition-colors">
+                <CardContent className="flex items-center gap-3 py-3">
+                  <Workflow className="h-4 w-4 text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">Workflows</div>
+                    <div className="text-xs text-muted-foreground">How new jobs get handled after they&apos;re created.</div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </CardContent>
+              </Card>
+            </Link>
+          )}
         </div>
       )}
 

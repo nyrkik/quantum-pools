@@ -15,6 +15,37 @@ from src.models.agent_thread import AgentThread
 _PAREN_SUFFIX = re.compile(r"\s*\([^)]*\)\s*$")
 
 
+# Heuristic: a local part that contains an underscore-separated hex
+# blob or a hex run ≥16 chars is almost certainly a VERP / tracking
+# mailbox (AmEx: ``r_07b156d0-...``, Poolcorp: ``b-1_3yyno...``). Show
+# a pretty domain instead of the opaque local part.
+_OPAQUE_LOCAL_RE = re.compile(
+    r"^(?:[a-z]_[0-9a-f]{4,}|[a-z]+-\d+_[0-9a-z]{4,}|[0-9a-f]{16,})",
+    re.IGNORECASE,
+)
+
+
+def _prettify_contact_email(email_addr: str | None) -> str | None:
+    """When no better display name is available, produce one from the
+    email address itself. Opaque local parts (VERP tracking mailboxes)
+    get a domain-based display; everything else renders the email
+    unchanged (the UI still shows it, and at least it's a real name
+    for one-off human senders)."""
+    if not email_addr or "@" not in email_addr:
+        return email_addr
+    local, _, domain = email_addr.rpartition("@")
+    if _OPAQUE_LOCAL_RE.match(local):
+        # "welcome.americanexpress.com" → "americanexpress.com"
+        parts = domain.lower().split(".")
+        if len(parts) >= 3 and parts[0] in {
+            "welcome", "bounce", "bouncing", "mail", "email", "send",
+            "notifications", "notify", "info", "updates",
+        }:
+            parts = parts[1:]
+        return ".".join(parts)
+    return email_addr
+
+
 def clean_person_name(raw: str | None, forbidden: set[str]) -> str | None:
     """Strip trailing property/company suffixes from an AI-extracted name.
 
@@ -57,6 +88,11 @@ class ThreadPresenter(Presenter):
         # Used to show "Org Name (Person)" — the person who actually replied vs. the account.
         contact_name_by_email = await self._load_contact_names(threads)
 
+        # Batch-resolve the sender's From-header display name per thread
+        # (e.g. "American Express" for VERP senders) — used as a
+        # fallback when no customer matched + no customer_name.
+        from_name_by_thread = await self._load_from_names(threads)
+
         # Batch-resolve sender tags via InboxRulesService (unified rule engine).
         # Each unique sender is looked up once; thread-level assignment happens
         # in the per-thread loop below.
@@ -82,7 +118,18 @@ class ThreadPresenter(Presenter):
                 d["contact_name"] = t.customer_name if t.customer_name != cust.display_name else None
                 d["customer_address"] = addresses.get(t.matched_customer_id)
             else:
-                d["customer_name"] = t.customer_name
+                # No matched customer — fall back to the thread's
+                # denormalized customer_name, then the latest From
+                # header's display name ("American Express" for VERP),
+                # then a VERP-aware pretty domain derived from the
+                # contact email. Never leave this null if we have any
+                # signal — the inbox row's top-line identity depends
+                # on it.
+                d["customer_name"] = (
+                    t.customer_name
+                    or from_name_by_thread.get(t.id)
+                    or _prettify_contact_email(t.contact_email)
+                )
                 d["contact_name"] = None
                 d["customer_address"] = None
 
@@ -130,7 +177,15 @@ class ThreadPresenter(Presenter):
             else:
                 d["customer_name"] = thread.customer_name
         else:
-            d["customer_name"] = thread.customer_name
+            # Same fallback chain as `many` — From-header display name,
+            # then VERP-aware pretty domain, so an unmatched sender
+            # never shows up as just an opaque email address.
+            from_names = await self._load_from_names([thread])
+            d["customer_name"] = (
+                thread.customer_name
+                or from_names.get(thread.id)
+                or _prettify_contact_email(thread.contact_email)
+            )
 
         # Unread status — honor rule-driven auto_read_at alongside ThreadRead.
         if user_id:
@@ -174,6 +229,40 @@ class ThreadPresenter(Presenter):
         d["contact_person_name"] = names.get(thread.id)
 
         return d
+
+    async def _load_from_names(
+        self, threads: list[AgentThread],
+    ) -> dict[str, str]:
+        """Return `{thread_id: from_name}` using the latest inbound
+        message's ``AgentMessage.from_name`` when set. Legacy rows
+        (ingested before the column existed) return nothing; the
+        caller falls back to a domain prettifier."""
+        if not threads:
+            return {}
+        from sqlalchemy import select
+        from src.models.agent_message import AgentMessage
+
+        rows = (await self.db.execute(
+            select(
+                AgentMessage.thread_id, AgentMessage.from_name,
+                AgentMessage.received_at,
+            )
+            .where(
+                AgentMessage.thread_id.in_([t.id for t in threads]),
+                AgentMessage.direction == "inbound",
+                AgentMessage.from_name.is_not(None),
+            )
+            .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+        )).all()
+
+        out: dict[str, str] = {}
+        for tid, fname, _rec in rows:
+            if tid not in out and fname and fname.strip():
+                # Drop homograph-attack / noisy display names that are
+                # just the email address ("brian@x.com" <brian@x.com>).
+                if "@" not in fname:
+                    out[tid] = fname.strip()
+        return out
 
     async def _load_contact_names(self, threads: list[AgentThread]) -> dict[str, str]:
         """Batch-resolve person names per thread (keyed by thread.id).

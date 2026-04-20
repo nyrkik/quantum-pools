@@ -15,6 +15,11 @@ class AgentMessage(Base):
     email_uid: Mapped[str | None] = mapped_column(String(100), unique=True, index=True)
     direction: Mapped[str] = mapped_column(String(10))  # inbound, outbound
     from_email: Mapped[str] = mapped_column(String(255))
+    # Display name parsed from the raw From header at ingest. Null for
+    # legacy rows + for senders who don't set a display name. Used by
+    # the inbox presenter to surface "American Express" instead of the
+    # VERP-style tracking mailbox.
+    from_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     to_email: Mapped[str] = mapped_column(String(255))
     subject: Mapped[str | None] = mapped_column(String(500))
     body: Mapped[str | None] = mapped_column(Text)  # plain text body (stripped)

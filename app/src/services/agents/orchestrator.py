@@ -407,9 +407,13 @@ async def process_incoming_email(
     if not email_date:
         email_date = datetime.now(timezone.utc)
 
-    # Extract email address from From header
-    email_match = re.search(r"<(.+?)>", from_header)
-    from_email = email_match.group(1) if email_match else from_header
+    # Extract email address + display name from From header via the
+    # RFC 5322-compliant parser. Falls back to regex on malformed
+    # headers — never raises.
+    from src.services.agents.mail_agent import parse_from_header
+    from_name_parsed, from_email_parsed = parse_from_header(from_header)
+    from_email = from_email_parsed or from_header
+    from_name = from_name_parsed or None
 
     to_header = decode_email_header(msg.get("To", ""))
 
@@ -613,6 +617,7 @@ async def process_incoming_email(
                 rfc_message_id=message_id_header or None,
                 direction="inbound",
                 from_email=from_email,
+                from_name=from_name,
                 to_email=to_header,
                 subject=subject,
                 body=body[:5000],
@@ -656,10 +661,11 @@ async def process_incoming_email(
                     rfc_message_id=message_id_header or None,
                     direction="inbound",
                     from_email=from_email,
+                    from_name=from_name,
                     to_email=to_header,
                     subject=subject,
                     body=body[:5000],
-                body_html=body_html[:50000] if body_html else None,
+                    body_html=body_html[:50000] if body_html else None,
                     category=category,
                     urgency="low",
                     status="handled",
@@ -719,6 +725,7 @@ async def process_incoming_email(
             rfc_message_id=message_id_header or None,
             direction="inbound",
             from_email=from_email,
+            from_name=from_name,
             to_email=to_header,
             subject=subject,
             body=body[:5000],

@@ -97,8 +97,8 @@ Inbound/outbound email, internal messaging, notifications.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| AgentThread | `agent_threads` | Email conversation thread. `folder_id` → InboxFolder (null = Inbox). `folder_override` prevents rules from re-moving manual assignments. `gmail_thread_id` for Gmail read/unread sync. |
-| AgentMessage | `agent_messages` | Individual email message in a thread. Has `body` (stripped text), `body_html` (original HTML for rendering), `rfc_message_id` (cross-source dedup), `delivery_status` / `delivered_at` / `first_opened_at` / `open_count` (Postmark webhook tracking). |
+| AgentThread | `agent_threads` | Email conversation thread. `folder_id` → InboxFolder (null = Inbox). `folder_override` prevents rules from re-moving manual assignments. `gmail_thread_id` for Gmail read/unread sync. `auto_handled_feedback_at` = timestamp of the user's Yes/No ack on the "AI moved this to X. Was that right?" banner; non-null suppresses the banner on future opens (persisted across sessions, not React-local). |
+| AgentMessage | `agent_messages` | Individual email message in a thread. Has `body` (stripped text), `body_html` (original HTML for rendering), `rfc_message_id` (cross-source dedup), `delivery_status` / `delivered_at` / `first_opened_at` / `open_count` (Postmark webhook tracking). `from_name` = display name parsed from the raw From header at ingest ("American Express" for VERP senders, etc.) — presenter prefers it over the raw email when no customer matched. |
 | MessageAttachment | `message_attachments` | File attachments on agent messages |
 | ThreadRead | `thread_reads` | Per-user read tracking for threads |
 | InboxRule | `inbox_rules` | Unified sender/recipient rules — JSONB conditions + actions (assign_folder, assign_tag, assign_category, set_visibility, route_to_spam, mark_as_read, suppress_contact_prompt). Evaluated in priority order per message. Replaced both `inbox_routing_rules` and `suppressed_email_senders` (dropped 2026-04-14). |

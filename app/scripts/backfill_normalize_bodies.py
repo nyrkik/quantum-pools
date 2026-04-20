@@ -33,10 +33,13 @@ from sqlalchemy import or_, select  # noqa: E402
 
 from src.core.database import get_db_context  # noqa: E402
 from src.models.agent_message import AgentMessage  # noqa: E402
+from src.models.agent_thread import AgentThread  # noqa: E402
 from src.services.agents.mail_agent import (  # noqa: E402
     _normalize_body,
     _looks_like_html,
     _looks_quoted_printable,
+    strip_email_signature,
+    strip_quoted_reply,
 )
 
 
@@ -46,6 +49,58 @@ def _needs_normalize(body: str | None, body_html: str | None) -> bool:
     if not body:
         return False
     return _looks_quoted_printable(body) or _looks_like_html(body)
+
+
+def _recompute_snippet(body: str) -> str:
+    """Mirror thread_manager.update_status_from_messages — snippet is the
+    first 200 chars of the quoted-reply + signature-stripped body."""
+    clean = strip_email_signature(strip_quoted_reply(body or ""))
+    return clean[:200]
+
+
+async def _refresh_thread_snippets(db, dry_run: bool) -> int:
+    """Recompute `agent_threads.last_snippet` for any thread whose current
+    snippet still carries QP tokens or HTML tags. Runs after the message
+    bodies have been normalized, so the snippet picks up the cleaned text.
+
+    Scoped to threads where the SNIPPET itself looks bad (not the body) —
+    a cheap, targeted sweep that doesn't force-refresh every thread in
+    the org.
+    """
+    candidates = (await db.execute(
+        select(AgentThread).where(
+            or_(
+                AgentThread.last_snippet.like("%=3D%"),
+                AgentThread.last_snippet.like("%=09%"),
+                AgentThread.last_snippet.op("~*")(
+                    r"<(html|body|div|table|tbody|tr|td|style|head|p|span)\b"
+                ),
+            )
+        )
+    )).scalars().all()
+
+    updated = 0
+    for t in candidates:
+        # Pull the latest message's body — match thread_manager's ordering.
+        last_body = (await db.execute(
+            select(AgentMessage.body)
+            .where(AgentMessage.thread_id == t.id)
+            .order_by(AgentMessage.received_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if last_body is None:
+            continue
+        new_snip = _recompute_snippet(last_body)
+        if new_snip == (t.last_snippet or ""):
+            continue
+        print(
+            f"  thread {t.id}: snippet {len(t.last_snippet or '')}→"
+            f"{len(new_snip)} chars | preview {new_snip[:60]!r}"
+        )
+        updated += 1
+        if not dry_run:
+            t.last_snippet = new_snip
+    return updated
 
 
 async def main(dry_run: bool = False) -> None:
@@ -96,12 +151,17 @@ async def main(dry_run: bool = False) -> None:
                     msg.body_html = new_html
                 changed += 1
 
+        # Snippet refresh pass — thread-level denorm of the cleaned body.
+        print()
+        print("Refreshing agent_threads.last_snippet for stale snippets…")
+        snippet_updates = await _refresh_thread_snippets(db, dry_run)
+
         if dry_run:
-            print(f"DRY RUN — would update {would_change} rows")
+            print(f"DRY RUN — would update {would_change} message row(s) + {snippet_updates} thread snippet(s)")
             await db.rollback()
         else:
             await db.commit()
-            print(f"Committed {changed} updates")
+            print(f"Committed {changed} message update(s) + {snippet_updates} thread snippet update(s)")
 
 
 if __name__ == "__main__":

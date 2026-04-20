@@ -37,7 +37,10 @@ export default function JobsPage() {
     searchParams.get("action")
   );
   const [newActionOpen, setNewActionOpen] = useState(false);
-  const [jobFilter, setJobFilter] = useState<string>("mine");
+  const [jobFilter, setJobFilter] = useState<string>(
+    // Deep-link support: UnassignedPoolStep sends ?assigned=unassigned.
+    searchParams.get("assigned") === "unassigned" ? "unassigned" : "mine",
+  );
   const [showCompleted, setShowCompleted] = useState(false);
 
   const handleToggleAction = async (

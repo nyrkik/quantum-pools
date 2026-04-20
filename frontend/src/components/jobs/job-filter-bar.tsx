@@ -43,6 +43,15 @@ export function JobFilterBar({
         >
           All
         </Button>
+        <Button
+          variant={jobFilter === "unassigned" ? "default" : "outline"}
+          size="sm"
+          className="h-7"
+          onClick={() => onFilterChange("unassigned")}
+          title="Jobs with no assignee — the dispatch queue"
+        >
+          Unassigned
+        </Button>
         {teamMembers.length > 0 && (
           <Select
             value={teamMembers.includes(jobFilter) ? jobFilter : ""}

@@ -30,9 +30,10 @@ Secondary benefit: handlers are the observable surface workflow-observer (Phase 
 - **New table** `org_workflow_config` (org-scoped singleton row, created lazily).
 - **Backend handler registry** `src/services/workflow/handlers.py` with 3 handlers: `assign_inline`, `unassigned_pool`, `schedule_inline`.
 - **Accept-response extension**: `POST /v1/proposals/{id}/accept` now includes `next_step: {kind, initial} | null`.
-- **Settings API**: `GET /v1/workflow/config`, `PUT /v1/workflow/config`.
+- **Settings API**: `GET /v1/workflow/config`, `PUT /v1/workflow/config` — gated by new permission slug `workflow.manage_config` (owner + admin granted by default; per-user override via existing permission system).
 - **Frontend component registry** keyed by `kind` — `AssignInlineStep`, `ScheduleInlineStep`, `UnassignedPoolStep` — rendered inside `ProposalCardMini` / `ProposalCard` after accept succeeds.
-- **Settings surface** at `/settings/workflows` with plain-language opinionated options (no enum names, no "advanced" panel).
+- **Settings surface** at `/settings/workflows` with plain-language opinionated options (no enum names, no "advanced" panel). Gated by `workflow.manage_config`.
+- **Unassigned-queue filter chip** on the Cases/Jobs list — shows jobs with no assignee. Makes `unassigned_pool` functional; no new page.
 - **Events**: `workflow_config.changed`, `handler.applied`, `handler.abandoned`.
 - **Tests**: handler-registry unit tests, accept-response shape integration test, Vitest for each component's apply/abandon paths.
 
@@ -264,13 +265,17 @@ Phase 6 (workflow_observer) reads these three events + `proposal.accepted` to pr
 9. **`handler.abandoned` fires on dismiss-without-save, NOT on failed save.** Save failures are `handler.apply_failed` territory — Phase 4 doesn't need this event yet; skip until Phase 6 shows we need it.
 10. **Phase 4 scope only covers proposal-acceptance paths.** Manual "Add Job" from case detail, DeepBlue tool-created jobs, scheduler-created jobs — out of scope. Phase 5 (unify existing agents into proposals) carries those paths onto the proposal rails, at which point Phase 4's handler hook covers them automatically.
 
-## 11. Open questions for Brian before coding
+## 11. Decisions locked (2026-04-19 gate closeout)
 
-1. **Settings surface permission.** Owner-only, or owner+admin? Other QP settings split on this. Manager/tech access = no (they don't touch workflow config).
-2. **`unassigned_pool` surface.** If no one views the unassigned pool, does it functionally disappear? Today, unassigned jobs appear in the Cases list but not in a dedicated "queue" view. Phase 4 might need a simple `/jobs?assignee=unassigned` listing, or that may land in Phase 5.
-3. **Default-assignee sub-picker scope.** The 3 handlers with an assignee picker all consult `default_assignee_strategy`. Do all 3 share one org-wide strategy, or does each handler carry its own? Simpler answer: one org-wide strategy (shipping).
-4. **"Based on your activity, [X] is recommended" callout.** Phase 6 produces this data; Phase 4 ships without the callout. Confirm that's acceptable for Sapphire dogfood.
-5. **Rollback scope if Sapphire hates the inline step.** Settings toggle → no behavior change needed (flag off = null `next_step`). No feature flag layer required; config-is-the-flag.
+1. **Settings permission = per-user via new slug `workflow.manage_config`.** Follows QP's existing 60-slug granular permission system. Default role assignments: `owner` + `admin` granted; `manager` / `technician` / `readonly` not granted by default. Owners can grant per-user via the per-user permission override system. Backend enforces via `require_permission("workflow.manage_config")` on the PUT endpoint.
+
+2. **`unassigned_pool` requires a queue view.** Offering the handler without somewhere to pick up the jobs would violate rule 6 (adds dispatcher hunt work). Phase 4 ships a filter chip on the existing Cases/Jobs list: `Unassigned` (shows jobs with `assigned_to IS NULL` in the user's org, newest first). Not a new page — just a chip, same pattern as the existing assignment filters. Keeps the surface area minimal while making the handler functional.
+
+3. **One org-wide `default_assignee_strategy`.** All handlers that ask for an assignee consult the same strategy. Per-user preferences are Phase 4b; dogfood data will confirm whether that's actually needed or just theoretical.
+
+4. **No "recommended" callout in Phase 4.** Phase 6 (workflow-observer) generates the observation data that feeds it. Shipping Phase 4 without it is fine — the settings surface remains valid, just without the advisory line.
+
+5. **Config IS the flag.** No separate feature-flag layer. An org with no row in `org_workflow_config` gets system defaults (`job → assign_inline`). To disable a handler for an org, set `post_creation_handlers.job` to a different value. To kill the whole feature for an org, set it to `{}` — every entity_type resolves to `next_step: null` and behavior matches pre-Phase-4.
 
 ## 12. Scope estimate
 

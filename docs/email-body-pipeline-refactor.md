@@ -1,6 +1,12 @@
 # Email body pipeline refactor — adopt the canonical 3-stage model
 
-> **Status:** planned 2026-04-20. One-shot refactor plan. **Remove this file when the refactor is shipped and stable.** Implementation reference during the refactor; orient new work off `docs/email-pipeline.md` afterward.
+> **Status:** shipped 2026-04-20 across commits `20215e8` (plan) →
+> `7e059d3` (pipeline) → `8b7064b` (from_name). Backfill committed,
+> post-ship audit returns zero rows with QP tokens / mojibake /
+> zero-widths across both message bodies and thread snippets. Kept
+> as implementation reference for ~1–2 weeks; remove after dogfood
+> stabilization confirms no regressions. Current-state reference is
+> `docs/email-pipeline.md`.
 
 ## 1. Why
 

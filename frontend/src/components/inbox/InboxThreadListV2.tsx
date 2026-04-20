@@ -54,6 +54,26 @@ interface Props {
   loading: boolean;
   selectedThreadId?: string | null;
   onSelectThread: (id: string) => void;
+  groupByClient?: boolean;
+}
+
+/** Group threads by customer (or sender email when unmatched). Pending
+ *  groups surface first, then alphabetical. Mirrors the v1 table's rule. */
+function groupThreadsByClient(threads: Thread[]): { label: string; threads: Thread[] }[] {
+  const byClient = new Map<string, Thread[]>();
+  for (const t of threads) {
+    const key = t.customer_name || t.contact_email;
+    if (!byClient.has(key)) byClient.set(key, []);
+    byClient.get(key)!.push(t);
+  }
+  return [...byClient.entries()]
+    .sort((a, b) => {
+      const aPending = a[1].some((t) => t.has_pending);
+      const bPending = b[1].some((t) => t.has_pending);
+      if (aPending !== bPending) return aPending ? -1 : 1;
+      return a[0].localeCompare(b[0]);
+    })
+    .map(([label, items]) => ({ label, threads: items }));
 }
 
 /** Body content for a row. Returns either `bullets` (primary display)
@@ -80,6 +100,7 @@ export function InboxThreadListV2({
   loading,
   selectedThreadId,
   onSelectThread,
+  groupByClient = false,
 }: Props) {
   // Hydrate staged proposals referenced by thread.ai_summary_payload.proposal_ids.
   // Keyed by thread id so each hover renders only its own proposals.
@@ -137,9 +158,7 @@ export function InboxThreadListV2({
     );
   }
 
-  return (
-    <ul className="divide-y rounded-md border bg-background">
-      {threads.map((t) => {
+  function renderRow(t: Thread) {
         const body = rowBody(t);
         const isSelected = selectedThreadId === t.id;
         const payload = (t.ai_summary_payload as InboxSummaryPayload | null | undefined) ?? null;
@@ -366,7 +385,33 @@ export function InboxThreadListV2({
             </HoverCard>
           </li>
         );
-      })}
+  }
+
+  if (groupByClient) {
+    const groups = groupThreadsByClient(threads);
+    return (
+      <div className="space-y-3">
+        {groups.map((g) => (
+          <ul
+            key={g.label}
+            className="divide-y rounded-md border bg-background overflow-hidden"
+          >
+            <li className="bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium uppercase tracking-wide flex items-center justify-between">
+              <span className="truncate">{g.label}</span>
+              <span className="opacity-70 ml-2 shrink-0">
+                {g.threads.length}
+              </span>
+            </li>
+            {g.threads.map((t) => renderRow(t))}
+          </ul>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <ul className="divide-y rounded-md border bg-background">
+      {threads.map((t) => renderRow(t))}
     </ul>
   );
 }

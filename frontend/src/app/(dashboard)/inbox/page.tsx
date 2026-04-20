@@ -497,6 +497,7 @@ export default function InboxPage() {
               loading={loading}
               selectedThreadId={selectedThreadId}
               onSelectThread={handleSelectThread}
+              groupByClient={groupByClient}
             />
           ) : (
             <>

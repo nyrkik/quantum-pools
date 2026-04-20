@@ -25,6 +25,7 @@ from src.services.proposals import ProposalService
 from src.services.proposals.proposal_service import (
     ProposalStateError,
 )
+from src.services.workflow.config_service import WorkflowConfigService
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
@@ -98,17 +99,27 @@ async def accept_proposal(
 ) -> dict:
     """Accept as-is: creator runs with the staged payload; entity is
     created; proposal.accepted event fires; learning record written.
-    Creator failure → rollback (proposal stays staged)."""
+    Creator failure → rollback (proposal stays staged).
+
+    Phase 4: the accept response also carries `next_step` — the
+    inline UI step the org's workflow config dictates. Handler
+    lookup failure NEVER rolls back the accept; worst case the user
+    sees `next_step: null` and proceeds via the entity's detail page."""
     await _load_org_scoped(db, proposal_id, ctx)
 
     service = ProposalService(db)
+    actor = actor_from_org_ctx(ctx)
     try:
         p, created = await service.accept(
             proposal_id=proposal_id,
-            actor=actor_from_org_ctx(ctx),
+            actor=actor,
         )
     except ProposalStateError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+    next_step = await WorkflowConfigService(db).resolve_next_step(
+        proposal=p, created=created, org_id=ctx.organization_id, actor=actor,
+    )
     await db.commit()
 
     return {
@@ -116,6 +127,7 @@ async def accept_proposal(
         "outcome_entity_id": getattr(created, "id", None),
         "outcome_entity_type": p.outcome_entity_type,
         "conflict": created is None,
+        "next_step": next_step,
     }
 
 
@@ -133,19 +145,25 @@ async def edit_and_accept_proposal(
 ) -> dict:
     """Human edited the draft before accepting. Service computes the
     RFC 6902 patch as `user_delta`, records learning with the delta,
-    runs the creator with the edited payload."""
+    runs the creator with the edited payload. Phase 4 next_step
+    resolution mirrors the plain accept path."""
     await _load_org_scoped(db, proposal_id, ctx)
 
     service = ProposalService(db)
+    actor = actor_from_org_ctx(ctx)
     try:
         p, created = await service.edit_and_accept(
             proposal_id=proposal_id,
-            actor=actor_from_org_ctx(ctx),
+            actor=actor,
             edited_payload=body.edited_payload,
             note=body.note,
         )
     except ProposalStateError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+    next_step = await WorkflowConfigService(db).resolve_next_step(
+        proposal=p, created=created, org_id=ctx.organization_id, actor=actor,
+    )
     await db.commit()
 
     return {
@@ -153,6 +171,7 @@ async def edit_and_accept_proposal(
         "outcome_entity_id": getattr(created, "id", None),
         "outcome_entity_type": p.outcome_entity_type,
         "conflict": created is None,
+        "next_step": next_step,
     }
 
 

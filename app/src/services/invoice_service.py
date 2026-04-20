@@ -186,15 +186,28 @@ class InvoiceService:
             query = query.where(Invoice.issue_date <= date_to)
             count_query = count_query.where(Invoice.issue_date <= date_to)
         if search:
+            # Join Customer so the UI's single search box can match by
+            # client name too — users type "slate" expecting to find
+            # Slate Creek Apartments' estimates, not just the invoice
+            # number or subject. Also matches `billing_name` (set on
+            # non-DB-customer invoices) so those aren't silently
+            # unsearchable. Outer join keeps billing_name-only rows.
+            from src.models.customer import Customer
             search_filter = f"%{search}%"
-            query = query.where(
-                (Invoice.invoice_number.ilike(search_filter))
-                | (Invoice.subject.ilike(search_filter))
+            query = query.outerjoin(Customer, Customer.id == Invoice.customer_id)
+            count_query = count_query.outerjoin(
+                Customer, Customer.id == Invoice.customer_id,
             )
-            count_query = count_query.where(
-                (Invoice.invoice_number.ilike(search_filter))
-                | (Invoice.subject.ilike(search_filter))
+            pred = (
+                Invoice.invoice_number.ilike(search_filter)
+                | Invoice.subject.ilike(search_filter)
+                | Invoice.billing_name.ilike(search_filter)
+                | Customer.first_name.ilike(search_filter)
+                | Customer.last_name.ilike(search_filter)
+                | Customer.company_name.ilike(search_filter)
             )
+            query = query.where(pred)
+            count_query = count_query.where(pred)
 
         total = (await self.db.execute(count_query)).scalar() or 0
         result = await self.db.execute(

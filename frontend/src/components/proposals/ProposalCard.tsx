@@ -27,6 +27,8 @@ import {
   rejectProposal,
   type Proposal,
 } from "@/lib/proposals";
+import { NextStepRenderer } from "@/components/workflow/next-step-registry";
+import type { NextStep } from "@/components/workflow/types";
 
 import { JobProposalBody } from "./renderers/JobProposalBody";
 import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
@@ -70,6 +72,10 @@ export function ProposalCard({
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [rejectPermanent, setRejectPermanent] = useState(false);
+  // Phase 4: post-accept inline step — defers onResolved until the
+  // user completes or skips the step.
+  const [nextStep, setNextStep] = useState<NextStep | null>(null);
+  const [pendingResolved, setPendingResolved] = useState<Proposal | null>(null);
 
   const Renderer = RENDERERS[proposal.entity_type];
   const resolved = proposal.status !== "staged";
@@ -79,12 +85,24 @@ export function ProposalCard({
     setBusy("accept");
     try {
       const res = await acceptProposal(proposal.id);
-      onResolved?.(res.proposal);
+      if (res.next_step) {
+        setPendingResolved(res.proposal);
+        setNextStep(res.next_step);
+      } else {
+        onResolved?.(res.proposal);
+      }
     } catch (err) {
       onError?.(err as Error);
     } finally {
       setBusy(null);
     }
+  }
+
+  function handleStepDone() {
+    const p = pendingResolved;
+    setNextStep(null);
+    setPendingResolved(null);
+    if (p) onResolved?.(p);
   }
 
   async function handleReject() {
@@ -138,7 +156,13 @@ export function ProposalCard({
         )}
       </div>
 
-      {!resolved && (
+      {nextStep && (
+        <div className="px-4 pb-4">
+          <NextStepRenderer step={nextStep} onDone={handleStepDone} />
+        </div>
+      )}
+
+      {!resolved && !nextStep && (
         <div className="flex items-center gap-2 justify-end px-4 py-3 border-t bg-muted/30">
           <Button
             variant="ghost"

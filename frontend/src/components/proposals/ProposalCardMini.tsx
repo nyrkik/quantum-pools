@@ -21,6 +21,8 @@ import {
   rejectProposal,
   type Proposal,
 } from "@/lib/proposals";
+import { NextStepRenderer } from "@/components/workflow/next-step-registry";
+import type { NextStep } from "@/components/workflow/types";
 
 import { JobProposalBody } from "./renderers/JobProposalBody";
 import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
@@ -44,6 +46,11 @@ interface Props {
 
 export function ProposalCardMini({ proposal, onResolved, onError }: Props) {
   const [busy, setBusy] = useState<"accept" | "reject" | null>(null);
+  // Phase 4: post-accept inline step. While `nextStep` is non-null the
+  // card replaces its own body with the step UI and defers
+  // `onResolved` until the user completes or skips the step.
+  const [nextStep, setNextStep] = useState<NextStep | null>(null);
+  const [pendingResolved, setPendingResolved] = useState<Proposal | null>(null);
 
   const Renderer = RENDERERS[proposal.entity_type];
   const resolved = proposal.status !== "staged";
@@ -52,12 +59,24 @@ export function ProposalCardMini({ proposal, onResolved, onError }: Props) {
     setBusy("accept");
     try {
       const res = await acceptProposal(proposal.id);
-      onResolved?.(res.proposal);
+      if (res.next_step) {
+        setPendingResolved(res.proposal);
+        setNextStep(res.next_step);
+      } else {
+        onResolved?.(res.proposal);
+      }
     } catch (err) {
       onError?.(err as Error);
     } finally {
       setBusy(null);
     }
+  }
+
+  function handleStepDone() {
+    const p = pendingResolved;
+    setNextStep(null);
+    setPendingResolved(null);
+    if (p) onResolved?.(p);
   }
 
   async function handleReject() {
@@ -70,6 +89,14 @@ export function ProposalCardMini({ proposal, onResolved, onError }: Props) {
     } finally {
       setBusy(null);
     }
+  }
+
+  if (nextStep) {
+    return (
+      <div className="rounded border bg-background p-2 text-sm">
+        <NextStepRenderer step={nextStep} onDone={handleStepDone} />
+      </div>
+    );
   }
 
   return (

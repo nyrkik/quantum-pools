@@ -9,6 +9,8 @@
 
 import { api } from "./api";
 
+import type { NextStep } from "@/components/workflow/types";
+
 export type ProposalStatus =
   | "staged"
   | "accepted"
@@ -44,6 +46,10 @@ export interface ResolveResponse {
   outcome_entity_id: string | null;
   outcome_entity_type: string | null;
   conflict: boolean;
+  /** Phase 4: post-creation handler step. Null when the org has no
+   * handler configured for this entity_type, when no handler entry
+   * type matches, or when handler resolution failed soft. */
+  next_step?: NextStep | null;
 }
 
 export interface RejectResponse {

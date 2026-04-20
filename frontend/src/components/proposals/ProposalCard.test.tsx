@@ -128,6 +128,28 @@ describe("ProposalCard", () => {
     });
   });
 
+  it("Phase 4: renders next_step inline and defers onResolved until the step finishes", async () => {
+    const resolved = makeProposal({ status: "accepted" });
+    (acceptProposal as ReturnType<typeof vi.fn>).mockResolvedValue({
+      proposal: resolved,
+      outcome_entity_id: "act-1",
+      outcome_entity_type: "job",
+      conflict: false,
+      next_step: {
+        kind: "unassigned_pool",
+        initial: { entity_type: "job", entity_id: "act-1", pool_count: 2 },
+      },
+    });
+    const onResolved = vi.fn();
+    render(<ProposalCard proposal={makeProposal()} onResolved={onResolved} />);
+    fireEvent.click(screen.getByRole("button", { name: /^accept$/i }));
+    expect(await screen.findByText(/Added to the unassigned pool/)).toBeInTheDocument();
+    expect(onResolved).not.toHaveBeenCalled();
+    // Card's own action footer is hidden while the step is up so the
+    // user has one focused workflow to complete.
+    expect(screen.queryByRole("button", { name: /edit & accept/i })).toBeNull();
+  });
+
   it("Edit & Accept button is disabled when no onEditAndAccept handler is provided", () => {
     render(<ProposalCard proposal={makeProposal()} />);
     const editBtn = screen.getByRole("button", { name: /edit & accept/i });

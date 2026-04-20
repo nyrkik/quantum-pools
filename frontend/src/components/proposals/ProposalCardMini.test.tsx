@@ -93,4 +93,26 @@ describe("ProposalCardMini", () => {
     expect(screen.queryByTitle("Accept")).toBeNull();
     expect(screen.queryByTitle("Reject")).toBeNull();
   });
+
+  it("Phase 4: when accept returns a next_step, renders the step + defers onResolved", async () => {
+    const resolved = makeProposal({ status: "accepted" });
+    (acceptProposal as ReturnType<typeof vi.fn>).mockResolvedValue({
+      proposal: resolved,
+      outcome_entity_id: "act-1",
+      outcome_entity_type: "job",
+      conflict: false,
+      next_step: {
+        kind: "unassigned_pool",
+        initial: { entity_type: "job", entity_id: "act-1", pool_count: 4 },
+      },
+    });
+    const onResolved = vi.fn();
+    render(<ProposalCardMini proposal={makeProposal()} onResolved={onResolved} />);
+    fireEvent.click(screen.getByTitle("Accept"));
+
+    // Step renders inside the card.
+    expect(await screen.findByText(/Added to the unassigned pool/)).toBeInTheDocument();
+    // onResolved is deferred until the step finishes.
+    expect(onResolved).not.toHaveBeenCalled();
+  });
 });

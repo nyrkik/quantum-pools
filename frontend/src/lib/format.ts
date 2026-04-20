@@ -2,7 +2,22 @@
  * Shared formatting utilities used across multiple pages.
  */
 
-/** Relative time: "just now", "5m ago", "2h ago", or "Mar 15" for older */
+/**
+ * "Mar 22" for dates in the current year, "Mar 22, 2025" for prior
+ * years — avoids the Gmail/Apple Mail footgun where an old thread
+ * looks brand new because only the month/day shows.
+ */
+function _dateWithYearIfStale(d: Date, now: Date): string {
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+  return d.toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+}
+
+/** Relative time: "just now", "5m ago", "2h ago", "Mar 15" (this year)
+ * or "Mar 15, 2025" (older). Matches every mainstream inbox client. */
 export function formatTime(iso: string | null): string {
   if (!iso) return "\u2014";
   const d = new Date(iso);
@@ -13,7 +28,7 @@ export function formatTime(iso: string | null): string {
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return _dateWithYearIfStale(d, now);
 }
 
 /** Relative time with "Never" default and week-level fallback */
@@ -28,7 +43,7 @@ export function formatRelativeDate(iso: string | null): string {
   if (diffHr < 24) return `${diffHr}h ago`;
   const diffDays = Math.floor(diffHr / 24);
   if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return _dateWithYearIfStale(d, now);
 }
 
 /** Full date+time: "Mar 15, 2026, 3:04 PM" */

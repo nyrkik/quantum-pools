@@ -18,6 +18,18 @@ vi.mock("@/lib/events", () => ({
   events: { emit: (type: string, input: unknown) => emitSpy(type, input) },
 }));
 
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+// jsdom defaults isSecureContext to false, which our component uses
+// as a preflight to avoid the silent "not-allowed" HTTP failure.
+// Stub it to true for tests — we're simulating a secure page.
+Object.defineProperty(window, "isSecureContext", {
+  configurable: true,
+  value: true,
+});
+
 import { VoiceDictationButton } from "./voice-dictation-button";
 
 // ---------------------------------------------------------------------------

@@ -19,9 +19,29 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff } from "lucide-react";
+import { toast } from "sonner";
 
 import { events } from "@/lib/events";
 import { cn } from "@/lib/utils";
+
+
+// Browser-level SpeechRecognition error codes we want to translate
+// into plain-language toasts so users don't stare at a silent icon.
+const ERROR_MESSAGES: Record<string, string> = {
+  "not-allowed":
+    "Microphone blocked. If the site is on HTTP (not HTTPS) voice won't work — open via https://app.quantumpoolspro.com. Otherwise enable mic in the browser's site settings.",
+  "service-not-allowed":
+    "Dictation requires HTTPS. Open the app at its https:// address and try again.",
+  "audio-capture":
+    "Couldn't access a microphone. Check your device has one and isn't being used by another app.",
+  "no-speech":
+    "Didn't hear anything — try again, closer to the mic.",
+  "network":
+    "Dictation needs an internet connection — we're offline.",
+  "aborted": "",  // silent — fired when we stop programmatically
+  "language-not-supported":
+    "This language isn't supported on your browser.",
+};
 
 // The Web Speech API types aren't in @types/dom as of this writing;
 // define the minimal surface we use without pulling in a polyfill.
@@ -166,6 +186,14 @@ export function VoiceDictationButton({
   const start = () => {
     const Ctor = resolveCtor();
     if (!Ctor) return;
+    // Preempt the silent `not-allowed` case — Web Speech refuses
+    // over plain HTTP. Tell the user up front instead of firing
+    // into the browser and waiting for a denial.
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      toast.error(ERROR_MESSAGES["service-not-allowed"]);
+      setError("service-not-allowed");
+      return;
+    }
     try {
       const rec = new Ctor();
       rec.lang = lang;
@@ -186,8 +214,20 @@ export function VoiceDictationButton({
         if (interim && onInterim) onInterim(interim);
       };
       rec.onerror = (ev) => {
-        setError(ev.error || "unknown");
+        const code = ev.error || "unknown";
+        setError(code);
         setListening(false);
+        // Surface the error so users don't stare at a silent icon.
+        // `aborted` is the programmatic-stop signal — never toast it.
+        if (code !== "aborted") {
+          const msg = ERROR_MESSAGES[code] ?? `Dictation failed (${code}).`;
+          if (msg) toast.error(msg);
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[voice] SpeechRecognition error: ${code}`,
+            { secureContext: window.isSecureContext, origin: window.location.origin },
+          );
+        }
       };
       rec.onend = () => {
         setListening(false);

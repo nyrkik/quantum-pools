@@ -153,7 +153,7 @@ Equipment lifecycle, parts catalog, vendors.
 | Model | Table | Purpose |
 |-------|-------|---------|
 | EquipmentCatalog | `equipment_catalog` | Canonical equipment database (114 entries) |
-| EquipmentItem | `equipment_items` | Installed equipment instance on a water feature |
+| EquipmentItem | `equipment_items` | Installed equipment instance on a water feature. `install_date` = when it was placed in service (PRX filter cartridge age, warranty windows, etc.). `system_group` groups multi-pump/filter systems so a cartridge is associated with a specific pump. Both are populated via the WF equipment edit sheet on customer detail. |
 | EquipmentEvent | `equipment_events` | Lifecycle events (install, repair, replace) |
 | PartsCatalog | `parts_catalog` | Parts database (434 entries, linked to equipment) |
 | PartPurchase | `part_purchases` | Purchase records for parts |

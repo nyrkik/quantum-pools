@@ -217,7 +217,7 @@ Confirmation cards track state:
 
 ### Shared frontend components
 - `ChatMessageList` — renders messages with stale/historical logic, used by sheet, full page, and case card
-- `ChatInput` — textarea + send button with auto-resize, Enter to send, focus management
+- `ChatInput` — textarea + send button with auto-resize, Enter to send, focus management. Includes a `VoiceDictationButton` (Phase 1 of `docs/voice-integration-plan.md`) that wraps the browser Web Speech API for push-to-talk dictation directly into the chat; emits `voice.dictated` for adoption telemetry.
 - `MessageRow` — single message with tool result cards
 - `parseStoredMessages()` — reconstructs ChatMessage from stored Anthropic blocks format
 

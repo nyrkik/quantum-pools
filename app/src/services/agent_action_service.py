@@ -205,11 +205,11 @@ class AgentActionService:
             query = query.where(AgentAction.status == status)
         if assigned_to:
             # Phase 4: sentinel "unassigned" maps to IS NULL so the
-            # unassigned_pool filter chip can surface jobs with no
-            # assignee. Real first_names never collide — there's no
-            # user literally named "unassigned" — and the alternative
-            # (separate query param) duplicates the chip-state shape
-            # on the frontend.
+            # Unassigned filter chip can surface jobs with no assignee
+            # (set by the hold_for_dispatch handler). Real first_names
+            # never collide — there's no user literally named
+            # "unassigned" — and the alternative (separate query param)
+            # duplicates the chip-state shape on the frontend.
             if assigned_to == "unassigned":
                 query = query.where(AgentAction.assigned_to.is_(None))
             else:

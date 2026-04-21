@@ -26,16 +26,16 @@ describe("NextStepRenderer", () => {
     warn.mockRestore();
   });
 
-  it("renders the unassigned-pool banner for kind=unassigned_pool", () => {
+  it("renders the hold-for-dispatch banner for kind=hold_for_dispatch", () => {
     const { getByText } = render(
       <NextStepRenderer
         step={{
-          kind: "unassigned_pool",
-          initial: { entity_type: "job", entity_id: "x", pool_count: 3 },
+          kind: "hold_for_dispatch",
+          initial: { entity_type: "job", entity_id: "x", unassigned_count: 3 },
         }}
         onDone={vi.fn()}
       />,
     );
-    expect(getByText(/Added to the unassigned pool/)).toBeInTheDocument();
+    expect(getByText(/Held for dispatch/)).toBeInTheDocument();
   });
 });

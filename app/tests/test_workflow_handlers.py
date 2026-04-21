@@ -7,7 +7,7 @@ Covers:
   shape, including edge cases:
     * assign_inline uses fallback_user_id when no prior assignments
     * assign_inline drops a stale default not in the options list
-    * unassigned_pool counts only open + unassigned jobs
+    * hold_for_dispatch counts only open + unassigned jobs
     * schedule_inline returns an ISO `default_date` in the future
 """
 
@@ -26,7 +26,7 @@ from src.services.events.platform_event_service import Actor
 from src.services.workflow import HANDLERS, get_handler
 from src.services.workflow.handlers.assign_inline import AssignInlineHandler
 from src.services.workflow.handlers.schedule_inline import ScheduleInlineHandler
-from src.services.workflow.handlers.unassigned_pool import UnassignedPoolHandler
+from src.services.workflow.handlers.hold_for_dispatch import HoldForDispatchHandler
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def _actor(user_id: str | None = None) -> Actor:
 
 
 def test_all_three_handlers_register():
-    assert set(HANDLERS) == {"assign_inline", "unassigned_pool", "schedule_inline"}
+    assert set(HANDLERS) == {"assign_inline", "hold_for_dispatch", "schedule_inline"}
 
 
 def test_get_handler_returns_registered_instance():
@@ -229,12 +229,12 @@ async def test_assign_inline_returns_none_for_wrong_entity(db_session, org_a):
 
 
 # ---------------------------------------------------------------------------
-# unassigned_pool
+# hold_for_dispatch
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_unassigned_pool_counts_only_open_unassigned(db_session, org_a):
+async def test_hold_for_dispatch_counts_only_open_unassigned(db_session, org_a):
     uid = await _seed_user(db_session, org_a.id)
     # 2 unassigned open jobs + 1 assigned + 1 done (both filtered out)
     await _seed_action(db_session, org_a.id)  # open, unassigned
@@ -244,18 +244,18 @@ async def test_unassigned_pool_counts_only_open_unassigned(db_session, org_a):
     new_action = await _seed_action(db_session, org_a.id)
     await db_session.commit()
 
-    step = await UnassignedPoolHandler().next_step_for(
+    step = await HoldForDispatchHandler().next_step_for(
         created=new_action, org_id=org_a.id, actor=_actor(uid), db=db_session,
     )
     assert step is not None
-    assert step.kind == "unassigned_pool"
+    assert step.kind == "hold_for_dispatch"
     assert step.initial["entity_id"] == new_action.id
     # new_action + the 2 prior unassigned-open = 3 waiting.
-    assert step.initial["pool_count"] == 3
+    assert step.initial["unassigned_count"] == 3
 
 
 @pytest.mark.asyncio
-async def test_unassigned_pool_other_org_excluded(db_session, org_a, org_b):
+async def test_hold_for_dispatch_other_org_excluded(db_session, org_a, org_b):
     uid = await _seed_user(db_session, org_a.id)
     # A pile of unassigned jobs in org_b — should not count.
     for _ in range(5):
@@ -263,10 +263,10 @@ async def test_unassigned_pool_other_org_excluded(db_session, org_a, org_b):
     action = await _seed_action(db_session, org_a.id)
     await db_session.commit()
 
-    step = await UnassignedPoolHandler().next_step_for(
+    step = await HoldForDispatchHandler().next_step_for(
         created=action, org_id=org_a.id, actor=_actor(uid), db=db_session,
     )
-    assert step.initial["pool_count"] == 1
+    assert step.initial["unassigned_count"] == 1
 
 
 # ---------------------------------------------------------------------------

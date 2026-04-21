@@ -26,7 +26,7 @@ interface WorkflowConfig {
   };
 }
 
-type JobHandler = "schedule_inline" | "assign_inline" | "unassigned_pool";
+type JobHandler = "schedule_inline" | "assign_inline" | "hold_for_dispatch";
 type StrategyKind = "always_ask" | "last_used_in_org" | "fixed";
 
 const JOB_HANDLER_OPTIONS: Array<{
@@ -47,8 +47,8 @@ const JOB_HANDLER_OPTIONS: Array<{
       "Best for flexible schedules. The job lands immediately; you just pick who takes it.",
   },
   {
-    value: "unassigned_pool",
-    title: "Send to unassigned pool",
+    value: "hold_for_dispatch",
+    title: "Hold for dispatch",
     blurb:
       "Best for dispatch-style teams. The job waits in a queue your dispatcher picks from.",
   },

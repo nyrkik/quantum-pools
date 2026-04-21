@@ -89,12 +89,12 @@ async def test_accept_job_proposal_returns_assign_inline_by_default(
 async def test_accept_job_proposal_respects_org_config_override(
     db_session, org_a,
 ):
-    """When the org overrides the job handler to unassigned_pool, that
+    """When the org overrides the job handler to hold_for_dispatch, that
     handler wins over the system default."""
     uid = await _seed_user(db_session, org_a.id)
     db_session.add(OrgWorkflowConfig(
         organization_id=org_a.id,
-        post_creation_handlers={"job": "unassigned_pool"},
+        post_creation_handlers={"job": "hold_for_dispatch"},
         default_assignee_strategy={"strategy": "always_ask"},
     ))
     proposal_id = await _stage_job(db_session, org_a.id)
@@ -109,12 +109,12 @@ async def test_accept_job_proposal_respects_org_config_override(
     )
     await db_session.commit()
 
-    assert next_step["kind"] == "unassigned_pool"
+    assert next_step["kind"] == "hold_for_dispatch"
     assert next_step["initial"]["entity_id"] == created.id
-    # pool_count is an int. Freshly-created job is unassigned + open so
-    # it counts itself; other orgs don't leak in.
-    assert isinstance(next_step["initial"]["pool_count"], int)
-    assert next_step["initial"]["pool_count"] >= 1
+    # unassigned_count is an int. Freshly-created job is unassigned + open
+    # so it counts itself; other orgs don't leak in.
+    assert isinstance(next_step["initial"]["unassigned_count"], int)
+    assert next_step["initial"]["unassigned_count"] >= 1
 
 
 @pytest.mark.asyncio

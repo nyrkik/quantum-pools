@@ -4,11 +4,11 @@
 
 ## 1. Purpose
 
-Phase 3 ships proposal-based job creation in the inbox — one click, job exists. But "job exists" isn't the end of the user's workflow. Some orgs need to schedule it immediately. Some assign it. Some drop it in an unassigned pool for dispatch pickup. Hardcoding one pattern violates DNA rule 1 (build for the 1,000th customer, not for Sapphire).
+Phase 3 ships proposal-based job creation in the inbox — one click, job exists. But "job exists" isn't the end of the user's workflow. Some orgs need to schedule it immediately. Some assign it. Some hold it for dispatch pickup. Hardcoding one pattern violates DNA rule 1 (build for the 1,000th customer, not for Sapphire).
 
 Phase 4 introduces a **pluggable post-creation handler** abstraction: when a proposal accepts and creates an entity, the backend tells the frontend *what happens next* (render this inline step), and the user completes the workflow without leaving the inbox.
 
-Secondary benefit: handlers are the observable surface workflow-observer (Phase 6) watches. Every `handler.applied` / `handler.abandoned` event is a data point — "this org clicked Accept 47 times and abandoned the schedule picker 46 of them → propose switching their default to unassigned_pool."
+Secondary benefit: handlers are the observable surface workflow-observer (Phase 6) watches. Every `handler.applied` / `handler.abandoned` event is a data point — "this org clicked Accept 47 times and abandoned the schedule picker 46 of them → propose switching their default to hold_for_dispatch."
 
 **DNA alignment**:
 - Rule 1: per-org configurable (not Sapphire-specific).
@@ -28,12 +28,12 @@ Secondary benefit: handlers are the observable surface workflow-observer (Phase 
 ## 3. What this phase ships
 
 - **New table** `org_workflow_config` (org-scoped singleton row, created lazily).
-- **Backend handler registry** `src/services/workflow/handlers.py` with 3 handlers: `assign_inline`, `unassigned_pool`, `schedule_inline`.
+- **Backend handler registry** `src/services/workflow/handlers.py` with 3 handlers: `assign_inline`, `hold_for_dispatch`, `schedule_inline`.
 - **Accept-response extension**: `POST /v1/proposals/{id}/accept` now includes `next_step: {kind, initial} | null`.
 - **Settings API**: `GET /v1/workflow/config`, `PUT /v1/workflow/config` — gated by new permission slug `workflow.manage_config` (owner + admin granted by default; per-user override via existing permission system).
-- **Frontend component registry** keyed by `kind` — `AssignInlineStep`, `ScheduleInlineStep`, `UnassignedPoolStep` — rendered inside `ProposalCardMini` / `ProposalCard` after accept succeeds.
+- **Frontend component registry** keyed by `kind` — `AssignInlineStep`, `ScheduleInlineStep`, `HoldForDispatchStep` — rendered inside `ProposalCardMini` / `ProposalCard` after accept succeeds.
 - **Settings surface** at `/settings/workflows` with plain-language opinionated options (no enum names, no "advanced" panel). Gated by `workflow.manage_config`.
-- **Unassigned-queue filter chip** on the Cases/Jobs list — shows jobs with no assignee. Makes `unassigned_pool` functional; no new page.
+- **Unassigned-queue filter chip** on the Cases/Jobs list — shows jobs with no assignee. Makes `hold_for_dispatch` functional; no new page.
 - **Events**: `workflow_config.changed`, `handler.applied`, `handler.abandoned`.
 - **Tests**: handler-registry unit tests, accept-response shape integration test, Vitest for each component's apply/abandon paths.
 
@@ -124,9 +124,9 @@ Rationale for router-side lookup:
 - Skip → dismisses + emits `handler.abandoned` with `reason: "skip"`.
 - Default assignee: derived from `default_assignee_strategy` on `org_workflow_config` — usually `last_used_in_org` (assignee of the most recent job in the org; good proxy at small-team scale without per-user tracking infra).
 
-**`unassigned_pool`** (for dispatch-style orgs):
-- `next_step` = `{kind: "unassigned_pool", initial: {entity_id, pool_count}}`.
-- Frontend renders a toast/banner: "Added to unassigned pool (N waiting)".
+**`hold_for_dispatch`** (for dispatch-style orgs):
+- `next_step` = `{kind: "hold_for_dispatch", initial: {entity_id, unassigned_count}}`.
+- Frontend renders a banner: "Held for dispatch (N waiting)".
 - No user input, no apply step. Emits `handler.applied` immediately on render.
 
 **`schedule_inline`** (for coordinator-driven orgs):
@@ -173,7 +173,7 @@ Row created lazily on first read — orgs without a row fall through to **system
 }
 ```
 
-Chosen because `assign_inline` covers both solo operators (me assigning to me) and small teams (Sapphire-style). `unassigned_pool` and `schedule_inline` are explicit opt-ins via settings.
+Chosen because `assign_inline` covers both solo operators (me assigning to me) and small teams (Sapphire-style). `hold_for_dispatch` and `schedule_inline` are explicit opt-ins via settings.
 
 ## 6. Settings UI
 
@@ -192,7 +192,7 @@ How new jobs get handled
     pick who takes it.
     ← Currently selected
 
-( ) Send to unassigned pool
+( ) Hold for dispatch
     Best for dispatch-style teams. Dispatcher picks jobs off
     the queue as they're ready.
 
@@ -228,12 +228,12 @@ Phase 6 (workflow_observer) reads these three events + `proposal.accepted` to pr
 ## 8. Rollout sequence
 
 1. **Migration**: `org_workflow_config` table. Nullable FK, default JSONB values. No per-org backfill (lazy read).
-2. **Handler registry** `src/services/workflow/handlers.py` with `WorkflowHandler` protocol + `HANDLERS` dict. Ship `assign_inline`, `unassigned_pool`, `schedule_inline` as concrete classes. Unit tests for each handler's `next_step_for` output shape.
+2. **Handler registry** `src/services/workflow/handlers.py` with `WorkflowHandler` protocol + `HANDLERS` dict. Ship `assign_inline`, `hold_for_dispatch`, `schedule_inline` as concrete classes. Unit tests for each handler's `next_step_for` output shape.
 3. **Workflow config service** `src/services/workflow/config_service.py`: `get_or_default(org_id)`, `put(org_id, config, actor)` + event emit. Unit tests + org-isolation test.
 4. **API**: `GET/PUT /v1/workflow/config` (owner+admin gated). Contract test: unknown handler name → 422 with the registry list.
 5. **Accept-response extension**: add `next_step` field to `POST /v1/proposals/{id}/accept` response. `workflow_service.resolve_next_step()` runs after accept, never rolls back accept on failure. Integration test: accept a job proposal → asserts `next_step.kind == "assign_inline"`.
 6. **Frontend settings page**: `/settings/workflows` route + component. Radio cards for the 3 options + the default-assignee sub-picker. Vitest: clicking an option dispatches PUT + updates local state.
-7. **Frontend step components**: `<AssignInlineStep>`, `<UnassignedPoolStep>`, `<ScheduleInlineStep>`. Each owns its local state, calls its apply endpoint on Save, emits `handler.applied`/`handler.abandoned` via `lib/events`. Vitest for each.
+7. **Frontend step components**: `<AssignInlineStep>`, `<HoldForDispatchStep>`, `<ScheduleInlineStep>`. Each owns its local state, calls its apply endpoint on Save, emits `handler.applied`/`handler.abandoned` via `lib/events`. Vitest for each.
 8. **Wire step components into ProposalCard + ProposalCardMini**: on successful accept, look at `next_step.kind`, look it up in the component registry, render it in a popover/inline region below the card. Handle unknown kinds (warn + no-op).
 9. **Sapphire dogfood**: flag is off by default → Sapphire gets no behavior change until a row is added to `org_workflow_config`. Turn on with default config (`job → assign_inline`) and iterate on UX.
 10. **Measurement**: count `handler.applied` vs `handler.abandoned` after 1 week. If abandoned > applied on any handler, that's signal for Phase 6 to act on later.
@@ -246,7 +246,7 @@ Phase 6 (workflow_observer) reads these three events + `proposal.accepted` to pr
 4. A handler lookup failure does NOT roll back the accept — creation is non-refundable, step is augmentation. Covered by a fault-injection test.
 5. `GET/PUT /v1/workflow/config` exists, owner+admin gated; unknown handler name rejected with 422 + registry list.
 6. Settings surface at `/settings/workflows` renders the 3 radio cards with plain-language copy; no enum names, no advanced panel; keyboard-navigable; mobile-stackable.
-7. `AssignInlineStep`, `UnassignedPoolStep`, `ScheduleInlineStep` all handle Save + Skip, emit the right event, and revert to the card on success.
+7. `AssignInlineStep`, `HoldForDispatchStep`, `ScheduleInlineStep` all handle Save + Skip, emit the right event, and revert to the card on success.
 8. ProposalCard + ProposalCardMini render the `next_step` component from the registry; unknown `kind` logs a warning and renders nothing.
 9. R1 enforcer passes: `workflow_config.changed`, `handler.applied`, `handler.abandoned` added to the taxonomy in the same commit as the first emit site.
 10. Vitest: at least one happy-path + one abandon test for each step component. Backend pytest: registry dispatch test, accept-response shape test, config endpoint auth test.
@@ -269,7 +269,7 @@ Phase 6 (workflow_observer) reads these three events + `proposal.accepted` to pr
 
 1. **Settings permission = per-user via new slug `workflow.manage_config`.** Follows QP's existing 60-slug granular permission system. Default role assignments: `owner` + `admin` granted; `manager` / `technician` / `readonly` not granted by default. Owners can grant per-user via the per-user permission override system. Backend enforces via `require_permission("workflow.manage_config")` on the PUT endpoint.
 
-2. **`unassigned_pool` requires a queue view.** Offering the handler without somewhere to pick up the jobs would violate rule 6 (adds dispatcher hunt work). Phase 4 ships a filter chip on the existing Cases/Jobs list: `Unassigned` (shows jobs with `assigned_to IS NULL` in the user's org, newest first). Not a new page — just a chip, same pattern as the existing assignment filters. Keeps the surface area minimal while making the handler functional.
+2. **`hold_for_dispatch` requires a queue view.** Offering the handler without somewhere to pick up the jobs would violate rule 6 (adds dispatcher hunt work). Phase 4 ships a filter chip on the existing Cases/Jobs list: `Unassigned` (shows jobs with `assigned_to IS NULL` in the user's org, newest first). Not a new page — just a chip, same pattern as the existing assignment filters. Keeps the surface area minimal while making the handler functional.
 
 3. **One org-wide `default_assignee_strategy`.** All handlers that ask for an assignee consult the same strategy. Per-user preferences are Phase 4b; dogfood data will confirm whether that's actually needed or just theoretical.
 

@@ -1,11 +1,10 @@
-"""unassigned_pool — dispatch-style post-creation handler.
+"""hold_for_dispatch — dispatch-style post-creation handler.
 
-The job lands with no assignee; the user sees a "dropped in the
-unassigned queue" toast + link to the Unassigned filter on the jobs
-list. No inline user input needed — emits `handler.applied` as soon
-as the frontend renders the toast (frontend handles that; backend
-just returns the `pool_count` so the toast can say how many are
-waiting).
+The job lands with no assignee; the user sees a "held for dispatch"
+banner + link to the Unassigned filter on the jobs list. No inline
+user input needed — emits `handler.applied` as soon as the frontend
+renders the banner (frontend handles that; backend just returns the
+`unassigned_count` so the banner can say how many are waiting).
 """
 
 from __future__ import annotations
@@ -26,8 +25,8 @@ _OPEN_STATUSES = ("open", "in_progress")
 
 
 @register
-class UnassignedPoolHandler:
-    name = "unassigned_pool"
+class HoldForDispatchHandler:
+    name = "hold_for_dispatch"
     entity_types = ("job",)
 
     async def next_step_for(
@@ -41,7 +40,7 @@ class UnassignedPoolHandler:
         if not isinstance(created, AgentAction):
             return None
 
-        pool_count = (await db.execute(
+        unassigned_count = (await db.execute(
             select(func.count(AgentAction.id))
             .where(
                 AgentAction.organization_id == org_id,
@@ -55,6 +54,6 @@ class UnassignedPoolHandler:
             initial={
                 "entity_type": "job",
                 "entity_id": created.id,
-                "pool_count": int(pool_count or 0),
+                "unassigned_count": int(unassigned_count or 0),
             },
         )

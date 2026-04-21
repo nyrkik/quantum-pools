@@ -69,6 +69,14 @@ All inline action icons use `Button variant="ghost" size="icon"`. No text labels
 | Loading spinner | `Loader2` | matches context | `animate-spin` |
 | Expand/collapse | `ChevronDown`/`ChevronUp` | h-3.5 w-3.5 | `text-muted-foreground` |
 
+**Icon-only buttons for primary decision actions** (Accept/Reject, Confirm/Cancel on action cards where the buttons are the whole purpose of the surface) are allowed when ALL of:
+- Touch target ≥ `h-10 w-10` (40px) on every surface the component renders on — ≥ `h-11 w-11` (44px) preferred to clear Apple HIG.
+- Color distinguishes affirmative from destructive at rest — `text-green-600` for Check, `text-destructive` for X. Not muted-until-hover; these icons carry meaning at rest.
+- `aria-label` describes the action in words, not just `title`. Screen readers MUST announce "Accept proposal," not "check icon."
+- Paired buttons have `gap-2` or more so adjacent hit zones don't overlap.
+
+Otherwise — for inline row actions, edit-mode field saves, and anything in dense grids — use the muted-at-rest icon pattern in the table above. A single shared rule: icons that are the *primary purpose* of their surface get color + size; icons that are *scaffolding* in a larger surface stay quiet until hovered.
+
 ### Edit Mode Pattern
 
 - **No "Edit" in title** — the page title stays the same as view mode

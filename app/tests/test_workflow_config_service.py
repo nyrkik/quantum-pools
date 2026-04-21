@@ -68,13 +68,13 @@ async def test_get_or_default_no_row_returns_system_defaults(db_session, org_a):
 async def test_get_or_default_row_overrides_defaults(db_session, org_a):
     db_session.add(OrgWorkflowConfig(
         organization_id=org_a.id,
-        post_creation_handlers={"job": "unassigned_pool"},
+        post_creation_handlers={"job": "hold_for_dispatch"},
         default_assignee_strategy={"strategy": "always_ask"},
     ))
     await db_session.commit()
 
     cfg = await WorkflowConfigService(db_session).get_or_default(org_a.id)
-    assert cfg["post_creation_handlers"]["job"] == "unassigned_pool"
+    assert cfg["post_creation_handlers"]["job"] == "hold_for_dispatch"
     assert cfg["default_assignee_strategy"] == {"strategy": "always_ask"}
 
 
@@ -120,14 +120,14 @@ async def test_put_updates_existing_row(db_session, org_a):
 
     await WorkflowConfigService(db_session).put(
         org_id=org_a.id,
-        post_creation_handlers={"job": "unassigned_pool"},
+        post_creation_handlers={"job": "hold_for_dispatch"},
         default_assignee_strategy={"strategy": "always_ask"},
         actor=_actor(uid),
     )
     await db_session.commit()
 
     row = await db_session.get(OrgWorkflowConfig, org_a.id)
-    assert row.post_creation_handlers == {"job": "unassigned_pool"}
+    assert row.post_creation_handlers == {"job": "hold_for_dispatch"}
 
 
 @pytest.mark.asyncio
@@ -199,7 +199,7 @@ async def test_resolve_next_step_dispatches_to_configured_handler(db_session, or
     uid = await _seed_user_and_link(db_session, org_a.id)
     db_session.add(OrgWorkflowConfig(
         organization_id=org_a.id,
-        post_creation_handlers={"job": "unassigned_pool"},
+        post_creation_handlers={"job": "hold_for_dispatch"},
         default_assignee_strategy={"strategy": "always_ask"},
     ))
     proposal, action = await _seed_proposal_and_action(db_session, org_a.id)
@@ -209,7 +209,7 @@ async def test_resolve_next_step_dispatches_to_configured_handler(db_session, or
         proposal=proposal, created=action, org_id=org_a.id, actor=_actor(uid),
     )
     assert result is not None
-    assert result["kind"] == "unassigned_pool"
+    assert result["kind"] == "hold_for_dispatch"
     assert result["initial"]["entity_id"] == action.id
 
 

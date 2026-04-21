@@ -61,7 +61,7 @@ async def test_list_handlers_returns_registry(db_session, org_a):
     ctx = OrgUserContext(user=user, org_user=org_user, org_name="Test")
     out = await list_handlers(ctx)
     names = {h["name"] for h in out["handlers"]}
-    assert names == {"assign_inline", "unassigned_pool", "schedule_inline"}
+    assert names == {"assign_inline", "hold_for_dispatch", "schedule_inline"}
 
 
 # ---------------------------------------------------------------------------

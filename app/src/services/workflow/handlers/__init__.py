@@ -6,5 +6,5 @@ self-registration of every handler into `workflow.registry.HANDLERS`.
 from src.services.workflow.handlers import (  # noqa: F401
     assign_inline,
     schedule_inline,
-    unassigned_pool,
+    hold_for_dispatch,
 )

@@ -9,7 +9,7 @@
 export type HandlerKind =
   | "assign_inline"
   | "schedule_inline"
-  | "unassigned_pool";
+  | "hold_for_dispatch";
 
 export interface NextStep {
   kind: HandlerKind | string;
@@ -33,10 +33,10 @@ export interface ScheduleInlineInitial extends AssignInlineInitial {
   default_date: string;
 }
 
-export interface UnassignedPoolInitial {
+export interface HoldForDispatchInitial {
   entity_type: "job";
   entity_id: string;
-  pool_count: number;
+  unassigned_count: number;
 }
 
 export interface StepComponentProps<TInitial> {

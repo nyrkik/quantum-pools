@@ -64,7 +64,7 @@ describe("ProposalCardMini", () => {
     const onResolved = vi.fn();
 
     render(<ProposalCardMini proposal={makeProposal()} onResolved={onResolved} />);
-    fireEvent.click(screen.getByTitle("Accept"));
+    fireEvent.click(screen.getByTitle("Accept proposal"));
 
     await waitFor(() => {
       expect(acceptProposal).toHaveBeenCalledWith("prop-mini");
@@ -80,7 +80,7 @@ describe("ProposalCardMini", () => {
     const onResolved = vi.fn();
 
     render(<ProposalCardMini proposal={makeProposal()} onResolved={onResolved} />);
-    fireEvent.click(screen.getByTitle("Reject"));
+    fireEvent.click(screen.getByTitle("Reject proposal"));
 
     await waitFor(() => {
       expect(rejectProposal).toHaveBeenCalledWith("prop-mini");
@@ -90,8 +90,8 @@ describe("ProposalCardMini", () => {
 
   it("hides action buttons when proposal is resolved", () => {
     render(<ProposalCardMini proposal={makeProposal({ status: "accepted" })} />);
-    expect(screen.queryByTitle("Accept")).toBeNull();
-    expect(screen.queryByTitle("Reject")).toBeNull();
+    expect(screen.queryByTitle("Accept proposal")).toBeNull();
+    expect(screen.queryByTitle("Reject proposal")).toBeNull();
   });
 
   it("Phase 4: when accept returns a next_step, renders the step + defers onResolved", async () => {
@@ -102,16 +102,16 @@ describe("ProposalCardMini", () => {
       outcome_entity_type: "job",
       conflict: false,
       next_step: {
-        kind: "unassigned_pool",
-        initial: { entity_type: "job", entity_id: "act-1", pool_count: 4 },
+        kind: "hold_for_dispatch",
+        initial: { entity_type: "job", entity_id: "act-1", unassigned_count: 4 },
       },
     });
     const onResolved = vi.fn();
     render(<ProposalCardMini proposal={makeProposal()} onResolved={onResolved} />);
-    fireEvent.click(screen.getByTitle("Accept"));
+    fireEvent.click(screen.getByTitle("Accept proposal"));
 
     // Step renders inside the card.
-    expect(await screen.findByText(/Added to the unassigned pool/)).toBeInTheDocument();
+    expect(await screen.findByText(/Held for dispatch/)).toBeInTheDocument();
     // onResolved is deferred until the step finishes.
     expect(onResolved).not.toHaveBeenCalled();
   });

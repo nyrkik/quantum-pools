@@ -3,7 +3,7 @@
 import type { NextStep } from "./types";
 import { AssignInlineStep } from "./assign-inline-step";
 import { ScheduleInlineStep } from "./schedule-inline-step";
-import { UnassignedPoolStep } from "./unassigned-pool-step";
+import { HoldForDispatchStep } from "./hold-for-dispatch-step";
 
 /**
  * Resolve a backend-provided `next_step` to a rendered component.
@@ -38,10 +38,10 @@ export function NextStepRenderer({
           onDone={onDone}
         />
       );
-    case "unassigned_pool":
+    case "hold_for_dispatch":
       return (
-        <UnassignedPoolStep
-          initial={step.initial as unknown as Parameters<typeof UnassignedPoolStep>[0]["initial"]}
+        <HoldForDispatchStep
+          initial={step.initial as unknown as Parameters<typeof HoldForDispatchStep>[0]["initial"]}
           onDone={onDone}
         />
       );

@@ -122,33 +122,35 @@ export function ProposalCardMini({ proposal, onResolved, onError }: Props) {
       </div>
 
       {!resolved && (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-11 w-11"
             onClick={handleAccept}
             disabled={busy !== null}
-            title="Accept"
+            aria-label="Accept proposal"
+            title="Accept proposal"
           >
             {busy === "accept" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              <Check className="h-4 w-4 text-muted-foreground hover:text-green-600" />
+              <Check className="h-5 w-5 text-green-600" />
             )}
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-11 w-11"
             onClick={handleReject}
             disabled={busy !== null}
-            title="Reject"
+            aria-label="Reject proposal"
+            title="Reject proposal"
           >
             {busy === "reject" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              <X className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+              <X className="h-5 w-5 text-destructive" />
             )}
           </Button>
         </div>

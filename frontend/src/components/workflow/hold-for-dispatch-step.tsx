@@ -6,17 +6,17 @@ import { Inbox } from "lucide-react";
 
 import { events } from "@/lib/events";
 
-import type { StepComponentProps, UnassignedPoolInitial } from "./types";
+import type { StepComponentProps, HoldForDispatchInitial } from "./types";
 
 /**
- * No user input for this step — the job's been parked in the queue.
+ * No user input for this step — the job's been held for dispatch.
  * We emit `handler.applied` once on mount so workflow-observer sees
  * the same shape as for interactive handlers. There's no Skip button;
  * the "action" is already complete by virtue of the job existing.
  */
-export function UnassignedPoolStep({
+export function HoldForDispatchStep({
   initial,
-}: StepComponentProps<UnassignedPoolInitial>) {
+}: StepComponentProps<HoldForDispatchInitial>) {
   useEffect(() => {
     events.emit("handler.applied", {
       level: "user_action",
@@ -25,8 +25,8 @@ export function UnassignedPoolStep({
         entity_type: initial.entity_type,
       },
       payload: {
-        handler: "unassigned_pool",
-        input: { pool_count: initial.pool_count },
+        handler: "hold_for_dispatch",
+        input: { unassigned_count: initial.unassigned_count },
       },
     });
     // Emit once per mount; the proposal card remounts this component
@@ -38,9 +38,9 @@ export function UnassignedPoolStep({
     <div className="border rounded-md bg-muted/40 p-3 flex items-center gap-3">
       <Inbox className="h-4 w-4 text-muted-foreground shrink-0" />
       <div className="text-xs flex-1">
-        Added to the unassigned pool.{" "}
+        Held for dispatch.{" "}
         <span className="text-muted-foreground">
-          {initial.pool_count} waiting
+          {initial.unassigned_count} waiting
         </span>
         .
       </div>

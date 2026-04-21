@@ -6,6 +6,7 @@ import { useCompose } from "./compose-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { VoiceDictationButton } from "@/components/voice/voice-dictation-button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
@@ -641,6 +642,12 @@ export function ComposeEmail() {
                 className="h-full min-h-[160px] text-sm resize-none"
                 placeholder="Write your email..."
               />
+              <div className="absolute top-2 right-2">
+                <VoiceDictationButton
+                  surface="email_compose"
+                  onTranscript={(text) => setBody((body ? `${body} ${text}` : text))}
+                />
+              </div>
             </div>
 
             {/* AI assist toggle */}

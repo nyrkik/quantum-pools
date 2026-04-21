@@ -3,6 +3,7 @@
 import { useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Loader2 } from "lucide-react";
+import { VoiceDictationButton } from "@/components/voice/voice-dictation-button";
 
 interface ChatInputProps {
   value: string;
@@ -49,6 +50,12 @@ export function ChatInput({ value, onChange, onSend, sending, autoFocus = false,
         rows={1}
         className="flex-1 min-h-[40px] max-h-[160px] px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
         disabled={sending}
+      />
+      <VoiceDictationButton
+        surface="deepblue_chat"
+        size="md"
+        disabled={sending}
+        onTranscript={(text) => onChange(value ? `${value} ${text}` : text)}
       />
       <Button
         size="icon"

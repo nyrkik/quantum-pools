@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { VoiceDictationButton } from "@/components/voice/voice-dictation-button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -134,7 +135,15 @@ function DraftReplyBlock({ threadId, draft, onAction }: { threadId: string; draf
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setEditing(false); setEditText(draft); }}>Cancel</Button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="text-sm min-h-[200px] sm:min-h-[250px]" rows={12} autoFocus />
+              <div className="relative">
+                <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="text-sm min-h-[200px] sm:min-h-[250px]" rows={12} autoFocus />
+                <div className="absolute top-2 right-2">
+                  <VoiceDictationButton
+                    surface="email_reply"
+                    onTranscript={(text) => setEditText(editText ? `${editText} ${text}` : text)}
+                  />
+                </div>
+              </div>
               <div className="flex gap-2 items-end">
                 <div className="flex-1">
                   <Textarea value={reviseInstruction} onChange={(e) => setReviseInstruction(e.target.value)} placeholder="Tell AI how to change it..."

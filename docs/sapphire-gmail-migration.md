@@ -76,7 +76,7 @@ Work through in order. Check off as completed.
 - [ ] **3.2** Migration source: **IMAP** (other provider). Server: `imappro.zoho.com` (paid Zoho Mail/Workplace — NOT `imap.zoho.com` which is the free tier), Port: `993`, SSL: Yes.
 - [x] **3.3** ~~Run #1 — Brian~~ — Done 2026-04-21. 841 emails imported, 0 failures. Label `Zoho-Brian` applied post-hoc (~750 conversations after Gmail threading) using search `(to:sapphire-pools.com OR from:sapphire-pools.com) before:2026/04/09 -label:QP-Processed`. Tier 1 + Tier 2 junk cleanup already run.
 - [x] **3.4** ~~Run #2 — Kim~~ — Done 2026-04-21. 2,572 emails imported, 0 failures. **Label pass + cleanup NOT YET DONE** (pending resume).
-- [~] **3.4a** Run #3 — Chance: **IN PROGRESS as of 2026-04-21 handoff.** Same setup: source `chance@sapphire-pools.com` Zoho + password, target `brian@sapphire-pools.com`. Label `Zoho-Chance` to be applied post-completion.
+- [x] **3.4a** ~~Run #3 — Chance~~ — Done 2026-04-21. 546 emails imported. **Label pass + cleanup NOT YET DONE.**
 - [ ] **3.5** Monitor progress in Data migration dashboard. Each shows per-user status; wait for **Completed** on all three.
 - [ ] **3.6** Post-DMS cleanup workflow **per mailbox** (apply in order: Zoho-Brian ✅, Zoho-Kim ⏸, Zoho-Chance ⏸):
     - Label pass (use search tailored to exclude already-labeled mail):

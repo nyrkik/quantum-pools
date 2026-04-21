@@ -176,6 +176,8 @@ EVENT_CATALOG: dict[str, EventSpec] = {
     "settings.changed": EventSpec(levels=_U, frontend_emittable=True),
     "feature_flag.toggled": EventSpec(levels=_U, frontend_emittable=True),
     "workflow_config.changed": EventSpec(levels=_U, frontend_emittable=True),
+    "handler.applied": EventSpec(levels=_U, frontend_emittable=True),
+    "handler.abandoned": EventSpec(levels=_U, frontend_emittable=True),
 
     # --- 8.11 Navigation ---
     "page.viewed": EventSpec(levels=_U, frontend_emittable=True, requires_org=False),

@@ -194,8 +194,16 @@ Cloudflare account: `brian.e.parrotte@gmail.com` (account ID `4f5794507b55069e37
        |--- Add Re: prefix (unless is_new=True)
        |--- From address: org's agent_from_email
        |--- Check for gmail_api EmailIntegration (is_primary=True, status=connected)
+       |       |
+       |       +-- If a gmail_api integration EXISTS but isn't connected+primary:
+       |           FAIL FAST with a user-visible error ("Reconnect Gmail in
+       |           Inbox → Integrations"). Do NOT fall through to Postmark —
+       |           that would send from the user's Gmail address, which is
+       |           almost never a verified Postmark Sender Signature and
+       |           guarantees a 422. Surfaces as a toast on the approve/send
+       |           endpoint instead of an opaque 500.
        v
-  Gmail API (if connected)                    PostmarkProvider (fallback)
+  Gmail API (if connected)                    PostmarkProvider (no gmail_api at all)
        |                                            |
        |--- users.messages.send()                   |--- Returns MessageID
        |--- Appears in user's Sent folder           |

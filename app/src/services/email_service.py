@@ -430,6 +430,28 @@ class EmailService:
             )
         )).scalar_one_or_none()
 
+        if not integration_row:
+            # If a gmail_api integration exists for this org but isn't connected+primary,
+            # fail fast with a user-visible error. Falling through to Postmark here
+            # would send from the user's Gmail address, which is almost never a verified
+            # Postmark Sender Signature → guaranteed 422. Better to tell the user to
+            # reconnect Gmail than to silently 500.
+            stale = (await self.db.execute(
+                select(EmailIntegration).where(
+                    EmailIntegration.organization_id == org_id,
+                    EmailIntegration.type == "gmail_api",
+                )
+            )).scalars().first()
+            if stale:
+                return EmailResult(
+                    success=False,
+                    message_id=None,
+                    error=(
+                        f"Gmail integration is not connected (status: {stale.status}). "
+                        f"Reconnect it in Inbox → Integrations."
+                    ),
+                )
+
         if integration_row:
             try:
                 from src.services.gmail.outbound import send_reply as gmail_send_reply

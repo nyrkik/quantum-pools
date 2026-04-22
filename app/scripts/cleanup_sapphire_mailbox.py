@@ -14,10 +14,12 @@ Three independent passes, each with its own --dry-run preview:
         both stored the same mail), trashes all but the oldest.
 
     Pass 3 — Junk sweep (historical)
-        Runs the Tier 1 junk search once across all pre-cutover mail:
+        Runs a narrow junk search once across all pre-cutover mail:
         `before:2026/04/09 -label:QP-Processed -label:Sapphire
-        (has:list-unsubscribe OR from:(noreply OR no-reply OR donotreply)
-        OR category:promotions)` → trash.
+        category:promotions` → trash.
+        Intentionally narrow — noreply-sender matching swept up
+        transactional mail (Stripe/bank/shipping); Gmail's promotions
+        classifier is conservative enough on its own.
 
 All destructive actions move messages to Trash (30-day auto-recovery).
 Re-running is safe: Pass 1 is idempotent; Pass 2 skips already-unique
@@ -26,14 +28,17 @@ message-ids; Pass 3 excludes already-trashed.
 -----------------------------------------------------------------------
 ONE-TIME SETUP (before first run):
 
-1) GCP console → APIs & Services → Credentials → open the OAuth 2.0 Client
-   ID that QP uses (matches $GOOGLE_OAUTH_CLIENT_ID in app/.env). Under
-   "Authorized redirect URIs" add:
+1) GCP console (project `quantumpools-oauth`) → APIs & Services →
+   Credentials → Create Credentials → OAuth client ID → Application
+   type: Desktop app. Desktop clients natively support localhost
+   redirects — no URI configuration needed.
 
-        http://localhost:8765/
+   Add the new client's id+secret to app/.env as:
+        GMAIL_CLEANUP_CLIENT_ID=...
+        GMAIL_CLEANUP_CLIENT_SECRET=...
 
-   Save. This is in addition to QP's existing redirect URI — leave that
-   one in place.
+   Keep this separate from QP's production Web OAuth client
+   (GOOGLE_OAUTH_CLIENT_ID/SECRET).
 
 2) Run with --pass=auth on a machine where you can open a browser:
 
@@ -95,12 +100,12 @@ CUTOVER_DATE = "2026/04/09"
 # ---------- auth ----------
 
 def _client_config() -> dict:
-    cid = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
-    csec = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    cid = os.environ.get("GMAIL_CLEANUP_CLIENT_ID", "").strip()
+    csec = os.environ.get("GMAIL_CLEANUP_CLIENT_SECRET", "").strip()
     if not cid or not csec:
-        sys.exit("GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET missing from app/.env")
+        sys.exit("GMAIL_CLEANUP_CLIENT_ID / GMAIL_CLEANUP_CLIENT_SECRET missing from app/.env")
     return {
-        "web": {
+        "installed": {
             "client_id": cid,
             "client_secret": csec,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -150,8 +155,12 @@ def _load_token() -> Credentials | None:
 
 
 def run_auth_flow() -> Credentials:
-    """Interactive OAuth consent via local-server callback. Prints URL,
-    user opens it in browser, script catches the redirect."""
+    """Interactive OAuth consent via paste-back. Prints URL; user opens in
+    browser, signs in, and pastes the final redirected URL back. Works
+    without any localhost reachability (handy when SSH port-forwarding is
+    unavailable)."""
+    from urllib.parse import urlparse, parse_qs
+
     flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=REDIRECT_URI)
     auth_url, _state = flow.authorization_url(
         access_type="offline",
@@ -160,37 +169,20 @@ def run_auth_flow() -> Credentials:
     )
     print("Open this URL in a browser and grant access as brian@sapphire-pools.com:\n")
     print(f"    {auth_url}\n")
-    print(f"Waiting for redirect on localhost:{LOCAL_PORT} ...")
+    print(
+        "After you approve, Google will redirect to http://localhost:8765/... —\n"
+        "that page WILL fail to load (expected; nothing is listening). Copy the FULL\n"
+        "redirected URL from your browser's address bar and paste it below.\n"
+    )
+    pasted = input("Paste redirected URL here: ").strip()
+    if not pasted:
+        sys.exit("No URL pasted.")
 
-    # Minimal HTTP listener for the single callback
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-    from urllib.parse import urlparse, parse_qs
-
-    received: dict[str, str] = {}
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            qs = parse_qs(urlparse(self.path).query)
-            if "code" in qs:
-                received["code"] = qs["code"][0]
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(b"<h2>OK. You can close this tab.</h2>")
-            else:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(b"missing code")
-
-        def log_message(self, *a, **kw):  # silence default stderr logging
-            pass
-
-    server = HTTPServer(("127.0.0.1", LOCAL_PORT), Handler)
-    server.handle_request()  # one-shot
-
-    code = received.get("code")
+    parsed = urlparse(pasted)
+    qs = parse_qs(parsed.query)
+    code = (qs.get("code") or [None])[0]
     if not code:
-        sys.exit("No authorization code received.")
+        sys.exit(f"No ?code=... found in pasted URL. Got query: {parsed.query!r}")
 
     flow.fetch_token(code=code)
     creds = flow.credentials
@@ -246,29 +238,63 @@ def batch_modify(svc, ids: list[str], add: list[str] | None = None,
 
 def fetch_metadata_batch(svc, ids: list[str], headers: list[str]) -> dict[str, dict]:
     """Fetch format=metadata (headers only) for each id. Returns {id: message}.
-    Uses the BatchHttpRequest machinery — 100 requests per batch."""
+    Uses BatchHttpRequest with smaller chunks + exponential-backoff retry.
+
+    Gmail's "concurrent requests per user" cap is much tighter than its
+    per-second quota. BatchHttpRequest of 100 counts as 100 concurrent,
+    which bursts over the cap even though the per-second budget is fine.
+    Smaller batch + backoff keeps us inside both limits.
+    """
     out: dict[str, dict] = {}
+    remaining = list(ids)
+    attempt = 0
+    MAX_ATTEMPTS = 6
+    CHUNK = 25
 
-    def _cb(request_id, response, exception):
-        if exception:
-            print(f"  warn: metadata fetch failed for {request_id}: {exception}")
-            return
-        out[request_id] = response
+    while remaining and attempt < MAX_ATTEMPTS:
+        failed: list[str] = []
 
-    CHUNK = 100  # Google's BatchHttpRequest cap
-    for i in range(0, len(ids), CHUNK):
-        batch = svc.new_batch_http_request(callback=_cb)
-        for mid in ids[i:i + CHUNK]:
-            batch.add(
-                svc.users().messages().get(
-                    userId="me", id=mid, format="metadata", metadataHeaders=headers,
-                ),
-                request_id=mid,
-            )
-        batch.execute()
-        # Light rate-limit courtesy — 250 units/s quota, batchGet each msg=5u → 500u/batch.
-        # One batch per ~2s keeps us well inside.
-        time.sleep(0.3)
+        def _cb(request_id, response, exception):
+            if exception:
+                msg = str(exception)
+                # Retry on rate-limit (429), backend-errors (500/503), and concurrent-cap.
+                # Only give up on genuine client errors (404, 403, etc.)
+                retryable = (
+                    "429" in msg or "500" in msg or "503" in msg
+                    or "rateLimit" in msg.lower() or "concurrent" in msg.lower()
+                    or "backendError" in msg or "unavailable" in msg.lower()
+                )
+                if retryable:
+                    failed.append(request_id)
+                else:
+                    print(f"  warn (non-retryable): {request_id}: {exception}")
+                return
+            out[request_id] = response
+
+        for i in range(0, len(remaining), CHUNK):
+            batch = svc.new_batch_http_request(callback=_cb)
+            for mid in remaining[i:i + CHUNK]:
+                batch.add(
+                    svc.users().messages().get(
+                        userId="me", id=mid, format="metadata", metadataHeaders=headers,
+                    ),
+                    request_id=mid,
+                )
+            batch.execute()
+            time.sleep(0.5)
+
+        if not failed:
+            break
+
+        wait_s = min(2 ** attempt, 60)
+        print(f"  retrying {len(failed)} rate-limited messages in {wait_s}s "
+              f"(attempt {attempt + 1}/{MAX_ATTEMPTS})")
+        time.sleep(wait_s)
+        remaining = failed
+        attempt += 1
+
+    if remaining:
+        print(f"  warn: {len(remaining)} messages still unfetched after {MAX_ATTEMPTS} retries")
     return out
 
 
@@ -352,10 +378,14 @@ def pass2_dedupe(svc, dry_run: bool) -> None:
 
 def pass3_junk(svc, dry_run: bool) -> None:
     print("\n=== Pass 3: junk sweep (historical, pre-cutover) ===")
+    # category:promotions only — narrow + high-precision. Noreply-sender filtering
+    # was too aggressive (Stripe receipts, bank alerts, shipping notifications all
+    # come from noreply@ and aren't junk). has:list-unsubscribe returned 0 on this
+    # mailbox; likely DMS-imported mail didn't preserve the header for Gmail to
+    # index.
     q = (
         f"before:{CUTOVER_DATE} -label:QP-Processed -label:Sapphire "
-        f"(has:list-unsubscribe OR from:(noreply OR no-reply OR donotreply) "
-        f"OR category:promotions)"
+        f"category:promotions"
     )
     ids = list_all_message_ids(svc, q)
     print(f"  matches: {len(ids)}")

@@ -66,6 +66,7 @@ import {
   Tag,
   Bot,
   Check,
+  Wand2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -1474,6 +1475,15 @@ export function ThreadDetailSheet({
             title={isInSpam ? "Not spam" : "Spam"}
           >
             {isInSpam ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground"
+            onClick={() => router.push(`/inbox/rules?thread_id=${threadId}`)}
+            title="Add to existing rule or create a new one"
+          >
+            <Wand2 className="h-3.5 w-3.5" />
           </Button>
 
           <div className="h-4 w-px bg-border mx-1.5" aria-hidden />

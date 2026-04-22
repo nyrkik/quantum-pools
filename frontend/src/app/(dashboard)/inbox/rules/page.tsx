@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import {
   DndContext,
@@ -45,7 +45,7 @@ import {
   type RuleDraft,
 } from "@/components/inbox/rule-editor-dialog";
 import { api } from "@/lib/api";
-import { ArrowLeft, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, GripVertical, Pencil, Plus, Trash2, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 
 interface InboxFolder {
@@ -76,6 +76,54 @@ const EMPTY_DRAFT: RuleDraft = {
   actions: [{ type: "assign_folder", params: {} }],
   is_active: true,
 };
+
+// Thread context pulled when the rules page opens from a thread's wand
+// icon — drives the "Add from thread" banner + per-row Add-sender buttons.
+interface ThreadContext {
+  id: string;
+  subject: string | null;
+  contact_email: string;
+  category: string | null;
+  sender_tag: string | null;
+  folder_id: string | null;
+}
+
+function draftFromThread(ctx: ThreadContext): RuleDraft {
+  const sender = (ctx.contact_email || "").toLowerCase();
+  const actions: RuleDraft["actions"] = [];
+  if (ctx.folder_id) {
+    actions.push({ type: "assign_folder", params: { folder_id: ctx.folder_id } });
+  }
+  if (ctx.sender_tag) {
+    actions.push({ type: "assign_tag", params: { tag: ctx.sender_tag } });
+  }
+  if (ctx.category && ctx.category !== "general") {
+    actions.push({ type: "assign_category", params: { category: ctx.category } });
+  }
+  if (actions.length === 0) {
+    actions.push({ type: "assign_folder", params: {} });
+  }
+  return {
+    name: sender ? `Auto-handle ${sender}` : "New rule from inbox",
+    priority: 100,
+    conditions: sender
+      ? [{ field: "sender_email", operator: "equals", value: sender }]
+      : [],
+    actions,
+    is_active: true,
+  };
+}
+
+// A rule is "add-sender-compatible" when it has at least one condition
+// on sender_email or sender_domain with the equals operator — those are
+// the conditions whose value is a set the append-sender endpoint extends.
+function ruleAcceptsSender(rule: RuleDraft): boolean {
+  return rule.conditions.some(
+    (c) =>
+      (c.field === "sender_email" || c.field === "sender_domain") &&
+      c.operator === "equals",
+  );
+}
 
 const FIELD_LABEL: Record<string, string> = {
   sender_email: "sender",
@@ -158,12 +206,18 @@ function SortableRuleRow({
   onEdit,
   onToggleActive,
   onDelete,
+  threadContext,
+  onAddSender,
+  addingSenderFor,
 }: {
   rule: RuleRow;
   folderNameById: Map<string, string>;
   onEdit: (rule: RuleRow) => void;
   onToggleActive: (rule: RuleRow, next: boolean) => void;
   onDelete: (rule: RuleRow) => void;
+  threadContext: ThreadContext | null;
+  onAddSender: (rule: RuleRow) => void;
+  addingSenderFor: string | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: rule.id });
@@ -212,6 +266,19 @@ function SortableRuleRow({
         onCheckedChange={(v) => onToggleActive(rule, v)}
         className="shrink-0"
       />
+      {threadContext && ruleAcceptsSender(rule) && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 shrink-0 gap-1"
+          onClick={() => onAddSender(rule)}
+          disabled={addingSenderFor !== null}
+          title={`Add ${threadContext.contact_email} to this rule's sender list`}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add sender
+        </Button>
+      )}
       <Button
         variant="ghost"
         size="icon"
@@ -234,12 +301,16 @@ function SortableRuleRow({
 
 export default function InboxRulesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const threadIdParam = searchParams.get("thread_id");
   const [rules, setRules] = useState<RuleRow[]>([]);
   const [folders, setFolders] = useState<InboxFolder[]>([]);
   const [permissions, setPermissions] = useState<PermissionCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<RuleDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RuleRow | null>(null);
+  const [threadContext, setThreadContext] = useState<ThreadContext | null>(null);
+  const [addingSenderFor, setAddingSenderFor] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -266,6 +337,55 @@ export default function InboxRulesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Fetch thread context when arriving from a thread's wand icon. Pulls
+  // the same /v1/admin/agent-threads/{id} endpoint that the thread detail
+  // sheet uses, so a thread that loads in the inbox loads here.
+  useEffect(() => {
+    if (!threadIdParam) {
+      setThreadContext(null);
+      return;
+    }
+    api.get<{
+      id: string;
+      subject: string | null;
+      contact_email: string;
+      category: string | null;
+      sender_tag: string | null;
+      folder_id: string | null;
+    }>(`/v1/admin/agent-threads/${threadIdParam}`)
+      .then((t) =>
+        setThreadContext({
+          id: t.id,
+          subject: t.subject,
+          contact_email: t.contact_email,
+          category: t.category,
+          sender_tag: t.sender_tag,
+          folder_id: t.folder_id,
+        }),
+      )
+      .catch(() => {
+        toast.error("Couldn't load thread context");
+        setThreadContext(null);
+      });
+  }, [threadIdParam]);
+
+  const handleAddSender = async (rule: RuleRow) => {
+    if (!threadContext) return;
+    setAddingSenderFor(rule.id);
+    try {
+      await api.post(
+        `/v1/inbox-rules/${rule.id}/append-sender?thread_id=${encodeURIComponent(threadContext.id)}`,
+        { value: threadContext.contact_email.toLowerCase() },
+      );
+      toast.success(`Added ${threadContext.contact_email} to "${rule.name || "rule"}"`);
+      router.push(`/inbox?thread=${threadContext.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add sender");
+    } finally {
+      setAddingSenderFor(null);
+    }
+  };
 
   const folderNameById = useMemo(
     () => new Map(folders.map((f) => [f.id, f.name])),
@@ -353,11 +473,37 @@ export default function InboxRulesPage() {
         </Button>
       }
       action={
-        <Button size="sm" onClick={() => setEditing({ ...EMPTY_DRAFT })}>
+        <Button
+          size="sm"
+          onClick={() =>
+            setEditing(
+              threadContext ? draftFromThread(threadContext) : { ...EMPTY_DRAFT },
+            )
+          }
+        >
           <Plus className="h-3.5 w-3.5 mr-1" /> Add rule
         </Button>
       }
     >
+      {threadContext && (
+        <div className="flex items-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm dark:border-purple-800 dark:bg-purple-950/30">
+          <Wand2 className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0" />
+          <span className="flex-1 text-purple-900 dark:text-purple-200 min-w-0 truncate">
+            Adding from thread <span className="font-mono text-xs">{threadContext.contact_email}</span>
+            {threadContext.subject ? <> &middot; <span className="italic truncate">{threadContext.subject}</span></> : null}
+            . Click <span className="font-medium">Add sender</span> on an existing rule, or <span className="font-medium">Add rule</span> to create a new one prefilled from this thread.
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-purple-700 hover:bg-purple-100 dark:text-purple-300 dark:hover:bg-purple-900/30"
+            onClick={() => router.replace("/inbox/rules")}
+            title="Clear thread context"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : rules.length === 0 ? (
@@ -383,6 +529,9 @@ export default function InboxRulesPage() {
                   onEdit={(rule) => setEditing({ ...rule })}
                   onToggleActive={handleToggleActive}
                   onDelete={(rule) => setConfirmDelete(rule)}
+                  threadContext={threadContext}
+                  onAddSender={handleAddSender}
+                  addingSenderFor={addingSenderFor}
                 />
               ))}
             </SortableContext>

@@ -39,6 +39,7 @@ import {
   FolderOpen,
   X,
   Archive,
+  ArchiveRestore,
   Trash2,
   CheckCheck,
 } from "lucide-react";
@@ -1274,6 +1275,20 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleRestoreToInbox = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/restore-to-inbox`, {});
+      toast.success("Moved to inbox");
+      onAction();
+      onClose();
+    } catch {
+      toast.error("Failed to restore");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleDelete = async () => {
     setSending(true);
     try {
@@ -1464,6 +1479,17 @@ export function ThreadDetailSheet({
           <div className="h-4 w-px bg-border mx-1.5" aria-hidden />
 
           {/* Group 3 — remove: destructive, placed last */}
+          {thread.is_historical && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground"
+              onClick={handleRestoreToInbox}
+              title="Move to inbox"
+            >
+              <ArchiveRestore className="h-3.5 w-3.5" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"

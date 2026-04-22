@@ -169,6 +169,23 @@ async def dismiss_thread(
     return result
 
 
+@router.post("/agent-threads/{thread_id}/restore-to-inbox")
+async def restore_to_inbox(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a historical thread back into the active inbox."""
+    from src.services.events.actor_factory import actor_from_org_ctx
+    service = AgentThreadService(db)
+    result = await service.restore_to_inbox(
+        org_id=ctx.organization_id, thread_id=thread_id,
+        actor=actor_from_org_ctx(ctx),
+    )
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "restored_from_historical"})
+    return result
+
+
 @router.post("/agent-threads/{thread_id}/archive")
 async def archive_thread(
     thread_id: str,

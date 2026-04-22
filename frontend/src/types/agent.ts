@@ -174,6 +174,7 @@ export interface ThreadDetail {
   sender_tag: string | null;
   is_auto_handled?: boolean;
   contact_person_name?: string | null;
+  is_historical?: boolean;
   timeline: TimelineMessage[];
   actions: unknown[];
 }

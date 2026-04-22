@@ -376,4 +376,5 @@ class ThreadPresenter(Presenter):
             # without inbox_v2, and threads below the confidence floor.
             # Frontend falls back to last_snippet when null.
             "ai_summary_payload": t.ai_summary_payload if hasattr(t, "ai_summary_payload") else None,
+            "is_historical": bool(getattr(t, "is_historical", False)),
         }

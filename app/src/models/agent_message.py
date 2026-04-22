@@ -37,6 +37,10 @@ class AgentMessage(Base):
     customer_name: Mapped[str | None] = mapped_column(String(200))
     property_address: Mapped[str | None] = mapped_column(String(300))
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
+    # Per-message owner derived at ingest from Delivered-To → To → Cc → (outbound) From.
+    # Populated by the historical ingest; live pipeline may backfill later. Email string,
+    # not user_id — see is_historical note on AgentThread.
+    received_by_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     thread_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agent_threads.id"), index=True)
     postmark_message_id: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
     rfc_message_id: Mapped[str | None] = mapped_column(String(500), index=True, nullable=True)  # RFC 5322 Message-ID header — cross-source dedup key

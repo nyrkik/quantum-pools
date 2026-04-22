@@ -152,6 +152,7 @@ Organized by subsystem. Each event specifies level and minimum expected `entity_
 | `thread.opened` | user_action | thread_id | User opened a thread in the inbox. |
 | `thread.closed` | user_action | thread_id | User navigated away. Payload: `{duration_ms}`. |
 | `thread.archived` | user_action | thread_id | Payload: `{prior_status}`. |
+| `thread.restored_from_historical` | user_action | thread_id | User promoted a pre-cutover `is_historical=True` thread back into the active inbox. Payload: `{}`. Ingested by `app/scripts/import_historical_gmail.py`; discovered via customer detail page or All Mail, then restored when judged worth active tracking. |
 | `thread.deleted` | user_action | thread_id | Destructive — thread + all messages removed. Owner-only action. Payload: `{message_count, status_at_delete}`. Emitted BEFORE the delete so the audit trail survives. |
 | `thread.snoozed` | user_action | thread_id | Payload: `{until_date}`. |
 | `thread.unsnoozed` | system_action | thread_id | Background wake. |

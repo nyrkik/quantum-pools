@@ -9,7 +9,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, desc, func, or_, select, update
+from sqlalchemy import and_, delete, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -89,6 +89,15 @@ class AgentThreadService:
         Orthogonal to ``customer_id`` which scopes to a specific customer.
         """
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
+
+        # Historical threads (is_historical=True) are pre-cutover context
+        # imported by app/scripts/import_historical_gmail.py. They belong on
+        # the customer detail page (when customer_id scopes the query) and in
+        # the "All Mail" escape-hatch folder (for searching the archive), but
+        # NOT in triage folders. Exclude from all other default paths.
+        include_historical = bool(customer_id) or folder_key == "all"
+        if not include_historical:
+            base = base.where(AgentThread.is_historical == False)  # noqa: E712
 
         # "All Mail" folder: show literally every thread — no folder, status, or
         # category filtering. Use this when the user thinks an email is missing.
@@ -328,7 +337,13 @@ class AgentThreadService:
         chip-rendering gate; if either layer is misconfigured the count never
         leaks to managers/techs.
         """
-        thread_org = AgentThread.organization_id == org_id
+        # Historical threads are pre-cutover context and never belong in the
+        # inbox dashboard counts (total/pending/unread/stale/failed/etc.).
+        # Combining the two org predicates keeps every downstream count in sync.
+        thread_org = and_(
+            AgentThread.organization_id == org_id,
+            AgentThread.is_historical == False,  # noqa: E712
+        )
 
         def _vis_filter(q):
             """Apply visibility filter if permissions are scoped."""
@@ -654,6 +669,42 @@ class AgentThreadService:
         d["timeline"] = timeline
         d["actions"] = actions
         return d
+
+    async def restore_to_inbox(self, org_id: str, thread_id: str, actor=None) -> dict:
+        """Flip a historical thread back into the active inbox.
+
+        Historical threads are pre-cutover Gmail imports and are hidden from
+        the triage view by default. When a user finds one in the archive
+        that's worth tracking as active work, this promotes it.
+        """
+        from src.services.events.platform_event_service import PlatformEventService
+        from src.services.events.actor_factory import actor_system
+
+        thread = (await self.db.execute(
+            select(AgentThread).where(
+                AgentThread.id == thread_id,
+                AgentThread.organization_id == org_id,
+            )
+        )).scalar_one_or_none()
+        if not thread:
+            raise Exception("Thread not found")
+        if not thread.is_historical:
+            return {"restored": False, "reason": "not_historical"}
+
+        thread.is_historical = False
+
+        await PlatformEventService.emit(
+            db=self.db,
+            event_type="thread.restored_from_historical",
+            level="user_action" if actor and actor.actor_type == "user" else "system_action",
+            actor=actor or actor_system(),
+            organization_id=org_id,
+            entity_refs={"thread_id": thread_id},
+            payload={},
+        )
+
+        await self.db.commit()
+        return {"restored": True}
 
     async def archive_thread(self, org_id: str, thread_id: str, actor=None) -> dict:
         """Archive a thread — hidden from inbox but preserved for records."""

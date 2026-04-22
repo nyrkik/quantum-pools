@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, text
+from sqlalchemy import String, Integer, Boolean, DateTime, Text, ForeignKey, text, false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
@@ -76,6 +76,15 @@ class AgentThread(Base):
         Integer, default=0, server_default=text("0"), nullable=False,
     )
     ai_summary_debounce_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Historical ingest — pre-cutover mail imported via app/scripts/import_historical_gmail.py.
+    # `is_historical=True` threads are excluded from `/inbox` default queries and never queue
+    # for AI/events/notifications. `primary_owner_email` is the derived per-thread owner (email
+    # string, not user_id — stable across future mailbox reshuffles).
+    is_historical: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(),
+    )
+    primary_owner_email: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(

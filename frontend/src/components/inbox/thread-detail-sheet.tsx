@@ -1900,11 +1900,15 @@ export function ThreadDetailSheet({
             )}
             {thread.matched_customer_id && (
               thread.linked_estimate_invoice_id ? (
-                // Estimate already accepted — navigate to the invoice.
+                // Estimate already accepted — navigate to the invoice,
+                // carrying `?from=<current path>` so Back returns here.
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => router.push(`/invoices/${thread.linked_estimate_invoice_id}`)}
+                  onClick={() => {
+                    const from = typeof window !== "undefined" ? window.location.pathname : "/inbox";
+                    router.push(`/invoices/${thread.linked_estimate_invoice_id}?from=${encodeURIComponent(from)}`);
+                  }}
                 >
                   <FileText className="h-3.5 w-3.5 mr-1.5" />
                   View Estimate →

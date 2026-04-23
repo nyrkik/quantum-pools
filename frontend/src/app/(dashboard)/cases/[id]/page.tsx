@@ -1452,7 +1452,10 @@ export default function CaseDetailPage({
                     toast.success("Draft accepted", {
                       action: {
                         label: "View invoice →",
-                        onClick: () => router.push(`/invoices/${resolved.outcome_entity_id}`),
+                        onClick: () => {
+                          const from = typeof window !== "undefined" ? window.location.pathname : `/cases/${id}`;
+                          router.push(`/invoices/${resolved.outcome_entity_id}?from=${encodeURIComponent(from)}`);
+                        },
                       },
                     });
                   }

@@ -1899,15 +1899,37 @@ export function ThreadDetailSheet({
               </Button>
             )}
             {thread.matched_customer_id && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDraftEstimate}
-                disabled={draftingEstimate}
-              >
-                {draftingEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FileText className="h-3.5 w-3.5 mr-1.5" />}
-                Draft Estimate
-              </Button>
+              thread.linked_estimate_invoice_id ? (
+                // Estimate already accepted — navigate to the invoice.
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push(`/invoices/${thread.linked_estimate_invoice_id}`)}
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1.5" />
+                  View Estimate →
+                </Button>
+              ) : thread.pending_estimate_proposal_id && thread.case_id ? (
+                // Draft already staged — navigate to case where user accepts.
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { onClose(); router.push(`/cases/${thread.case_id}`); }}
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1.5" />
+                  View Draft →
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDraftEstimate}
+                  disabled={draftingEstimate}
+                >
+                  {draftingEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+                  Draft Estimate
+                </Button>
+              )
             )}
           </div>
 

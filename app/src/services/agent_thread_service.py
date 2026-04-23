@@ -705,6 +705,37 @@ class AgentThreadService:
         d = await presenter.one(thread, user_id=user_id)
         d["timeline"] = timeline
         d["actions"] = actions
+
+        # Phase 5: state fields that let the UI render the Draft Estimate
+        # button correctly — hide or relabel when a draft is already pending
+        # or an invoice already exists, so users can't click and accidentally
+        # stage a duplicate.
+        from src.models.agent_proposal import AgentProposal, STATUS_STAGED
+        from src.models.invoice import Invoice
+        from src.models.job_invoice import JobInvoice
+
+        staged_estimate = (await self.db.execute(
+            select(AgentProposal.id).where(
+                AgentProposal.organization_id == org_id,
+                AgentProposal.entity_type == "estimate",
+                AgentProposal.source_type == "thread",
+                AgentProposal.source_id == thread_id,
+                AgentProposal.status == STATUS_STAGED,
+            ).limit(1)
+        )).scalar_one_or_none()
+        d["pending_estimate_proposal_id"] = staged_estimate
+
+        linked_estimate = (await self.db.execute(
+            select(Invoice.id)
+            .join(JobInvoice, JobInvoice.invoice_id == Invoice.id)
+            .join(AgentAction, AgentAction.id == JobInvoice.action_id)
+            .where(
+                AgentAction.thread_id == thread_id,
+                Invoice.document_type == "estimate",
+            ).limit(1)
+        )).scalar_one_or_none()
+        d["linked_estimate_invoice_id"] = linked_estimate
+
         return d
 
     async def restore_to_inbox(self, org_id: str, thread_id: str, actor=None) -> dict:

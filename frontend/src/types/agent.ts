@@ -175,6 +175,12 @@ export interface ThreadDetail {
   is_auto_handled?: boolean;
   contact_person_name?: string | null;
   is_historical?: boolean;
+  // Phase 5: present when an AI-drafted estimate is staged or already
+  // accepted for this thread. Lets the UI render "View Draft →" or
+  // "View Estimate →" instead of offering a fresh "Draft Estimate" click
+  // that would silently hit the backend's existing-record short-circuit.
+  pending_estimate_proposal_id?: string | null;
+  linked_estimate_invoice_id?: string | null;
   timeline: TimelineMessage[];
   actions: unknown[];
 }

@@ -258,7 +258,7 @@ export default function InvoiceDetailPage({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => router.push(invoice.document_type === "estimate" ? "/invoices?tab=estimates" : "/invoices")}>
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>

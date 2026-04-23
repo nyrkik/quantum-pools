@@ -24,6 +24,7 @@ import { Check, X, Loader2, Pencil } from "lucide-react";
 
 import {
   acceptProposal,
+  editAndAcceptProposal,
   rejectProposal,
   type Proposal,
 } from "@/lib/proposals";
@@ -35,7 +36,16 @@ import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
 import { EquipmentProposalBody } from "./renderers/EquipmentProposalBody";
 import { OrgConfigProposalBody } from "./renderers/OrgConfigProposalBody";
 
-type BodyRenderer = (props: { payload: Record<string, unknown> }) => ReactNode;
+export interface ProposalBodyProps {
+  payload: Record<string, unknown>;
+  /** True when the user is editing before accepting. Renderer should
+   *  switch its controls to editable inputs. */
+  isEditing?: boolean;
+  /** When editing, call with the updated payload on every change. */
+  onChange?: (next: Record<string, unknown>) => void;
+}
+
+type BodyRenderer = (props: ProposalBodyProps) => ReactNode;
 
 const RENDERERS: Record<string, BodyRenderer> = {
   job: JobProposalBody,
@@ -44,16 +54,14 @@ const RENDERERS: Record<string, BodyRenderer> = {
   org_config: OrgConfigProposalBody,
 };
 
+// Entity types whose renderer supports inline edit mode. Grows as each
+// Phase 5+ migration wires its renderer.
+const EDITABLE_TYPES = new Set<string>(["estimate"]);
+
 interface ProposalCardProps {
   proposal: Proposal;
   onResolved?: (p: Proposal) => void;
   onError?: (err: Error) => void;
-  /**
-   * Custom Edit & Accept handler. When provided, the button is enabled.
-   * Each entity_type migration (Step 9+) wires this to the matching
-   * pre-populated editor. Until then, we render the button disabled.
-   */
-  onEditAndAccept?: (p: Proposal) => void;
 }
 
 function prettifyAgent(agent_type: string): string {
@@ -66,9 +74,8 @@ export function ProposalCard({
   proposal,
   onResolved,
   onError,
-  onEditAndAccept,
 }: ProposalCardProps) {
-  const [busy, setBusy] = useState<"accept" | "reject" | null>(null);
+  const [busy, setBusy] = useState<"accept" | "reject" | "save" | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [rejectPermanent, setRejectPermanent] = useState(false);
@@ -76,10 +83,19 @@ export function ProposalCard({
   // user completes or skips the step.
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [pendingResolved, setPendingResolved] = useState<Proposal | null>(null);
+  // Inline edit mode — renderer renders Inputs, footer swaps to
+  // Save & Accept / Cancel. `editedPayload` is a snapshot the renderer
+  // mutates via onChange; Save & Accept commits it via the
+  // edit-and-accept endpoint (records the diff as an `agent_corrections`
+  // row and closes the proposal in one transaction).
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedPayload, setEditedPayload] = useState<Record<string, unknown>>(
+    proposal.proposed_payload,
+  );
 
   const Renderer = RENDERERS[proposal.entity_type];
   const resolved = proposal.status !== "staged";
-  const canEdit = Boolean(onEditAndAccept);
+  const canEdit = EDITABLE_TYPES.has(proposal.entity_type);
 
   async function handleAccept() {
     setBusy("accept");
@@ -123,8 +139,36 @@ export function ProposalCard({
     }
   }
 
+  function handleEnterEdit() {
+    setEditedPayload(proposal.proposed_payload);
+    setIsEditing(true);
+  }
+
+  function handleCancelEdit() {
+    setIsEditing(false);
+    setEditedPayload(proposal.proposed_payload);
+  }
+
+  async function handleSaveAndAccept() {
+    setBusy("save");
+    try {
+      const res = await editAndAcceptProposal(proposal.id, editedPayload);
+      setIsEditing(false);
+      if (res.next_step) {
+        setPendingResolved(res.proposal);
+        setNextStep(res.next_step);
+      } else {
+        onResolved?.(res.proposal);
+      }
+    } catch (err) {
+      onError?.(err as Error);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
-    <Card className="shadow-sm border-l-4 border-primary">
+    <Card className={`shadow-sm border-l-4 ${isEditing ? "border-amber-400" : "border-primary"}`}>
       <div className="flex items-center justify-between gap-2 bg-primary/10 px-4 py-2 border-b">
         <div className="flex items-center gap-2 text-xs">
           <Badge variant="outline" className="capitalize">
@@ -148,7 +192,11 @@ export function ProposalCard({
 
       <div className="p-4">
         {Renderer ? (
-          <Renderer payload={proposal.proposed_payload} />
+          <Renderer
+            payload={isEditing ? editedPayload : proposal.proposed_payload}
+            isEditing={isEditing}
+            onChange={isEditing ? setEditedPayload : undefined}
+          />
         ) : (
           <pre className="text-xs bg-muted p-2 rounded overflow-x-auto">
             {JSON.stringify(proposal.proposed_payload, null, 2)}
@@ -162,17 +210,17 @@ export function ProposalCard({
         </div>
       )}
 
-      {!resolved && !nextStep && (
+      {!resolved && !nextStep && !isEditing && (
         <div className="flex items-center gap-2 justify-end px-4 py-3 border-t bg-muted/30">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => canEdit && onEditAndAccept?.(proposal)}
-            disabled={!canEdit}
+            onClick={handleEnterEdit}
+            disabled={!canEdit || busy !== null}
             title={
               canEdit
-                ? "Open in editor to edit before accepting"
-                : "Editor integration pending — use Reject then create manually"
+                ? "Edit the proposal before accepting"
+                : "Inline editing not available for this proposal type"
             }
           >
             <Pencil className="h-3.5 w-3.5 mr-1" />
@@ -239,7 +287,7 @@ export function ProposalCard({
           </AlertDialog>
 
           <Button
-            variant="default"
+            variant="ghost"
             size="sm"
             onClick={handleAccept}
             disabled={busy !== null}
@@ -247,9 +295,38 @@ export function ProposalCard({
             {busy === "accept" ? (
               <Loader2 className="h-4 w-4 animate-spin mr-1" />
             ) : (
-              <Check className="h-4 w-4 mr-1" />
+              <Check className="h-4 w-4 mr-1 text-green-600" />
             )}
             Accept
+          </Button>
+        </div>
+      )}
+
+      {isEditing && (
+        <div className="flex items-center gap-2 justify-end px-4 py-3 border-t bg-amber-50 dark:bg-amber-950/30">
+          <span className="text-xs text-amber-700 dark:text-amber-400 mr-auto">
+            Editing — save commits as your version with correction recorded
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCancelEdit}
+            disabled={busy !== null}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSaveAndAccept}
+            disabled={busy !== null}
+          >
+            {busy === "save" ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+            ) : (
+              <Check className="h-4 w-4 mr-1 text-green-600" />
+            )}
+            Save & Accept
           </Button>
         </div>
       )}

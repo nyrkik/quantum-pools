@@ -35,6 +35,7 @@ import { JobProposalBody } from "./renderers/JobProposalBody";
 import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
 import { EquipmentProposalBody } from "./renderers/EquipmentProposalBody";
 import { OrgConfigProposalBody } from "./renderers/OrgConfigProposalBody";
+import { EmailReplyProposalBody } from "./renderers/EmailReplyProposalBody";
 
 export interface ProposalBodyProps {
   payload: Record<string, unknown>;
@@ -52,11 +53,12 @@ const RENDERERS: Record<string, BodyRenderer> = {
   estimate: EstimateProposalBody,
   equipment_item: EquipmentProposalBody,
   org_config: OrgConfigProposalBody,
+  email_reply: EmailReplyProposalBody,
 };
 
 // Entity types whose renderer supports inline edit mode. Grows as each
 // Phase 5+ migration wires its renderer.
-const EDITABLE_TYPES = new Set<string>(["estimate"]);
+const EDITABLE_TYPES = new Set<string>(["estimate", "email_reply"]);
 
 interface ProposalCardProps {
   proposal: Proposal;

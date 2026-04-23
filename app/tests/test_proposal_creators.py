@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select, text
 
 from src.models.agent_action import AgentAction
+from src.models.agent_message import AgentMessage
 from src.models.agent_thread import AgentThread
 from src.models.customer import Customer
 from src.models.equipment_item import EquipmentItem
@@ -451,6 +452,158 @@ async def test_org_config_creator_rejects_unknown_key(db_session, org_a):
         )
 
 
+# --- email_reply ---------------------------------------------------------
+
+
+async def _seed_inbound_message(db, org_id: str, thread_id: str, customer_id: str | None) -> AgentMessage:
+    msg = AgentMessage(
+        id=str(uuid.uuid4()),
+        organization_id=org_id,
+        thread_id=thread_id,
+        direction="inbound",
+        from_email="client@example.com",
+        to_email="support@sapphire-pools.com",
+        subject="Pump question",
+        body="Original customer body",
+        status="pending",
+        matched_customer_id=customer_id,
+        customer_name="Test Customer" if customer_id else None,
+    )
+    db.add(msg)
+    await db.flush()
+    return msg
+
+
+@pytest.mark.asyncio
+async def test_email_reply_creator_sends_and_records_outbound(db_session, org_a, monkeypatch):
+    """Accept → EmailService.send_agent_reply called; outbound AgentMessage
+    row exists; inbound msg marked sent; thread status updated."""
+    from src.services.email_service import EmailResult
+
+    send_calls: list[dict] = []
+
+    async def fake_send(self, *args, **kwargs):
+        send_calls.append(kwargs)
+        return EmailResult(success=True, message_id="postmark-fake")
+
+    monkeypatch.setattr(
+        "src.services.email_service.EmailService.send_agent_reply",
+        fake_send,
+        raising=True,
+    )
+
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=cust_id)
+    inbound = await _seed_inbound_message(db_session, org_a.id, thread_id, cust_id)
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="email_drafter",
+        entity_type="email_reply",
+        source_type="message",
+        source_id=inbound.id,
+        proposed_payload={
+            "thread_id": thread_id,
+            "reply_to_message_id": inbound.id,
+            "to": inbound.from_email,
+            "subject": inbound.subject,
+            "body": "Thanks — we'll take a look and follow up.",
+            "customer_id": cust_id,
+        },
+    )
+    await db_session.commit()
+
+    _, created = await service.accept(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    # send_agent_reply was invoked with the payload values
+    assert len(send_calls) == 1
+    assert send_calls[0]["to"] == inbound.from_email
+    assert send_calls[0]["body_text"] == "Thanks — we'll take a look and follow up."
+
+    # Outbound AgentMessage row exists on the thread
+    assert isinstance(created, AgentMessage)
+    assert created.direction == "outbound"
+    assert created.status == "sent"
+    assert created.thread_id == thread_id
+
+    # Inbound message was marked sent + final_response captured
+    await db_session.refresh(inbound)
+    assert inbound.status == "sent"
+    assert inbound.final_response == "Thanks — we'll take a look and follow up."
+
+
+@pytest.mark.asyncio
+async def test_email_reply_creator_rejects_invalid_payload(db_session, org_a):
+    """Missing required fields → Pydantic validation error at stage time."""
+    service = ProposalService(db_session)
+    with pytest.raises(Exception):
+        await service.stage(
+            org_id=org_a.id,
+            agent_type="email_drafter",
+            entity_type="email_reply",
+            source_type="message",
+            source_id=None,
+            # Missing body
+            proposed_payload={
+                "thread_id": "t",
+                "reply_to_message_id": "m",
+                "to": "x@y.com",
+                "subject": "hi",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_email_reply_creator_raises_on_missing_thread(db_session, org_a, monkeypatch):
+    """Accept on a proposal whose thread no longer exists in the org →
+    NotFoundError, proposal stays staged (no send, no outbound row)."""
+    from src.services.email_service import EmailResult
+
+    send_calls: list[dict] = []
+
+    async def fake_send(self, *args, **kwargs):
+        send_calls.append(kwargs)
+        return EmailResult(success=True, message_id="postmark-fake")
+
+    monkeypatch.setattr(
+        "src.services.email_service.EmailService.send_agent_reply",
+        fake_send,
+        raising=True,
+    )
+
+    user_id = await _seed_user(db_session)
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="email_drafter",
+        entity_type="email_reply",
+        source_type="message",
+        source_id=None,
+        proposed_payload={
+            "thread_id": "deadbeef-thread-that-does-not-exist",
+            "reply_to_message_id": "deadbeef-msg-that-does-not-exist",
+            "to": "x@y.com",
+            "subject": "hi",
+            "body": "hi",
+        },
+    )
+    await db_session.commit()
+
+    with pytest.raises(Exception):
+        await service.accept(
+            proposal_id=p.id,
+            actor=Actor(actor_type="user", user_id=user_id),
+        )
+    # No send happened, no outbound row was created
+    assert len(send_calls) == 0
+
+
 # --- registry smoke ------------------------------------------------------
 
 
@@ -461,3 +614,9 @@ async def test_all_four_phase_2_entity_types_registered():
     # All 4 Phase-2 creators are registered on import
     for expected in ("job", "estimate", "equipment_item", "org_config"):
         assert expected in types, f"{expected!r} missing from registry"
+
+
+@pytest.mark.asyncio
+async def test_email_reply_registered():
+    from src.services.proposals.registry import known_entity_types
+    assert "email_reply" in known_entity_types()

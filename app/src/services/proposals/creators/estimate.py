@@ -116,6 +116,19 @@ async def _find_or_create_linked_job(
     )
 
 
+def _coerce_date(value):
+    """Pydantic stores date fields as ISO strings in JSONB (via
+    model_dump(mode="json")). Convert back to `date` before handing to
+    InvoiceService — asyncpg rejects strings for DATE columns with
+    'str object has no attribute toordinal'."""
+    from datetime import date as _date
+    if value is None or isinstance(value, _date):
+        return value
+    if isinstance(value, str):
+        return _date.fromisoformat(value)
+    return value
+
+
 @register("estimate", schema=EstimateProposalPayload)
 async def create_estimate_from_proposal(
     payload: dict, org_id: str, actor: Actor, db: AsyncSession,
@@ -132,8 +145,8 @@ async def create_estimate_from_proposal(
         document_type="estimate",
         subject=payload.get("subject"),
         notes=payload.get("notes"),
-        issue_date=payload.get("issue_date") or _date.today(),
-        due_date=payload.get("due_date"),
+        issue_date=_coerce_date(payload.get("issue_date")) or _date.today(),
+        due_date=_coerce_date(payload.get("due_date")),
         case_id=payload.get("case_id"),
         billing_name=payload.get("billing_name"),
     )

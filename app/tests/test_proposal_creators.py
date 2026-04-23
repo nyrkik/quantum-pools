@@ -159,6 +159,42 @@ async def test_estimate_creator_produces_invoice(db_session, org_a, event_record
 
 
 @pytest.mark.asyncio
+async def test_estimate_creator_coerces_iso_date_strings(db_session, org_a):
+    """Pydantic stores dates as ISO strings in JSONB. The creator must
+    coerce back to `date` before calling InvoiceService — otherwise
+    asyncpg raises 'str has no attribute toordinal' on the DATE column.
+    Regression test for the edit-and-accept path which exposed this."""
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="estimate_generator",
+        entity_type="estimate",
+        source_type="test",
+        source_id=None,
+        proposed_payload={
+            "customer_id": cust_id,
+            "subject": "Spring opening",
+            # ISO strings, not date objects — matches what Pydantic stores.
+            "issue_date": "2026-04-23",
+            "due_date": "2026-05-23",
+            "line_items": [{"description": "Service", "quantity": 1, "unit_price": 200.00}],
+        },
+    )
+    await db_session.commit()
+
+    _, created = await service.accept(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    assert isinstance(created, Invoice)
+    assert created.issue_date is not None
+
+
+@pytest.mark.asyncio
 async def test_estimate_creator_rejects_empty_line_items(db_session, org_a):
     service = ProposalService(db_session)
     with pytest.raises(Exception):

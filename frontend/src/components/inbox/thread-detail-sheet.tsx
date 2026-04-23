@@ -1426,15 +1426,22 @@ export function ThreadDetailSheet({
         return;
       }
 
-      // New flow: proposal staged. Stay in context — user accepts via
-      // ProposalCard in the inbox summary / row hover / case detail.
+      // New flow: proposal staged. Send the user somewhere they can act
+      // on it. Case detail is where the ProposalCard renders at the top
+      // of the page, so the path is: draft → see draft → accept.
       if (result.existing) {
-        toast.info("Estimate draft already pending — review it in the case or inbox summary");
+        toast.info("Estimate draft already pending — review and accept");
       } else {
         toast.success("Estimate drafted — review and accept to send to the customer");
       }
       onAction();
-      onClose();
+      if (thread?.case_id) {
+        onClose();
+        router.push(`/cases/${thread.case_id}`);
+      }
+      // If the thread has no case, keep the sheet open — the user can
+      // navigate elsewhere or scroll to find the proposal in the summary.
+      // (Future: render the ProposalCard inline in the sheet itself.)
     } catch {
       toast.error("Failed to draft estimate");
     } finally {

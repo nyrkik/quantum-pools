@@ -235,14 +235,21 @@ Respond with JSON:
         return {"action_id": action.id, "description": action.description, "action_type": action.action_type, "case_id": case_id}
 
     async def draft_estimate_from_thread(self, org_id: str, thread_id: str, created_by: str) -> dict:
-        """AI reads conversation and drafts an estimate with line items."""
+        """AI reads conversation and drafts an estimate — staged as a proposal.
+
+        Phase 5 migration: drafting stages an `estimate` proposal via
+        `ProposalService.stage`. The Invoice row (and job link) only
+        materialize when a human accepts via `POST /v1/proposals/{id}/accept`.
+        DNA rule 5 — AI never commits to the customer — is enforced by
+        the proposal boundary.
+        """
         thread = (await self.db.execute(
             select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
         )).scalar_one_or_none()
         if not thread:
             return {"error": "not_found", "detail": "Thread not found"}
 
-        # Check for existing estimate linked to this thread via a job
+        # Short-circuit: if an estimate is already linked to this thread via a job, return it.
         from src.models.invoice import Invoice
         from src.models.job_invoice import JobInvoice
         existing = (await self.db.execute(
@@ -261,6 +268,26 @@ Respond with JSON:
                 "subject": existing.subject,
                 "total": float(existing.total or 0),
                 "line_items": [],
+                "existing": True,
+            }
+
+        # Also short-circuit if a staged estimate proposal already exists for this thread.
+        from src.models.agent_proposal import AgentProposal, STATUS_STAGED
+        existing_proposal = (await self.db.execute(
+            select(AgentProposal).where(
+                AgentProposal.organization_id == org_id,
+                AgentProposal.entity_type == "estimate",
+                AgentProposal.source_type == "thread",
+                AgentProposal.source_id == thread_id,
+                AgentProposal.status == STATUS_STAGED,
+            )
+        )).scalar_one_or_none()
+        if existing_proposal:
+            return {
+                "proposal_id": existing_proposal.id,
+                "status": "staged",
+                "subject": existing_proposal.proposed_payload.get("subject"),
+                "line_items": existing_proposal.proposed_payload.get("line_items", []),
                 "existing": True,
             }
 
@@ -327,85 +354,43 @@ Rules:
         except Exception as e:
             return {"error": "ai_failed", "detail": f"Failed: {str(e)}"}
 
-        # Create the estimate via InvoiceService
-        from src.services.invoice_service import InvoiceService
-
         line_items = data.get("line_items", [])
         if not line_items:
             return {"error": "no_items", "detail": "AI could not extract line items from conversation"}
 
-        inv_svc = InvoiceService(self.db)
-        invoice = await inv_svc.create(
-            org_id,
-            customer_id=thread.matched_customer_id,
-            line_items_data=[{
-                "description": li.get("description", "Service"),
-                "quantity": li.get("quantity", 1),
-                "unit_price": li.get("unit_price", 0),
-            } for li in line_items],
-            document_type="estimate",
-            subject=data.get("subject", thread.subject or "Service Estimate"),
-            issue_date=date_type.today(),
-            status="draft",
+        # Stage the estimate as a proposal. The creator handles InvoiceService.create
+        # + job-linking inside ProposalService.accept's transaction when a human accepts.
+        from src.services.events.actor_factory import actor_agent
+        from src.services.proposals import ProposalService
+
+        subject = data.get("subject", thread.subject or "Service Estimate")
+        proposal = await ProposalService(self.db).stage(
+            org_id=org_id,
+            agent_type="estimate_generator",
+            entity_type="estimate",
+            source_type="thread",
+            source_id=thread_id,
+            proposed_payload={
+                "customer_id": thread.matched_customer_id,
+                "thread_id": thread_id,
+                "case_id": thread.case_id,
+                "subject": subject,
+                "issue_date": date_type.today().isoformat(),
+                "line_items": [{
+                    "description": li.get("description", "Service"),
+                    "quantity": li.get("quantity", 1),
+                    "unit_price": li.get("unit_price", 0),
+                } for li in line_items],
+            },
+            input_context=f"Drafted by {created_by} from thread {thread.subject!r}",
+            actor=actor_agent("estimate_generator"),
         )
-
-        # Find best job to link: thread match first, then customer match
-        from src.services.job_invoice_service import link_job_invoice
-
-        existing_job = None
-        # 1. Try thread-linked jobs
-        thread_jobs = (await self.db.execute(
-            select(AgentAction).where(
-                AgentAction.thread_id == thread_id,
-                AgentAction.organization_id == org_id,
-                AgentAction.status.in_(("open", "in_progress", "pending_approval")),
-            )
-        )).scalars().all()
-        if thread_jobs:
-            # Prefer repair/site_visit over follow_up/bid
-            preferred = [j for j in thread_jobs if j.action_type in ("repair", "site_visit")]
-            existing_job = preferred[0] if preferred else thread_jobs[0]
-
-        # 2. Fall back to customer-matched open jobs (for manually-created jobs)
-        if not existing_job and thread.matched_customer_id:
-            cust_jobs = (await self.db.execute(
-                select(AgentAction).where(
-                    AgentAction.organization_id == org_id,
-                    AgentAction.customer_id == thread.matched_customer_id,
-                    AgentAction.status.in_(("open", "in_progress", "pending_approval")),
-                ).order_by(desc(AgentAction.created_at))
-            )).scalars().all()
-            if cust_jobs:
-                preferred = [j for j in cust_jobs if j.action_type in ("repair", "site_visit")]
-                existing_job = preferred[0] if preferred else cust_jobs[0]
-
-        if existing_job:
-            await link_job_invoice(self.db, existing_job.id, invoice.id, linked_by=created_by)
-        else:
-            from src.services.agent_action_service import AgentActionService
-            from src.services.events.actor_factory import actor_agent
-            job = await AgentActionService(self.db).add_job(
-                org_id=org_id,
-                action_type="bid",
-                description=data.get("subject", thread.subject or "Service Estimate")[:60],
-                source="thread_ai",
-                actor=actor_agent("email_drafter"),
-                case_id=thread.case_id,
-                thread_id=thread_id,
-                customer_id=thread.matched_customer_id,
-                customer_name=thread.customer_name,
-                job_path="customer",
-                created_by=created_by,
-            )
-            await link_job_invoice(self.db, job.id, invoice.id, linked_by=created_by)
-
         await self.db.commit()
 
         return {
-            "invoice_id": invoice.id,
-            "invoice_number": invoice.invoice_number,
-            "subject": invoice.subject,
-            "total": float(invoice.total or 0),
+            "proposal_id": proposal.id,
+            "status": "staged",
+            "subject": subject,
             "line_items": [{
                 "description": li.get("description"),
                 "quantity": li.get("quantity"),

@@ -17,9 +17,11 @@ import pytest
 from sqlalchemy import select, text
 
 from src.models.agent_action import AgentAction
+from src.models.agent_thread import AgentThread
 from src.models.customer import Customer
 from src.models.equipment_item import EquipmentItem
 from src.models.invoice import Invoice
+from src.models.job_invoice import JobInvoice
 from src.models.property import Property
 from src.models.user import User
 from src.models.water_feature import WaterFeature
@@ -165,6 +167,167 @@ async def test_estimate_creator_rejects_empty_line_items(db_session, org_a):
             source_type="t", source_id=None,
             proposed_payload={"customer_id": "c", "line_items": []},  # empty — rejected
         )
+
+
+async def _seed_thread(db, org_id: str, customer_id: str | None = None) -> str:
+    t = AgentThread(
+        id=str(uuid.uuid4()),
+        organization_id=org_id,
+        thread_key=f"est-{uuid.uuid4().hex[:8]}",
+        contact_email="client@example.com",
+        subject="Pump is leaking",
+        status="pending",
+        category="service_request",
+        message_count=1,
+        last_direction="inbound",
+        matched_customer_id=customer_id,
+        customer_name="Test Customer" if customer_id else None,
+    )
+    db.add(t)
+    await db.flush()
+    return t.id
+
+
+async def _has_link(db, action_id: str, invoice_id: str) -> bool:
+    row = (await db.execute(
+        select(JobInvoice).where(
+            JobInvoice.action_id == action_id,
+            JobInvoice.invoice_id == invoice_id,
+        )
+    )).scalar_one_or_none()
+    return row is not None
+
+
+@pytest.mark.asyncio
+async def test_estimate_creator_links_to_existing_thread_job(db_session, org_a):
+    """thread_id with an existing repair job on the thread → invoice linked to that job."""
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=cust_id)
+    existing_job = AgentAction(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        thread_id=thread_id,
+        customer_id=cust_id,
+        action_type="repair",
+        description="Replace pump seal",
+        status="open",
+    )
+    db_session.add(existing_job)
+    await db_session.flush()
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="estimate_generator",
+        entity_type="estimate",
+        source_type="thread",
+        source_id=thread_id,
+        proposed_payload={
+            "customer_id": cust_id,
+            "thread_id": thread_id,
+            "subject": "Pump repair",
+            "line_items": [{"description": "Labor", "quantity": 1, "unit_price": 250.00}],
+        },
+    )
+    await db_session.commit()
+
+    _, created = await service.accept(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    assert isinstance(created, Invoice)
+    assert await _has_link(db_session, existing_job.id, created.id)
+
+
+@pytest.mark.asyncio
+async def test_estimate_creator_falls_back_to_customer_open_job(db_session, org_a):
+    """No thread job, but matched customer has an open site_visit → invoice linked to that."""
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=cust_id)
+    customer_job = AgentAction(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        customer_id=cust_id,
+        action_type="site_visit",
+        description="Initial visit for quote",
+        status="open",
+    )
+    db_session.add(customer_job)
+    await db_session.flush()
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="estimate_generator",
+        entity_type="estimate",
+        source_type="thread",
+        source_id=thread_id,
+        proposed_payload={
+            "customer_id": cust_id,
+            "thread_id": thread_id,
+            "subject": "Initial quote",
+            "line_items": [{"description": "Assessment", "quantity": 1, "unit_price": 150.00}],
+        },
+    )
+    await db_session.commit()
+
+    _, created = await service.accept(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    assert isinstance(created, Invoice)
+    assert await _has_link(db_session, customer_job.id, created.id)
+
+
+@pytest.mark.asyncio
+async def test_estimate_creator_creates_new_bid_job_when_none_exists(
+    db_session, org_a, event_recorder,
+):
+    """No thread job, no matched-customer job → new bid job created + linked."""
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=cust_id)
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="estimate_generator",
+        entity_type="estimate",
+        source_type="thread",
+        source_id=thread_id,
+        proposed_payload={
+            "customer_id": cust_id,
+            "thread_id": thread_id,
+            "subject": "Weekly service quote",
+            "line_items": [{"description": "Service", "quantity": 4, "unit_price": 125.00}],
+        },
+    )
+    await db_session.commit()
+
+    _, created = await service.accept(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    # Confirm a bid job got created for this thread + customer, linked to the invoice
+    new_job = (await db_session.execute(
+        select(AgentAction).where(
+            AgentAction.thread_id == thread_id,
+            AgentAction.action_type == "bid",
+        )
+    )).scalar_one_or_none()
+    assert new_job is not None
+    assert new_job.customer_id == cust_id
+    assert new_job.job_path == "customer"
+    assert await _has_link(db_session, new_job.id, created.id)
+    await event_recorder.assert_emitted("job.created", job_id=new_job.id)
 
 
 # --- equipment_item ------------------------------------------------------

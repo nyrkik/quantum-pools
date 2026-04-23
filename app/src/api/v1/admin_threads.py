@@ -455,7 +455,16 @@ async def draft_estimate_from_thread(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """AI drafts an estimate from thread conversation context."""
+    """AI drafts an estimate from thread conversation context.
+
+    Post-Phase-5 response shapes:
+      - New draft:      `{proposal_id, status: "staged", subject, line_items}`
+      - Re-draft hit:   `{proposal_id, status: "staged", ..., existing: True}`
+      - Existing invoice already linked: `{invoice_id, invoice_number, ..., existing: True}`
+
+    Front end accepts via `POST /v1/proposals/{proposal_id}/accept` — that's
+    what materializes the Invoice + job link.
+    """
     service = ThreadAIService(db)
     result = await service.draft_estimate_from_thread(
         org_id=ctx.organization_id,
@@ -463,7 +472,7 @@ async def draft_estimate_from_thread(
         created_by=f"{ctx.user.first_name} {ctx.user.last_name}",
     )
     if "error" in result:
-        code = {"not_found": 404, "ai_failed": 500}.get(result["error"], 400)
+        code = {"not_found": 404, "ai_failed": 500, "no_items": 422}.get(result["error"], 400)
         raise HTTPException(status_code=code, detail=result["detail"])
     return result
 

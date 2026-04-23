@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, use } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Send,
   DollarSign,
   MoreHorizontal,
@@ -67,6 +66,7 @@ import {
 } from "@/components/invoices/invoice-detail-components";
 import type { Invoice, Payment, Revision } from "@/components/invoices/invoice-detail-components";
 import { LinkCasePicker } from "@/components/cases/link-case-picker";
+import { BackButton } from "@/components/ui/back-button";
 import {
   Card,
   CardContent,
@@ -81,19 +81,6 @@ export default function InvoiceDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  // `?from=<url>` carries the origin page (thread, case, etc.) so Back
-  // returns the user where they came from instead of relying on
-  // browser history, which leaks earlier navigations (e.g. the case
-  // page from a prior accept flow).
-  const fromParam = searchParams.get("from");
-  const handleBack = () => {
-    if (fromParam) {
-      router.push(fromParam);
-    } else {
-      router.back();
-    }
-  };
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -271,10 +258,7 @@ export default function InvoiceDetailPage({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={handleBack}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
-          </Button>
+          <BackButton fallback={invoice?.document_type === "estimate" ? "/invoices?tab=estimates" : "/invoices"} />
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
               {invoice.invoice_number || "Draft"}

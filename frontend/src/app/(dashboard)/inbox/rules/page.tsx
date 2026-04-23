@@ -45,7 +45,8 @@ import {
   type RuleDraft,
 } from "@/components/inbox/rule-editor-dialog";
 import { api } from "@/lib/api";
-import { ArrowLeft, GripVertical, Pencil, Plus, Trash2, Wand2, X } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2, Wand2, X } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 import { toast } from "sonner";
 
 interface InboxFolder {
@@ -462,16 +463,7 @@ export default function InboxRulesPage() {
   return (
     <PageLayout
       title="Inbox Rules"
-      secondaryActions={
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => router.push("/inbox")}
-          aria-label="Back to inbox"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-      }
+      secondaryActions={<BackButton fallback="/inbox" label="" />}
       action={
         <Button
           size="sm"

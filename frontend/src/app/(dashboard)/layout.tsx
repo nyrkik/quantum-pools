@@ -14,6 +14,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { ActiveVisitBanner } from "@/components/layout/active-visit-banner";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { PageEmitter } from "@/components/events/page-emitter";
+import { NavHistoryProvider } from "@/lib/nav-history";
 import { Code2 } from "lucide-react";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -67,15 +68,17 @@ export default function DashboardLayout({
     <AuthProvider>
       <WebSocketProvider>
         <DevModeProvider>
-          <ComposeProvider>
-            <DeepBlueProvider>
-              <AuthenticatedLayout>{children}</AuthenticatedLayout>
-              <ComposeEmail />
-              <DeepBlueTrigger />
-              <DeepBlueSheet />
-              <PageEmitter />
-            </DeepBlueProvider>
-          </ComposeProvider>
+          <NavHistoryProvider>
+            <ComposeProvider>
+              <DeepBlueProvider>
+                <AuthenticatedLayout>{children}</AuthenticatedLayout>
+                <ComposeEmail />
+                <DeepBlueTrigger />
+                <DeepBlueSheet />
+                <PageEmitter />
+              </DeepBlueProvider>
+            </ComposeProvider>
+          </NavHistoryProvider>
         </DevModeProvider>
       </WebSocketProvider>
     </AuthProvider>

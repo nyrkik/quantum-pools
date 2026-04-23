@@ -21,8 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, Save, Eye, EyeOff, ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import { Loader2, Save, Eye, EyeOff } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 import { formatPhone, unformatPhone } from "@/lib/format";
 
 const US_STATES = [
@@ -165,11 +165,7 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <div className="flex items-center gap-3">
-        <Link href="/dashboard">
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+        <BackButton fallback="/dashboard" label="" className="h-8 w-8" />
         <div>
           <h1 className="text-2xl font-bold">My Profile</h1>
           <p className="text-sm text-muted-foreground">{ROLE_LABELS[role] || role} at {organizationName}</p>

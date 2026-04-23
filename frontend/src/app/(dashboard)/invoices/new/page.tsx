@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Info, Link2, X } from "lucide-react";
+import { Loader2, Info, Link2, X } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 import { LineItemsEditor, type LineItem } from "@/components/invoices/line-items-editor";
 import { InvoiceSummary } from "@/components/invoices/invoice-summary";
 
@@ -258,9 +259,7 @@ function NewInvoiceForm() {
     <div className="pb-24">
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
-        <Button variant="ghost" size="icon" onClick={() => handleBack()}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+        <BackButton fallback={jobId ? "/jobs" : "/invoices"} label="" />
         <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight">
             {isEdit ? `Edit ${label}` : `New ${label}`}

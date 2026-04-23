@@ -6,7 +6,8 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Loader2, MapPin, Play, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Loader2, MapPin, Play, AlertTriangle } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 
 interface ActiveVisitData {
   visit: { id: string; status: string; started_at: string | null };
@@ -111,7 +112,7 @@ function NewVisitContent() {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2">
         <p className="text-sm text-muted-foreground">Missing property ID</p>
-        <Button variant="ghost" size="sm" onClick={() => router.back()}>Go back</Button>
+        <BackButton fallback="/visits" label="Go back" />
       </div>
     );
   }
@@ -134,9 +135,7 @@ function NewVisitContent() {
 
     return (
       <div className="max-w-md mx-auto py-8 px-4">
-        <Button variant="ghost" size="sm" className="mb-4" onClick={() => router.back()}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Back
-        </Button>
+        <BackButton fallback="/visits" className="mb-4" />
 
         <Card className="shadow-sm border-amber-300">
           <CardContent className="pt-6 space-y-4">
@@ -189,9 +188,7 @@ function NewVisitContent() {
   // Normal: no active visit — show start confirmation
   return (
     <div className="max-w-md mx-auto py-8 px-4">
-      <Button variant="ghost" size="sm" className="mb-4" onClick={() => router.back()}>
-        <ArrowLeft className="h-4 w-4 mr-1" /> Back
-      </Button>
+      <BackButton fallback="/visits" className="mb-4" />
 
       <Card className="shadow-sm">
         <CardContent className="pt-6 space-y-4">

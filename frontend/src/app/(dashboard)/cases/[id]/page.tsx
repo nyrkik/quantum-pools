@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  ArrowLeft,
   FolderOpen,
   Mail,
   ClipboardList,
@@ -64,6 +63,7 @@ import type {
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { CaseOwner } from "@/components/cases/case-owner";
 import { ProposalCard } from "@/components/proposals/ProposalCard";
+import { BackButton } from "@/components/ui/back-button";
 
 // --- Selected item tracking ---
 
@@ -1304,14 +1304,7 @@ export default function CaseDetailPage({
       />
       {/* Header */}
       <div className="flex items-start gap-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 mt-0.5 shrink-0"
-          onClick={() => router.push("/cases")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+        <BackButton fallback="/cases" label="" className="h-8 w-8 mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1"></div>
         {detail.status !== "closed" ? (
           <Button
@@ -1452,10 +1445,7 @@ export default function CaseDetailPage({
                     toast.success("Draft accepted", {
                       action: {
                         label: "View invoice →",
-                        onClick: () => {
-                          const from = typeof window !== "undefined" ? window.location.pathname : `/cases/${id}`;
-                          router.push(`/invoices/${resolved.outcome_entity_id}?from=${encodeURIComponent(from)}`);
-                        },
+                        onClick: () => router.push(`/invoices/${resolved.outcome_entity_id}`),
                       },
                     });
                   }

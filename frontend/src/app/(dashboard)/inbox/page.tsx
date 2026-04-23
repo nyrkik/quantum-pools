@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { events } from "@/lib/events";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -77,7 +78,25 @@ export default function InboxPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+
+  // Thread selection lives in the URL (`?thread=<id>`) so opening a
+  // thread → navigating elsewhere → Back restores the open thread.
+  // Uses `replace` not `push` so switching between threads in the same
+  // inbox session doesn't pile up history entries.
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedThreadId = searchParams?.get("thread") ?? null;
+  const setSelectedThreadId = useCallback(
+    (id: string | null) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      if (id) params.set("thread", id);
+      else params.delete("thread");
+      const qs = params.toString();
+      router.replace(qs ? `/inbox?${qs}` : "/inbox", { scroll: false });
+    },
+    [router, searchParams],
+  );
+
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
   const [defaultFolderResolved, setDefaultFolderResolved] = useState(false);

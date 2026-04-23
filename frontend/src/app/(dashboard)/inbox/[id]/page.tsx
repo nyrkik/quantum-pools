@@ -2,8 +2,7 @@
 
 import { use } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 import { ThreadDetailSheet } from "@/components/inbox/thread-detail-sheet";
 
 export default function ThreadDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,9 +12,7 @@ export default function ThreadDetailPage({ params }: { params: Promise<{ id: str
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/inbox")}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+        <BackButton fallback="/inbox" label="" />
         <h1 className="text-lg font-semibold">Conversation</h1>
       </div>
       <ThreadDetailSheet

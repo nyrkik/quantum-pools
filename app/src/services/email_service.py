@@ -17,7 +17,7 @@ from email import encoders
 
 import aiosmtplib
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings

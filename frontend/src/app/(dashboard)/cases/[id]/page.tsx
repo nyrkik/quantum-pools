@@ -63,6 +63,7 @@ import type {
 } from "@/components/cases/case-components";
 import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges";
 import { CaseOwner } from "@/components/cases/case-owner";
+import { ProposalCard } from "@/components/proposals/ProposalCard";
 
 // --- Selected item tracking ---
 
@@ -1428,6 +1429,41 @@ export default function CaseDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Pending AI drafts — proposals staged against this case awaiting
+          human accept. Stays on-page per Phase 5 spec: accepting an
+          estimate materializes the Invoice + job link right here. */}
+      {detail.pending_proposals && detail.pending_proposals.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <Sparkles className="h-3.5 w-3.5" />
+            Pending AI Drafts
+            <span className="text-xs font-normal ml-1">
+              ({detail.pending_proposals.length})
+            </span>
+          </div>
+          <div className="space-y-2">
+            {detail.pending_proposals.map((p) => (
+              <ProposalCard
+                key={p.id}
+                proposal={p}
+                onResolved={(resolved) => {
+                  if (resolved.status === "accepted" && resolved.outcome_entity_id) {
+                    toast.success("Draft accepted", {
+                      action: {
+                        label: "View invoice →",
+                        onClick: () => router.push(`/invoices/${resolved.outcome_entity_id}`),
+                      },
+                    });
+                  }
+                  load();
+                }}
+                onError={(err) => toast.error(err.message || "Failed to resolve proposal")}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Two-column layout: timeline left, detail right */}
       <div className="flex flex-col lg:flex-row gap-4">

@@ -125,6 +125,7 @@ export interface CaseDetail {
   jobs: CaseJob[];
   threads: CaseThread[];
   invoices: CaseInvoice[];
+  pending_proposals?: import("@/lib/proposals").Proposal[];
   deepblue_conversations: DeepBlueConversation[];
   internal_threads: {
     id: string;

@@ -189,6 +189,57 @@ async def get_case(
         for inv in invoices_result.scalars().all()
     ]
 
+    # Load staged proposals for this case. Two sources:
+    #   1. source_type='thread' + source_id in {case's thread ids} — drafted
+    #      from a thread linked to this case (e.g. estimate_generator).
+    #   2. proposed_payload.case_id == case_id — proposals directly bound to
+    #      the case (e.g. future handlers that stage on case timeline).
+    from src.models.agent_proposal import AgentProposal, STATUS_STAGED
+    thread_ids = [t.id for t in threads]
+    proposal_filters = [
+        (AgentProposal.source_type == "thread") & (AgentProposal.source_id.in_(thread_ids or [""]))
+    ]
+    try:
+        from sqlalchemy.dialects.postgresql import JSONB
+        proposal_filters.append(
+            AgentProposal.proposed_payload["case_id"].astext == case_id  # type: ignore[index]
+        )
+    except Exception:
+        pass  # SQLite fallback — not used in prod
+
+    from sqlalchemy import or_
+    pending_proposals_rows = (await db.execute(
+        select(AgentProposal).where(
+            AgentProposal.organization_id == ctx.organization_id,
+            AgentProposal.status == STATUS_STAGED,
+            or_(*proposal_filters),
+        ).order_by(AgentProposal.created_at.desc())
+    )).scalars().all()
+    d["pending_proposals"] = [
+        {
+            "id": p.id,
+            "organization_id": p.organization_id,
+            "agent_type": p.agent_type,
+            "entity_type": p.entity_type,
+            "source_type": p.source_type,
+            "source_id": p.source_id,
+            "proposed_payload": p.proposed_payload,
+            "confidence": p.confidence,
+            "status": p.status,
+            "rejected_permanently": p.rejected_permanently,
+            "superseded_by_id": p.superseded_by_id,
+            "outcome_entity_type": p.outcome_entity_type,
+            "outcome_entity_id": p.outcome_entity_id,
+            "user_delta": p.user_delta,
+            "resolved_at": presenter._iso(p.resolved_at),
+            "resolved_by_user_id": p.resolved_by_user_id,
+            "resolution_note": p.resolution_note,
+            "created_at": presenter._iso(p.created_at),
+            "updated_at": presenter._iso(p.updated_at),
+        }
+        for p in pending_proposals_rows
+    ]
+
     # Load DeepBlue conversations
     from src.models.deepblue_conversation import DeepBlueConversation
     db_convos = (await db.execute(

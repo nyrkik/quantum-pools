@@ -1402,17 +1402,39 @@ export function ThreadDetailSheet({
   const handleDraftEstimate = async () => {
     setDraftingEstimate(true);
     try {
-      const result = await api.post<{ invoice_id: string; invoice_number: string; subject: string; total: number; existing?: boolean }>(
+      type DraftResult = {
+        existing?: boolean;
+        // New flow: proposal staged, awaits human accept.
+        proposal_id?: string;
+        status?: string;
+        // Existing-invoice short-circuit: estimate already materialized.
+        invoice_id?: string;
+        invoice_number?: string;
+        subject?: string;
+        total?: number;
+      };
+      const result = await api.post<DraftResult>(
         `/v1/admin/agent-threads/${threadId}/draft-estimate`, {}
       );
+
+      if (result.invoice_id) {
+        // Pre-existing invoice already linked — toast + navigate (old behavior).
+        toast.info(`Estimate ${result.invoice_number ?? ""} already exists`);
+        onAction();
+        onClose();
+        router.push(`/invoices/${result.invoice_id}`);
+        return;
+      }
+
+      // New flow: proposal staged. Stay in context — user accepts via
+      // ProposalCard in the inbox summary / row hover / case detail.
       if (result.existing) {
-        toast.info(`Estimate ${result.invoice_number} already exists`);
+        toast.info("Estimate draft already pending — review it in the case or inbox summary");
       } else {
-        toast.success(`Estimate ${result.invoice_number} drafted — $${result.total.toFixed(2)}`);
+        toast.success("Estimate drafted — review and accept to send to the customer");
       }
       onAction();
       onClose();
-      router.push(`/invoices/${result.invoice_id}`);
     } catch {
       toast.error("Failed to draft estimate");
     } finally {

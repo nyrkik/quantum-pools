@@ -23,9 +23,9 @@ Platform identity, multi-tenancy, auth, and permissions.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| Organization | `organizations` | Tenant (pool service company) |
+| Organization | `organizations` | Tenant (pool service company). Signature fields: `agent_signature` (shared org footer), `auto_signature_prefix` (admin toggle: prepend first_name + org_name), `include_logo_in_signature` (admin toggle: embed logo via CID), `allow_per_user_signature` (admin toggle: honor per-user email_signature/email_signoff; off = absolute consistency), `website_url` (clickable logo target — logo is wrapped in `<a href>` when both are set). |
 | User | `users` | Platform user account |
-| OrganizationUser | `organization_users` | User-to-org membership with legacy role enum |
+| OrganizationUser | `organization_users` | User-to-org membership with legacy role enum. Signature fields: `email_signature` (per-user personal info, rendered above the org footer), `email_signoff` (optional valediction like "Best,"/"v/r,"/"Cheers," rendered above the name line). |
 | UserSession | `user_sessions` | JWT refresh token tracking |
 | Permission | `permissions` | 60-slug permission definitions |
 | PermissionPreset | `permission_presets` | Named permission bundles (e.g. "Manager") |
@@ -105,9 +105,10 @@ Inbound/outbound email, internal messaging, notifications.
 | BroadcastEmail | `broadcast_emails` | Bulk email campaigns |
 | EmailTemplate | `email_templates` | Reusable email templates |
 | EmailIntegration | `email_integrations` | Per-org email integration (gmail_api, managed, ms_graph, forwarding, manual). OAuth tokens Fernet-encrypted. |
-| InboxFolder | `inbox_folders` | Org-level folders. System folders (is_system=True): Inbox, Sent, Spam. Custom folders nest under Inbox. Threads reference via `agent_threads.folder_id` (null = Inbox). |
+| InboxFolder | `inbox_folders` | Org-level folders. System folders (is_system=True, seeded per org in sort_order): Inbox (0), **Outbox** (1 — stuck outbound: status queued/failed or delivery_status bounced/spam_complaint or delivery_error set; red badge), Sent (2), Spam (3), **All Mail** (4 — escape hatch for live mail regardless of status/folder; gated by `inbox.see_all_mail`), **Historical** (5 — pre-cutover imports, is_historical=True only; same permission). Custom folders nest under Inbox. Threads reference via `agent_threads.folder_id` (null = Inbox). |
 | InternalThread | `internal_threads` | Internal team discussion thread |
 | InternalMessage | `internal_messages` | Message within an internal thread |
+| InternalMessageReaction | `internal_message_reactions` | Per-user emoji reaction on an InternalMessage. Unique on (message_id, user_id, emoji); toggle semantics at the API layer (`POST /v1/messages/reactions/{id}` adds if absent, removes if present). |
 | Notification | `notifications` | In-app notification for a user |
 
 ### Service Cases

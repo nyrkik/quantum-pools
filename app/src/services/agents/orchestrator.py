@@ -545,9 +545,14 @@ async def process_incoming_email(
                 logger.warning(f"skip_customer_match check failed: {e}")
 
         # Quick check: does this email match a customer directly?
+        # Phase 5: collect any fuzzy candidates the QC verifier dropped so
+        # we can surface them to a human via customer_match_suggestion
+        # proposals after the agent_msg is persisted.
+        unverified_candidates: list[dict] = []
         pre_match = await match_customer(
             from_email, subject, body[:500], from_header,
             skip_previous_match=skip_prev,
+            unverified_sink=unverified_candidates,
         )
         if pre_match and pre_match.get("customer_id"):
             sender_is_customer = True
@@ -815,6 +820,36 @@ async def process_incoming_email(
                 # — agent_msg is still persisted with draft_response=None;
                 # user can reply manually from the thread sheet.
                 logger.warning(f"email_reply proposal stage failed for msg {agent_msg.id}: {e}")
+
+        # Phase 5 customer_matcher migration: stage a proposal for each
+        # fuzzy candidate the verifier dropped. Gated behind the same flag
+        # since proposals without a review surface would just accumulate;
+        # /inbox/matches review queue ships alongside. High-confidence
+        # trusted-method matches auto-apply above (unchanged).
+        if use_proposals and unverified_candidates:
+            for candidate in unverified_candidates:
+                try:
+                    from src.services.events.actor_factory import actor_agent
+                    from src.services.proposals import ProposalService
+                    await ProposalService(db).stage(
+                        org_id=organization_id,
+                        agent_type="customer_matcher",
+                        entity_type="customer_match_suggestion",
+                        source_type="thread",
+                        source_id=thread.id,
+                        proposed_payload={
+                            "thread_id": thread.id,
+                            "candidate_customer_id": candidate["candidate_customer_id"],
+                            "reason": candidate["reason"],
+                            "confidence": "medium",
+                        },
+                        input_context=f"Sender: {from_email}; subject: {subject[:120] if subject else ''}",
+                        actor=actor_agent("customer_matcher"),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"customer_match_suggestion stage failed for thread {thread.id}: {e}"
+                    )
 
         await _emit_agent_message_received(db, agent_msg, msg=msg, body_normalize_flags=body_normalize_flags)
         await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))

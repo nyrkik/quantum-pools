@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,6 +73,34 @@ def _serialize(p: AgentProposal) -> dict:
 
 
 # -- Read -------------------------------------------------------------------
+
+
+@router.get("")
+async def list_proposals(
+    entity_type: Optional[str] = Query(None),
+    status_: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List proposals scoped to the caller's org. Intended for UI surfaces
+    like `/inbox/matches` (staged customer_match_suggestions). Narrow
+    filters only — no cursor/pagination yet; bump `limit` if needed.
+
+    `status_` is the query-param `status` (keyword `status_` to avoid
+    shadowing Python's builtin at the handler level).
+    """
+    from sqlalchemy import select
+    q = select(AgentProposal).where(
+        AgentProposal.organization_id == ctx.organization_id,
+    )
+    if entity_type:
+        q = q.where(AgentProposal.entity_type == entity_type)
+    if status_:
+        q = q.where(AgentProposal.status == status_)
+    q = q.order_by(AgentProposal.created_at.desc()).limit(max(1, min(limit, 500)))
+    rows = (await db.execute(q)).scalars().all()
+    return {"items": [_serialize(p) for p in rows], "total": len(rows)}
 
 
 @router.get("/{proposal_id}")

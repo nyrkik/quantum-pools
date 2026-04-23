@@ -60,6 +60,24 @@ export async function getProposal(id: string): Promise<Proposal> {
   return api.get<Proposal>(`/v1/proposals/${id}`);
 }
 
+/** List org-scoped proposals. Used by the /inbox/matches review queue
+ *  and other surfaces that need to enumerate staged proposals for the
+ *  caller's org. Narrow filters — add pagination when volume grows. */
+export async function listProposals(opts: {
+  entityType?: string;
+  status?: string;
+  limit?: number;
+} = {}): Promise<{ items: Proposal[]; total: number }> {
+  const params = new URLSearchParams();
+  if (opts.entityType) params.set("entity_type", opts.entityType);
+  if (opts.status) params.set("status", opts.status);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return api.get<{ items: Proposal[]; total: number }>(
+    `/v1/proposals${qs ? `?${qs}` : ""}`,
+  );
+}
+
 export async function acceptProposal(id: string): Promise<ResolveResponse> {
   return api.post<ResolveResponse>(`/v1/proposals/${id}/accept`);
 }

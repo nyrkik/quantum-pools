@@ -36,6 +36,7 @@ import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
 import { EquipmentProposalBody } from "./renderers/EquipmentProposalBody";
 import { OrgConfigProposalBody } from "./renderers/OrgConfigProposalBody";
 import { EmailReplyProposalBody } from "./renderers/EmailReplyProposalBody";
+import { CustomerMatchProposalBody } from "./renderers/CustomerMatchProposalBody";
 
 export interface ProposalBodyProps {
   payload: Record<string, unknown>;
@@ -54,6 +55,7 @@ const RENDERERS: Record<string, BodyRenderer> = {
   equipment_item: EquipmentProposalBody,
   org_config: OrgConfigProposalBody,
   email_reply: EmailReplyProposalBody,
+  customer_match_suggestion: CustomerMatchProposalBody,
 };
 
 // Entity types whose renderer supports inline edit mode. Grows as each

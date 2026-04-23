@@ -620,3 +620,142 @@ async def test_all_four_phase_2_entity_types_registered():
 async def test_email_reply_registered():
     from src.services.proposals.registry import known_entity_types
     assert "email_reply" in known_entity_types()
+
+
+# --- customer_match_suggestion ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_customer_match_accept_applies_match(db_session, org_a):
+    """Accept → thread.matched_customer_id + customer_name set."""
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    # Thread starts unmatched.
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=None)
+    thread_before = (await db_session.execute(
+        select(AgentThread).where(AgentThread.id == thread_id)
+    )).scalar_one()
+    assert thread_before.matched_customer_id is None
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="customer_matcher",
+        entity_type="customer_match_suggestion",
+        source_type="thread",
+        source_id=thread_id,
+        proposed_payload={
+            "thread_id": thread_id,
+            "candidate_customer_id": cust_id,
+            "reason": "Claude matched body mention of 'Coventry Park'",
+            "confidence": "medium",
+        },
+    )
+    await db_session.commit()
+
+    _, created = await service.accept(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    assert isinstance(created, AgentThread)
+    thread_after = (await db_session.execute(
+        select(AgentThread).where(AgentThread.id == thread_id)
+    )).scalar_one()
+    assert thread_after.matched_customer_id == cust_id
+    assert thread_after.customer_name is not None
+
+
+@pytest.mark.asyncio
+async def test_customer_match_reject_preserves_unmatched(db_session, org_a):
+    """Reject → thread stays unmatched; correction recorded."""
+    user_id = await _seed_user(db_session)
+    cust_id, _, _ = await _seed_customer_property_wf(db_session, org_a.id)
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=None)
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="customer_matcher",
+        entity_type="customer_match_suggestion",
+        source_type="thread",
+        source_id=thread_id,
+        proposed_payload={
+            "thread_id": thread_id,
+            "candidate_customer_id": cust_id,
+            "reason": "Low confidence name match",
+            "confidence": "low",
+        },
+    )
+    await db_session.commit()
+
+    await service.reject(
+        proposal_id=p.id,
+        actor=Actor(actor_type="user", user_id=user_id),
+    )
+    await db_session.commit()
+
+    thread_after = (await db_session.execute(
+        select(AgentThread).where(AgentThread.id == thread_id)
+    )).scalar_one()
+    assert thread_after.matched_customer_id is None
+
+
+@pytest.mark.asyncio
+async def test_customer_match_rejects_invalid_confidence(db_session, org_a):
+    """confidence must be low|medium — high auto-applies, not proposed."""
+    service = ProposalService(db_session)
+    with pytest.raises(Exception):
+        await service.stage(
+            org_id=org_a.id,
+            agent_type="customer_matcher",
+            entity_type="customer_match_suggestion",
+            source_type="thread",
+            source_id=None,
+            proposed_payload={
+                "thread_id": "t",
+                "candidate_customer_id": "c",
+                "reason": "x",
+                "confidence": "high",  # not allowed
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_customer_match_cross_org_candidate_raises(db_session, org_a, org_b):
+    """Candidate customer in a different org → NotFoundError on accept.
+    Defense-in-depth even though the proposal is org-scoped."""
+    user_id = await _seed_user(db_session)
+    # Customer seeded in org_b
+    cust_b, _, _ = await _seed_customer_property_wf(db_session, org_b.id)
+    # Thread in org_a
+    thread_id = await _seed_thread(db_session, org_a.id, customer_id=None)
+
+    service = ProposalService(db_session)
+    p = await service.stage(
+        org_id=org_a.id,
+        agent_type="customer_matcher",
+        entity_type="customer_match_suggestion",
+        source_type="thread",
+        source_id=thread_id,
+        proposed_payload={
+            "thread_id": thread_id,
+            "candidate_customer_id": cust_b,  # wrong org!
+            "reason": "test",
+            "confidence": "medium",
+        },
+    )
+    await db_session.commit()
+
+    with pytest.raises(Exception):
+        await service.accept(
+            proposal_id=p.id,
+            actor=Actor(actor_type="user", user_id=user_id),
+        )
+
+
+@pytest.mark.asyncio
+async def test_customer_match_suggestion_registered():
+    from src.services.proposals.registry import known_entity_types
+    assert "customer_match_suggestion" in known_entity_types()

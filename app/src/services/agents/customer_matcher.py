@@ -105,6 +105,7 @@ async def match_customer(
     from_header: str = "",
     *,
     skip_previous_match: bool = False,
+    unverified_sink: list[dict] | None = None,
 ) -> dict | None:
     """Match an incoming email to a customer in the database. Returns context dict or None.
 
@@ -115,6 +116,14 @@ async def match_customer(
     thread may concern a different customer, so pinning to the first match
     would silently misattribute future mail. Callers set this based on
     inbox rules with the ``skip_customer_match`` action.
+
+    ``unverified_sink`` — Phase 5 customer_matcher migration. When the QC
+    verifier drops a fuzzy match (Claude not confident), we still want to
+    surface the candidate to a human via a ``customer_match_suggestion``
+    proposal. Callers pass an empty list; the matcher appends dicts
+    ``{candidate_customer_id, reason, method}`` as it drops candidates.
+    Caller decides whether to stage proposals (flag-gated at the
+    orchestrator level).
     """
     match_method = None
 
@@ -362,6 +371,12 @@ async def match_customer(
             )
             if not verified:
                 logger.info(f"Dropping match: {customer.display_name} ({match_method}) — failed QC verification")
+                if unverified_sink is not None:
+                    unverified_sink.append({
+                        "candidate_customer_id": customer.id,
+                        "reason": f"Matched via {match_method} ({customer.display_name}) but Claude QC verification declined",
+                        "method": match_method,
+                    })
                 customer = None
                 match_method = None
                 # Still allow domain fallback if available

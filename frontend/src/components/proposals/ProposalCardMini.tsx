@@ -29,6 +29,7 @@ import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
 import { EquipmentProposalBody } from "./renderers/EquipmentProposalBody";
 import { OrgConfigProposalBody } from "./renderers/OrgConfigProposalBody";
 import { EmailReplyProposalBody } from "./renderers/EmailReplyProposalBody";
+import { CustomerMatchProposalBody } from "./renderers/CustomerMatchProposalBody";
 
 type BodyRenderer = (props: { payload: Record<string, unknown> }) => ReactNode;
 
@@ -38,6 +39,7 @@ const RENDERERS: Record<string, BodyRenderer> = {
   equipment_item: EquipmentProposalBody,
   org_config: OrgConfigProposalBody,
   email_reply: EmailReplyProposalBody,
+  customer_match_suggestion: CustomerMatchProposalBody,
 };
 
 interface Props {

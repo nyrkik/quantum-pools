@@ -51,6 +51,11 @@ class EmailMessage:
     reply_to: str | None = None
     cc: str | None = None
     attachments: list[dict] | None = None  # [{filename, content_bytes, mime_type}]
+    # Inline attachments referenced from HTML via cid: URLs. Shape matches
+    # `attachments` entries + `content_id` (without angle brackets).
+    # Used for the signature logo; kept separate so plain "user added
+    # attachments" can't accidentally be treated as inline.
+    inline_attachments: list[dict] | None = None
 
 
 @dataclass
@@ -155,15 +160,30 @@ class PostmarkProvider(EmailProvider):
         if message.reply_to:
             body["ReplyTo"] = message.reply_to
 
+        postmark_atts: list[dict] = []
         if message.attachments:
-            body["Attachments"] = [
+            postmark_atts.extend(
                 {
                     "Name": att["filename"],
                     "Content": base64.b64encode(att["content_bytes"]).decode(),
                     "ContentType": att["mime_type"],
                 }
                 for att in message.attachments
-            ]
+            )
+        if message.inline_attachments:
+            # Postmark convention: ContentID = `cid:<id>` marks it inline
+            # (referenced via <img src="cid:<id>"> in the HTML body).
+            postmark_atts.extend(
+                {
+                    "Name": att["filename"],
+                    "Content": base64.b64encode(att["content_bytes"]).decode(),
+                    "ContentType": att["mime_type"],
+                    "ContentID": f"cid:{att['content_id']}",
+                }
+                for att in message.inline_attachments
+            )
+        if postmark_atts:
+            body["Attachments"] = postmark_atts
 
         headers = {
             "Accept": "application/json",
@@ -209,6 +229,66 @@ class EmailService:
     async def _get_org(self, org_id: str) -> Organization | None:
         result = await self.db.execute(select(Organization).where(Organization.id == org_id))
         return result.scalar_one_or_none()
+
+    async def _resolve_user_sig_fields(self, org_id: str, sender_name: str | None) -> tuple[str | None, str | None]:
+        """Return (email_signature, email_signoff) for the sender. Matches
+        by first_name (case-insensitive) against users in the org. Returns
+        (None, None) when no match — caller falls back to org defaults."""
+        if not sender_name:
+            return None, None
+        from src.models.organization_user import OrganizationUser
+        from src.models.user import User
+        first_name = sender_name.split()[0].strip()
+        if not first_name:
+            return None, None
+        row = (await self.db.execute(
+            select(OrganizationUser.email_signature, OrganizationUser.email_signoff)
+            .join(User, User.id == OrganizationUser.user_id)
+            .where(
+                OrganizationUser.organization_id == org_id,
+                func.lower(User.first_name) == first_name.lower(),
+            )
+            .limit(1)
+        )).one_or_none()
+        if not row:
+            return None, None
+        return row[0] or None, row[1] or None
+
+    async def _resolve_user_signature(self, org_id: str, sender_name: str | None) -> str | None:
+        """Backwards-compat wrapper returning just the signature text."""
+        sig, _ = await self._resolve_user_sig_fields(org_id, sender_name)
+        return sig
+
+    # In-process cache for signature logos. Keyed on (org_id, logo_url) —
+    # logo_url changes trigger a fetch; otherwise the bytes are reused for
+    # the life of the worker process. Small footprint (<200KB per org is
+    # reasonable), no TTL because logos rarely change.
+    _logo_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
+
+    async def _fetch_logo_bytes(self, org_id: str, logo_url: str) -> tuple[bytes | None, str | None]:
+        """Return (bytes, mime) for the org's signature logo, or (None, None)
+        on failure. Cached per (org_id, logo_url)."""
+        key = (org_id, logo_url)
+        hit = self._logo_cache.get(key)
+        if hit is not None:
+            return hit
+        try:
+            import httpx
+            # Local uploads come through as relative paths like
+            # "/uploads/..." — resolve to the backend origin.
+            fetch_url = logo_url
+            if fetch_url.startswith("/"):
+                backend_base = os.environ.get("APP_BASE_URL", "http://localhost:7061").rstrip("/")
+                fetch_url = backend_base + logo_url
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                resp = await client.get(fetch_url)
+                resp.raise_for_status()
+                content_type = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower() or None
+                self._logo_cache[key] = (resp.content, content_type)
+                return resp.content, content_type
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Signature logo fetch failed for org %s (%s): %s", org_id, logo_url, e)
+            return None, None
 
     def _apply_org_defaults(self, message: EmailMessage, org: Organization | None) -> None:
         """Fill in from_email / from_name from org config when not overridden."""
@@ -384,24 +464,67 @@ class EmailService:
         org = await self._get_org(org_id)
         org_name = org.name if org else ""
         org_sig = getattr(org, "agent_signature", None) if org else None
+        auto_prefix = bool(getattr(org, "auto_signature_prefix", True)) if org else True
+        include_logo = bool(getattr(org, "include_logo_in_signature", False)) if org else False
+        logo_url = getattr(org, "logo_url", None) if org else None
+        website_url = getattr(org, "website_url", None) if org else None
+        allow_per_user = bool(getattr(org, "allow_per_user_signature", True)) if org else True
 
-        # Build signature block
-        sig_parts = []
-        if sender_name:
-            first_name = sender_name.split()[0]
-            sig_parts.append(first_name)
-        # Only include org_name separately if the configured signature doesn't already start with it
-        sig_has_org_name = bool(
-            org_sig and org_name and org_sig.strip().lower().startswith(org_name.strip().lower())
+        # From-address normalization. The raw `from_address` is usually the
+        # thread's delivered_to (preserves per-alias identity on replies —
+        # customer emailed contact@, reply goes from contact@). But a
+        # Workspace converted from a personal Gmail keeps the legacy
+        # `sapphpools@gmail.com` identity live on the same mailbox; if the
+        # customer has that old address on file, `delivered_to` points at
+        # `@gmail.com`, and without this check QP keeps reinforcing the old
+        # identity on every reply. Rule: if the caller's `from_address`
+        # isn't on the org's primary domain (derived from agent_from_email),
+        # override to the org's configured agent_from_email. Legacy aliases
+        # never leak outbound.
+        org_from = getattr(org, "agent_from_email", None) if org else None
+        expected_domain = None
+        if org_from and "@" in org_from:
+            expected_domain = org_from.split("@", 1)[1].lower()
+        if from_address and expected_domain:
+            actual_domain = from_address.split("@")[-1].lower() if "@" in from_address else ""
+            if actual_domain != expected_domain:
+                logger.info(
+                    "Overriding from_address %s -> %s (not on org domain %s)",
+                    from_address, org_from, expected_domain,
+                )
+                from_address = org_from
+
+        # Resolve per-user signature + sign-off from organization_users for
+        # the sender. Falls back to org_sig if the user hasn't set one.
+        # When the admin has disabled per-user customization, skip user
+        # fields entirely — every outbound ships with only org settings.
+        if allow_per_user:
+            user_sig, user_signoff = await self._resolve_user_sig_fields(org_id, sender_name)
+        else:
+            user_sig, user_signoff = None, None
+
+        # Fetch logo bytes if the admin toggle is on. Cached per-org so we
+        # don't hit the URL on every send.
+        logo_bytes, logo_mime = (None, None)
+        if include_logo and logo_url:
+            logo_bytes, logo_mime = await self._fetch_logo_bytes(org_id, logo_url)
+
+        from src.services.email_signature import compose_signature
+        sig = compose_signature(
+            sender_first_name=sender_name.split()[0] if sender_name else None,
+            org_name=org_name or None,
+            auto_signature_prefix=auto_prefix,
+            user_signature=user_sig,
+            org_signature=org_sig,
+            include_logo=include_logo,
+            logo_url=logo_url,
+            logo_bytes=logo_bytes,
+            logo_mime_type=logo_mime,
+            user_signoff=user_signoff,
+            website_url=website_url,
         )
-        if org_name and not sig_has_org_name:
-            sig_parts.append(org_name)
-        if org_sig:
-            sig_parts.append(org_sig)
 
-        full_body = body_text
-        if sig_parts:
-            full_body = f"{body_text}\n\n--\n" + "\n".join(sig_parts)
+        full_body = body_text + (sig.plain or "")
 
         final_subject = subject or ""
         if not is_new and final_subject and not final_subject.startswith("Re:"):
@@ -409,10 +532,22 @@ class EmailService:
 
         from_name = f"{sender_name} at {org_name}" if sender_name and org_name else org_name or None
 
-        # Generate HTML version from plain text
+        # Generate HTML version from plain text — use the bare body (no
+        # plain-text signature baked in, since we're appending a richer HTML
+        # signature block below that can include autolinks + logo).
         from src.services.email_templates import customer_email_template
         color = getattr(org, "branding_color", None) or "#1a1a2e"
-        _, html_body = customer_email_template(org_name or "QuantumPools", full_body, branding_color=color)
+        _, html_body = customer_email_template(org_name or "QuantumPools", body_text, branding_color=color)
+        if sig.html:
+            # Insert the HTML signature before the closing </body> tag if
+            # present; otherwise append at the end.
+            if "</body>" in html_body.lower():
+                # Find the actual (case-preserving) closing tag position.
+                lower = html_body.lower()
+                idx = lower.rfind("</body>")
+                html_body = html_body[:idx] + sig.html + html_body[idx:]
+            else:
+                html_body = html_body + sig.html
 
         # --- Multi-mode dispatch (Phase 5b.1+) -------------------------------
         # If the org has a connected gmail_api EmailIntegration, route this
@@ -465,6 +600,7 @@ class EmailService:
                     from_address=from_address or integration_row.account_email,
                     from_name=from_name,
                     attachments=attachments,
+                    inline_attachments=[sig.logo_inline] if sig.logo_inline else None,
                     cc=cc,
                 )
                 # Persist any token-refresh side effects from build_gmail_client
@@ -496,6 +632,7 @@ class EmailService:
         msg = EmailMessage(
             to=to, subject=final_subject, text_body=full_body, html_body=html_body,
             from_email=from_address, from_name=from_name, cc=cc, attachments=attachments,
+            inline_attachments=[sig.logo_inline] if sig.logo_inline else None,
         )
         return await self.send_email(org_id, msg)
 

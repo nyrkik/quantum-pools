@@ -640,6 +640,23 @@ async def process_incoming_email(
         return
 
     if category in ("spam", "auto_reply", "no_response", "thank_you"):
+        # First-contact guardrail: if the sender isn't a matched customer AND
+        # we've never seen this sender before in this org, don't silently
+        # auto-handle — keep it pending so a human reviews. Protects against
+        # the "I sent a test to accounting@ and it vanished" failure mode
+        # where the classifier mislabels a first-touch as no_response.
+        is_first_contact_unknown = False
+        if not sender_is_customer and category in ("no_response", "thank_you"):
+            async with get_db_context() as _fc_db:
+                prior = (await _fc_db.execute(
+                    select(AgentMessage.id).where(
+                        AgentMessage.organization_id == organization_id,
+                        AgentMessage.from_email == from_email,
+                        AgentMessage.direction == "inbound",
+                    ).limit(1)
+                )).scalar_one_or_none()
+            is_first_contact_unknown = prior is None
+
         if sender_is_customer and category in ("spam", "auto_reply"):
             # Spam/auto-reply from a customer address is suspicious — override to pending
             logger.info(f"Customer email classified as {category}, overriding to pending: {subject[:50]}")
@@ -649,6 +666,14 @@ async def process_incoming_email(
         elif category not in ("spam", "auto_reply") and sender_is_customer and result.get("confidence") != "high":
             # Low/medium confidence no_response from a customer — play it safe
             logger.info(f"Customer email classified as {category} (confidence={result.get('confidence')}), overriding to pending: {subject[:50]}")
+            category = "general"
+            result["category"] = "general"
+            result["needs_approval"] = True
+        elif is_first_contact_unknown:
+            logger.info(
+                f"First-contact unknown classified as {category}, overriding to pending: "
+                f"from={from_email} subj={subject[:50]}"
+            )
             category = "general"
             result["category"] = "general"
             result["needs_approval"] = True

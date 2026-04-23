@@ -284,6 +284,155 @@ async def get_me(
     )
 
 
+@router.get("/me/email-signature")
+async def get_my_email_signature(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the current user's per-org email signature + the org-level
+    composition toggles that affect how it renders in outbound mail. The
+    frontend uses these together to render the live preview."""
+    org = (await db.execute(
+        select(Organization).where(Organization.id == ctx.organization_id)
+    )).scalar_one_or_none()
+    return {
+        "email_signature": ctx.org_user.email_signature,
+        "email_signoff": ctx.org_user.email_signoff,
+        # Mirrored from the org for preview convenience — read-only here;
+        # admin edits via /v1/branding.
+        "org_auto_signature_prefix": bool(getattr(org, "auto_signature_prefix", True)) if org else True,
+        "org_include_logo_in_signature": bool(getattr(org, "include_logo_in_signature", False)) if org else False,
+        "org_allow_per_user_signature": bool(getattr(org, "allow_per_user_signature", True)) if org else True,
+        "org_signature_fallback": getattr(org, "agent_signature", None) if org else None,
+        "org_name": org.name if org else None,
+        "org_logo_url": getattr(org, "logo_url", None) if org else None,
+    }
+
+
+class MyEmailSignatureUpdate(BaseModel):
+    email_signature: Optional[str] = None
+    email_signoff: Optional[str] = None
+
+
+class SignaturePreviewBody(BaseModel):
+    """Payload for an uncommitted-preview render. Each field is optional —
+    omitted fields fall back to the caller's saved state. Lets the UI
+    preview changes without saving first."""
+    user_signature: Optional[str] = None
+    user_signoff: Optional[str] = None
+    auto_signature_prefix: Optional[bool] = None
+    include_logo_in_signature: Optional[bool] = None
+    allow_per_user_signature: Optional[bool] = None
+    website_url: Optional[str] = None
+    org_signature: Optional[str] = None
+    # If true, preview uses the caller's first_name + org_name for the
+    # prefix block. Callers set this from the current user session.
+    use_current_user: bool = True
+
+
+@router.post("/me/email-signature/preview")
+async def preview_my_email_signature(
+    body: SignaturePreviewBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side signature preview so the frontend doesn't have to
+    reimplement the autolinker / prefix logic. Returns plain + html blocks
+    identical to what send_agent_reply produces, minus the logo CID
+    (previews don't need to round-trip the image)."""
+    from src.services.email_signature import compose_signature
+
+    org = (await db.execute(
+        select(Organization).where(Organization.id == ctx.organization_id)
+    )).scalar_one_or_none()
+
+    auto_prefix = (
+        body.auto_signature_prefix
+        if body.auto_signature_prefix is not None
+        else bool(getattr(org, "auto_signature_prefix", True)) if org else True
+    )
+    include_logo = (
+        body.include_logo_in_signature
+        if body.include_logo_in_signature is not None
+        else bool(getattr(org, "include_logo_in_signature", False)) if org else False
+    )
+    org_sig = (
+        body.org_signature
+        if body.org_signature is not None
+        else (getattr(org, "agent_signature", None) if org else None)
+    )
+    allow_per_user = (
+        body.allow_per_user_signature
+        if body.allow_per_user_signature is not None
+        else bool(getattr(org, "allow_per_user_signature", True)) if org else True
+    )
+    if allow_per_user:
+        user_sig = (
+            body.user_signature
+            if body.user_signature is not None
+            else ctx.org_user.email_signature
+        )
+        user_signoff = (
+            body.user_signoff
+            if body.user_signoff is not None
+            else ctx.org_user.email_signoff
+        )
+    else:
+        user_sig = None
+        user_signoff = None
+
+    effective_website = (
+        body.website_url
+        if body.website_url is not None
+        else (getattr(org, "website_url", None) if org else None)
+    )
+
+    sig = compose_signature(
+        sender_first_name=ctx.user.first_name if body.use_current_user else None,
+        org_name=(org.name if org else None),
+        auto_signature_prefix=auto_prefix,
+        user_signature=user_sig,
+        org_signature=org_sig,
+        include_logo=include_logo,
+        logo_url=(org.logo_url if org else None),
+        # Preview: pass no logo bytes — the UI renders the logo_url directly
+        # via <img src>. The cid-attachment path only runs at actual send.
+        logo_bytes=None,
+        user_signoff=user_signoff,
+        website_url=effective_website,
+    )
+    return {
+        "plain": sig.plain,
+        "html": sig.html,
+        "logo_url": org.logo_url if org and include_logo else None,
+        "website_url": effective_website,
+        "org_name": org.name if org else None,
+        "sender_first_name": ctx.user.first_name,
+    }
+
+
+@router.put("/me/email-signature")
+async def update_my_email_signature(
+    body: MyEmailSignatureUpdate,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the current user's per-org email signature + sign-off.
+    Omitted fields are left alone; explicit empty string / null clears.
+    Cleared signature falls back to Organization.agent_signature."""
+    if body.email_signature is not None:
+        text = body.email_signature.strip()
+        ctx.org_user.email_signature = text or None
+    if body.email_signoff is not None:
+        signoff = body.email_signoff.strip()
+        ctx.org_user.email_signoff = signoff or None
+    await db.commit()
+    return {
+        "email_signature": ctx.org_user.email_signature,
+        "email_signoff": ctx.org_user.email_signoff,
+    }
+
+
 @router.get("/my-orgs")
 async def list_my_orgs(
     user: User = Depends(get_current_user),

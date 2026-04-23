@@ -196,6 +196,109 @@ class ThreadActionService:
             )
             return {"error": "send_failed", "detail": f"{type(exc).__name__}: {exc}"}
 
+    async def _find_latest_stuck_outbound(self, org_id: str, thread_id: str) -> AgentMessage | None:
+        """Return the most-recent outbound message in a thread IF it's in a
+        stuck state (queued/failed/bounced/delivery_error). Mirrors the
+        Outbox folder's filter so retry/discard operate on the same row the
+        folder surfaces."""
+        latest = (await self.db.execute(
+            select(AgentMessage)
+            .where(
+                AgentMessage.thread_id == thread_id,
+                AgentMessage.organization_id == org_id,
+                AgentMessage.direction == "outbound",
+            )
+            .order_by(desc(AgentMessage.received_at))
+            .limit(1)
+        )).scalar_one_or_none()
+        if not latest:
+            return None
+        is_stuck = (
+            latest.status in ("failed", "queued")
+            or latest.delivery_status in ("bounced", "spam_complaint")
+            or bool(latest.delivery_error)
+        )
+        return latest if is_stuck else None
+
+    async def retry_outbound(self, org_id: str, thread_id: str, user_name: str) -> dict:
+        """Retry sending the latest stuck outbound message.
+
+        Uses the original to/subject/body. On success, inserts a NEW outbound
+        row with status='sent'. The stuck row stays in the timeline as an
+        audit record (status/error unchanged) so failed attempts remain
+        visible. Thread drops out of Outbox because the new outbound is now
+        the most-recent one.
+        """
+        from src.services.agents.thread_manager import update_thread_status
+        from src.services.email_service import EmailService
+
+        stuck = await self._find_latest_stuck_outbound(org_id, thread_id)
+        if not stuck:
+            return {"error": "not_stuck", "detail": "No stuck outbound message in this thread"}
+
+        thread_obj = (await self.db.execute(
+            select(AgentThread).where(AgentThread.id == thread_id)
+        )).scalar_one_or_none()
+        from_addr = thread_obj.delivered_to if thread_obj and thread_obj.delivered_to else None
+
+        email_svc = EmailService(self.db)
+        try:
+            send_result = await email_svc.send_agent_reply(
+                org_id, stuck.to_email, stuck.subject or "", stuck.body or "",
+                from_address=from_addr, sender_name=user_name,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.exception("retry_outbound send failed")
+            return {"error": "send_failed", "detail": str(e)}
+
+        if not send_result.success:
+            return {"error": "send_failed", "detail": send_result.error or "Retry did not succeed"}
+
+        now = datetime.now(timezone.utc)
+        outbound = AgentMessage(
+            organization_id=org_id,
+            direction="outbound",
+            from_email=from_addr or stuck.from_email or AGENT_FROM_EMAIL,
+            to_email=stuck.to_email,
+            subject=stuck.subject,
+            body=stuck.body,
+            status="sent",
+            thread_id=thread_id,
+            matched_customer_id=stuck.matched_customer_id,
+            customer_name=stuck.customer_name,
+            approved_by=user_name,
+            approved_at=now,
+            sent_at=now,
+            received_at=now,
+            notes=f"Retry of message {stuck.id} ({stuck.received_at.isoformat()})",
+        )
+        self.db.add(outbound)
+        await self.db.commit()
+        await update_thread_status(thread_id)
+        return {"retried": True, "outbound_message_id": outbound.id}
+
+    async def discard_outbound(self, org_id: str, thread_id: str, user_name: str) -> dict:
+        """Discard the latest stuck outbound message.
+
+        User has decided not to retry — flips status to 'rejected' so the
+        Outbox filter no longer matches (filter checks `status IN
+        ('failed','queued')`, delivery_status, and delivery_error). The
+        message row stays for audit; reason gets noted.
+        """
+        from src.services.agents.thread_manager import update_thread_status
+
+        stuck = await self._find_latest_stuck_outbound(org_id, thread_id)
+        if not stuck:
+            return {"error": "not_stuck", "detail": "No stuck outbound message in this thread"}
+
+        stuck.status = "rejected"
+        stuck.delivery_error = None  # clear so it doesn't keep matching the Outbox filter via delivery_error
+        stuck.notes = ((stuck.notes or "") + f"\nDiscarded by {user_name}").strip()
+
+        await self.db.commit()
+        await update_thread_status(thread_id)
+        return {"discarded": True, "message_id": stuck.id}
+
     async def dismiss_thread(self, org_id: str, thread_id: str, user_name: str, actor=None) -> dict:
         """Dismiss all pending messages in a thread."""
         from src.services.agents.thread_manager import update_thread_status

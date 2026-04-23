@@ -28,6 +28,10 @@ class BrandingUpdate(BaseModel):
     tagline: Optional[str] = None
     organization_name: Optional[str] = None
     email_signature: Optional[str] = None
+    auto_signature_prefix: Optional[bool] = None
+    include_logo_in_signature: Optional[bool] = None
+    allow_per_user_signature: Optional[bool] = None
+    website_url: Optional[str] = None
 
 
 @router.get("")
@@ -44,7 +48,11 @@ async def get_branding(
         "logo_url": org.logo_url,
         "primary_color": org.primary_color,
         "tagline": org.tagline,
+        "website_url": org.website_url,
         "email_signature": org.agent_signature,
+        "auto_signature_prefix": bool(org.auto_signature_prefix),
+        "include_logo_in_signature": bool(org.include_logo_in_signature),
+        "allow_per_user_signature": bool(org.allow_per_user_signature),
     }
 
 
@@ -74,6 +82,14 @@ async def update_branding(
         org.name = name
     if body.email_signature is not None:
         org.agent_signature = body.email_signature.strip() or None
+    if body.auto_signature_prefix is not None:
+        org.auto_signature_prefix = bool(body.auto_signature_prefix)
+    if body.include_logo_in_signature is not None:
+        org.include_logo_in_signature = bool(body.include_logo_in_signature)
+    if body.allow_per_user_signature is not None:
+        org.allow_per_user_signature = bool(body.allow_per_user_signature)
+    if body.website_url is not None:
+        org.website_url = body.website_url.strip() or None
 
     await db.commit()
     return {
@@ -81,7 +97,11 @@ async def update_branding(
         "logo_url": org.logo_url,
         "primary_color": org.primary_color,
         "tagline": org.tagline,
+        "website_url": org.website_url,
         "email_signature": org.agent_signature,
+        "auto_signature_prefix": bool(org.auto_signature_prefix),
+        "include_logo_in_signature": bool(org.include_logo_in_signature),
+        "allow_per_user_signature": bool(org.allow_per_user_signature),
     }
 
 

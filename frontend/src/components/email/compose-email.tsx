@@ -113,6 +113,14 @@ export function ComposeEmail() {
   // Sending
   const [sending, setSending] = useState(false);
 
+  // Refs for focus management — on open, focus the first empty field
+  // (To → Subject → Body). Without this the browser picks a tabbable
+  // element and frequently lands on the Message textarea, making users
+  // backtrack to fill in recipients and subject.
+  const toRef = useRef<HTMLInputElement>(null);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
   // Seed from options
   useEffect(() => {
     if (isOpen) {
@@ -140,6 +148,18 @@ export function ComposeEmail() {
       api.get<{ items: EmailTemplate[] }>("/v1/email/templates")
         .then((data) => setTemplates(data.items))
         .catch(() => setTemplates([]));
+
+      // Focus the first empty field after the panel mounts. Use rAF so the
+      // refs are attached before we call focus().
+      requestAnimationFrame(() => {
+        if (!options.to && !options.customerId) {
+          toRef.current?.focus();
+        } else if (!options.subject) {
+          subjectRef.current?.focus();
+        } else {
+          bodyRef.current?.focus();
+        }
+      });
     }
   }, [isOpen, options]);
 
@@ -423,6 +443,7 @@ export function ComposeEmail() {
             ) : (
               <div className="flex-1 relative">
                 <Input
+                  ref={toRef}
                   value={customerSearch || to}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -498,6 +519,7 @@ export function ComposeEmail() {
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground w-8">Subj</span>
           <Input
+            ref={subjectRef}
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             className="h-8 text-sm flex-1"
@@ -598,6 +620,7 @@ export function ComposeEmail() {
         {!body && !showAiAssist ? (
           <div className="flex-1 flex flex-col gap-2 min-h-[180px]">
             <Textarea
+              ref={bodyRef}
               value={body}
               onChange={(e) => setBody(e.target.value)}
               className="flex-1 text-sm resize-none min-h-[100px]"
@@ -637,6 +660,7 @@ export function ComposeEmail() {
           <div className="flex-1 flex flex-col gap-2 min-h-[180px]">
             <div className="relative flex-1">
               <Textarea
+                ref={bodyRef}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 className="h-full min-h-[160px] text-sm resize-none"

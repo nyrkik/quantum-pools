@@ -38,8 +38,15 @@ def _build_mime(
     in_reply_to: str | None,
     references: str | None,
     attachments: list[dict] | None = None,
+    inline_attachments: list[dict] | None = None,
 ) -> str:
-    """Build an RFC 5322 message and base64url-encode it for the Gmail API."""
+    """Build an RFC 5322 message and base64url-encode it for the Gmail API.
+
+    `inline_attachments` are MIME parts referenced from the HTML body via
+    `cid:<content_id>` — used for the signature logo. They become related
+    parts of the HTML alternative (multipart/related) so mail clients
+    render them inline, not as downloadable attachments.
+    """
     msg = StdlibEmailMessage()
     if from_name:
         msg["From"] = f'"{from_name}" <{from_address}>'
@@ -58,6 +65,18 @@ def _build_mime(
     msg.set_content(body_text)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+        if inline_attachments:
+            html_part = msg.get_body(preferencelist=("html",))
+            if html_part is not None:
+                for att in inline_attachments:
+                    maintype, _, subtype = att["mime_type"].partition("/")
+                    html_part.add_related(
+                        att["content_bytes"],
+                        maintype=maintype,
+                        subtype=subtype or "octet-stream",
+                        cid=f"<{att['content_id']}>",
+                        filename=att.get("filename") or "inline",
+                    )
 
     # File attachments
     if attachments:
@@ -87,6 +106,7 @@ async def send_reply(
     in_reply_to_message_id: str | None = None,
     references: str | None = None,
     attachments: list[dict] | None = None,
+    inline_attachments: list[dict] | None = None,
     cc: str | None = None,
 ) -> dict[str, Any]:
     """Send an outbound email via the Gmail API.
@@ -122,6 +142,7 @@ async def send_reply(
         in_reply_to=in_reply_to_message_id,
         references=references,
         attachments=attachments,
+        inline_attachments=inline_attachments,
     )
 
     body: dict[str, Any] = {"raw": raw}

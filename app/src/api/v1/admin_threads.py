@@ -169,6 +169,42 @@ async def dismiss_thread(
     return result
 
 
+@router.post("/agent-threads/{thread_id}/retry-outbound")
+async def retry_outbound(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retry the latest stuck outbound message in a thread."""
+    service = ThreadActionService(db)
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email
+    result = await service.retry_outbound(
+        org_id=ctx.organization_id, thread_id=thread_id, user_name=user_name,
+    )
+    if "error" in result:
+        raise HTTPException(400, result.get("detail") or result["error"])
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "retried_outbound"})
+    return result
+
+
+@router.post("/agent-threads/{thread_id}/discard-outbound")
+async def discard_outbound(
+    thread_id: str,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Discard the latest stuck outbound message — removes thread from Outbox."""
+    service = ThreadActionService(db)
+    user_name = f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email
+    result = await service.discard_outbound(
+        org_id=ctx.organization_id, thread_id=thread_id, user_name=user_name,
+    )
+    if "error" in result:
+        raise HTTPException(400, result.get("detail") or result["error"])
+    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "discarded_outbound"})
+    return result
+
+
 @router.post("/agent-threads/{thread_id}/restore-to-inbox")
 async def restore_to_inbox(
     thread_id: str,

@@ -69,6 +69,7 @@ from src.models.equipment_event import EquipmentEvent
 from src.models.feedback_item import FeedbackItem
 from src.models.property_access_code import PropertyAccessCode
 from src.models.internal_message import InternalThread, InternalMessage
+from src.models.internal_message_reaction import InternalMessageReaction
 from src.models.customer_contact import CustomerContact
 from src.models.agent_correction import AgentCorrection
 from src.models.thread_read import ThreadRead
@@ -140,6 +141,7 @@ __all__ = [
     "PropertyAccessCode",
     "InternalThread",
     "InternalMessage",
+    "InternalMessageReaction",
     "CustomerContact",
     "AgentCorrection",
     "EmailTemplate",

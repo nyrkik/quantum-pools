@@ -34,6 +34,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { ComposeMessage } from "@/components/messages/compose-message";
+import { MessageReactions } from "@/components/messages/message-reactions";
 import { useCompose } from "@/components/email/compose-provider";
 import { AttachExistingDialog } from "@/components/cases/attach-existing-dialog";
 import { ReopenCaseDialog } from "@/components/cases/reopen-case-dialog";
@@ -767,19 +768,28 @@ function InternalMessageDetailPanel({
         {messages.map((m) => {
           const isMe = m.from_user_id === user?.id;
           return (
-            <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+            <div key={m.id} className={`group relative flex flex-col ${isMe ? "items-end" : "items-start"}`}>
               <span className="text-[10px] text-muted-foreground mb-0.5">
                 {nameFor(m.from_user_id)} · {formatTime(m.created_at)}
               </span>
               <div
                 className={`text-sm whitespace-pre-wrap rounded-md px-3 py-2 max-w-[85%] ${
                   isMe
-                    ? "bg-primary/10 dark:bg-primary/20"
+                    ? "bg-sky-600 text-white"
                     : "bg-purple-50 dark:bg-purple-950/30 border-l-2 border-purple-400"
                 }`}
               >
                 {m.text}
               </div>
+              {user?.id && (
+                <MessageReactions
+                  messageId={m.id}
+                  reactions={m.reactions || []}
+                  currentUserId={user.id}
+                  alignRight={isMe}
+                  onChange={onUpdate}
+                />
+              )}
             </div>
           );
         })}

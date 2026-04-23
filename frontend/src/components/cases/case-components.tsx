@@ -130,7 +130,18 @@ export interface CaseDetail {
     id: string;
     subject: string | null;
     message_count: number;
-    messages: { id: string; from_user_id: string; text: string; created_at: string }[];
+    messages: {
+      id: string;
+      from_user_id: string;
+      text: string;
+      created_at: string;
+      reactions?: {
+        emoji: string;
+        count: number;
+        user_ids: string[];
+        user_names: string[];
+      }[];
+    }[];
   }[];
   timeline: TimelineEntry[];
 }

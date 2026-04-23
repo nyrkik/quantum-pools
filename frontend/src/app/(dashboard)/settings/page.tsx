@@ -210,20 +210,21 @@ function BillingTermsSection() {
   );
 }
 
+
 function BrandingSection() {
   const { refreshUser } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [branding, setBranding] = useState<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null; email_signature: string | null } | null>(null);
-  const [form, setForm] = useState({ name: "", primary_color: "", tagline: "", email_signature: "" });
+  const [branding, setBranding] = useState<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null } | null>(null);
+  const [form, setForm] = useState({ name: "", primary_color: "", tagline: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.get<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null; email_signature: string | null }>("/v1/branding");
+      const data = await api.get<{ name: string; logo_url: string | null; primary_color: string | null; tagline: string | null }>("/v1/branding");
       setBranding(data);
-      setForm({ name: data.name || "", primary_color: data.primary_color || "", tagline: data.tagline || "", email_signature: data.email_signature || "" });
+      setForm({ name: data.name || "", primary_color: data.primary_color || "", tagline: data.tagline || "" });
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
@@ -233,8 +234,7 @@ function BrandingSection() {
   const isDirty = branding && (
     form.name !== (branding.name || "") ||
     form.primary_color !== (branding.primary_color || "") ||
-    form.tagline !== (branding.tagline || "") ||
-    form.email_signature !== (branding.email_signature || "")
+    form.tagline !== (branding.tagline || "")
   );
 
   const handleSave = async () => {
@@ -244,7 +244,6 @@ function BrandingSection() {
         organization_name: form.name,
         primary_color: form.primary_color || null,
         tagline: form.tagline || null,
-        email_signature: form.email_signature || null,
       });
       toast.success("Branding updated");
       load();
@@ -351,19 +350,6 @@ function BrandingSection() {
             className="max-w-sm"
           />
           <p className="text-[10px] text-muted-foreground">Displayed under your logo in the sidebar.</p>
-        </div>
-
-        {/* Email Signature */}
-        <div className="space-y-1">
-          <Label className="text-sm font-medium">Email Signature</Label>
-          <Textarea
-            value={form.email_signature}
-            onChange={(e) => setForm({ ...form, email_signature: e.target.value })}
-            rows={4}
-            placeholder={"Company Name\nemail@company.com\ncompany.com"}
-            className="text-sm font-mono"
-          />
-          <p className="text-[10px] text-muted-foreground">Appended to all outbound emails. Plain text.</p>
         </div>
 
         {/* Save */}

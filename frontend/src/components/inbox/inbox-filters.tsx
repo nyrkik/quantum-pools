@@ -2,14 +2,13 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, Search, User, Users, Bot, MailX, UserCheck, CheckCheck } from "lucide-react";
+import { AlertTriangle, Search, User, Users, Bot, UserCheck, CheckCheck } from "lucide-react";
 
 interface ThreadStats {
   total: number;
   pending: number;
   stale_pending: number;
   open_actions: number;
-  failed?: number;
 }
 
 type AssignFilter = "all" | "mine";
@@ -29,8 +28,6 @@ interface InboxFiltersProps {
   onHandledFilterChange?: (v: boolean) => void;
   staleFilter?: boolean;
   onStaleFilterChange?: (v: boolean) => void;
-  failedFilter?: boolean;
-  onFailedFilterChange?: (v: boolean) => void;
   autoHandledFilter?: boolean;
   onAutoHandledFilterChange?: (v: boolean) => void;
   autoHandledTodayCount?: number;  // for chip-style count
@@ -55,8 +52,6 @@ export function InboxFilters({
   onHandledFilterChange,
   staleFilter,
   onStaleFilterChange,
-  failedFilter,
-  onFailedFilterChange,
   autoHandledFilter,
   onAutoHandledFilterChange,
   autoHandledTodayCount,
@@ -106,17 +101,6 @@ export function InboxFilters({
         >
           <Users className="h-3.5 w-3.5 mr-1" />
           By Client
-        </Button>
-      )}
-      {canManageInbox && stats && (stats.failed ?? 0) > 0 && onFailedFilterChange && (
-        <Button
-          variant={failedFilter ? "destructive" : "outline"}
-          size="sm"
-          className={`h-7 px-2.5 text-xs gap-1 ${!failedFilter ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400" : ""}`}
-          onClick={() => onFailedFilterChange(!failedFilter)}
-        >
-          <MailX className="h-3.5 w-3.5" />
-          {stats.failed} Failed
         </Button>
       )}
       {canManageInbox && onAutoHandledFilterChange && (

@@ -71,7 +71,6 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [assignFilter, setAssignFilter] = useState<AssignFilter>("all");
   const [staleFilter, setStaleFilter] = useState(false);
-  const [failedFilter, setFailedFilter] = useState(false);
   const [autoHandledFilter, setAutoHandledFilter] = useState(false);
   const [clientsOnlyFilter, setClientsOnlyFilter] = useState(false);
   const [handledFilter, setHandledFilter] = useState(false);
@@ -96,7 +95,6 @@ export default function InboxPage() {
     const active: string[] = [];
     if (assignFilter !== "all") active.push(`assign:${assignFilter}`);
     if (staleFilter) active.push("stale");
-    if (failedFilter) active.push("failed");
     if (autoHandledFilter) active.push("auto_handled");
     if (clientsOnlyFilter) active.push("clients_only");
     if (handledFilter) active.push("handled");
@@ -104,7 +102,7 @@ export default function InboxPage() {
       level: "user_action",
       payload: { chips_active: active, count: active.length },
     });
-  }, [assignFilter, staleFilter, failedFilter, autoHandledFilter, clientsOnlyFilter, handledFilter]);
+  }, [assignFilter, staleFilter, autoHandledFilter, clientsOnlyFilter, handledFilter]);
 
   // Instrumentation: emit inbox.folder_viewed whenever the selected folder
   // changes. Also skips initial render.
@@ -204,9 +202,6 @@ export default function InboxPage() {
     } else if (autoHandledFilter) {
       params.set("status", "auto_handled");
       params.set("exclude_spam", "false");
-    } else if (failedFilter) {
-      params.set("status", "failed");
-      params.set("exclude_spam", "false");
     } else {
       // Folder-based filtering
       if (selectedFolderKey) {
@@ -237,7 +232,7 @@ export default function InboxPage() {
       })
       .catch(() => toast.error("Failed to load threads"))
       .finally(() => setLoading(false));
-  }, [search, page, assignFilter, staleFilter, autoHandledFilter, failedFilter, clientsOnlyFilter, handledFilter, user?.id, selectedFolderId, selectedFolderKey]);
+  }, [search, page, assignFilter, staleFilter, autoHandledFilter, clientsOnlyFilter, handledFilter, user?.id, selectedFolderId, selectedFolderKey]);
 
   const loadStats = useCallback(() => {
     api.get<ThreadStats>("/v1/admin/agent-threads/stats")
@@ -477,13 +472,11 @@ export default function InboxPage() {
             clientsOnlyFilter={clientsOnlyFilter}
             onClientsOnlyFilterChange={(v) => { setClientsOnlyFilter(v); setPage(0); }}
             handledFilter={handledFilter}
-            onHandledFilterChange={(v) => { setHandledFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
+            onHandledFilterChange={(v) => { setHandledFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setPage(0); }}
             staleFilter={staleFilter}
-            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoHandledFilter(false); setFailedFilter(false); setPage(0); }}
-            failedFilter={failedFilter}
-            onFailedFilterChange={(v) => { setFailedFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setPage(0); }}
+            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoHandledFilter(false); setPage(0); }}
             autoHandledFilter={autoHandledFilter}
-            onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setFailedFilter(false); setPage(0); }}
+            onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setPage(0); }}
             autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
             canManageInbox={perms.can("inbox.manage")}
           />

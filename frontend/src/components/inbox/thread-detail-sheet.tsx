@@ -67,6 +67,7 @@ import {
   Bot,
   Check,
   Wand2,
+  Clock,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -1290,6 +1291,34 @@ export function ThreadDetailSheet({
     }
   };
 
+  const handleRetryOutbound = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/retry-outbound`, {});
+      toast.success("Retry sent");
+      await loadThread();
+      onAction();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Retry failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleDiscardOutbound = async () => {
+    setSending(true);
+    try {
+      await api.post(`/v1/admin/agent-threads/${threadId}/discard-outbound`, {});
+      toast.success("Discarded");
+      await loadThread();
+      onAction();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Discard failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleDelete = async () => {
     setSending(true);
     try {
@@ -1401,8 +1430,54 @@ export function ThreadDetailSheet({
 
   if (!thread) return null;
 
+  // Identify the latest outbound message in the timeline. If it's in a stuck
+  // state (queued/failed/bounced/delivery_error), show the Outbox banner with
+  // Retry/Discard. Mirrors the server-side filter in list_threads and
+  // InboxFolderService so the UI stays in sync with the folder count.
+  const latestOutbound = [...thread.timeline]
+    .reverse()
+    .find((m) => m.direction === "outbound");
+  const stuckOutbound =
+    latestOutbound &&
+    (
+      latestOutbound.status === "failed" ||
+      latestOutbound.status === "queued" ||
+      latestOutbound.delivery_status === "bounced" ||
+      latestOutbound.delivery_status === "spam_complaint" ||
+      !!latestOutbound.delivery_error
+    )
+      ? latestOutbound
+      : null;
+
   return (
     <div className="flex flex-col h-full overflow-x-hidden">
+      {stuckOutbound && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800">
+          <Clock className="h-4 w-4 text-amber-700 dark:text-amber-400 shrink-0" />
+          <span className="flex-1 text-xs font-medium text-amber-900 dark:text-amber-200">
+            Failed to send.
+          </span>
+          <Button
+            variant="default"
+            size="sm"
+            className="h-7 text-xs shrink-0"
+            onClick={handleRetryOutbound}
+            disabled={sending}
+          >
+            {sending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Retry
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs shrink-0 text-destructive hover:bg-destructive/10"
+            onClick={handleDiscardOutbound}
+            disabled={sending}
+          >
+            Discard
+          </Button>
+        </div>
+      )}
       {/* Compact toolbar — Status / Category / Stale badges intentionally
           moved to the left-pane thread table (scanning surface). Right pane
           keeps only the interactive controls: retag sender, add-as-contact

@@ -173,7 +173,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               <item.icon className="h-4 w-4" />
               {item.label}
               {"badge" in item && item.badge === "pending" && pendingCount > 0 && (
-                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-destructive-foreground">
+                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
                   {pendingCount}
                 </span>
               )}
@@ -348,7 +348,7 @@ export function Sidebar() {
           {mobilePending > 0 && (
             <Link href="/inbox" className="relative">
               <Mail className="h-5 w-5 text-muted-foreground" />
-              <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">
+              <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
                 {mobilePending}
               </span>
             </Link>

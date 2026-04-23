@@ -91,17 +91,27 @@ class AgentThreadService:
         base = select(AgentThread).where(AgentThread.organization_id == org_id)
 
         # Historical threads (is_historical=True) are pre-cutover context
-        # imported by app/scripts/import_historical_gmail.py. They belong on
-        # the customer detail page (when customer_id scopes the query) and in
-        # the "All Mail" escape-hatch folder (for searching the archive), but
-        # NOT in triage folders. Exclude from all other default paths.
-        include_historical = bool(customer_id) or folder_key == "all"
-        if not include_historical:
+        # imported by app/scripts/import_historical_gmail.py. Five view modes:
+        #   - customer_id scope: include historical alongside live (customer page)
+        #   - folder_key == "historical": ONLY historical (exclusive view)
+        #   - folder_key == "all_mail": user-visible failsafe. Every LIVE thread
+        #     regardless of status, folder, or direction — the "where's my email"
+        #     escape hatch for messages QP auto-handled out of sight.
+        #   - folder_key == "all": internal-only escape hatch kept for the
+        #     case-attach dialog's cross-folder search. Same semantics as
+        #     all_mail; not exposed as a sidebar folder.
+        #   - everything else (default inbox, sent, spam, custom folders):
+        #     exclude historical so triage stays clean
+        if folder_key == "historical":
+            base = base.where(AgentThread.is_historical == True)  # noqa: E712
+        elif not customer_id:
             base = base.where(AgentThread.is_historical == False)  # noqa: E712
 
-        # "All Mail" folder: show literally every thread — no folder, status, or
-        # category filtering. Use this when the user thinks an email is missing.
-        if folder_key == "all":
+        # Escape-hatch branches — skip the default-inbox-shape filter, return
+        # everything matched by search + visibility + assigned_to. is_historical
+        # scoping is already handled above (all_mail stays live-only because of
+        # the elif-not-customer_id clause).
+        if folder_key in ("historical", "all_mail", "all"):
             # Skip every other filter except visibility + search + assigned_to.
             if assigned_to:
                 base = base.where(AgentThread.assigned_to_user_id == assigned_to)
@@ -264,6 +274,33 @@ class AgentThreadService:
                         AgentMessage.organization_id == org_id,
                         AgentMessage.direction == "outbound",
                         AgentMessage.status == "sent",
+                    )
+                )
+            )
+        elif folder_key == "outbox":
+            # Outbox: threads whose MOST RECENT outbound message is in a stuck
+            # state (queued / failed / bounced / delivery_error). A later
+            # successful retry resolves the thread and removes it from Outbox.
+            # Same semantics as the previous "failed" filter chip, now surfaced
+            # as a folder with "not sent yet" framing.
+            latest_outbound = (
+                select(
+                    AgentMessage.thread_id.label("tid"),
+                    AgentMessage.status.label("st"),
+                    AgentMessage.delivery_status.label("ds"),
+                    AgentMessage.delivery_error.label("de"),
+                )
+                .where(AgentMessage.direction == "outbound")
+                .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+                .distinct(AgentMessage.thread_id)
+                .subquery()
+            )
+            base = base.where(
+                AgentThread.id.in_(
+                    select(latest_outbound.c.tid).where(
+                        latest_outbound.c.ds.in_(("bounced", "spam_complaint"))
+                        | latest_outbound.c.de.isnot(None)
+                        | latest_outbound.c.st.in_(("failed", "queued"))
                     )
                 )
             )

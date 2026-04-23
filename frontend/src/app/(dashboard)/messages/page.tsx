@@ -28,6 +28,7 @@ import { usePasteAttachments } from "@/hooks/use-paste-attachments";
 import { EmojiPickerButton } from "@/components/ui/emoji-picker-button";
 import { AttachmentDisplay, type AttachmentInfo } from "@/components/ui/attachment-display";
 import { LinkCasePicker } from "@/components/cases/link-case-picker";
+import { MessageReactions } from "@/components/messages/message-reactions";
 
 interface ThreadSummary {
   id: string;
@@ -44,12 +45,20 @@ interface ThreadSummary {
   case_id: string | null;
 }
 
+interface MessageReaction {
+  emoji: string;
+  count: number;
+  user_ids: string[];
+  user_names: string[];
+}
+
 interface ThreadMessage {
   id: string;
   from_user_id: string;
   from_name: string;
   text: string;
   attachments?: AttachmentInfo[];
+  reactions?: MessageReaction[];
   created_at: string;
 }
 
@@ -279,15 +288,24 @@ export default function MessagesPage() {
               {detail.messages.map((m) => {
                 const isMe = m.from_user_id === user?.id;
                 return (
-                  <div key={m.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[80%] rounded-lg px-3 py-2 ${isMe ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                  <div key={m.id} className={`group relative flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                    <div className={`max-w-[80%] rounded-lg px-3 py-2 ${isMe ? "bg-sky-600 text-white" : "bg-muted"}`}>
                       {!isMe && <p className="text-[10px] font-medium mb-0.5 opacity-70">{m.from_name}</p>}
                       <p className="text-sm whitespace-pre-wrap">{m.text}</p>
                       {m.attachments && m.attachments.length > 0 && (
                         <AttachmentDisplay attachments={m.attachments} />
                       )}
-                      <p className={`text-[10px] mt-1 ${isMe ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{formatTime(m.created_at)}</p>
+                      <p className={`text-[10px] mt-1 ${isMe ? "text-white/70" : "text-muted-foreground"}`}>{formatTime(m.created_at)}</p>
                     </div>
+                    {user?.id && (
+                      <MessageReactions
+                        messageId={m.id}
+                        reactions={m.reactions || []}
+                        currentUserId={user.id}
+                        alignRight={isMe}
+                        onChange={() => { if (selectedThreadId) loadDetail(selectedThreadId); }}
+                      />
+                    )}
                   </div>
                 );
               })}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { usePermissions } from "@/lib/permissions";
 import { toast } from "sonner";
 import { PageLayout } from "@/components/layout/page-layout";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { Save } from "lucide-react";
 import {
   Loader2,
   Mail,
@@ -33,6 +39,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  PenLine,
 } from "lucide-react";
 
 interface EmailIntegration {
@@ -347,6 +354,8 @@ function EmailSettingsContent() {
           </CardContent>
         </Card>
 
+        <SignatureSection />
+
       </div>
 
       <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
@@ -366,6 +375,432 @@ function EmailSettingsContent() {
         </AlertDialogContent>
       </AlertDialog>
     </PageLayout>
+  );
+}
+
+
+interface SignaturePreviewResult {
+  plain: string;
+  html: string;
+  logo_url: string | null;
+  website_url: string | null;
+  org_name: string | null;
+  sender_first_name: string | null;
+}
+
+interface UserSigData {
+  email_signature: string | null;
+  email_signoff: string | null;
+  org_auto_signature_prefix: boolean;
+  org_include_logo_in_signature: boolean;
+  org_allow_per_user_signature: boolean;
+  org_signature_fallback: string | null;
+  org_name: string | null;
+  org_logo_url: string | null;
+}
+
+interface OrgSigData {
+  email_signature: string | null;
+  auto_signature_prefix: boolean;
+  include_logo_in_signature: boolean;
+  allow_per_user_signature: boolean;
+  logo_url?: string | null;
+  website_url?: string | null;
+}
+
+/**
+ * SignatureSection — single surface for both admin and per-user signature
+ * config. Lives at /inbox/integrations and holds BOTH form states so the
+ * live preview reflects every in-flight edit across both cards. The old
+ * split previews diverged because each card had its own form + preview;
+ * this unified section fixes that.
+ *
+ * Layout:
+ *   ┌─ Preview (one, shared) ─────────┐
+ *   └─────────────────────────────────┘
+ *   ┌─ Your email signature ──────────┐
+ *   │  Sign-off, personal info        │  (per-user, everyone sees)
+ *   └─────────────────────────────────┘
+ *   ┌─ Email Signature (admin only) ──┐
+ *   │  Toggles + shared org footer    │  (hidden if non-admin)
+ *   └─────────────────────────────────┘
+ */
+function SignatureSection() {
+  const perms = usePermissions();
+  const isAdmin = perms.role === "owner" || perms.role === "admin";
+
+  const [userLoaded, setUserLoaded] = useState<UserSigData | null>(null);
+  const [userSig, setUserSig] = useState("");
+  const [userSignoff, setUserSignoff] = useState("");
+  const [userSaving, setUserSaving] = useState(false);
+
+  const [orgLoaded, setOrgLoaded] = useState<OrgSigData | null>(null);
+  const [orgForm, setOrgForm] = useState<OrgSigData>({
+    email_signature: "",
+    auto_signature_prefix: true,
+    include_logo_in_signature: false,
+    allow_per_user_signature: true,
+    logo_url: null,
+    website_url: null,
+  });
+  const [orgSaving, setOrgSaving] = useState(false);
+
+  const [preview, setPreview] = useState<SignaturePreviewResult | null>(null);
+
+  const loadUser = useCallback(async () => {
+    try {
+      const data = await api.get<UserSigData>("/v1/auth/me/email-signature");
+      setUserLoaded(data);
+      setUserSig(data?.email_signature ?? "");
+      setUserSignoff(data?.email_signoff ?? "");
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadOrg = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const data = await api.get<OrgSigData>("/v1/branding");
+      setOrgLoaded(data);
+      setOrgForm({
+        email_signature: data.email_signature ?? "",
+        auto_signature_prefix: data.auto_signature_prefix,
+        include_logo_in_signature: data.include_logo_in_signature,
+        allow_per_user_signature: data.allow_per_user_signature,
+        logo_url: data.logo_url ?? null,
+        website_url: data.website_url ?? null,
+      });
+    } catch { /* ignore */ }
+  }, [isAdmin]);
+
+  useEffect(() => { loadUser(); loadOrg(); }, [loadUser, loadOrg]);
+
+  // Live preview combines both forms' unsaved state.
+  // Admin form takes precedence for org-level fields when available;
+  // non-admins pass only user fields and inherit current org state from
+  // userLoaded snapshot.
+  useEffect(() => {
+    if (!userLoaded) return;
+    const t = setTimeout(async () => {
+      try {
+        const p = await api.post<SignaturePreviewResult>("/v1/auth/me/email-signature/preview", {
+          user_signature: userSig,
+          user_signoff: userSignoff,
+          auto_signature_prefix: isAdmin ? orgForm.auto_signature_prefix : undefined,
+          include_logo_in_signature: isAdmin ? orgForm.include_logo_in_signature : undefined,
+          allow_per_user_signature: isAdmin ? orgForm.allow_per_user_signature : undefined,
+          website_url: isAdmin ? orgForm.website_url : undefined,
+          org_signature: isAdmin ? orgForm.email_signature : undefined,
+          use_current_user: true,
+        });
+        setPreview(p);
+      } catch { /* ignore */ }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [userSig, userSignoff, orgForm, userLoaded, isAdmin]);
+
+  const userDirty = !!userLoaded && (
+    userSig !== (userLoaded.email_signature ?? "") ||
+    userSignoff !== (userLoaded.email_signoff ?? "")
+  );
+
+  const orgDirty = !!orgLoaded && (
+    (orgForm.email_signature ?? "") !== (orgLoaded.email_signature ?? "") ||
+    orgForm.auto_signature_prefix !== orgLoaded.auto_signature_prefix ||
+    orgForm.include_logo_in_signature !== orgLoaded.include_logo_in_signature ||
+    orgForm.allow_per_user_signature !== orgLoaded.allow_per_user_signature ||
+    (orgForm.website_url ?? "") !== (orgLoaded.website_url ?? "")
+  );
+
+  const saveUser = async () => {
+    setUserSaving(true);
+    try {
+      await api.put("/v1/auth/me/email-signature", {
+        email_signature: userSig || null,
+        email_signoff: userSignoff || null,
+      });
+      toast.success("Your signature saved");
+      await loadUser();
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setUserSaving(false);
+    }
+  };
+
+  const saveOrg = async () => {
+    setOrgSaving(true);
+    try {
+      await api.put("/v1/branding", {
+        email_signature: orgForm.email_signature || null,
+        auto_signature_prefix: orgForm.auto_signature_prefix,
+        include_logo_in_signature: orgForm.include_logo_in_signature,
+        allow_per_user_signature: orgForm.allow_per_user_signature,
+        website_url: orgForm.website_url || null,
+      });
+      toast.success("Organization signature settings saved");
+      await loadOrg();
+      // User preview inherits org state from userLoaded; reload so it's
+      // in sync with the saved values.
+      await loadUser();
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setOrgSaving(false);
+    }
+  };
+
+  if (!userLoaded) return null;
+
+  // Which admin toggles to reflect in the preview. If admin is editing,
+  // use their form state; otherwise use what userLoaded reports.
+  const effectiveIncludeLogo = isAdmin && orgLoaded
+    ? orgForm.include_logo_in_signature
+    : userLoaded.org_include_logo_in_signature;
+  const effectiveLogoUrl = isAdmin && orgLoaded ? orgForm.logo_url : userLoaded.org_logo_url;
+  const showLogoUrl = effectiveIncludeLogo ? effectiveLogoUrl ?? null : null;
+  const logoAvailable = !!effectiveLogoUrl;
+  const effectiveWebsiteUrl = isAdmin && orgLoaded
+    ? orgForm.website_url ?? null
+    : preview?.website_url ?? null;
+
+  // When admin has disabled per-user customization, the personal section
+  // still renders but its inputs are disabled with an explanation. That
+  // way users see their current (saved) values and the reason they can't
+  // edit. If nothing's saved + it's disabled, we show a status message.
+  const perUserAllowed = isAdmin && orgLoaded
+    ? orgForm.allow_per_user_signature
+    : userLoaded.org_allow_per_user_signature;
+
+  return (
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <PenLine className="h-4 w-4 text-primary" />
+          Email Signature
+        </CardTitle>
+        <CardDescription>
+          Signature applied to outbound customer emails. Admin-controlled format and footer;
+          each user adds their own personal info above the shared footer.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Preview — always on top, always reflects live form state */}
+        <section className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">Preview</div>
+          <p className="text-[11px] text-muted-foreground -mt-0.5">
+            Live — reflects unsaved edits anywhere on this page. This is literally what recipients see.
+          </p>
+          <SignaturePreview preview={preview} showLogoUrl={showLogoUrl} websiteUrl={effectiveWebsiteUrl} />
+        </section>
+
+        {/* Per-user section */}
+        <section className="space-y-3 border-t pt-5 max-w-2xl">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">Your personal info</div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {perUserAllowed
+                ? userLoaded.org_auto_signature_prefix
+                  ? "Your first name and organization name are auto-added above this. Type just your personal contact details (phone, title, pronouns)."
+                  : "The organization's shared footer is appended below this. Type your personal contact details (phone, title, pronouns)."
+                : "The organization admin has disabled per-user signature customization — every outbound uses the organization defaults below."}
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Sign-off (optional)</Label>
+            <Input
+              type="text"
+              value={userSignoff}
+              onChange={(e) => setUserSignoff(e.target.value)}
+              placeholder="e.g. Best, — leave blank to skip"
+              maxLength={50}
+              disabled={!perUserAllowed}
+              className="text-sm max-w-xs"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Rendered on its own line above your name. Common choices: &quot;Best,&quot; &quot;Regards,&quot; &quot;v/r,&quot; &quot;Cheers,&quot;.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Signature text</Label>
+            <Textarea
+              value={userSig}
+              onChange={(e) => setUserSig(e.target.value)}
+              rows={4}
+              placeholder={"e.g.\n(555) 555-1234\nyour-title@example.com"}
+              disabled={!perUserAllowed}
+              className="text-sm font-mono"
+            />
+          </div>
+          {perUserAllowed && (
+            <Button
+              onClick={saveUser}
+              disabled={userSaving || !userDirty}
+              size="sm"
+            >
+              {userSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Save
+            </Button>
+          )}
+        </section>
+
+        {/* Admin section */}
+        {isAdmin && orgLoaded && (
+          <section className="space-y-3 border-t pt-5 max-w-2xl">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">Organization settings (admin only)</div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Format and shared footer applied to every outbound email regardless of who sent it.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="flex items-start gap-2 cursor-pointer text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={orgForm.allow_per_user_signature}
+                  onChange={(e) =>
+                    setOrgForm((f) => ({ ...f, allow_per_user_signature: e.target.checked }))
+                  }
+                />
+                <div>
+                  <div className="font-medium">Let users customize their signature</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    When off, every outbound uses only the org footer below — users can&apos;t add a personal sign-off or personal info. Use for absolute brand consistency.
+                  </div>
+                </div>
+              </label>
+              <label className="flex items-start gap-2 cursor-pointer text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={orgForm.auto_signature_prefix}
+                  onChange={(e) =>
+                    setOrgForm((f) => ({ ...f, auto_signature_prefix: e.target.checked }))
+                  }
+                />
+                <div>
+                  <div className="font-medium">Auto-add sender name and organization name</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Prepends each sender&apos;s first name and the organization name above their signature text. Keeps outbound branding consistent across every sender.
+                  </div>
+                </div>
+              </label>
+              <label className={cn("flex items-start gap-2 text-sm", logoAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-60")}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={orgForm.include_logo_in_signature}
+                  disabled={!logoAvailable}
+                  onChange={(e) =>
+                    setOrgForm((f) => ({ ...f, include_logo_in_signature: e.target.checked }))
+                  }
+                />
+                <div>
+                  <div className="font-medium">Include logo in signature</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {logoAvailable
+                      ? "Adds your uploaded logo at the bottom of the signature as an inline image. Renders in Gmail, Apple Mail, Outlook."
+                      : "Upload a logo under Branding (Settings) first to enable this."}
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Website URL</Label>
+              <p className="text-[11px] text-muted-foreground">
+                When the logo is enabled, clicking it in a recipient&apos;s inbox opens this URL. Leave blank for a static (non-clickable) logo.
+              </p>
+              <Input
+                type="url"
+                value={orgForm.website_url ?? ""}
+                onChange={(e) =>
+                  setOrgForm((f) => ({ ...f, website_url: e.target.value }))
+                }
+                placeholder="e.g. https://your-company.com"
+                className="text-sm max-w-sm"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Organization footer (shared by all users)</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Appended to every outbound email from every sender — this is your standardized tail.
+              </p>
+              <Textarea
+                value={orgForm.email_signature ?? ""}
+                onChange={(e) =>
+                  setOrgForm((f) => ({ ...f, email_signature: e.target.value }))
+                }
+                rows={4}
+                placeholder={"e.g.\ncontact@your-company.com\nyour-company.com"}
+                className="text-sm font-mono"
+              />
+            </div>
+
+            <Button
+              onClick={saveOrg}
+              disabled={orgSaving || !orgDirty}
+              size="sm"
+            >
+              {orgSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Save
+            </Button>
+          </section>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SignaturePreview({
+  preview,
+  showLogoUrl,
+  websiteUrl,
+}: {
+  preview: SignaturePreviewResult | null;
+  showLogoUrl: string | null;
+  websiteUrl: string | null;
+}) {
+  // Preview matches send behavior: when both a logo and a website URL are
+  // set, the logo is clickable. We normalize bare domains like
+  // "sapphire-pools.com" to https for the preview href — matches server
+  // composition in email_signature._normalize_website.
+  const normalizedSite = websiteUrl?.trim()
+    ? /^https?:\/\//i.test(websiteUrl.trim())
+      ? websiteUrl.trim()
+      : `https://${websiteUrl.trim()}`
+    : null;
+  const logoImg = showLogoUrl ? (
+    <img
+      src={showLogoUrl}
+      alt="logo"
+      style={{ maxWidth: 180, maxHeight: 60, height: "auto", display: "inline-block", border: 0 }}
+    />
+  ) : null;
+  return (
+    <div className="rounded-md border bg-background p-4 text-sm">
+      {preview && preview.html ? (
+        <>
+          <div className="text-muted-foreground italic">Hi Jane,</div>
+          <div className="text-muted-foreground italic">Thanks for reaching out. [the body of your email goes here.]</div>
+          <div dangerouslySetInnerHTML={{ __html: preview.html }} />
+          {logoImg && (
+            <div className="mt-2">
+              {normalizedSite ? (
+                <a href={normalizedSite} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+                  {logoImg}
+                </a>
+              ) : logoImg}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-muted-foreground italic">No signature configured yet.</div>
+      )}
+    </div>
   );
 }
 

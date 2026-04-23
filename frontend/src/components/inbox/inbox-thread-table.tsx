@@ -326,7 +326,7 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                         <StatusBadge status={t.status} />
                         {t.has_pending && t.last_message_at &&
                           (Date.now() - new Date(t.last_message_at).getTime()) > 30 * 60 * 1000 && (
-                          <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                          <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
                             Stale
                           </span>
                         )}

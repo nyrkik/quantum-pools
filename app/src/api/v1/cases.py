@@ -217,6 +217,15 @@ async def get_case(
         .order_by(InternalThread.created_at)
     )
     internal_threads = internal_result.scalars().all()
+
+    # Batch-load reactions for every message in every thread so the case
+    # detail panel can render chips without a per-message fetch.
+    all_message_ids = [m.id for it in internal_threads for m in (it.messages or [])]
+    reactions_by_msg: dict[str, list[dict]] = {}
+    if all_message_ids:
+        from src.presenters.message_presenter import MessagePresenter as _MP
+        reactions_by_msg = await _MP(db)._load_reactions(all_message_ids)
+
     d["internal_threads"] = [
         {
             "id": it.id,
@@ -227,6 +236,7 @@ async def get_case(
                     "id": m.id,
                     "from_user_id": m.from_user_id,
                     "text": m.text,
+                    "reactions": reactions_by_msg.get(m.id, []),
                     "created_at": presenter._iso(m.created_at),
                 }
                 for m in sorted(it.messages or [], key=lambda x: x.created_at)

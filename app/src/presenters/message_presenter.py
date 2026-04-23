@@ -91,6 +91,10 @@ class MessagePresenter(Presenter):
         msg_ids = [m.id for m in messages]
         attachments_by_msg = await self._load_attachments("internal_message", msg_ids)
 
+        # Load reactions grouped by (message_id, emoji) so the frontend can
+        # render chips with counts + user names without a per-message fetch.
+        reactions_by_msg = await self._load_reactions(msg_ids)
+
         # Load case summary for the link picker
         case_number = None
         case_title = None
@@ -123,11 +127,55 @@ class MessagePresenter(Presenter):
                     "from_name": user_names.get(m.from_user_id, "Unknown"),
                     "text": m.text,
                     "attachments": self._format_attachments(attachments_by_msg.get(m.id, [])),
+                    "reactions": reactions_by_msg.get(m.id, []),
                     "created_at": self._iso(m.created_at),
                 }
                 for m in messages
             ],
         }
+
+    async def _load_reactions(self, message_ids: list[str]) -> dict[str, list[dict]]:
+        """Return {message_id: [{emoji, count, user_ids:[], user_names:[]}]}.
+
+        Grouped and sorted by count desc so the frontend renders the most
+        popular reaction first.
+        """
+        if not message_ids:
+            return {}
+        from src.models.internal_message_reaction import InternalMessageReaction
+        rows = (await self.db.execute(
+            select(
+                InternalMessageReaction.message_id,
+                InternalMessageReaction.emoji,
+                InternalMessageReaction.user_id,
+            ).where(InternalMessageReaction.message_id.in_(message_ids))
+        )).all()
+        if not rows:
+            return {}
+
+        # Resolve user names for the list of reacting users.
+        user_ids = {r.user_id for r in rows}
+        user_names = await self._load_user_names(user_ids)
+
+        # Group: message_id → emoji → [user_ids]
+        grouped: dict[str, dict[str, list[str]]] = {}
+        for r in rows:
+            grouped.setdefault(r.message_id, {}).setdefault(r.emoji, []).append(r.user_id)
+
+        result: dict[str, list[dict]] = {}
+        for mid, by_emoji in grouped.items():
+            entries = [
+                {
+                    "emoji": emoji,
+                    "count": len(uids),
+                    "user_ids": uids,
+                    "user_names": [user_names.get(uid, "Unknown") for uid in uids],
+                }
+                for emoji, uids in by_emoji.items()
+            ]
+            entries.sort(key=lambda e: (-e["count"], e["emoji"]))
+            result[mid] = entries
+        return result
 
     async def _load_user_names(self, ids: set[str]) -> dict[str, str]:
         if not ids:

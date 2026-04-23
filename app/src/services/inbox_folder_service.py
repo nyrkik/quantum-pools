@@ -17,7 +17,13 @@ class InboxFolderService:
         self.db = db
 
     async def list_folders(self, org_id: str, user_id: str | None = None) -> list[dict]:
-        """Return all folders with thread counts (total + per-user unread)."""
+        """Return all folders with thread counts (total + per-user unread).
+
+        Historical threads (`is_historical=True`) are excluded from every
+        count — they belong on the customer detail page and the All Mail
+        folder, not in folder-badge totals that would otherwise show
+        thousands of pre-cutover threads in Inbox.
+        """
         from src.models.thread_read import ThreadRead
 
         # Folders with threads assigned — unread = threads where the user hasn't
@@ -26,11 +32,13 @@ class InboxFolderService:
             AgentThread.last_direction == "inbound",
             AgentThread.status.notin_(("closed", "ignored")),
         )
+        # Partial-index-friendly exclusion — keeps historical off every count.
+        not_historical = AgentThread.is_historical == False  # noqa: E712
 
         rows = (await self.db.execute(
             select(
                 InboxFolder,
-                func.count(AgentThread.id).filter(AgentThread.id.isnot(None)).label("thread_count"),
+                func.count(AgentThread.id).filter(AgentThread.id.isnot(None), not_historical).label("thread_count"),
             )
             .outerjoin(AgentThread, AgentThread.folder_id == InboxFolder.id)
             .where(InboxFolder.organization_id == org_id)
@@ -43,6 +51,7 @@ class InboxFolderService:
             select(func.count(AgentThread.id)).where(
                 AgentThread.organization_id == org_id,
                 AgentThread.folder_id.is_(None),
+                not_historical,
             )
         )).scalar() or 0
 
@@ -68,6 +77,7 @@ class InboxFolderService:
                 .where(
                     AgentThread.organization_id == org_id,
                     unread_filter,
+                    not_historical,
                     or_(
                         ThreadRead.read_at.is_(None),
                         AgentThread.last_message_at > ThreadRead.read_at,
@@ -83,10 +93,59 @@ class InboxFolderService:
         # behavior in AgentThreadService.list_threads.
         from src.models.agent_message import AgentMessage
         sent_thread_count = (await self.db.execute(
-            select(func.count(func.distinct(AgentMessage.thread_id))).where(
+            select(func.count(func.distinct(AgentMessage.thread_id)))
+            .select_from(AgentMessage.__table__.join(
+                AgentThread.__table__,
+                AgentMessage.thread_id == AgentThread.id,
+            ))
+            .where(
                 AgentMessage.organization_id == org_id,
                 AgentMessage.direction == "outbound",
                 AgentMessage.status == "sent",
+                not_historical,
+            )
+        )).scalar() or 0
+
+        # All Mail: failsafe count = every live thread across all folders/status/directions.
+        # Mirrors the folder_key=="all_mail" branch semantics in list_threads.
+        all_mail_thread_count = (await self.db.execute(
+            select(func.count(AgentThread.id)).where(
+                AgentThread.organization_id == org_id,
+                not_historical,
+            )
+        )).scalar() or 0
+
+        # Outbox: threads whose MOST RECENT outbound message is stuck
+        # (queued / failed / bounced / delivery_error). Matches the
+        # folder_key=="outbox" list branch in AgentThreadService.list_threads.
+        # Ignores folder_id — a thread routed to any custom folder still
+        # surfaces here if its latest outbound is stuck.
+        latest_outbound_sq = (
+            select(
+                AgentMessage.thread_id.label("tid"),
+                AgentMessage.status.label("st"),
+                AgentMessage.delivery_status.label("ds"),
+                AgentMessage.delivery_error.label("de"),
+            )
+            .where(AgentMessage.direction == "outbound")
+            .order_by(AgentMessage.thread_id, AgentMessage.received_at.desc())
+            .distinct(AgentMessage.thread_id)
+            .subquery()
+        )
+        outbox_thread_count = (await self.db.execute(
+            select(func.count(func.distinct(AgentThread.id)))
+            .select_from(AgentThread.__table__.join(
+                latest_outbound_sq,
+                latest_outbound_sq.c.tid == AgentThread.id,
+            ))
+            .where(
+                AgentThread.organization_id == org_id,
+                not_historical,
+                (
+                    latest_outbound_sq.c.ds.in_(("bounced", "spam_complaint"))
+                    | latest_outbound_sq.c.de.isnot(None)
+                    | latest_outbound_sq.c.st.in_(("failed", "queued"))
+                ),
             )
         )).scalar() or 0
 
@@ -101,6 +160,18 @@ class InboxFolderService:
             elif folder.system_key == "sent":
                 tc = sent_thread_count
                 uc = 0  # Sent folder isn't something users track as unread
+            elif folder.system_key == "outbox":
+                # Outbox count = threads with stuck outbound, not folder_id
+                # assignments. Expose it as the unread count so the sidebar
+                # badge surfaces the number that needs attention (same slot
+                # the eye is already drawn to).
+                tc = outbox_thread_count
+                uc = outbox_thread_count
+            elif folder.system_key == "all_mail":
+                # All Mail shows every live thread — informational total, no
+                # unread badge (would just mirror Inbox's count and add noise).
+                tc = all_mail_thread_count
+                uc = 0
             result.append({
                 "id": folder.id,
                 "name": folder.name,

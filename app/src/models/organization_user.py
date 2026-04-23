@@ -43,6 +43,16 @@ class OrganizationUser(Base):
     # JSON array of sender emails this user has dismissed from contact learning prompts
     dismissed_sender_emails: Mapped[str] = mapped_column(Text, default="[]")
 
+    # Per-user email signature tail (applied AFTER any org-level auto-prepend
+    # of first name + org name + logo). Admin sets the org-wide format; each
+    # user's signature content is their own. Falls back to
+    # Organization.agent_signature when the user hasn't set one.
+    email_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional sign-off (valediction) rendered between the body and the
+    # auto-prepended name line. Examples: "Best,", "v/r,", "Cheers,".
+    # Null/empty = no sign-off (abrupt style).
+    email_signoff: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     organization = relationship("Organization", back_populates="members")

@@ -294,8 +294,19 @@ Job/action items extracted from emails or created manually.
 |-------|---------|
 | `agent_from_email` | Org-specific sender address (Postmark-verified) |
 | `agent_from_name` | Org-specific sender name |
-| `agent_signature` | Org email signature block |
+| `agent_signature` | Shared org footer appended to every outbound signature (links, compliance lines). Standardized across all senders. |
+| `auto_signature_prefix` | Admin toggle: prepend `{sender_first_name}\n{org_name}` above the user signature |
+| `include_logo_in_signature` | Admin toggle: embed `logo_url` as inline CID image at the bottom of HTML signatures |
 | `agent_tone_rules` | Custom tone guidelines for AI drafts |
+
+Per-user fields live on `organization_users` (one row per user-per-org):
+
+| Field | Purpose |
+|-------|---------|
+| `email_signature` | User's personal contact info rendered above the org footer |
+| `email_signoff` | Optional valediction ("Best,", "v/r,") rendered above the name line |
+
+Signature composition lives in `src/services/email_signature.py` — single source of truth. Order rendered (top → bottom): optional sign-off → optional auto-prepended name + org name → user's personal signature text → org footer → optional CID logo.
 
 ## Monitoring
 

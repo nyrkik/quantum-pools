@@ -22,6 +22,10 @@ class Organization(Base):
     logo_url: Mapped[str | None] = mapped_column(String(500))
     primary_color: Mapped[str | None] = mapped_column(String(20))  # hex color e.g. #1e40af
     tagline: Mapped[str | None] = mapped_column(String(255))
+    # Public website URL. Used as the <a href> target when the signature
+    # logo is enabled so clicking the logo in a customer's inbox opens the
+    # org's site. Optional — if unset, logo renders as a static image.
+    website_url: Mapped[str | None] = mapped_column(String(500))
     stripe_customer_id: Mapped[str | None] = mapped_column(String(100))
     billing_email: Mapped[str | None] = mapped_column(String(255))
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -32,6 +36,21 @@ class Organization(Base):
     agent_from_name: Mapped[str | None] = mapped_column(String(100))
     agent_tone_rules: Mapped[str | None] = mapped_column(Text)
     agent_signature: Mapped[str | None] = mapped_column(Text)
+    # Signature composition toggles — admin-controlled so outbound signature
+    # format is consistent across all org senders, but each user's personal
+    # signature text (OrganizationUser.email_signature) stays per-user.
+    auto_signature_prefix: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False,
+    )
+    include_logo_in_signature: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False,
+    )
+    # When false, per-user email_signature / email_signoff are ignored at
+    # send time — every outbound uses the org's shared settings only. Admin
+    # lever for orgs that want absolute brand consistency.
+    allow_per_user_signature: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False,
+    )
     agent_business_hours_start: Mapped[int | None] = mapped_column(Integer)  # 7 = 7 AM
     agent_business_hours_end: Mapped[int | None] = mapped_column(Integer)    # 20 = 8 PM
     agent_timezone: Mapped[str | None] = mapped_column(String(50))

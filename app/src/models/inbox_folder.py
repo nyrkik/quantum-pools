@@ -45,7 +45,22 @@ class InboxFolder(Base):
 
 SYSTEM_FOLDERS = [
     {"system_key": "inbox", "name": "Inbox", "icon": "inbox", "sort_order": 0},
-    {"system_key": "sent", "name": "Sent", "icon": "send", "sort_order": 1},
-    {"system_key": "spam", "name": "Spam", "icon": "shield-alert", "sort_order": 2},
-    {"system_key": "all", "name": "All Mail", "icon": "mailbox", "sort_order": 3},
+    # Outbox = outbound messages that haven't completed (queued, failed,
+    # bounced, or delivery_error). Replaces the "Failed" filter chip —
+    # Gmail-like mental model ("where did my email go? check Outbox").
+    # Language is "not sent yet", not "failed", so users aren't alarmed by
+    # transient queue states. Badge shows count only when > 0.
+    {"system_key": "outbox", "name": "Outbox", "icon": "clock", "sort_order": 1},
+    {"system_key": "sent", "name": "Sent", "icon": "send", "sort_order": 2},
+    {"system_key": "spam", "name": "Spam", "icon": "shield-alert", "sort_order": 3},
+    # All Mail = escape hatch showing EVERY live (non-historical) thread
+    # regardless of status, folder, or direction. The "where's my email?"
+    # failsafe — if QP's AI auto-handled a message into status=ignored with
+    # no folder, this is where users find it. Distinct from Historical,
+    # which only shows pre-cutover imports. Gated by inbox.see_all_mail.
+    {"system_key": "all_mail", "name": "All Mail", "icon": "mailbox", "sort_order": 4},
+    # Historical = pre-cutover mail imported via app/scripts/import_historical_gmail.py
+    # (see agent_threads.is_historical). Exclusive view of historical threads only —
+    # sent/spam/active live in their own folders.
+    {"system_key": "historical", "name": "Historical", "icon": "archive", "sort_order": 5},
 ]

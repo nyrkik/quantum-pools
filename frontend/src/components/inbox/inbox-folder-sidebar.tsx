@@ -25,6 +25,8 @@ import {
   Loader2,
   Mailbox,
   PenSquare,
+  Archive,
+  Clock,
 } from "lucide-react";
 import { useCompose } from "@/components/email/compose-provider";
 
@@ -54,6 +56,8 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   bot: <Bot className="h-4 w-4" />,
   "shield-alert": <ShieldAlert className="h-4 w-4" />,
   mailbox: <Mailbox className="h-4 w-4" />,
+  archive: <Archive className="h-4 w-4" />,
+  clock: <Clock className="h-4 w-4" />,
 };
 
 export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className, refreshKey, autoHandledToday }: Props) {
@@ -110,8 +114,9 @@ export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className
   const inboxFolder = folders.find((f) => f.system_key === "inbox");
   const systemFolders = folders.filter((f) => {
     if (!f.is_system || f.system_key === "inbox") return false;
-    // All Mail is permission-gated
-    if (f.system_key === "all" && !canSeeAllMail) return false;
+    // Historical + All Mail share the inbox.see_all_mail permission gate —
+    // both are escape-hatch views typically reserved for owners/admins/managers.
+    if ((f.system_key === "historical" || f.system_key === "all_mail") && !canSeeAllMail) return false;
     return true;
   });
   const customFolders = folders.filter((f) => !f.is_system);
@@ -135,16 +140,11 @@ export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className
         {f.icon && ICON_MAP[f.icon] ? ICON_MAP[f.icon] : <Folder className="h-3.5 w-3.5" />}
       </span>
       <span className="flex-1 truncate">{f.name}</span>
-      {f.system_key === "inbox" && canSeeAllMail && (autoHandledToday ?? 0) > 0 && (
-        <span
-          className="h-4 px-1 text-[9px] font-medium rounded bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 inline-flex items-center"
-          title={`${autoHandledToday} email${autoHandledToday === 1 ? '' : 's'} auto-handled in last 24h. Click All Mail to review.`}
-        >
-          +{autoHandledToday}
-        </span>
-      )}
       {f.unread_count > 0 && (
-        <Badge variant="default" className="h-5 min-w-[20px] px-1.5 text-[10px] font-semibold">
+        <Badge
+          variant={f.system_key === "outbox" ? "destructive" : "default"}
+          className="h-5 min-w-[20px] px-1.5 text-[10px] font-semibold"
+        >
           {f.unread_count}
         </Badge>
       )}

@@ -379,3 +379,61 @@ async def convert_to_job(
 
     await db.commit()
     return {"action_id": action.id, "converted": True}
+
+
+class ReactionBody(BaseModel):
+    emoji: str
+
+
+@router.post("/reactions/{message_id}")
+async def toggle_reaction(
+    message_id: str,
+    body: ReactionBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle an emoji reaction on an internal message.
+
+    If the (message, user, emoji) combo exists it's removed; otherwise it's
+    inserted. Org-scoped via the message's thread — users can only react
+    to messages in threads they can see (participant or org member of a
+    case-linked thread).
+    """
+    from src.models.internal_message_reaction import InternalMessageReaction
+
+    # Org-scope check: join message → thread → org.
+    msg_row = (await db.execute(
+        select(InternalMessage, InternalThread)
+        .join(InternalThread, InternalThread.id == InternalMessage.thread_id)
+        .where(
+            InternalMessage.id == message_id,
+            InternalThread.organization_id == ctx.organization_id,
+        )
+    )).one_or_none()
+    if not msg_row:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    emoji = (body.emoji or "").strip()
+    if not emoji or len(emoji) > 16:
+        raise HTTPException(status_code=400, detail="Invalid emoji")
+
+    existing = (await db.execute(
+        select(InternalMessageReaction).where(
+            InternalMessageReaction.message_id == message_id,
+            InternalMessageReaction.user_id == ctx.user.id,
+            InternalMessageReaction.emoji == emoji,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        await db.delete(existing)
+        await db.commit()
+        return {"removed": True, "emoji": emoji}
+
+    db.add(InternalMessageReaction(
+        message_id=message_id,
+        user_id=ctx.user.id,
+        emoji=emoji,
+    ))
+    await db.commit()
+    return {"added": True, "emoji": emoji}

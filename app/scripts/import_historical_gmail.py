@@ -590,7 +590,10 @@ async def ingest_thread(
             "contact": contact_email_candidate,
         }
 
-    # Insert thread.
+    # Insert thread. `auto_read_at = last_message_at` marks every historical
+    # thread as pre-read for all users — this is archive material, not
+    # unreviewed mail. Without this, every new user + historical pair would
+    # render unread because no thread_reads row exists.
     thread = AgentThread(
         organization_id=org_id,
         thread_key=tkey,
@@ -609,6 +612,7 @@ async def ingest_thread(
         delivered_to=first_msg["delivered_to"],
         is_historical=True,
         primary_owner_email=primary_owner,
+        auto_read_at=last_msg["received_at"],
         created_at=first_msg["received_at"],
     )
     db.add(thread)

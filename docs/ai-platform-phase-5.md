@@ -2,6 +2,14 @@
 
 > Refinement spec produced by the per-phase gate. Master plan: `docs/ai-platform-plan.md` → Phase 5. Remove this file when the phase is shipped + archived.
 
+## Status (2026-04-23)
+
+- [x] **Step 1: estimate_generator pilot** — shipped + dogfood-verified on Sapphire. `draft_estimate_from_thread` stages an `estimate` proposal; case detail renders `<ProposalCard>` in "Pending AI Drafts"; Accept materializes Invoice + job link atomically; Edit/Save records `agent_corrections` edit rows.
+- [x] **Step 2: email_drafter migration** — shipped + dogfood-verified. Orchestrator flag-gated via `EMAIL_DRAFTER_USE_PROPOSALS` (on for Sapphire). When on: inbound mail stages `email_reply` proposals, inbox reading pane renders `<ProposalCard>` in place of the legacy `draft_response` block, Accept/Edit/Reject flow via the canonical `ProposalService` path.
+- [x] **Step 3: customer_matcher extension** — shipped. Low-confidence verifier drops now stage `customer_match_suggestion` proposals; review queue at `/inbox/matches` (owner+admin visibility). High-confidence trusted methods still auto-apply unchanged.
+- [ ] **Step 4: Historical port** — REMAINING. One-shot script to port pre-Phase-5 `draft_response` rows into `agent_proposals` + `agent_corrections`, then delete `classifier.get_correction_history` + `thread_action_service.send_draft_reply`.
+- [ ] **Step 5: Audit enforcement + closeout** — REMAINING. R1 enforcer grep against `draft_response`, taxonomy doc update, master plan closeout.
+
 ## 1. Purpose
 
 Phases 2-4 built the platform. Phase 5 **migrates the remaining ad-hoc AI paths onto it**. Today three agents still bypass `agent_proposals`, `ProposalService`, and the correction-recording pipeline:

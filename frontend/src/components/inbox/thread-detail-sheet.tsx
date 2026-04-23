@@ -52,6 +52,8 @@ import { ContactLearningPrompt, SENDER_TAG_STYLES } from "./contact-learning-mod
 import { RuleEditorDialog, type RuleDraft } from "./rule-editor-dialog";
 import { LinkCasePicker } from "@/components/cases/link-case-picker";
 import { AttachmentPicker, type UploadedAttachment } from "@/components/ui/attachment-picker";
+import { ProposalCard } from "@/components/proposals/ProposalCard";
+import { getProposal, type Proposal } from "@/lib/proposals";
 import { AttachmentDisplay } from "@/components/ui/attachment-display";
 import {
   ChevronDown,
@@ -1117,6 +1119,25 @@ export function ThreadDetailSheet({
 
   const pendingMessage = thread?.timeline.find((m) => m.status === "pending" && m.direction === "inbound");
 
+  // Phase 5 email_drafter migration: when the pending inbound carries
+  // a staged `email_reply` proposal, render <ProposalCard/> in place of
+  // the legacy draft_response inline block. The proposal owns its own
+  // edit/accept/reject flow; our only job here is to fetch it and
+  // refresh the thread on resolve.
+  const stagedReplyProposalId = pendingMessage?.email_reply_proposal_id ?? null;
+  const [stagedReplyProposal, setStagedReplyProposal] = useState<Proposal | null>(null);
+  useEffect(() => {
+    if (!stagedReplyProposalId) {
+      setStagedReplyProposal(null);
+      return;
+    }
+    let alive = true;
+    getProposal(stagedReplyProposalId)
+      .then((p) => { if (alive) setStagedReplyProposal(p); })
+      .catch(() => { if (alive) setStagedReplyProposal(null); });
+    return () => { alive = false; };
+  }, [stagedReplyProposalId]);
+
   // Auto-generate a follow-up draft for handled customer threads so the
   // composer has a reply ready to review. Classifier deliberately skipped
   // drafting (category=no_response etc.), but Kim may still want to send
@@ -1731,9 +1752,20 @@ export function ThreadDetailSheet({
       {/* Bottom action area — capped so the reading pane keeps at least half the panel
           even when reply composer / linked jobs / actions are all expanded. */}
       <div className="flex-shrink-0 border-t pt-3 px-4 pb-3 space-y-2 overflow-x-hidden overflow-y-auto max-h-[50vh]">
+        {/* Phase 5: staged email_reply proposal takes precedence. Renders
+            the full ProposalCard with Edit/Accept/Reject so the user can
+            review + send through the canonical proposal path. */}
+        {stagedReplyProposal && (
+          <ProposalCard
+            proposal={stagedReplyProposal}
+            onResolved={() => { loadThread(); onAction(); }}
+            onError={(err) => toast.error(err.message || "Failed to resolve proposal")}
+          />
+        )}
+
         {/* AI draft — collapsed by default so the reading pane isn't dominated
             by the draft editor. Click the bar to review / edit / send. */}
-        {pendingMessage && pendingMessage.draft_response && !draftExpanded && (
+        {!stagedReplyProposal && pendingMessage && pendingMessage.draft_response && !draftExpanded && (
           <button
             onClick={() => setDraftExpanded(true)}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors text-left"
@@ -1743,7 +1775,7 @@ export function ThreadDetailSheet({
           </button>
         )}
 
-        {pendingMessage && pendingMessage.draft_response && draftExpanded && (
+        {!stagedReplyProposal && pendingMessage && pendingMessage.draft_response && draftExpanded && (
           <div className="rounded-lg border bg-background shadow-sm">
             {/* Header — matches InlineReplyComposer */}
             <div className="flex items-center gap-2 px-3 py-2 border-b bg-blue-50 dark:bg-blue-950/30">
@@ -1824,8 +1856,10 @@ export function ThreadDetailSheet({
         {/* Inline reply composer — visible whenever there isn't a draft
             to approve. Covers (a) no pending message at all (classic
             follow-up case) and (b) a pending inbound where draft generation
-            failed or returned empty (don't leave the user with no reply UI). */}
-        {(!pendingMessage || !pendingMessage.draft_response) && (
+            failed or returned empty (don't leave the user with no reply UI).
+            Suppressed when a staged proposal is showing (which provides its
+            own accept/reject/edit affordances). */}
+        {!stagedReplyProposal && (!pendingMessage || !pendingMessage.draft_response) && (
           <InlineReplyComposer
             threadId={threadId}
             recipient={thread.contact_email}

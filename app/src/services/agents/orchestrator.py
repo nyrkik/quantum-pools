@@ -744,6 +744,14 @@ async def process_incoming_email(
         # Inherit case_id from thread if it already has one (don't create cases from emails)
         case_id = thread_obj.case_id if thread_obj else None
 
+        # Phase 5 email_drafter migration: when the flag is on, the AI
+        # draft is staged as an `email_reply` proposal instead of being
+        # written to `AgentMessage.draft_response`. Flag defaults off so
+        # non-migrated orgs keep current behavior; flip to "true" per-org
+        # via the EMAIL_DRAFTER_USE_PROPOSALS env var once ready.
+        use_proposals = os.environ.get("EMAIL_DRAFTER_USE_PROPOSALS", "").lower() == "true"
+        classifier_draft = result.get("draft_response")
+
         agent_msg = AgentMessage(
             organization_id=organization_id,
             email_uid=uid,
@@ -756,7 +764,10 @@ async def process_incoming_email(
             body=body[:5000],
             category=category,
             urgency=result.get("urgency", "medium"),
-            draft_response=result.get("draft_response"),
+            # Only persist draft_response on the message when the proposal
+            # migration is OFF. When it's ON, the draft lives only on
+            # the proposal row (Step 4 of Phase 5 ports legacy rows).
+            draft_response=None if use_proposals else classifier_draft,
             status="pending",
             received_at=email_date,
             matched_customer_id=result.get("_matched_customer_id"),
@@ -769,6 +780,41 @@ async def process_incoming_email(
         )
         db.add(agent_msg)
         await db.flush()
+
+        # Stage the draft as a proposal when the flag is on + the classifier
+        # produced a draft. `agent_msg.id` is now flushed so we can reference
+        # it as source_id for the proposal.
+        if use_proposals and classifier_draft:
+            try:
+                from src.services.events.actor_factory import actor_agent
+                from src.services.proposals import ProposalService
+                reply_subject = (
+                    subject if subject and subject.startswith("Re:")
+                    else (f"Re: {subject}" if subject else "")
+                )
+                await ProposalService(db).stage(
+                    org_id=organization_id,
+                    agent_type="email_drafter",
+                    entity_type="email_reply",
+                    source_type="message",
+                    source_id=agent_msg.id,
+                    proposed_payload={
+                        "thread_id": thread.id,
+                        "reply_to_message_id": agent_msg.id,
+                        "to": from_email,
+                        "subject": reply_subject,
+                        "body": classifier_draft,
+                        "customer_id": result.get("_matched_customer_id"),
+                    },
+                    confidence=result.get("confidence") if isinstance(result.get("confidence"), (int, float)) else None,
+                    input_context=(body[:500] if body else None),
+                    actor=actor_agent("email_drafter"),
+                )
+            except Exception as e:
+                # Never break ingest on proposal-stage failure. Fall through
+                # — agent_msg is still persisted with draft_response=None;
+                # user can reply manually from the thread sheet.
+                logger.warning(f"email_reply proposal stage failed for msg {agent_msg.id}: {e}")
 
         await _emit_agent_message_received(db, agent_msg, msg=msg, body_normalize_flags=body_normalize_flags)
         await _emit_agent_message_classified(db, agent_msg, classification_confidence=result.get("confidence"))

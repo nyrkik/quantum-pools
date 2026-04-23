@@ -641,6 +641,25 @@ class AgentThreadService:
                 if fallback:
                     from_name_by_msg_id[m.id] = fallback
 
+        # Phase 5: look up any staged `email_reply` proposals whose
+        # source_id points at one of this thread's messages. Lets the UI
+        # render <ProposalCard/> in place of the legacy draft block when
+        # the new flow is live, while preserving the draft_response read
+        # path for historical messages.
+        from src.models.agent_proposal import AgentProposal, STATUS_STAGED
+        email_reply_prop_ids: dict[str, str] = {}
+        if msg_ids:
+            for (mid, pid) in (await self.db.execute(
+                select(AgentProposal.source_id, AgentProposal.id).where(
+                    AgentProposal.organization_id == org_id,
+                    AgentProposal.entity_type == "email_reply",
+                    AgentProposal.source_type == "message",
+                    AgentProposal.source_id.in_(msg_ids),
+                    AgentProposal.status == STATUS_STAGED,
+                )
+            )).all():
+                email_reply_prop_ids[mid] = pid
+
         # Build conversation timeline
         timeline = []
         for m in messages:
@@ -662,6 +681,7 @@ class AgentThreadService:
                 "urgency": m.urgency,
                 "status": m.status,
                 "draft_response": m.draft_response if m.status == "pending" else None,
+                "email_reply_proposal_id": email_reply_prop_ids.get(m.id),
                 "received_at": m.received_at.isoformat() if m.received_at else None,
                 "sent_at": m.sent_at.isoformat() if m.sent_at else None,
                 "approved_by": m.approved_by,

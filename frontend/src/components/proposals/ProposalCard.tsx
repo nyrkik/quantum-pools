@@ -96,6 +96,10 @@ export function ProposalCard({
   const Renderer = RENDERERS[proposal.entity_type];
   const resolved = proposal.status !== "staged";
   const canEdit = EDITABLE_TYPES.has(proposal.entity_type);
+  // Dirty derivation per CLAUDE.md's dirty-tracking rule — do NOT
+  // maintain a separate boolean flag; compute from state comparison
+  // so Save only appears when there are actual changes to commit.
+  const isDirty = isEditing && JSON.stringify(editedPayload) !== JSON.stringify(proposal.proposed_payload);
 
   async function handleAccept() {
     setBusy("accept");
@@ -224,7 +228,7 @@ export function ProposalCard({
             }
           >
             <Pencil className="h-3.5 w-3.5 mr-1" />
-            Edit & Accept
+            Edit
           </Button>
 
           <AlertDialog open={rejectOpen} onOpenChange={setRejectOpen}>
@@ -305,7 +309,9 @@ export function ProposalCard({
       {isEditing && (
         <div className="flex items-center gap-2 justify-end px-4 py-3 border-t bg-amber-50 dark:bg-amber-950/30">
           <span className="text-xs text-amber-700 dark:text-amber-400 mr-auto">
-            Editing — save commits as your version with correction recorded
+            {isDirty
+              ? "Saving commits your edits with a correction recorded"
+              : "Make changes or cancel"}
           </span>
           <Button
             variant="ghost"
@@ -315,19 +321,43 @@ export function ProposalCard({
           >
             Cancel
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleSaveAndAccept}
-            disabled={busy !== null}
-          >
-            {busy === "save" ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-1" />
-            ) : (
-              <Check className="h-4 w-4 mr-1 text-green-600" />
-            )}
-            Save & Accept
-          </Button>
+          <AlertDialog open={rejectOpen} onOpenChange={setRejectOpen}>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={busy !== null}>
+                <X className="h-4 w-4 mr-1 text-destructive" />
+                Reject
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reject proposal?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The AI agent will learn from this rejection.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={busy !== null}>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleReject} disabled={busy !== null}>
+                  {busy === "reject" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reject"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          {isDirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSaveAndAccept}
+              disabled={busy !== null}
+            >
+              {busy === "save" ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              ) : (
+                <Check className="h-4 w-4 mr-1 text-green-600" />
+              )}
+              Save
+            </Button>
+          )}
         </div>
       )}
     </Card>

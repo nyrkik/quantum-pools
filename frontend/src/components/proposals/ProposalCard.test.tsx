@@ -147,17 +147,17 @@ describe("ProposalCard", () => {
     expect(onResolved).not.toHaveBeenCalled();
     // Card's own action footer is hidden while the step is up so the
     // user has one focused workflow to complete.
-    expect(screen.queryByRole("button", { name: /edit & accept/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
   });
 
-  it("Edit & Accept is disabled for non-editable entity types", () => {
+  it("Edit is disabled for non-editable entity types", () => {
     // job renderer doesn't support inline editing yet
     render(<ProposalCard proposal={makeProposal({ entity_type: "job" })} />);
-    const editBtn = screen.getByRole("button", { name: /edit & accept/i });
+    const editBtn = screen.getByRole("button", { name: /^edit$/i });
     expect(editBtn).toBeDisabled();
   });
 
-  it("Edit & Accept enters edit mode for editable entity types", () => {
+  it("Edit enters edit mode; Save appears only when dirty", () => {
     const estimatePayload = {
       subject: "Pump replace",
       line_items: [{ description: "Pump", quantity: 1, unit_price: 500 }],
@@ -167,12 +167,12 @@ describe("ProposalCard", () => {
         proposal={makeProposal({ entity_type: "estimate", proposed_payload: estimatePayload })}
       />,
     );
-    const editBtn = screen.getByRole("button", { name: /edit & accept/i });
+    const editBtn = screen.getByRole("button", { name: /^edit$/i });
     expect(editBtn).not.toBeDisabled();
     fireEvent.click(editBtn);
-    // Footer swaps to Save & Accept + Cancel
-    expect(screen.getByRole("button", { name: /save & accept/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
+    // Entered edit mode — Cancel is there, Save is NOT (no changes yet).
+    expect(screen.getByRole("button", { name: /^cancel$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
   });
 
   it("hides action buttons when proposal is already resolved", () => {

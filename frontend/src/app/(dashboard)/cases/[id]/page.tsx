@@ -1440,16 +1440,30 @@ export default function CaseDetailPage({
               <ProposalCard
                 key={p.id}
                 proposal={p}
-                onResolved={(resolved) => {
-                  if (resolved.status === "accepted" && resolved.outcome_entity_id) {
-                    toast.success("Draft accepted", {
-                      action: {
-                        label: "View invoice →",
-                        onClick: () => router.push(`/invoices/${resolved.outcome_entity_id}`),
+                onResolved={async (resolved) => {
+                  const committed = resolved.status === "accepted" || resolved.status === "edited";
+                  if (committed && resolved.outcome_entity_id) {
+                    toast.success(
+                      resolved.status === "edited" ? "Draft saved" : "Draft accepted",
+                      {
+                        action: {
+                          label: "View invoice →",
+                          onClick: () => router.push(`/invoices/${resolved.outcome_entity_id}`),
+                        },
                       },
+                    );
+                  }
+                  await load();
+                  // Focus the newly-created invoice in the right detail
+                  // panel so the user stays on the estimate they just
+                  // committed, instead of seeing the default-selected
+                  // timeline entry (usually the originating thread).
+                  if (committed && resolved.outcome_entity_id) {
+                    setSelectedItem({
+                      type: "invoice_event",
+                      id: resolved.outcome_entity_id,
                     });
                   }
-                  load();
                 }}
                 onError={(err) => toast.error(err.message || "Failed to resolve proposal")}
               />

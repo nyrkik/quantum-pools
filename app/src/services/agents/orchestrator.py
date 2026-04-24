@@ -519,6 +519,10 @@ async def process_incoming_email(
     # --- Pre-check: is this sender a known customer? ---
     # If yes, NEVER auto-ignore — always require human review.
     sender_is_customer = bool(thread and thread.matched_customer_id)
+    # Defined at the function scope so the downstream proposal-staging
+    # block can reference it whether or not the pre-match branch ran
+    # (known-customer threads skip the matcher + its unverified_sink).
+    unverified_candidates: list[dict] = []
     if not sender_is_customer:
         # Honor `skip_customer_match` inbox-rule advisory: for shared /
         # regional senders we don't want to reuse the last thread's match,
@@ -548,7 +552,6 @@ async def process_incoming_email(
         # Phase 5: collect any fuzzy candidates the QC verifier dropped so
         # we can surface them to a human via customer_match_suggestion
         # proposals after the agent_msg is persisted.
-        unverified_candidates: list[dict] = []
         pre_match = await match_customer(
             from_email, subject, body[:500], from_header,
             skip_previous_match=skip_prev,

@@ -522,6 +522,7 @@ async def process_incoming_email(
     # Defined at the function scope so the downstream proposal-staging
     # block can reference it whether or not the pre-match branch ran
     # (known-customer threads skip the matcher + its unverified_sink).
+    # Regression: `tests/test_orchestrator_known_customer_scoping.py`.
     unverified_candidates: list[dict] = []
     if not sender_is_customer:
         # Honor `skip_customer_match` inbox-rule advisory: for shared /
@@ -551,7 +552,8 @@ async def process_incoming_email(
         # Quick check: does this email match a customer directly?
         # Phase 5: collect any fuzzy candidates the QC verifier dropped so
         # we can surface them to a human via customer_match_suggestion
-        # proposals after the agent_msg is persisted.
+        # proposals after the agent_msg is persisted. The list itself is
+        # declared above at function scope; `match_customer` only mutates.
         pre_match = await match_customer(
             from_email, subject, body[:500], from_header,
             skip_previous_match=skip_prev,

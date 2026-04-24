@@ -26,7 +26,6 @@ class AgentMessage(Base):
     body_html: Mapped[str | None] = mapped_column(Text, nullable=True)  # original HTML body (rendered in iframe)
     category: Mapped[str | None] = mapped_column(String(50))  # schedule, complaint, billing, gate_code, general, spam
     urgency: Mapped[str | None] = mapped_column(String(20))  # low, medium, high
-    draft_response: Mapped[str | None] = mapped_column(Text)
     final_response: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, approved, sent, auto_sent, rejected, ignored
     approved_by: Mapped[str | None] = mapped_column(String(50))  # phone number or name

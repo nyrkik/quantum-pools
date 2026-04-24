@@ -479,7 +479,7 @@ Secondary: makes workflow-observer (Phase 6) possible — the handler becomes th
 
 ## Phase 5: Unify existing agents into the proposal system
 
-> **Status: SHIPPED 2026-04-24.** Three agents migrated (`estimate_generator`, `email_drafter`, `customer_matcher`). 150 historical `draft_response` rows ported on Sapphire. Legacy paths deleted (`classifier.get_correction_history`, `thread_action_service.approve_thread`, `handle_sms_reply`, `/agent-threads/{id}/approve`, `save-draft`, `/agent-messages/{id}/approve|reject|dismiss`). R7 audit enforcer blocks `.draft_response` attribute access regressions in `app/src/`. `EMAIL_DRAFTER_USE_PROPOSALS` flag retired. Column drop to Phase 5b.
+> **Status: SHIPPED 2026-04-24.** Three agents migrated (`estimate_generator`, `email_drafter`, `customer_matcher`). 150 historical `draft_response` rows ported on Sapphire. Legacy paths deleted (`classifier.get_correction_history`, `thread_action_service.approve_thread`, `handle_sms_reply`, `/agent-threads/{id}/approve`, `save-draft`, `/agent-messages/{id}/approve|reject|dismiss`). R7 audit enforcer blocks `.draft_response` attribute access regressions in `app/src/`. `EMAIL_DRAFTER_USE_PROPOSALS` flag retired. Phase 5b (same day) dropped `agent_messages.draft_response` column via Alembic migration `c33eb1accc84`. `final_response` denormalization deferred to a separate cleanup project.
 
 ### Why this phase exists
 

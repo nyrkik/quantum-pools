@@ -273,7 +273,9 @@ Previously tracked emails sent directly from Gmail's Sent folder. No longer call
 ### AgentMessage (`agent_messages`)
 Individual email records. Key fields: `email_uid` (unique, dedup key — `pm-{hash}` for webhook emails), `direction` (inbound/outbound), `from_email`, `to_email`, `subject`, `body`, `category`, `urgency`, `status` (pending/approved/sent/auto_sent/rejected/handled/queued/failed/bounced/delivered), `postmark_message_id` (Postmark tracking), `delivery_error` (bounce reason), `delivered_to`, `thread_id`, `received_at`.
 
-> **Deprecated columns**: `draft_response` and `final_response` are still on the table but no longer read or written at runtime — Phase 5 Step 5 (2026-04-24) migrated drafts to `agent_proposals(entity_type='email_reply')`, and the R7 audit enforcer blocks any `.draft_response` attribute access in `app/src/`. Scheduled for removal in Phase 5b.
+`final_response` exists on inbound messages that have been replied to — written by the `email_reply` proposal creator as a convenience link back to the body that was sent. It duplicates `AgentMessage.body` on the corresponding outbound row; six downstream readers still depend on it. Denormalizing to a single source of truth is a separate future cleanup, not Phase 5 scope.
+
+> **Column history**: `draft_response` was dropped in Phase 5b (2026-04-24). AI drafts now live on `agent_proposals(entity_type='email_reply')` exclusively; the R7 audit enforcer blocks any `.draft_response` attribute access in `app/src/` to prevent reintroduction.
 
 ### AgentThread (`agent_threads`)
 Groups related emails into a conversation. Key fields: `thread_key`, `contact_email`, `subject`, `matched_customer_id`, `status` (pending/handled/archived), `last_direction`, `has_pending`, `visibility_permission`, `delivered_to`, `assigned_to_user_id`.

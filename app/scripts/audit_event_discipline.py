@@ -283,17 +283,16 @@ _DRAFT_RESPONSE_ATTR_RE = re.compile(r'\.draft_response\b')
 
 
 def rule_7_no_draft_response_attr_access(report: AuditReport):
-    """After Phase 5 Step 5, `AgentMessage.draft_response` has no runtime
-    read/write — drafts live on `agent_proposals`. Catches regressions of
-    `msg.draft_response = ...` or `msg.draft_response` reads. The column
-    stays pending Phase 5b; we police attribute access, not column exist."""
+    """After Phase 5b (2026-04-24), `agent_messages.draft_response` is
+    dropped entirely. Any `.draft_response` attribute access in `app/src/`
+    is a regression — drafts live on `agent_proposals(entity_type=
+    'email_reply')`. The enforcer file itself names the pattern, so
+    allowlist only this script."""
     for py in _iter_py_files(APP_SRC):
         rel = _rel(py)
-        text = py.read_text()
-        # Allow mention in the model's own definition + in this enforcer.
-        if rel in ("app/src/models/agent_message.py",
-                   "app/scripts/audit_event_discipline.py"):
+        if rel == "app/scripts/audit_event_discipline.py":
             continue
+        text = py.read_text()
         for m in _DRAFT_RESPONSE_ATTR_RE.finditer(text):
             line = text[:m.start()].count("\n") + 1
             report.add(

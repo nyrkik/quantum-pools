@@ -37,8 +37,14 @@ def test_orchestrator_does_not_reference_org_auto_send_flag():
 @pytest.mark.asyncio
 async def test_inbound_marked_auto_sendable_stays_pending(db_session, org_a):
     """Messages the classifier flags as low-urgency (needs_approval=False)
-    must stay in status='pending' with a draft attached, waiting for a human
-    to approve from the inbox UI."""
+    must stay in status='pending', waiting for a human to accept the
+    staged `email_reply` proposal from the inbox UI.
+
+    Post-Phase-5b the draft body lives on `agent_proposals.proposed_payload.body`
+    (not `AgentMessage.draft_response` — column dropped). This test verifies
+    the no-auto-send invariant: inbound stays pending, no outbound row is
+    created automatically.
+    """
     import uuid
 
     from sqlalchemy import select
@@ -54,7 +60,6 @@ async def test_inbound_marked_auto_sendable_stays_pending(db_session, org_a):
         body="Thanks, got it.",
         direction="inbound",
         status="pending",
-        draft_response="You're welcome!",
     )
     db_session.add(msg)
     await db_session.commit()
@@ -66,7 +71,6 @@ async def test_inbound_marked_auto_sendable_stays_pending(db_session, org_a):
         select(AgentMessage).where(AgentMessage.id == msg.id)
     )).scalar_one()
     assert persisted.status == "pending"
-    assert persisted.draft_response == "You're welcome!"
 
     outbound = (await db_session.execute(
         select(AgentMessage).where(

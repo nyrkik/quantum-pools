@@ -64,6 +64,7 @@ import { ActionTypeBadge, ActionStatusIcon } from "@/components/jobs/job-badges"
 import { CaseOwner } from "@/components/cases/case-owner";
 import { ProposalCard } from "@/components/proposals/ProposalCard";
 import { BackButton } from "@/components/ui/back-button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 // --- Selected item tracking ---
 
@@ -1097,11 +1098,34 @@ export default function CaseDetailPage({
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
   const detailPanelRef = useRef<HTMLDivElement>(null);
 
+  // Below the lg breakpoint the page stacks vertically and the detail
+  // panel renders below the (long) timeline. Linked Items rows open a
+  // bottom Sheet on mobile so the user doesn't lose their place; on
+  // desktop they fall back to selecting + scrolling the side panel
+  // (matches existing timeline-tap behavior).
+  const [isMobileLg, setIsMobileLg] = useState(false);
+  const [mobileSheetItem, setMobileSheetItem] = useState<SelectedItem | null>(null);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023.98px)");
+    setIsMobileLg(mq.matches);
+    const h = (e: MediaQueryListEvent) => setIsMobileLg(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+
   const selectAndScroll = useCallback((item: SelectedItem) => {
     setSelectedItem(item);
     // On mobile the detail panel is below the timeline — scroll it into view
     setTimeout(() => detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }, []);
+
+  const openLinkedItem = useCallback((item: SelectedItem) => {
+    if (isMobileLg) {
+      setMobileSheetItem(item);
+    } else {
+      selectAndScroll(item);
+    }
+  }, [isMobileLg, selectAndScroll]);
 
   // Merge DeepBlue conversations into the timeline
   const mergedTimeline = useMemo(() => {
@@ -1423,6 +1447,16 @@ export default function CaseDetailPage({
         </div>
       </div>
 
+      {/* Linked items — at-a-glance index of jobs + invoices/estimates on
+          this case so the user doesn't have to scrub the timeline (FB-49).
+          Tap opens the same DetailPanel content; on mobile via a bottom
+          Sheet so the user doesn't lose their place in the list. */}
+      <LinkedItemsStrip
+        jobs={detail.jobs}
+        invoices={detail.invoices}
+        onOpen={openLinkedItem}
+      />
+
       {/* Pending AI drafts — proposals staged against this case awaiting
           human accept. Stays on-page per Phase 5 spec: accepting an
           estimate materializes the Invoice + job link right here. */}
@@ -1689,6 +1723,92 @@ export default function CaseDetailPage({
         defaultCaseId={id}
         defaultCustomerId={detail.customer_id || undefined}
       />
+
+      {/* Mobile-only detail sheet for Linked Items taps (FB-49). Bottom
+          sheet so it feels native; reuses DetailPanel so what the user
+          sees here is identical to the desktop right-panel view. */}
+      <Sheet open={!!mobileSheetItem} onOpenChange={(o) => !o && setMobileSheetItem(null)}>
+        <SheetContent side="bottom" className="h-[85vh] overflow-y-auto p-4">
+          <SheetHeader className="p-0 pb-3">
+            <SheetTitle className="text-sm font-medium text-muted-foreground">
+              Details
+            </SheetTitle>
+          </SheetHeader>
+          {mobileSheetItem && (
+            <DetailPanel
+              selectedItem={mobileSheetItem}
+              mergedTimeline={mergedTimeline}
+              detail={detail}
+              caseId={id}
+              onReplyEmail={handleReplyEmail}
+              onUpdate={load}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
+  );
+}
+
+/** Compact at-a-glance index of jobs + invoices/estimates linked to the
+ *  case. Tap a row to open its details (FB-49). Cancelled jobs and
+ *  drafts are still shown — anything attached to the case is fair game.
+ *  Hidden when the case has neither jobs nor invoices.
+ */
+function LinkedItemsStrip({
+  jobs,
+  invoices,
+  onOpen,
+}: {
+  jobs: CaseJob[];
+  invoices: CaseInvoice[];
+  onOpen: (item: SelectedItem) => void;
+}) {
+  // Show only "real" jobs (repair / site_visit / bid / equipment).
+  // Tasks and ad-hoc to-dos surface inside the JobEventDetailPanel
+  // checklist; promoting them up here would just add noise.
+  const realJobs = jobs.filter((j) => JOB_TYPES.has(j.action_type));
+  if (realJobs.length === 0 && invoices.length === 0) return null;
+
+  return (
+    <Card className="shadow-sm">
+      <CardContent className="p-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <ClipboardList className="h-3.5 w-3.5" />
+          Linked Items
+        </div>
+        <div className="space-y-1">
+          {realJobs.map((j) => (
+            <button
+              key={j.id}
+              onClick={() => onOpen({ type: "job_event", id: `job-created-${j.id}` })}
+              className="w-full flex items-center gap-2 py-1.5 px-2 rounded-md text-left hover:bg-muted transition-colors"
+            >
+              <ActionStatusIcon status={j.status} />
+              <ActionTypeBadge type={j.action_type} />
+              <span className="text-sm truncate flex-1 min-w-0">{j.description}</span>
+            </button>
+          ))}
+          {invoices.map((inv) => (
+            <button
+              key={inv.id}
+              onClick={() => onOpen({ type: "invoice_event", id: inv.id })}
+              className="w-full flex items-center gap-2 py-1.5 px-2 rounded-md text-left hover:bg-muted transition-colors"
+            >
+              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="text-sm font-mono shrink-0">
+                {inv.invoice_number || (inv.document_type === "estimate" ? "Draft est." : "Draft inv.")}
+              </span>
+              <span className="text-sm text-muted-foreground shrink-0">
+                ${inv.total.toFixed(2)}
+              </span>
+              <Badge variant="outline" className="text-[10px] capitalize ml-auto shrink-0">
+                {inv.status.replace("_", " ")}
+              </Badge>
+            </button>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

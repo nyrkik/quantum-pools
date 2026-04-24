@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { Circle, CheckCircle2, EyeOff, Archive, AlertTriangle, Minus, Send } from "lucide-react";
+import { Circle, CheckCircle2, EyeOff, Archive, AlertTriangle, Minus, Send, Bot } from "lucide-react";
 
 export function StatusBadge({ status }: { status: string }) {
   switch (status) {
@@ -32,6 +32,21 @@ export function UrgencyBadge({ urgency }: { urgency: string | null }) {
     default:
       return null;
   }
+}
+
+/** Sticky AI marker for threads the classifier auto-closed. Shows in
+ *  every Handled/All view across roles — first surface where non-admins
+ *  see the AI's work. Stays visible after the admin acks the in-thread
+ *  banner, so the audit trail of "this was AI" survives.
+ */
+export function AIBadge({ show }: { show: boolean | undefined }) {
+  if (!show) return null;
+  return (
+    <span title="Auto-handled by AI" className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[9px] font-medium bg-muted text-muted-foreground">
+      <Bot className="h-2.5 w-2.5" />
+      AI
+    </span>
+  );
 }
 
 export function CategoryBadge({ category }: { category: string | null }) {

@@ -208,13 +208,16 @@ class ThreadPresenter(Presenter):
         else:
             d["is_unread"] = False
 
-        # Auto-handled (AI hid this from inbox without human action).
-        # Suppressed after the user acknowledges via the banner so the
-        # banner doesn't reappear on every future open.
+        # Auto-handled — two flags from the same source:
+        #   `was_auto_handled` is sticky once the AI auto-closed the
+        #     thread, and drives the "AI" row pill in every Handled view
+        #     (so non-admins finally see AI's work).
+        #   `is_auto_handled` is the not-yet-acked subset, drives the
+        #     in-thread feedback banner. Clears once the user clicks
+        #     Yes/No (sets auto_handled_feedback_at).
+        d["was_auto_handled"] = thread.auto_handled_at is not None
         d["is_auto_handled"] = (
-            thread.last_direction == "inbound"
-            and thread.status in ("ignored", "handled")
-            and not thread.has_pending
+            thread.auto_handled_at is not None
             and thread.auto_handled_feedback_at is None
         )
 

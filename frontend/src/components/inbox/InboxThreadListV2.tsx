@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, AlertTriangle, Lock, Info } from "lucide-react";
 
 import { formatTime } from "@/lib/format";
-import { StatusBadge, CategoryBadge } from "@/components/inbox/inbox-badges";
+import { StatusBadge, CategoryBadge, AIBadge } from "@/components/inbox/inbox-badges";
 import { SENDER_TAG_STYLES } from "./contact-learning-modal";
 import { InboxRowHoverPanel } from "./InboxRowHoverPanel";
 import type { InboxSummaryPayload } from "./InboxSummaryCard";
@@ -301,6 +301,7 @@ export function InboxThreadListV2({
                         )}
                         <CategoryBadge category={t.category} />
                         <StatusBadge status={t.status} />
+                        <AIBadge show={t.was_auto_handled} />
                         {isStale && (
                           <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
                             Stale

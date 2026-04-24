@@ -215,14 +215,12 @@ export default function InboxPage() {
       offset: String(page * PAGE_SIZE),
     });
 
-    // Stale view (banner-driven) + Auto-Handled override folder filtering
-    // because those cross folder boundaries ("find my stale stuff regardless
-    // of where it lives"). Normal All/Pending/Handled respect the folder.
+    // Stale view (banner-driven) crosses folder boundaries ("find my stale
+    // stuff regardless of where it lives"). Normal All/Pending/Handled
+    // respect the folder. AI Review is now a sidebar folder, not a
+    // status filter — handled by the standard folder branch below.
     if (staleView) {
       params.set("status", "stale");
-      params.set("exclude_spam", "false");
-    } else if (statusFilter === "auto_handled") {
-      params.set("status", "auto_handled");
       params.set("exclude_spam", "false");
     } else {
       // Folder-based filtering
@@ -232,12 +230,11 @@ export default function InboxPage() {
         params.set("folder_id", selectedFolderId);
       }
 
-      // Inbox: exclude spam/ignored (they have their own folders)
-      // Non-inbox folders: show everything
+      // Inbox: exclude spam (it has its own folder).
+      // Non-inbox folders: show everything in that folder.
       const isInbox = selectedFolderKey === "inbox" || (!selectedFolderKey && !selectedFolderId);
       if (isInbox) {
         params.set("exclude_spam", "true");
-        params.set("exclude_ignored", "true");
       } else {
         params.set("exclude_spam", "false");
       }
@@ -477,7 +474,6 @@ export default function InboxPage() {
           onSelectFolder={handleFolderSelect}
           className="hidden sm:flex w-40 shrink-0 border-r pr-3"
           refreshKey={folderRefreshKey}
-          autoHandledToday={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
         />
 
         {/* Thread list */}
@@ -491,13 +487,11 @@ export default function InboxPage() {
             onClientsOnlyFilterChange={(v) => { setClientsOnlyFilter(v); setPage(0); }}
             statusFilter={statusFilter}
             onStatusFilterChange={(s) => { setStatusFilter(s); setStaleView(false); setPage(0); }}
-            autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
             stats={stats}
             onOpenSettings={() => setSettingsOpen(true)}
             searchInput={searchInput}
             onSearchInputChange={setSearchInput}
             onSearch={handleSearch}
-            canManageInbox={perms.can("inbox.manage")}
           />
 
           {/* Stale banner — surfaces when admins have unattended

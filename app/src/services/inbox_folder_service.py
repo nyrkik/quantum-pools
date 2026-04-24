@@ -30,7 +30,7 @@ class InboxFolderService:
         # read the latest inbound message (per thread_reads table).
         unread_filter = and_(
             AgentThread.last_direction == "inbound",
-            AgentThread.status.notin_(("closed", "ignored")),
+            AgentThread.status.notin_(("closed", "ignored", "archived")),
         )
         # Partial-index-friendly exclusion — keeps historical off every count.
         not_historical = AgentThread.is_historical == False  # noqa: E712
@@ -149,6 +149,18 @@ class InboxFolderService:
             )
         )).scalar() or 0
 
+        # AI Review folder: virtual count from auto_handled_at, not folder_id.
+        # No thread.folder_id ever points at ai_review — the seeded folder row
+        # exists only so the sidebar can render it as a system folder.
+        ai_review_thread_count = (await self.db.execute(
+            select(func.count(AgentThread.id)).where(
+                AgentThread.organization_id == org_id,
+                not_historical,
+                AgentThread.auto_handled_at.isnot(None),
+                AgentThread.auto_handled_feedback_at.is_(None),
+            )
+        )).scalar() or 0
+
         result = []
         for folder, thread_count in rows:
             tc = thread_count
@@ -172,6 +184,12 @@ class InboxFolderService:
                 # unread badge (would just mirror Inbox's count and add noise).
                 tc = all_mail_thread_count
                 uc = 0
+            elif folder.system_key == "ai_review":
+                # AI Review = unreviewed AI auto-closes. Surface the count
+                # as the unread badge so the amber pill is the user's nudge
+                # to review what the AI silently closed.
+                tc = ai_review_thread_count
+                uc = ai_review_thread_count
             result.append({
                 "id": folder.id,
                 "name": folder.name,

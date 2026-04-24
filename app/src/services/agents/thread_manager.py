@@ -128,10 +128,19 @@ async def update_thread_status(thread_id: str):
 
         has_pending = any(m.status == "pending" for m in msgs)
         has_sent = any(m.status in ("sent", "auto_sent") for m in msgs)
+        has_inbound_handled = any(
+            m.direction == "inbound" and m.status == "handled" for m in msgs
+        )
+        has_outcome = has_sent or has_inbound_handled
 
         thread.message_count = len(msgs)
         thread.has_pending = has_pending
-        thread.status = "pending" if has_pending else ("handled" if has_sent else "ignored")
+        # Derivation: pending → handled (sent OR AI auto-closed inbound) → archived.
+        # `ignored` is no longer derived — only set by explicit user action paths
+        # (legacy data backfilled by app/scripts/migrate_auto_handled_status.py).
+        # AI-auto-closed visibility lives on `auto_handled_at`, set by the
+        # orchestrator at the auto-close decision point.
+        thread.status = "pending" if has_pending else ("handled" if has_outcome else "archived")
 
         last = msgs[-1]
         thread.last_message_at = last.received_at

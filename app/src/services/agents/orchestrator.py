@@ -189,6 +189,54 @@ async def _emit_agent_message_classified(db, agent_msg, classification_confidenc
     )
 
 
+async def _mark_thread_auto_handled(
+    thread_id: str,
+    organization_id: str,
+    category: str | None,
+    matched_customer_id: str | None,
+    classifier_confidence: str | None,
+):
+    """Stamp `thread.auto_handled_at` and emit `thread.auto_handled`.
+
+    Called from each orchestrator auto-close path. The timestamp drives
+    the AI Review folder query and the row-level "AI" pill; the event
+    feeds the platform-events pipeline. Idempotent — won't overwrite a
+    prior stamp if the thread is auto-closed twice (replay safe).
+    """
+    from src.services.events.platform_event_service import PlatformEventService
+    from src.services.events.actor_factory import actor_agent
+
+    async with get_db_context() as db:
+        t = (await db.execute(
+            select(AgentThread).where(AgentThread.id == thread_id)
+        )).scalar_one_or_none()
+        if not t:
+            return
+        if t.auto_handled_at is None:
+            t.auto_handled_at = datetime.now(timezone.utc)
+
+        refs: dict = {"thread_id": thread_id}
+        if matched_customer_id:
+            refs["customer_id"] = matched_customer_id
+        try:
+            await PlatformEventService.emit(
+                db=db,
+                event_type="thread.auto_handled",
+                level="agent_action",
+                actor=actor_agent("email_classifier"),
+                organization_id=organization_id,
+                entity_refs=refs,
+                payload={
+                    "category": category,
+                    "classifier_confidence": classifier_confidence,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"thread.auto_handled emit failed for {thread_id}: {e}")
+
+        await db.commit()
+
+
 async def _emit_agent_message_customer_matched(db, agent_msg, match_method: str | None):
     """Emit `agent_message.customer_matched` when a customer was matched.
 
@@ -610,6 +658,10 @@ async def process_incoming_email(
             await _emit_agent_message_customer_matched(db, agent_msg, match_method=result.get("_match_method"))
             await db.commit()
         await update_thread_status(thread.id)
+        await _mark_thread_auto_handled(
+            thread.id, organization_id, category,
+            result.get("_matched_customer_id"), result.get("confidence"),
+        )
         return
 
     if category in ("spam", "auto_reply", "no_response", "thank_you"):
@@ -700,6 +752,10 @@ async def process_incoming_email(
                     except Exception as e:
                         logger.warning(f"Spam folder assign failed for thread {thread.id}: {e}")
             await update_thread_status(thread.id)
+            await _mark_thread_auto_handled(
+                thread.id, organization_id, category,
+                result.get("_matched_customer_id"), result.get("confidence"),
+            )
             return
 
     # Save to DB

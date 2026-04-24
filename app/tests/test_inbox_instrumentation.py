@@ -237,7 +237,11 @@ async def test_dismiss_thread_emits_status_changed(
     assert event["level"] == "user_action"
     assert event["actor_user_id"] == "dispatcher-123"
     assert event["payload"]["from"] == "pending"
-    assert event["payload"]["to"] == "ignored"
+    # Dismiss now emits "archived" (the new derivation has no inbound
+    # `handled` and no outbound `sent`, so update_thread_status derives to
+    # archived). `ignored` is no longer a derived state — see
+    # tests/test_thread_status_derivation.py.
+    assert event["payload"]["to"] == "archived"
     assert event["payload"]["reason"] == "dismissed"
     # No pending messages were seeded, so count is 0 — verifies the field is
     # populated, not just that pending messages dismissed.

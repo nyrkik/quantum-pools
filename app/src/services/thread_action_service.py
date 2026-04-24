@@ -246,7 +246,7 @@ class ThreadActionService:
             entity_refs={"thread_id": thread_id},
             payload={
                 "from": prior_status,
-                "to": "ignored",
+                "to": "archived",
                 "reason": "dismissed",
                 "messages_dismissed": dismissed_count,
             },

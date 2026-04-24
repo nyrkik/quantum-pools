@@ -47,7 +47,6 @@ interface Props {
   onSelectFolder: (folderId: string | null, systemKey: string | null) => void;
   className?: string;
   refreshKey?: number; // increment to trigger reload
-  autoHandledToday?: number; // shown as chip on Inbox row when > 0 (admin only)
 }
 
 const ICON_MAP: Record<string, React.ReactNode> = {
@@ -60,10 +59,11 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   clock: <Clock className="h-4 w-4" />,
 };
 
-export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className, refreshKey, autoHandledToday }: Props) {
+export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className, refreshKey }: Props) {
   const { openCompose } = useCompose();
   const perms = usePermissions();
   const canSeeAllMail = perms.can("inbox.see_all_mail");
+  const canManageInbox = perms.can("inbox.manage");
   const [folders, setFolders] = useState<InboxFolderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -117,6 +117,10 @@ export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className
     // Historical + All Mail share the inbox.see_all_mail permission gate —
     // both are escape-hatch views typically reserved for owners/admins/managers.
     if ((f.system_key === "historical" || f.system_key === "all_mail") && !canSeeAllMail) return false;
+    // AI Review surfaces silent classifier auto-closes — only the people who
+    // can act on the underlying threads (owner+admin via inbox.manage) need
+    // to see it. For everyone else it's noise.
+    if (f.system_key === "ai_review" && !canManageInbox) return false;
     return true;
   });
   const customFolders = folders.filter((f) => !f.is_system);
@@ -143,7 +147,10 @@ export function InboxFolderSidebar({ selectedFolderId, onSelectFolder, className
       {f.unread_count > 0 && (
         <Badge
           variant={f.system_key === "outbox" ? "destructive" : "default"}
-          className="h-5 min-w-[20px] px-1.5 text-[10px] font-semibold"
+          className={cn(
+            "h-5 min-w-[20px] px-1.5 text-[10px] font-semibold",
+            f.system_key === "ai_review" && "bg-amber-100 text-amber-800 hover:bg-amber-100",
+          )}
         >
           {f.unread_count}
         </Badge>

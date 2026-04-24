@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { formatTime } from "@/lib/format";
 import type { Thread } from "@/types/agent";
-import { StatusBadge, UrgencyBadge, CategoryBadge } from "@/components/inbox/inbox-badges";
+import { StatusBadge, UrgencyBadge, CategoryBadge, AIBadge } from "@/components/inbox/inbox-badges";
 import { SENDER_TAG_STYLES } from "./contact-learning-modal";
 import type { InboxFolderItem } from "./inbox-folder-sidebar";
 
@@ -324,6 +324,7 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                         })()}
                         <CategoryBadge category={t.category} />
                         <StatusBadge status={t.status} />
+                        <AIBadge show={t.was_auto_handled} />
                         {t.has_pending && t.last_message_at &&
                           (Date.now() - new Date(t.last_message_at).getTime()) > 30 * 60 * 1000 && (
                           <span className="px-1.5 py-0 rounded text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">

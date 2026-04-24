@@ -20,6 +20,7 @@ from src.presenters.thread_presenter import ThreadPresenter
 
 
 async def _seed_auto_handled_thread(db, org_id: str) -> AgentThread:
+    now = datetime.now(timezone.utc)
     t = AgentThread(
         id=str(uuid.uuid4()),
         organization_id=org_id,
@@ -29,7 +30,8 @@ async def _seed_auto_handled_thread(db, org_id: str) -> AgentThread:
         last_direction="inbound",
         status="handled",
         has_pending=False,
-        last_message_at=datetime.now(timezone.utc),
+        last_message_at=now,
+        auto_handled_at=now,
     )
     db.add(t)
     await db.flush()

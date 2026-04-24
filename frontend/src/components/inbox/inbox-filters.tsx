@@ -3,7 +3,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Bot,
   CheckCheck,
   Circle,
   Clock,
@@ -21,7 +20,7 @@ interface ThreadStats {
 }
 
 export type AssignFilter = "all" | "mine";
-export type StatusFilter = "all" | "pending" | "handled" | "auto_handled";
+export type StatusFilter = "all" | "pending" | "handled";
 
 interface InboxFiltersProps {
   assignFilter: AssignFilter;
@@ -30,46 +29,29 @@ interface InboxFiltersProps {
   onClientsOnlyFilterChange?: (v: boolean) => void;
   statusFilter: StatusFilter;
   onStatusFilterChange: (s: StatusFilter) => void;
-  autoHandledTodayCount?: number;
   stats: ThreadStats | null;
   onOpenSettings: () => void;
   searchInput: string;
   onSearchInputChange: (v: string) => void;
   onSearch: () => void;
-  /** Owner/admin: shows the Auto-Handled segment alongside the others.
-   *  Ops chips were separate buttons in the pre-rework layout; now folded
-   *  into the single status axis so there's one thing to change. */
-  canManageInbox?: boolean;
 }
 
-/** Segmented status control — single-select lifecycle axis. Replaces the
- *  scattered Handled / Auto-Handled / Pending chips from pre-2026-04-24.
- *  Auto-Handled is a subtype of handled (AI closed it without human action),
- *  so admins get a 4th pill; regular users see 3. */
+/** Segmented status control — single-select lifecycle axis.
+ *  All / Pending / Handled. Auto-handled threads now surface in the
+ *  AI Review sidebar folder (admin-only); they appear in Handled for
+ *  every role with the row-level "AI" pill marking them. */
 function StatusSegmented({
   value,
   onChange,
-  autoHandledTodayCount,
-  canManageInbox,
 }: {
   value: StatusFilter;
   onChange: (s: StatusFilter) => void;
-  autoHandledTodayCount?: number;
-  canManageInbox?: boolean;
 }) {
-  const options: Array<{ key: StatusFilter; label: string; icon: React.ReactNode; badge?: number }> = [
+  const options: Array<{ key: StatusFilter; label: string; icon: React.ReactNode }> = [
     { key: "all", label: "All", icon: <Circle className="h-3.5 w-3.5" /> },
     { key: "pending", label: "Pending", icon: <Clock className="h-3.5 w-3.5" /> },
     { key: "handled", label: "Handled", icon: <CheckCheck className="h-3.5 w-3.5" /> },
   ];
-  if (canManageInbox) {
-    options.push({
-      key: "auto_handled",
-      label: "Auto",
-      icon: <Bot className="h-3.5 w-3.5" />,
-      badge: autoHandledTodayCount && autoHandledTodayCount > 0 ? autoHandledTodayCount : undefined,
-    });
-  }
 
   return (
     <div className="inline-flex items-center rounded-md border bg-background overflow-hidden">
@@ -92,9 +74,6 @@ function StatusSegmented({
           >
             {opt.icon}
             <span>{opt.label}</span>
-            {opt.badge !== undefined && (
-              <span className="ml-0.5 text-[10px] font-semibold opacity-70">+{opt.badge}</span>
-            )}
           </button>
         );
       })}
@@ -109,13 +88,11 @@ export function InboxFilters({
   onClientsOnlyFilterChange,
   statusFilter,
   onStatusFilterChange,
-  autoHandledTodayCount,
   stats: _stats,
   onOpenSettings,
   searchInput,
   onSearchInputChange,
   onSearch,
-  canManageInbox = false,
 }: InboxFiltersProps) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -132,8 +109,6 @@ export function InboxFilters({
       <StatusSegmented
         value={statusFilter}
         onChange={onStatusFilterChange}
-        autoHandledTodayCount={autoHandledTodayCount}
-        canManageInbox={canManageInbox}
       />
 
       {onClientsOnlyFilterChange && (

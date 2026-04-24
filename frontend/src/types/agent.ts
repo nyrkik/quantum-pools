@@ -112,6 +112,12 @@ export interface Thread {
   delivered_to: string | null;
   sender_tag: string | null;
   contact_person_name?: string | null;
+  // Sticky AI marker — true once the classifier auto-closed this thread,
+  // never clears. Drives the "AI" row pill in every Handled view.
+  was_auto_handled?: boolean;
+  // Subset: AI auto-closed AND the user hasn't ack'd the in-thread feedback
+  // banner yet. Banner stops rendering once this flips false.
+  is_auto_handled?: boolean;
   // Phase 3 — cached AI summary payload. Null when no summary has been
   // generated (short thread, low confidence, or inbox_v2 off for org).
   ai_summary_payload?: {
@@ -175,6 +181,7 @@ export interface ThreadDetail {
   is_unread: boolean;
   sender_tag: string | null;
   is_auto_handled?: boolean;
+  was_auto_handled?: boolean;
   contact_person_name?: string | null;
   is_historical?: boolean;
   // Phase 5: present when an AI-drafted estimate is staged or already

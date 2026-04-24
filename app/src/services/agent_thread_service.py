@@ -159,6 +159,15 @@ class AgentThreadService:
             items = await presenter.many(threads, read_map=read_map if current_user_id else None)
             return {"items": items, "total": total}
 
+        # AI Review is a virtual folder — no thread.folder_id points at it.
+        # The seeded inbox_folders row exists so the sidebar can render
+        # consistently; the actual query lives on auto_handled_at. Translate
+        # folder_key="ai_review" to status="auto_handled" so we exercise the
+        # same code path the legacy admin "Auto" filter chip used to.
+        if folder_key == "ai_review":
+            status = "auto_handled"
+            folder_key = None
+
         # Non-inbox folders (sent, spam, custom) show ALL threads in that
         # folder without the default inbox shape filter (inbound-or-pending
         # only). Explicit status filters from filter chips STILL apply —
@@ -177,14 +186,14 @@ class AgentThreadService:
                 )
             )
         elif status == "auto_handled":
-            # AI hid the email without sending a reply. Most-recent first.
+            # AI Review folder query: classifier auto-closed the inbound
+            # without sending a reply, and the user hasn't ack'd the
+            # banner yet. Once `auto_handled_feedback_at` is set, the
+            # thread drops from this view but stays in the regular
+            # Handled segment.
             base = base.where(
-                AgentThread.last_direction == "inbound",
-                AgentThread.status.in_(("ignored", "handled")),
-                AgentThread.has_pending == False,  # noqa: E712
-                AgentThread.id.notin_(
-                    select(AgentMessage.thread_id).where(AgentMessage.status == "auto_sent")
-                ),
+                AgentThread.auto_handled_at.isnot(None),
+                AgentThread.auto_handled_feedback_at.is_(None),
             )
         elif status == "failed":
             # A thread is "failed" only if its MOST RECENT outbound attempt
@@ -443,7 +452,7 @@ class AgentThreadService:
                 )
                 .where(
                     thread_org,
-                    AgentThread.status.notin_(("closed", "ignored")),
+                    AgentThread.status.notin_(("closed", "ignored", "archived")),
                     AgentThread.last_direction == "inbound",
                     or_(
                         ThreadRead.read_at.is_(None),
@@ -463,33 +472,33 @@ class AgentThreadService:
             unread_q = _vis_filter(unread_q)
             unread = (await self.db.execute(unread_q)).scalar() or 0
 
-        # Auto-handled today (status=ignored or status=handled with no human action)
-        # Surfaces email the AI hid from the inbox so the user knows what's not visible.
-        # Excludes threads that any admin/owner has already opened (reviewed).
+        # Auto-handled today — count of AI-auto-closed threads in the last
+        # 24h that the user hasn't ack'd yet. Drives the legacy "+N" pill on
+        # the inbox header; keep it for the deprecation window even though
+        # the AI Review folder badge is the primary surface now.
         today_start = datetime.now(timezone.utc) - timedelta(hours=24)
-        from src.models.thread_read import ThreadRead
-        from src.models.organization_user import OrganizationUser
-        admin_user_ids_subq = (
-            select(OrganizationUser.user_id)
-            .where(
-                OrganizationUser.organization_id == org_id,
-                OrganizationUser.role.in_(("owner", "admin")),
-            )
-        )
-        reviewed_thread_ids_subq = (
-            select(ThreadRead.thread_id)
-            .where(ThreadRead.user_id.in_(admin_user_ids_subq))
-        )
         auto_handled_today = (await self.db.execute(
             _vis_filter(
                 select(func.count(AgentThread.id))
                 .where(
                     thread_org,
-                    AgentThread.last_message_at >= today_start,
-                    AgentThread.last_direction == "inbound",
-                    AgentThread.status.in_(("ignored", "handled")),
-                    AgentThread.has_pending == False,  # noqa: E712
-                    AgentThread.id.notin_(reviewed_thread_ids_subq),
+                    AgentThread.auto_handled_at.isnot(None),
+                    AgentThread.auto_handled_feedback_at.is_(None),
+                    AgentThread.auto_handled_at >= today_start,
+                )
+            )
+        )).scalar() or 0
+
+        # AI Review folder badge: total unreviewed auto-closes (not time-
+        # scoped). The folder is the primary surface for catching mis-handles
+        # — the badge counts everything the user could ack, until they do.
+        ai_review_count = (await self.db.execute(
+            _vis_filter(
+                select(func.count(AgentThread.id))
+                .where(
+                    thread_org,
+                    AgentThread.auto_handled_at.isnot(None),
+                    AgentThread.auto_handled_feedback_at.is_(None),
                 )
             )
         )).scalar() or 0
@@ -537,6 +546,7 @@ class AgentThreadService:
             "stale_pending": stale if can_manage_inbox else 0,
             "failed": failed if can_manage_inbox else 0,
             "auto_handled_today": auto_handled_today if can_manage_inbox else 0,
+            "ai_review_count": ai_review_count if can_manage_inbox else 0,
         }
 
     async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None, user_id: str | None = None) -> dict | None:

@@ -21,7 +21,7 @@ class AgentThread(Base):
     property_address: Mapped[str | None] = mapped_column(String(300))
 
     # Denormalized thread-level status (updated on each message add/status change)
-    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, handled, ignored
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, handled, archived (ignored is legacy — pre-2026-04-25 derivation set it for AI auto-closes; user-dismiss now derives to archived)
     urgency: Mapped[str | None] = mapped_column(String(20))
     category: Mapped[str | None] = mapped_column(String(50))
     message_count: Mapped[int] = mapped_column(Integer, default=1)
@@ -46,6 +46,14 @@ class AgentThread(Base):
     # the banner no longer shows. Keeps the decision persisted across
     # sessions (the React `reviewed` state was local-only).
     auto_handled_feedback_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    # Set by the orchestrator when an inbound is auto-closed by the AI
+    # without human input (no draft sent). Drives the AI Review folder
+    # query (`auto_handled_at IS NOT NULL AND auto_handled_feedback_at IS NULL`)
+    # and the row-level "AI" pill. Once set, never clears.
+    auto_handled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
 

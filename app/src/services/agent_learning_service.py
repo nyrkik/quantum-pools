@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Agent type constants
 AGENT_EMAIL_CLASSIFIER = "email_classifier"
 AGENT_EMAIL_DRAFTER = "email_drafter"
+AGENT_EMAIL_TRIAGE = "email_triage"
 AGENT_DEEPBLUE = "deepblue_responder"
 AGENT_COMMAND_EXECUTOR = "command_executor"
 AGENT_JOB_EVALUATOR = "job_evaluator"

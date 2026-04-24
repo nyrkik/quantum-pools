@@ -101,7 +101,7 @@ async def test_known_customer_inbound_does_not_unbound_local_error(
     cust, _thread = await _seed_known_customer(db_session, org_a.id)
 
     # Stub ai_triage — avoids a live Claude call during the test.
-    async def _fake_triage(body: str, subject: str, from_email: str) -> bool:
+    async def _fake_triage(body: str, subject: str, from_email: str, **kwargs) -> bool:
         return True
 
     monkeypatch.setattr(triage_agent, "ai_triage", _fake_triage)

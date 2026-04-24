@@ -536,7 +536,10 @@ async def process_incoming_email(
     clean_body = strip_email_signature(strip_quoted_reply(body)) if body else ""
 
     from .triage_agent import ai_triage
-    needs_response = await ai_triage(clean_body, subject, from_email)
+    needs_response = await ai_triage(
+        clean_body, subject, from_email,
+        organization_id=organization_id or None,
+    )
     if not needs_response:
         logger.info(f"AI triage: no response needed — {subject[:50]}")
         if sender_is_customer:

@@ -6,14 +6,13 @@
 # To add a NEW exception: run `--write-baseline` AFTER a deliberate decision.
 # Normal path: fix the violation, don't add it here.
 #
-# Generated 15 entries.
+# Generated 14 entries.
 
 R5|app/src/services/agent_action_service.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/agents/comment_classifier.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/agents/equipment_agent.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/agents/evals.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/agents/resolution_evaluator.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
-R5|app/src/services/agents/triage_agent.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/deepblue/engine.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/deepblue/eval_generator.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns
 R5|app/src/services/deepblue/eval_runner.py|.messages.create() without AgentLearningService in module — DNA rule #2: every AI agent learns

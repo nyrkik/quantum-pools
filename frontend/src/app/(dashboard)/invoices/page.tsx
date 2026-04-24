@@ -32,7 +32,12 @@ type DocView = "invoices" | "estimates";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
 type EstimateFilter =
   | "all" | "open" | "draft" | "sent" | "approved" | "rejected" | "expired";
-const OPEN_ESTIMATE_STATUSES = ["draft", "sent", "revised", "viewed"];
+// Approved is the highest-priority "needs action" state for an estimate
+// (customer said yes; convert to invoice + schedule). Aligns with
+// OPEN_STATUSES on the invoices side, which already includes approved.
+// Once an estimate is converted, document_type flips to "invoice", so
+// the row naturally falls out of this view.
+const OPEN_ESTIMATE_STATUSES = ["draft", "sent", "revised", "viewed", "approved"];
 
 // Sentinel for "no management-company filter" — the Radix Select
 // won't accept empty-string values, so we route through this.
@@ -119,16 +124,22 @@ export default function InvoicesPage() {
         `/v1/invoices?${params}`
       );
       let items = data.items;
+      // Search transcends the current tab — once the user types into the
+      // search box, they want to see every match regardless of which
+      // status filter the page happens to be on. Otherwise FB-47-style
+      // misses recur (search "26024" while the Estimates tab is on its
+      // default "open" view, miss the approved match client-side).
+      const isSearching = !!search;
       if (docView === "invoices") {
         const effectiveFilter = selectedMonth !== null ? chartSegment : activeTab;
-        if (effectiveFilter === "open") {
+        if (effectiveFilter === "open" && !isSearching) {
           items = items.filter((inv) =>
             OPEN_STATUSES.split(",").includes(inv.status)
           );
         }
-        setTotal(effectiveFilter === "open" ? items.length : data.total);
+        setTotal(effectiveFilter === "open" && !isSearching ? items.length : data.total);
       } else {
-        if (estimateFilter === "open") {
+        if (estimateFilter === "open" && !isSearching) {
           items = items.filter((inv) =>
             OPEN_ESTIMATE_STATUSES.includes(inv.status),
           );

@@ -14,9 +14,18 @@ import { toast } from "sonner";
 interface InboxSettingsSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** View-mode toggle (not a filter). Moved here from the filter chip
+   *  row in the 2026-04-24 rework so the main row stays about filtering. */
+  groupByClient?: boolean;
+  onGroupByClientChange?: (v: boolean) => void;
 }
 
-export function InboxSettingsSheet({ open, onOpenChange }: InboxSettingsSheetProps) {
+export function InboxSettingsSheet({
+  open,
+  onOpenChange,
+  groupByClient,
+  onGroupByClientChange,
+}: InboxSettingsSheetProps) {
   const [learningMode, setLearningMode] = useState(true);
   const [loadingLearning, setLoadingLearning] = useState(false);
 
@@ -47,6 +56,21 @@ export function InboxSettingsSheet({ open, onOpenChange }: InboxSettingsSheetPro
       open={open}
       onOpenChange={onOpenChange}
     >
+      {onGroupByClientChange && (
+        <div className="flex items-center justify-between py-3 border-b">
+          <div className="space-y-0.5">
+            <Label className="text-sm font-medium">Group threads by client</Label>
+            <p className="text-xs text-muted-foreground">
+              Collapse threads by the matched customer instead of showing them as a flat list.
+            </p>
+          </div>
+          <Switch
+            checked={!!groupByClient}
+            onCheckedChange={onGroupByClientChange}
+          />
+        </div>
+      )}
+
       <div className="flex items-center justify-between py-3 border-b">
         <div className="space-y-0.5">
           <Label className="text-sm font-medium">Contact Learning Mode</Label>

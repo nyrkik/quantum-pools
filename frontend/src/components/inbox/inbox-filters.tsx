@@ -2,7 +2,16 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, Search, User, Users, Bot, UserCheck, CheckCheck } from "lucide-react";
+import {
+  Bot,
+  CheckCheck,
+  Circle,
+  Clock,
+  Search,
+  Settings,
+  User,
+  UserCheck,
+} from "lucide-react";
 
 interface ThreadStats {
   total: number;
@@ -11,50 +20,101 @@ interface ThreadStats {
   open_actions: number;
 }
 
-type AssignFilter = "all" | "mine";
+export type AssignFilter = "all" | "mine";
+export type StatusFilter = "all" | "pending" | "handled" | "auto_handled";
 
 interface InboxFiltersProps {
   assignFilter: AssignFilter;
   onAssignFilterChange: (f: AssignFilter) => void;
+  clientsOnlyFilter?: boolean;
+  onClientsOnlyFilterChange?: (v: boolean) => void;
+  statusFilter: StatusFilter;
+  onStatusFilterChange: (s: StatusFilter) => void;
+  autoHandledTodayCount?: number;
+  stats: ThreadStats | null;
+  onOpenSettings: () => void;
   searchInput: string;
   onSearchInputChange: (v: string) => void;
   onSearch: () => void;
-  stats: ThreadStats | null;
-  groupByClient?: boolean;
-  onGroupByClientChange?: (v: boolean) => void;
-  clientsOnlyFilter?: boolean;
-  onClientsOnlyFilterChange?: (v: boolean) => void;
-  handledFilter?: boolean;
-  onHandledFilterChange?: (v: boolean) => void;
-  staleFilter?: boolean;
-  onStaleFilterChange?: (v: boolean) => void;
-  autoHandledFilter?: boolean;
-  onAutoHandledFilterChange?: (v: boolean) => void;
-  autoHandledTodayCount?: number;  // for chip-style count
-  // Ops chips (Failed, Auto-Handled, Stale) are owner/admin only —
-  // billing/ops triage is not a manager concern. Backend stats also zero these
-  // out for non-managers as defense in depth.
+  /** Owner/admin: shows the Auto-Handled segment alongside the others.
+   *  Ops chips were separate buttons in the pre-rework layout; now folded
+   *  into the single status axis so there's one thing to change. */
   canManageInbox?: boolean;
+}
+
+/** Segmented status control — single-select lifecycle axis. Replaces the
+ *  scattered Handled / Auto-Handled / Pending chips from pre-2026-04-24.
+ *  Auto-Handled is a subtype of handled (AI closed it without human action),
+ *  so admins get a 4th pill; regular users see 3. */
+function StatusSegmented({
+  value,
+  onChange,
+  autoHandledTodayCount,
+  canManageInbox,
+}: {
+  value: StatusFilter;
+  onChange: (s: StatusFilter) => void;
+  autoHandledTodayCount?: number;
+  canManageInbox?: boolean;
+}) {
+  const options: Array<{ key: StatusFilter; label: string; icon: React.ReactNode; badge?: number }> = [
+    { key: "all", label: "All", icon: <Circle className="h-3.5 w-3.5" /> },
+    { key: "pending", label: "Pending", icon: <Clock className="h-3.5 w-3.5" /> },
+    { key: "handled", label: "Handled", icon: <CheckCheck className="h-3.5 w-3.5" /> },
+  ];
+  if (canManageInbox) {
+    options.push({
+      key: "auto_handled",
+      label: "Auto",
+      icon: <Bot className="h-3.5 w-3.5" />,
+      badge: autoHandledTodayCount && autoHandledTodayCount > 0 ? autoHandledTodayCount : undefined,
+    });
+  }
+
+  return (
+    <div className="inline-flex items-center rounded-md border bg-background overflow-hidden">
+      {options.map((opt, i) => {
+        const active = value === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onChange(opt.key)}
+            className={[
+              "h-7 px-2.5 text-xs inline-flex items-center gap-1",
+              i > 0 ? "border-l" : "",
+              active
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted",
+            ].join(" ")}
+            aria-pressed={active}
+            aria-label={`Filter: ${opt.label}`}
+          >
+            {opt.icon}
+            <span>{opt.label}</span>
+            {opt.badge !== undefined && (
+              <span className="ml-0.5 text-[10px] font-semibold opacity-70">+{opt.badge}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export function InboxFilters({
   assignFilter,
   onAssignFilterChange,
+  clientsOnlyFilter,
+  onClientsOnlyFilterChange,
+  statusFilter,
+  onStatusFilterChange,
+  autoHandledTodayCount,
+  stats: _stats,
+  onOpenSettings,
   searchInput,
   onSearchInputChange,
   onSearch,
-  stats,
-  groupByClient,
-  onGroupByClientChange,
-  clientsOnlyFilter,
-  onClientsOnlyFilterChange,
-  handledFilter,
-  onHandledFilterChange,
-  staleFilter,
-  onStaleFilterChange,
-  autoHandledFilter,
-  onAutoHandledFilterChange,
-  autoHandledTodayCount,
   canManageInbox = false,
 }: InboxFiltersProps) {
   return (
@@ -68,6 +128,14 @@ export function InboxFilters({
         <User className="h-3.5 w-3.5 mr-1" />
         Mine
       </Button>
+
+      <StatusSegmented
+        value={statusFilter}
+        onChange={onStatusFilterChange}
+        autoHandledTodayCount={autoHandledTodayCount}
+        canManageInbox={canManageInbox}
+      />
+
       {onClientsOnlyFilterChange && (
         <Button
           variant={clientsOnlyFilter ? "default" : "outline"}
@@ -80,55 +148,18 @@ export function InboxFilters({
           Clients
         </Button>
       )}
-      {onHandledFilterChange && (
-        <Button
-          variant={handledFilter ? "default" : "outline"}
-          size="sm"
-          className="h-7 px-2.5 text-xs"
-          onClick={() => onHandledFilterChange(!handledFilter)}
-          title="Show threads already marked handled"
-        >
-          <CheckCheck className="h-3.5 w-3.5 mr-1" />
-          Handled
-        </Button>
-      )}
-      {onGroupByClientChange && (
-        <Button
-          variant={groupByClient ? "default" : "outline"}
-          size="sm"
-          className="h-7 px-2.5 text-xs"
-          onClick={() => onGroupByClientChange(!groupByClient)}
-        >
-          <Users className="h-3.5 w-3.5 mr-1" />
-          By Client
-        </Button>
-      )}
-      {canManageInbox && onAutoHandledFilterChange && (
-        <Button
-          variant={autoHandledFilter ? "default" : "outline"}
-          size="sm"
-          className={`h-7 px-2.5 text-xs gap-1 ${!autoHandledFilter ? "border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-400" : ""}`}
-          onClick={() => onAutoHandledFilterChange(!autoHandledFilter)}
-          title="Show all emails the AI auto-handled (moved/tagged without human action)"
-        >
-          <Bot className="h-3.5 w-3.5" />
-          Auto-Handled
-          {(autoHandledTodayCount ?? 0) > 0 && (
-            <span className="ml-0.5 text-[10px] font-semibold opacity-70">+{autoHandledTodayCount}</span>
-          )}
-        </Button>
-      )}
-      {canManageInbox && stats && stats.pending > 0 && onStaleFilterChange && (
-        <Button
-          variant={staleFilter ? "destructive" : "outline"}
-          size="sm"
-          className={`h-7 px-2.5 text-xs gap-1 ${!staleFilter ? "border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400" : ""}`}
-          onClick={() => onStaleFilterChange(!staleFilter)}
-        >
-          <AlertTriangle className="h-3.5 w-3.5" />
-          {stats.pending} Pending
-        </Button>
-      )}
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 text-muted-foreground"
+        onClick={onOpenSettings}
+        title="Inbox settings"
+        aria-label="Inbox settings"
+      >
+        <Settings className="h-3.5 w-3.5" />
+      </Button>
+
       <div className="flex items-center gap-1 ml-auto">
         <Input
           placeholder="Search..."

@@ -15,7 +15,7 @@ import { usePermissions } from "@/lib/permissions";
 import type { Thread } from "@/types/agent";
 import { ThreadDetailSheet } from "@/components/inbox/thread-detail-sheet";
 import { InboxSettingsSheet } from "@/components/inbox/inbox-settings-sheet";
-import { InboxFilters } from "@/components/inbox/inbox-filters";
+import { InboxFilters, type StatusFilter } from "@/components/inbox/inbox-filters";
 import { InboxMobileList } from "@/components/inbox/inbox-mobile-list";
 import { InboxThreadTable } from "@/components/inbox/inbox-thread-table";
 import { InboxThreadListV2 } from "@/components/inbox/InboxThreadListV2";
@@ -71,10 +71,12 @@ export default function InboxPage() {
   const [stats, setStats] = useState<ThreadStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [assignFilter, setAssignFilter] = useState<AssignFilter>("all");
-  const [staleFilter, setStaleFilter] = useState(false);
-  const [autoHandledFilter, setAutoHandledFilter] = useState(false);
   const [clientsOnlyFilter, setClientsOnlyFilter] = useState(false);
-  const [handledFilter, setHandledFilter] = useState(false);
+  // Segmented-control single-select axis. Replaces the pre-2026-04-24
+  // scattered handled/autoHandled/pending chips. Stale isn't here — it's
+  // a transient "focus on stale pending" view toggled from the banner.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [staleView, setStaleView] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
@@ -113,15 +115,14 @@ export default function InboxPage() {
     }
     const active: string[] = [];
     if (assignFilter !== "all") active.push(`assign:${assignFilter}`);
-    if (staleFilter) active.push("stale");
-    if (autoHandledFilter) active.push("auto_handled");
+    if (staleView) active.push("stale");
+    if (statusFilter !== "all") active.push(`status:${statusFilter}`);
     if (clientsOnlyFilter) active.push("clients_only");
-    if (handledFilter) active.push("handled");
     events.emit("inbox.filter_changed", {
       level: "user_action",
       payload: { chips_active: active, count: active.length },
     });
-  }, [assignFilter, staleFilter, autoHandledFilter, clientsOnlyFilter, handledFilter]);
+  }, [assignFilter, staleView, statusFilter, clientsOnlyFilter]);
 
   // Instrumentation: emit inbox.folder_viewed whenever the selected folder
   // changes. Also skips initial render.
@@ -214,11 +215,13 @@ export default function InboxPage() {
       offset: String(page * PAGE_SIZE),
     });
 
-    // Stale / Auto-Handled / Failed filters: search across ALL folders
-    if (staleFilter) {
+    // Stale view (banner-driven) + Auto-Handled override folder filtering
+    // because those cross folder boundaries ("find my stale stuff regardless
+    // of where it lives"). Normal All/Pending/Handled respect the folder.
+    if (staleView) {
       params.set("status", "stale");
       params.set("exclude_spam", "false");
-    } else if (autoHandledFilter) {
+    } else if (statusFilter === "auto_handled") {
       params.set("status", "auto_handled");
       params.set("exclude_spam", "false");
     } else {
@@ -238,11 +241,13 @@ export default function InboxPage() {
       } else {
         params.set("exclude_spam", "false");
       }
+
+      if (statusFilter === "pending") params.set("status", "pending");
+      else if (statusFilter === "handled") params.set("status", "handled");
     }
     if (search) params.set("search", search);
     if (assignFilter === "mine" && user?.id) params.set("assigned_to", user.id);
     if (clientsOnlyFilter) params.set("has_customer", "true");
-    if (handledFilter) params.set("status", "handled");
 
     api.get<PaginatedThreads>(`/v1/admin/agent-threads?${params}`)
       .then((data) => {
@@ -251,7 +256,7 @@ export default function InboxPage() {
       })
       .catch(() => toast.error("Failed to load threads"))
       .finally(() => setLoading(false));
-  }, [search, page, assignFilter, staleFilter, autoHandledFilter, clientsOnlyFilter, handledFilter, user?.id, selectedFolderId, selectedFolderKey]);
+  }, [search, page, assignFilter, staleView, statusFilter, clientsOnlyFilter, user?.id, selectedFolderId, selectedFolderKey]);
 
   const loadStats = useCallback(() => {
     api.get<ThreadStats>("/v1/admin/agent-threads/stats")
@@ -482,23 +487,47 @@ export default function InboxPage() {
           <InboxFilters
             assignFilter={assignFilter}
             onAssignFilterChange={(f) => { setAssignFilter(f); setPage(0); }}
+            clientsOnlyFilter={clientsOnlyFilter}
+            onClientsOnlyFilterChange={(v) => { setClientsOnlyFilter(v); setPage(0); }}
+            statusFilter={statusFilter}
+            onStatusFilterChange={(s) => { setStatusFilter(s); setStaleView(false); setPage(0); }}
+            autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
+            stats={stats}
+            onOpenSettings={() => setSettingsOpen(true)}
             searchInput={searchInput}
             onSearchInputChange={setSearchInput}
             onSearch={handleSearch}
-            stats={stats}
-            groupByClient={groupByClient}
-            onGroupByClientChange={setGroupByClient}
-            clientsOnlyFilter={clientsOnlyFilter}
-            onClientsOnlyFilterChange={(v) => { setClientsOnlyFilter(v); setPage(0); }}
-            handledFilter={handledFilter}
-            onHandledFilterChange={(v) => { setHandledFilter(v); setStaleFilter(false); setAutoHandledFilter(false); setPage(0); }}
-            staleFilter={staleFilter}
-            onStaleFilterChange={(v) => { setStaleFilter(v); setAutoHandledFilter(false); setPage(0); }}
-            autoHandledFilter={autoHandledFilter}
-            onAutoHandledFilterChange={(v) => { setAutoHandledFilter(v); setStaleFilter(false); setPage(0); }}
-            autoHandledTodayCount={(stats as { auto_handled_today?: number } | null)?.auto_handled_today ?? 0}
             canManageInbox={perms.can("inbox.manage")}
           />
+
+          {/* Stale banner — surfaces when admins have unattended
+              pending mail >30min. Clicking Show switches the list to a
+              stale-only view; clicking Clear returns to the normal
+              folder + status view. Silent when count is zero. */}
+          {perms.can("inbox.manage") && stats && stats.stale_pending > 0 && !staleView && (
+            <button
+              type="button"
+              onClick={() => { setStaleView(true); setPage(0); }}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-amber-400 bg-amber-50 text-amber-800 text-xs dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/50"
+            >
+              <span>
+                <strong>{stats.stale_pending}</strong> pending thread{stats.stale_pending === 1 ? "" : "s"} older than 30 min
+              </span>
+              <span className="underline">Show</span>
+            </button>
+          )}
+          {staleView && (
+            <div className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-amber-400 bg-amber-100 text-amber-900 text-xs dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200">
+              <span>Showing stale pending threads only</span>
+              <button
+                type="button"
+                onClick={() => { setStaleView(false); setPage(0); }}
+                className="underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {inboxV2Enabled ? (
             /* Phase 3 V2 layout — responsive card-per-thread with AI summary.
@@ -573,7 +602,12 @@ export default function InboxPage() {
         </Sheet>
       )}
 
-      <InboxSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <InboxSettingsSheet
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        groupByClient={groupByClient}
+        onGroupByClientChange={setGroupByClient}
+      />
     </PageLayout>
   );
 }

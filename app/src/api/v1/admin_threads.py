@@ -125,31 +125,6 @@ async def get_thread(
     return result
 
 
-@router.post("/agent-threads/{thread_id}/approve")
-async def approve_thread(
-    thread_id: str,
-    body: ApproveBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Approve the latest pending message in a thread."""
-    service = ThreadActionService(db)
-    result = await service.approve_thread(
-        org_id=ctx.organization_id,
-        thread_id=thread_id,
-        response_text=body.response_text,
-        user_name=f"{ctx.user.first_name} {ctx.user.last_name}",
-        attachment_ids=body.attachment_ids,
-    )
-    if "error" in result:
-        code = {"no_pending": 400, "no_text": 400, "send_failed": 500}[result["error"]]
-        raise HTTPException(status_code=code, detail=result["detail"])
-    thread_svc = AgentThreadService(db)
-    await thread_svc.mark_thread_read(thread_id=thread_id, user_id=ctx.user.id, org_id=ctx.organization_id, user_role=ctx.org_user.role)
-    await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "approved"})
-    return result
-
-
 @router.post("/agent-threads/{thread_id}/dismiss")
 async def dismiss_thread(
     thread_id: str,
@@ -278,35 +253,6 @@ async def assign_thread(
         raise HTTPException(status_code=code, detail=result["detail"])
     await publish(EventType.THREAD_UPDATED, ctx.organization_id, {"thread_id": thread_id, "action": "assigned", "assigned_to": body.user_id})
     return result
-
-
-@router.post("/agent-threads/{thread_id}/save-draft")
-async def save_thread_draft(
-    thread_id: str,
-    body: ApproveBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin, OrgRole.manager)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Save edited draft without sending."""
-    from sqlalchemy import select, desc
-    from src.models.agent_message import AgentMessage
-    result = await db.execute(
-        select(AgentMessage)
-        .where(
-            AgentMessage.thread_id == thread_id,
-            AgentMessage.organization_id == ctx.organization_id,
-            AgentMessage.status == "pending",
-            AgentMessage.direction == "inbound",
-        )
-        .order_by(desc(AgentMessage.received_at))
-        .limit(1)
-    )
-    msg = result.scalar_one_or_none()
-    if not msg:
-        raise HTTPException(status_code=404, detail="No pending message in this thread")
-    msg.draft_response = body.response_text
-    await db.commit()
-    return {"saved": True}
 
 
 @router.post("/agent-threads/{thread_id}/send-followup")

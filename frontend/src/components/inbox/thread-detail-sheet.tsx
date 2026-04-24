@@ -991,16 +991,8 @@ export function ThreadDetailSheet({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
 
-  // Draft editing (for pending messages)
-  const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState("");
-  const [reviseInstruction, setReviseInstruction] = useState("");
-  // AI draft panel collapses by default so the reading pane isn't dominated
-  // by the draft editor. User clicks the "AI drafted a reply" bar to expand.
-  const [draftExpanded, setDraftExpanded] = useState(false);
-  const [revising, setRevising] = useState(false);
-  // Linked-jobs panel + older-message accordion both collapse by default for
-  // the same reason — keep the email body the dominant element of the panel.
+  // Linked-jobs panel + older-message accordion collapse by default to keep
+  // the email body the dominant element of the panel.
   const [jobsExpanded, setJobsExpanded] = useState(false);
   const [olderMessagesExpanded, setOlderMessagesExpanded] = useState(false);
 
@@ -1011,7 +1003,6 @@ export function ThreadDetailSheet({
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [followUpRevise, setFollowUpRevise] = useState("");
   const [followUpRevising, setFollowUpRevising] = useState(false);
-  const [approveAttachments, setApproveAttachments] = useState<UploadedAttachment[]>([]);
   const [followUpAttachments, setFollowUpAttachments] = useState<UploadedAttachment[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
@@ -1089,11 +1080,6 @@ export function ThreadDetailSheet({
     api.get<ThreadDetail>(`/v1/admin/agent-threads/${threadId}`)
       .then((t) => {
         setThread(t);
-        // Find latest pending message draft
-        const pendingMsg = t.timeline.find((m) => m.status === "pending" && m.direction === "inbound" && m.draft_response);
-        if (pendingMsg) {
-          setEditText(pendingMsg.draft_response || "");
-        }
       })
       .catch(() => toast.error("Failed to load thread"))
       .finally(() => setLoading(false));
@@ -1102,12 +1088,9 @@ export function ThreadDetailSheet({
   // When threadId changes (user clicked a different thread in the left
   // pane), clear local state so the detail pane shows a loading spinner
   // instead of the previously-rendered thread. Without this the old body,
-  // draft, toolbar, etc. linger until the new fetch resolves.
+  // toolbar, etc. linger until the new fetch resolves.
   useEffect(() => {
     setThread(null);
-    setEditText("");
-    setReviseInstruction("");
-    setDraftExpanded(false);
   }, [threadId]);
 
   useEffect(() => { loadThread(); }, [loadThread]);
@@ -1160,24 +1143,6 @@ export function ThreadDetailSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread?.id, thread?.matched_customer_id, thread?.status]);
 
-  const handleApprove = async (responseText?: string) => {
-    setSending(true);
-    try {
-      await api.post(`/v1/admin/agent-threads/${threadId}/approve`, {
-        response_text: responseText || undefined,
-        attachment_ids: approveAttachments.length ? approveAttachments.map((a) => a.id) : undefined,
-      });
-      toast.success("Reply sent");
-      setApproveAttachments([]);
-      onAction();
-      onClose();
-    } catch {
-      toast.error("Failed to send");
-    } finally {
-      setSending(false);
-    }
-  };
-
   const handleDismiss = async () => {
     setSending(true);
     try {
@@ -1189,32 +1154,6 @@ export function ThreadDetailSheet({
       toast.error("Failed to dismiss");
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleReviseDraft = async () => {
-    if (!reviseInstruction.trim()) return;
-    const currentDraft = editing ? editText : (pendingMessage?.draft_response || "");
-    if (!currentDraft) return;
-    setRevising(true);
-    try {
-      const result = await api.post<{ draft: string }>(`/v1/admin/agent-threads/${threadId}/revise-draft`, {
-        draft: currentDraft,
-        instruction: reviseInstruction,
-      });
-      if (editing) {
-        // Update the textarea in-place
-        setEditText(result.draft);
-      } else {
-        // Save revised draft directly and reload
-        await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: result.draft });
-        loadThread();
-      }
-      setReviseInstruction("");
-    } catch {
-      toast.error("Failed to revise");
-    } finally {
-      setRevising(false);
     }
   };
 
@@ -1763,103 +1702,13 @@ export function ThreadDetailSheet({
           />
         )}
 
-        {/* AI draft — collapsed by default so the reading pane isn't dominated
-            by the draft editor. Click the bar to review / edit / send. */}
-        {!stagedReplyProposal && pendingMessage && pendingMessage.draft_response && !draftExpanded && (
-          <button
-            onClick={() => setDraftExpanded(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors text-left"
-          >
-            <Pencil className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400 shrink-0" />
-            <span className="text-sm text-blue-700 dark:text-blue-400">Reply</span>
-          </button>
-        )}
-
-        {!stagedReplyProposal && pendingMessage && pendingMessage.draft_response && draftExpanded && (
-          <div className="rounded-lg border bg-background shadow-sm">
-            {/* Header — matches InlineReplyComposer */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b bg-blue-50 dark:bg-blue-950/30">
-              <Pencil className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400 shrink-0" />
-              <span className="text-xs text-blue-700 dark:text-blue-400 flex-1 truncate">
-                AI draft — review and send
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-muted-foreground"
-                onClick={() => setDraftExpanded(false)}
-                title="Collapse"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-
-            {/* Body */}
-            <div className="p-3 space-y-2">
-              <Textarea
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                className="text-sm min-h-[120px] border-0 shadow-none focus-visible:ring-0 p-0 resize-none"
-                rows={6}
-              />
-
-              <div className="flex gap-2 items-end pt-2 border-t">
-                <Textarea
-                  value={reviseInstruction}
-                  onChange={(e) => setReviseInstruction(e.target.value)}
-                  placeholder="Tell AI how to change it..."
-                  className="text-sm min-h-[2rem] resize-none flex-1"
-                  rows={1}
-                  onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleReviseDraft(); } }}
-                />
-                <Button variant="outline" size="sm" className="h-8" onClick={handleReviseDraft} disabled={revising || !reviseInstruction.trim()}>
-                  {revising ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}Revise
-                </Button>
-              </div>
-
-              <AttachmentPicker
-                attachments={approveAttachments}
-                onAttachmentsChange={setApproveAttachments}
-                sourceType="agent_message"
-              />
-            </div>
-
-            {/* Send bar — matches InlineReplyComposer sizing/placement */}
-            <div className="flex items-center justify-between gap-2 px-3 py-2 border-t bg-muted/10">
-              <span className="text-[10px] text-muted-foreground">AI drafted — edit and send</span>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  onClick={async () => {
-                    try {
-                      await api.post(`/v1/admin/agent-threads/${threadId}/save-draft`, { response_text: editText });
-                      toast.success("Draft saved");
-                      loadThread();
-                    } catch { toast.error("Failed to save draft"); }
-                  }}
-                  disabled={sending}
-                >
-                  Save
-                </Button>
-                <Button size="sm" className="h-8" onClick={() => handleApprove(editText)} disabled={sending}>
-                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
-                  Send
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Inline reply composer — visible whenever there isn't a draft
-            to approve. Covers (a) no pending message at all (classic
-            follow-up case) and (b) a pending inbound where draft generation
-            failed or returned empty (don't leave the user with no reply UI).
-            Suppressed when a staged proposal is showing (which provides its
-            own accept/reject/edit affordances). */}
-        {!stagedReplyProposal && (!pendingMessage || !pendingMessage.draft_response) && (
+        {/* Inline reply composer — visible whenever there isn't a staged
+            email_reply proposal. Covers (a) no pending message at all (classic
+            follow-up case) and (b) post-Phase-5-Step-4: pending inbound without
+            a proposal (drafter skipped or proposal was rejected). The legacy
+            draft_response block was retired — every AI draft is now a proposal
+            rendered by ProposalCard above. */}
+        {!stagedReplyProposal && (
           <InlineReplyComposer
             threadId={threadId}
             recipient={thread.contact_email}

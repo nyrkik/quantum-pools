@@ -102,94 +102,45 @@ CRITICAL TONE RULES — follow these exactly:
 SYSTEM_PROMPT = _get_system_prompt()
 
 
-async def get_correction_history(from_email: str, category: str | None) -> list[dict]:
-    """Get past corrections (edited drafts) to learn from. Returns most relevant examples."""
+async def get_past_exchanges(from_email: str) -> list[dict]:
+    """Recent outbound replies to this sender — for conversation continuity.
+
+    Correction lessons (edits/rejections) now come from `agent_corrections` via
+    `AgentLearningService.build_lessons_prompt(..., AGENT_EMAIL_DRAFTER)`, which
+    is injected separately. This function's remaining job is "what have we
+    previously said to this person?" — sourced from outbound `AgentMessage.body`
+    since `final_response` on the inbound side is retired (Phase 5 Step 4).
+    """
     async with get_db_context() as db:
-        # Get messages where draft was edited before sending (final != draft)
-        query = (
+        rows = (await db.execute(
             select(AgentMessage)
             .where(
-                AgentMessage.status == "sent",
-                AgentMessage.draft_response.isnot(None),
-                AgentMessage.final_response.isnot(None),
-                AgentMessage.draft_response != AgentMessage.final_response,
-            )
-            .order_by(desc(AgentMessage.sent_at))
-            .limit(20)
-        )
-        result = await db.execute(query)
-        edited = result.scalars().all()
-
-        # Also get rejections to learn what NOT to do
-        reject_query = (
-            select(AgentMessage)
-            .where(AgentMessage.status == "rejected")
-            .order_by(desc(AgentMessage.approved_at))
-            .limit(5)
-        )
-        reject_result = await db.execute(reject_query)
-        rejected = reject_result.scalars().all()
-
-        # Also get recent successful sends for same email (conversation continuity)
-        convo_query = (
-            select(AgentMessage)
-            .where(
-                AgentMessage.from_email == from_email,
+                AgentMessage.direction == "outbound",
+                AgentMessage.to_email == from_email,
                 AgentMessage.status.in_(("sent", "auto_sent")),
             )
             .order_by(desc(AgentMessage.sent_at))
             .limit(5)
-        )
-        convo_result = await db.execute(convo_query)
-        past_convos = convo_result.scalars().all()
+        )).scalars().all()
 
-        corrections = []
-
-        # Prioritize: same-email corrections, then same-category, then general
-        for msg in edited:
-            relevance = "general"
-            if msg.from_email == from_email:
-                relevance = "same_client"
-            elif msg.category == category:
-                relevance = "same_category"
-            corrections.append({
-                "type": "correction",
-                "relevance": relevance,
-                "category": msg.category,
-                "subject": msg.subject,
-                "original_draft": msg.draft_response[:200],
-                "corrected_to": msg.final_response[:200],
-            })
-
-        # Sort: same_client first, then same_category, then general
-        priority = {"same_client": 0, "same_category": 1, "general": 2}
-        corrections.sort(key=lambda x: priority.get(x["relevance"], 3))
-
-        for msg in rejected:
-            corrections.append({
-                "type": "rejection",
-                "category": msg.category,
-                "subject": msg.subject,
-                "rejected_draft": msg.draft_response[:200] if msg.draft_response else "",
-                "reason": "Team decided not to respond",
-            })
-
-        past_exchanges = []
-        for msg in past_convos:
-            past_exchanges.append({
-                "subject": msg.subject,
-                "received": msg.received_at.isoformat() if msg.received_at else None,
-                "response": msg.final_response[:200] if msg.final_response else msg.draft_response[:200] if msg.draft_response else "",
-            })
-
-        return {
-            "corrections": corrections[:8],  # Cap at 8 most relevant
-            "past_exchanges": past_exchanges,
-        }
+        return [
+            {
+                "subject": m.subject,
+                "received": m.sent_at.isoformat() if m.sent_at else None,
+                "response": (m.body or "")[:200],
+            }
+            for m in rows
+        ]
 
 
-def build_context_prompt(customer_ctx: dict | None, history: dict | None) -> str:
-    """Build the context section to inject into the system prompt."""
+def build_context_prompt(customer_ctx: dict | None, past_exchanges: list[dict] | None = None) -> str:
+    """Build the context section to inject into the system prompt.
+
+    Correction lessons are injected separately via
+    `AgentLearningService.build_lessons_prompt(AGENT_EMAIL_DRAFTER)` —
+    this function only handles known-customer context and recent outbound
+    conversation history.
+    """
     parts = []
 
     if customer_ctx and customer_ctx.get("_multi_candidates"):
@@ -221,31 +172,14 @@ def build_context_prompt(customer_ctx: dict | None, history: dict | None) -> str
         parts.append("")
         parts.append("Use the customer's name and reference their property details when relevant. This is a known client — respond with familiarity, not as a cold contact.")
 
-    if history:
-        exchanges = history.get("past_exchanges", [])
-        if exchanges:
-            parts.append("")
-            parts.append("=== RECENT CONVERSATION HISTORY ===")
-            for ex in exchanges[:3]:
-                parts.append(f"- [{ex.get('received', '?')}] Re: {ex['subject']}")
-                parts.append(f"  Our reply: {ex['response']}")
-            parts.append("")
-            parts.append("Continue the existing relationship tone. Reference prior communication if relevant.")
-
-        corrections = history.get("corrections", [])
-        if corrections:
-            parts.append("")
-            parts.append("=== LEARN FROM PAST CORRECTIONS ===")
-            parts.append("The team has previously edited drafts. Adapt your style based on these:")
-            for c in corrections[:5]:
-                if c["type"] == "correction":
-                    parts.append(f"- [{c.get('category', '?')}] Draft: \"{c['original_draft']}\"")
-                    parts.append(f"  Corrected to: \"{c['corrected_to']}\"")
-                elif c["type"] == "rejection":
-                    parts.append(f"- [{c.get('category', '?')}] REJECTED draft for: {c['subject']}")
-                    parts.append(f"  Draft was: \"{c.get('rejected_draft', '')}\"")
-            parts.append("")
-            parts.append("Match the corrected tone and style. Avoid patterns from rejected drafts.")
+    if past_exchanges:
+        parts.append("")
+        parts.append("=== RECENT CONVERSATION HISTORY ===")
+        for ex in past_exchanges[:3]:
+            parts.append(f"- [{ex.get('received', '?')}] Re: {ex['subject']}")
+            parts.append(f"  Our reply: {ex['response']}")
+        parts.append("")
+        parts.append("Continue the existing relationship tone. Reference prior communication if relevant.")
 
     return "\n".join(parts) if parts else ""
 
@@ -254,29 +188,36 @@ async def classify_and_draft(from_email: str, subject: str, body: str, from_head
     """Use Claude to classify the email and draft a response with customer context and learning."""
     # Build context from database
     customer_ctx = await match_customer(from_email, subject, body, from_header)
-    history = await get_correction_history(from_email, None)
+    past_exchanges = await get_past_exchanges(from_email)
 
-    context_block = build_context_prompt(customer_ctx, history)
+    context_block = build_context_prompt(customer_ctx, past_exchanges)
 
     full_system = SYSTEM_PROMPT
     if context_block:
         full_system += "\n\n" + context_block
 
-    # Inject lessons from past corrections
+    # Inject lessons from past corrections — both classifier-level (category
+    # calibration) and drafter-level (tone/content edits). Post-Phase-5, both
+    # streams read from `agent_corrections` via the canonical learning path.
     try:
         async with get_db_context() as learn_db:
-            from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
+            from src.services.agent_learning_service import (
+                AGENT_EMAIL_CLASSIFIER,
+                AGENT_EMAIL_DRAFTER,
+                AgentLearningService,
+            )
             learner = AgentLearningService(learn_db)
             org_id = customer_ctx.get("organization_id") if customer_ctx else None
             customer_id = customer_ctx.get("customer_id") if customer_ctx else None
             category = customer_ctx.get("category") if customer_ctx else None
             if org_id:
-                lessons = await learner.build_lessons_prompt(
-                    org_id, AGENT_EMAIL_CLASSIFIER,
-                    category=category, customer_id=customer_id,
-                )
-                if lessons:
-                    full_system += "\n\n" + lessons
+                for agent_type in (AGENT_EMAIL_CLASSIFIER, AGENT_EMAIL_DRAFTER):
+                    lessons = await learner.build_lessons_prompt(
+                        org_id, agent_type,
+                        category=category, customer_id=customer_id,
+                    )
+                    if lessons:
+                        full_system += "\n\n" + lessons
                 await learn_db.commit()
     except Exception:
         pass  # learning is non-critical

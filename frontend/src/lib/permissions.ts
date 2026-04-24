@@ -196,7 +196,11 @@ export function getPermissionsForRole(role: Role, features: string[] = [], serve
 }
 
 export function usePermissions(): Permissions {
-  const { effectiveRole } = useDevMode();
+  const { effectiveRole, isActive, viewAsRole, realRole } = useDevMode();
   const { features, permissions: serverPerms } = useAuth();
-  return buildPermissions(effectiveRole as Role, serverPerms, features);
+  // Dev "view as" overrides the role string but serverPerms still belong to the real user.
+  // Fall back to the simulated role's preset so can() answers match what that role would see.
+  const simulating = isActive && viewAsRole && viewAsRole !== realRole;
+  const effectivePerms = simulating ? {} : serverPerms;
+  return buildPermissions(effectiveRole as Role, effectivePerms, features);
 }

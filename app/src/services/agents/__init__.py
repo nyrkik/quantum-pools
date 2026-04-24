@@ -7,7 +7,7 @@ from .orchestrator import process_incoming_email, save_discovered_contact, auto_
 from .triage_agent import ai_triage
 from .customer_matcher import verify_customer_match
 from .thread_manager import get_or_create_thread, update_thread_status
-from .communicator import send_email_response, send_sms, send_approval_request, notify_others
+from .communicator import send_email_response
 from .customer_matcher import match_customer
 from .classifier import classify_and_draft, build_context_prompt, SYSTEM_PROMPT
 from .mail_agent import decode_email_header, extract_text_body, strip_quoted_reply, strip_email_signature, _clean_html, _unwrap_embedded_mime
@@ -24,9 +24,6 @@ __all__ = [
     "get_or_create_thread",
     "update_thread_status",
     "send_email_response",
-    "send_sms",
-    "send_approval_request",
-    "notify_others",
     "match_customer",
     "classify_and_draft",
     "build_context_prompt",

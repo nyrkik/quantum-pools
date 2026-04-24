@@ -1,10 +1,10 @@
-"""Admin webhook endpoints — Twilio SMS + Postmark delivery events."""
+"""Admin webhook endpoints — Postmark delivery events."""
 
 import logging
 import os
 import secrets as _secrets
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request, Response, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,16 +105,3 @@ async def postmark_delivery_webhook(
 
     await db.commit()
     return {"ok": True}
-
-
-@router.post("/twilio-webhook")
-async def twilio_sms_webhook(request: Request):
-    """Twilio SMS webhook — kept so replies to outbound SMS urgency pings
-    don't 404 on Twilio's side. The pre-Phase-5 SMS approve-via-text flow
-    (`handle_sms_reply`) was retired when drafts migrated to the proposal
-    system; replies now are ack-only. Approvals happen in the inbox UI via
-    ProposalCard. DNA rule 5 — AI never commits to the customer."""
-    return Response(
-        content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-        media_type="application/xml",
-    )

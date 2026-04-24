@@ -16,26 +16,11 @@ from src.models.customer import Customer
 
 from .mail_agent import decode_email_header, extract_text_body
 from .classifier import classify_and_draft, ANTHROPIC_KEY
-from .communicator import (
-    send_email_response, send_approval_request, send_sms, notify_others,
-    FROM_EMAIL, FROM_NAME, APPROVAL_NUMBERS,
-)
+from .communicator import send_email_response, FROM_EMAIL, FROM_NAME
 from .customer_matcher import match_customer
 from .thread_manager import get_or_create_thread, update_thread_status, _get_thread_open_actions
 
 logger = logging.getLogger(__name__)
-
-# Track pending approvals: message_id -> AgentMessage.id
-_pending_approvals: dict[str, str] = {}
-
-
-# Flood protection: track recent SMS alerts per sender
-_recent_alerts: dict[str, datetime] = {}
-ALERT_COOLDOWN_MINUTES = 10
-
-# Business hours (Pacific time)
-BUSINESS_HOUR_START = 7  # 7 AM
-BUSINESS_HOUR_END = 20   # 8 PM
 
 # Reply loop detection patterns
 LOOP_PATTERNS = ["noreply@", "no-reply@", "mailer-daemon@", "postmaster@"]
@@ -329,32 +314,6 @@ def _extract_delivered_to(msg) -> str | None:
         for addr in addresses:
             return addr.lower()
     return None
-
-
-def _is_business_hours() -> bool:
-    """Check if current time is within business hours (Pacific)."""
-    try:
-        from zoneinfo import ZoneInfo
-        now = datetime.now(ZoneInfo("America/Los_Angeles"))
-        return BUSINESS_HOUR_START <= now.hour < BUSINESS_HOUR_END and now.weekday() < 5
-    except Exception:
-        return True  # Default to allowing if timezone fails
-
-
-def _should_throttle_alert(from_email: str) -> bool:
-    """Check if we've already alerted about this sender recently."""
-    addr = from_email.lower()
-    now = datetime.now(timezone.utc)
-    last = _recent_alerts.get(addr)
-    if last and (now - last).total_seconds() < ALERT_COOLDOWN_MINUTES * 60:
-        return True
-    _recent_alerts[addr] = now
-    # Clean old entries
-    cutoff = now - timedelta(minutes=ALERT_COOLDOWN_MINUTES * 2)
-    for k in list(_recent_alerts.keys()):
-        if _recent_alerts[k] < cutoff:
-            del _recent_alerts[k]
-    return False
 
 
 async def process_incoming_email(
@@ -946,30 +905,12 @@ async def process_incoming_email(
 
         await db.commit()
 
-        # Auto-send removed 2026-04-14 — see docs/auto-send-removal-plan.md
-        # All AI-drafted replies require human approval. Phase 5 Steps 4+5
-        # (2026-04-24) migrated drafts to email_reply proposals; approve now
-        # happens via ProposalCard in the inbox reading pane. The classifier's
-        # `needs_approval` flag still gates SMS urgency pings below.
-        needs_approval = result.get("needs_approval", True)
-
-        if needs_approval:
-            # --- Flood protection: don't spam SMS for same sender ---
-            if _should_throttle_alert(from_email):
-                logger.info(f"Throttled SMS alert for {from_email} (cooldown)")
-            elif not _is_business_hours():
-                # --- Outside business hours: skip SMS, just log ---
-                logger.info(f"Outside business hours, skipping SMS alert for: {(subject or '')[:60]}")
-                agent_msg.notes = (agent_msg.notes or "") + "\nSMS alert suppressed (outside business hours)"
-                agent_msg.notes = agent_msg.notes.strip()
-                await db.commit()
-            else:
-                await send_approval_request(
-                    agent_msg.id,
-                    result.get("summary", subject),
-                    result.get("draft_response", ""),
-                    from_email,
-                )
+        # Auto-send removed 2026-04-14 — all AI-drafted replies now require
+        # human approval via ProposalCard in the inbox reading pane (Phase 5
+        # Steps 4+5). The SMS urgency-ping path that used to fan out here was
+        # retired 2026-04-24 — its reply-to-approve counterpart was already
+        # dead code, and the Twilio number had drifted off our account. ntfy
+        # on MS-01:7031 is where future team-urgency pings should live.
 
     # Update thread status
     await update_thread_status(thread.id)

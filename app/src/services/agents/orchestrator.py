@@ -517,6 +517,7 @@ async def process_incoming_email(
             from_email, subject, body[:500], from_header,
             skip_previous_match=skip_prev,
             unverified_sink=unverified_candidates,
+            organization_id=organization_id or None,
         )
         if pre_match and pre_match.get("customer_id"):
             sender_is_customer = True

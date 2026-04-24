@@ -51,30 +51,58 @@ _TRUSTED_METHODS = frozenset({"email", "contact_email", "previous_match", "sende
 
 async def _verify_match(from_email: str, subject: str, body: str,
                         customer_name: str, property_addresses: list[str],
-                        match_method: str) -> bool:
-    """Use Claude to verify a fuzzy customer match. Returns True if match looks correct."""
+                        match_method: str,
+                        organization_id: str | None = None) -> bool:
+    """Use Claude to verify a fuzzy customer match. Returns True if match looks correct.
+
+    DNA rule 2 — every AI agent learns. When `organization_id` is provided
+    (orchestrator path), inject past `customer_matcher` corrections as
+    lessons before the verification call. The acceptance/rejection side of
+    the loop is already wired: Phase 5 Step 3 stages `customer_match_suggestion`
+    proposals for unverified candidates, and human Accept/Reject via
+    `ProposalService` writes `agent_corrections` rows with
+    `agent_type='customer_matcher'`. This closes the pre-gen side.
+
+    Callers without org_id (classifier.classify_and_draft, eval harness)
+    still get verification — they just don't benefit from lesson injection.
+    """
     if not ANTHROPIC_KEY:
         return True  # Can't verify without API key, trust the algorithm
+
+    lessons = ""
+    if organization_id:
+        try:
+            from src.services.agent_learning_service import (
+                AGENT_CUSTOMER_MATCHER,
+                AgentLearningService,
+            )
+            async with get_db_context() as learn_db:
+                learner = AgentLearningService(learn_db)
+                lessons = await learner.build_lessons_prompt(
+                    organization_id, AGENT_CUSTOMER_MATCHER,
+                ) or ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"customer_matcher lesson injection failed (continuing without): {e}")
 
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         addresses_str = "; ".join(property_addresses[:3]) if property_addresses else "none on file"
+        user_content = (
+            f"Does this email appear to be about or from this customer?\n\n"
+            f"EMAIL FROM: {from_email}\n"
+            f"SUBJECT: {subject}\n"
+            f"BODY (first 500 chars): {body[:500]}\n\n"
+            f"MATCHED CUSTOMER: {customer_name}\n"
+            f"CUSTOMER ADDRESSES: {addresses_str}\n"
+            f"MATCH METHOD: {match_method}\n\n"
+            f"Answer ONLY 'yes' or 'no'."
+        )
+        if lessons:
+            user_content = f"{lessons}\n\n{user_content}"
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=20,
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Does this email appear to be about or from this customer?\n\n"
-                    f"EMAIL FROM: {from_email}\n"
-                    f"SUBJECT: {subject}\n"
-                    f"BODY (first 500 chars): {body[:500]}\n\n"
-                    f"MATCHED CUSTOMER: {customer_name}\n"
-                    f"CUSTOMER ADDRESSES: {addresses_str}\n"
-                    f"MATCH METHOD: {match_method}\n\n"
-                    f"Answer ONLY 'yes' or 'no'."
-                ),
-            }],
+            messages=[{"role": "user", "content": user_content}],
         )
         answer = resp.content[0].text.strip().lower()
         if "no" in answer and "yes" not in answer:
@@ -106,6 +134,7 @@ async def match_customer(
     *,
     skip_previous_match: bool = False,
     unverified_sink: list[dict] | None = None,
+    organization_id: str | None = None,
 ) -> dict | None:
     """Match an incoming email to a customer in the database. Returns context dict or None.
 
@@ -368,6 +397,7 @@ async def match_customer(
             verified = await _verify_match(
                 from_email, subject, body,
                 customer.display_name, verify_addresses, match_method,
+                organization_id=organization_id,
             )
             if not verified:
                 logger.info(f"Dropping match: {customer.display_name} ({match_method}) — failed QC verification")
@@ -390,7 +420,8 @@ async def match_customer(
                     )
                     d_addrs = [p.full_address for p in dp.scalars().all()]
                     if await _verify_match(from_email, subject, body,
-                                           domain_single_match.display_name, d_addrs, "domain"):
+                                           domain_single_match.display_name, d_addrs, "domain",
+                                           organization_id=organization_id):
                         customer = domain_single_match
                         match_method = "domain_verified"
             # Note: contact saving is handled by the frontend contact learning modal,

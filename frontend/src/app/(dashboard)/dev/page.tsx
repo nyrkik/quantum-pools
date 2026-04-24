@@ -114,7 +114,6 @@ interface AgentMsg {
   urgency: string | null;
   status: string;
   customer_name: string | null;
-  draft_response: string | null;
   received_at: string | null;
   sent_at: string | null;
 }

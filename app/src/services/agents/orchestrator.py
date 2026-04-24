@@ -749,12 +749,9 @@ async def process_incoming_email(
         # Inherit case_id from thread if it already has one (don't create cases from emails)
         case_id = thread_obj.case_id if thread_obj else None
 
-        # Phase 5 email_drafter migration: when the flag is on, the AI
-        # draft is staged as an `email_reply` proposal instead of being
-        # written to `AgentMessage.draft_response`. Flag defaults off so
-        # non-migrated orgs keep current behavior; flip to "true" per-org
-        # via the EMAIL_DRAFTER_USE_PROPOSALS env var once ready.
-        use_proposals = os.environ.get("EMAIL_DRAFTER_USE_PROPOSALS", "").lower() == "true"
+        # Phase 5 Step 5 closeout (2026-04-24): classifier drafts are ALWAYS
+        # staged as email_reply proposals — the inbox reading pane renders
+        # ProposalCard exclusively. DNA rule 5: AI never commits to customer.
         classifier_draft = result.get("draft_response")
 
         agent_msg = AgentMessage(
@@ -769,10 +766,6 @@ async def process_incoming_email(
             body=body[:5000],
             category=category,
             urgency=result.get("urgency", "medium"),
-            # Only persist draft_response on the message when the proposal
-            # migration is OFF. When it's ON, the draft lives only on
-            # the proposal row (Step 4 of Phase 5 ports legacy rows).
-            draft_response=None if use_proposals else classifier_draft,
             status="pending",
             received_at=email_date,
             matched_customer_id=result.get("_matched_customer_id"),
@@ -786,10 +779,7 @@ async def process_incoming_email(
         db.add(agent_msg)
         await db.flush()
 
-        # Stage the draft as a proposal when the flag is on + the classifier
-        # produced a draft. `agent_msg.id` is now flushed so we can reference
-        # it as source_id for the proposal.
-        if use_proposals and classifier_draft:
+        if classifier_draft:
             try:
                 from src.services.events.actor_factory import actor_agent
                 from src.services.proposals import ProposalService
@@ -816,17 +806,13 @@ async def process_incoming_email(
                     actor=actor_agent("email_drafter"),
                 )
             except Exception as e:
-                # Never break ingest on proposal-stage failure. Fall through
-                # — agent_msg is still persisted with draft_response=None;
-                # user can reply manually from the thread sheet.
+                # Never break ingest on proposal-stage failure; user can
+                # reply manually from the thread sheet's inline composer.
                 logger.warning(f"email_reply proposal stage failed for msg {agent_msg.id}: {e}")
 
-        # Phase 5 customer_matcher migration: stage a proposal for each
-        # fuzzy candidate the verifier dropped. Gated behind the same flag
-        # since proposals without a review surface would just accumulate;
-        # /inbox/matches review queue ships alongside. High-confidence
-        # trusted-method matches auto-apply above (unchanged).
-        if use_proposals and unverified_candidates:
+        # Low-confidence customer-match candidates dropped by the QC verifier
+        # become review proposals at /inbox/matches (owner+admin).
+        if unverified_candidates:
             for candidate in unverified_candidates:
                 try:
                     from src.services.events.actor_factory import actor_agent
@@ -956,9 +942,10 @@ async def process_incoming_email(
         await db.commit()
 
         # Auto-send removed 2026-04-14 — see docs/auto-send-removal-plan.md
-        # All AI-drafted replies now require human approval; the draft lives on
-        # agent_msg.draft_response and is sent via one-click approve from the UI.
-        # The classifier's `needs_approval` flag still gates SMS urgency pings.
+        # All AI-drafted replies require human approval. Phase 5 Steps 4+5
+        # (2026-04-24) migrated drafts to email_reply proposals; approve now
+        # happens via ProposalCard in the inbox reading pane. The classifier's
+        # `needs_approval` flag still gates SMS urgency pings below.
         needs_approval = result.get("needs_approval", True)
 
         if needs_approval:
@@ -1075,79 +1062,6 @@ async def process_incoming_email(
 
 
     # Extracted to customer_matcher.py — kept as import target for backward compat
-
-
-async def handle_sms_reply(from_number: str, body: str):
-    """Handle an incoming SMS reply (approval or modification)."""
-    body = body.strip()
-
-    # Find the pending approval
-    ref = None
-    for key in _pending_approvals:
-        ref = key
-        break  # Take the most recent pending
-
-    if not ref or ref not in _pending_approvals:
-        logger.warning(f"No pending approval found for SMS from {from_number}")
-        return
-
-    agent_msg_id = _pending_approvals.pop(ref)
-
-    async with get_db_context() as db:
-        result = await db.execute(
-            select(AgentMessage).where(AgentMessage.id == agent_msg_id)
-        )
-        agent_msg = result.scalar_one_or_none()
-        if not agent_msg:
-            return
-
-        if body.lower() in ("ok", "yes", "send", "approve", "y"):
-            # Send the draft as-is
-            response_text = agent_msg.draft_response
-        elif body.lower() in ("no", "skip", "ignore", "n"):
-            agent_msg.status = "rejected"
-            await db.commit()
-            await notify_others(from_number, f"Rejected: {agent_msg.subject}")
-            return
-        else:
-            # Use the reply as instructions to redraft — include customer context
-            customer_ctx = await match_customer(agent_msg.from_email, agent_msg.subject or "", agent_msg.body or "")
-            redraft_system = f"You write email responses for {FROM_NAME}, a pool service company. Write a brief, professional response based on the instructions given. Sign as '{FROM_NAME}'. Keep it under 3 sentences."
-            if customer_ctx:
-                redraft_system += f"\n\nCustomer: {customer_ctx['customer_name']}"
-                if customer_ctx.get("company_name"):
-                    redraft_system += f" ({customer_ctx['company_name']})"
-                if customer_ctx.get("preferred_day"):
-                    redraft_system += f"\nService days: {customer_ctx['preferred_day']}"
-
-            client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-            redraft = client.messages.create(
-                model=await get_model("fast"),
-                max_tokens=300,
-                system=redraft_system,
-                messages=[
-                    {"role": "user", "content": f"Original email from {agent_msg.from_email}: {agent_msg.subject}\n\n{agent_msg.body[:500]}\n\nInstructions for response: {body}"}
-                ],
-            )
-            response_text = redraft.content[0].text
-
-        # Send the email
-        success = await send_email_response(
-            agent_msg.from_email,
-            agent_msg.subject,
-            response_text,
-        )
-
-        if success:
-            agent_msg.status = "sent"
-            agent_msg.final_response = response_text
-            agent_msg.approved_by = from_number
-            agent_msg.approved_at = datetime.now(timezone.utc)
-            agent_msg.sent_at = datetime.now(timezone.utc)
-            await db.commit()
-
-            summary = f"{agent_msg.customer_name or agent_msg.from_email}: {agent_msg.subject}"
-            await notify_others(from_number, summary)
 
 
 async def save_discovered_contact(agent_msg_id: str):

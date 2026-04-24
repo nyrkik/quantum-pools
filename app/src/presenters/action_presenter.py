@@ -13,6 +13,7 @@ from src.presenters.base import Presenter
 from src.models.agent_action import AgentAction, AgentActionComment
 from src.models.agent_action_task import AgentActionTask
 from src.models.agent_message import AgentMessage
+from src.models.agent_proposal import AgentProposal, STATUS_STAGED
 from src.models.customer import Customer
 from src.models.job_invoice import JobInvoice
 
@@ -124,8 +125,25 @@ class ActionPresenter(Presenter):
                 d["subject"] = msg.subject
                 from src.services.agents.mail_agent import strip_quoted_reply, strip_email_signature
                 d["email_body"] = strip_email_signature(strip_quoted_reply(msg.body)) if msg.body else ""
-                d["our_response"] = msg.final_response or msg.draft_response
-                d["response_is_draft"] = not msg.final_response and bool(msg.draft_response)
+                # If the reply was sent, use the finalized text. Otherwise
+                # check for a staged `email_reply` proposal — Phase 5 Step 5
+                # made proposals the single source of truth for pending drafts.
+                draft_body: str | None = None
+                if not msg.final_response:
+                    payload_row = await self.db.execute(
+                        select(AgentProposal.proposed_payload).where(
+                            AgentProposal.agent_type == "email_drafter",
+                            AgentProposal.entity_type == "email_reply",
+                            AgentProposal.source_type == "message",
+                            AgentProposal.source_id == msg.id,
+                            AgentProposal.status == STATUS_STAGED,
+                        ).limit(1)
+                    )
+                    payload = payload_row.scalar_one_or_none()
+                    if isinstance(payload, dict):
+                        draft_body = payload.get("body")
+                d["our_response"] = msg.final_response or draft_body
+                d["response_is_draft"] = not msg.final_response and bool(draft_body)
 
                 # Related jobs from same message (email-originated)
                 siblings_result = await self.db.execute(

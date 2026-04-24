@@ -201,19 +201,37 @@ class ThreadActionService:
                 AgentMessage.status == "pending",
             )
         )
-        from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
-        learner = AgentLearningService(self.db)
+        # Reject any staged `email_reply` proposals attached to the pending
+        # inbound messages we're about to dismiss. Proposal rejection records
+        # the learning signal via the canonical `agent_corrections` path —
+        # no more direct draft_response reads.
+        from src.models.agent_proposal import AgentProposal, STATUS_STAGED
+        from src.services.events.actor_factory import actor_from_org_ctx  # noqa: F401 — available if needed
+        from src.services.proposals import ProposalService
+        proposal_svc = ProposalService(self.db)
         dismissed_count = 0
         for msg in result.scalars().all():
-            # Record rejection for learning
-            if msg.draft_response:
-                await learner.record_correction(
-                    msg.organization_id, AGENT_EMAIL_CLASSIFIER, "rejection",
-                    original_output=msg.draft_response,
-                    input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
-                    category=msg.category, customer_id=msg.matched_customer_id,
-                    source_id=msg.id, source_type="agent_message",
-                )
+            staged_proposal_id = (await self.db.execute(
+                select(AgentProposal.id).where(
+                    AgentProposal.agent_type == "email_drafter",
+                    AgentProposal.entity_type == "email_reply",
+                    AgentProposal.source_type == "message",
+                    AgentProposal.source_id == msg.id,
+                    AgentProposal.status == STATUS_STAGED,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if staged_proposal_id:
+                try:
+                    await proposal_svc.reject(
+                        proposal_id=staged_proposal_id,
+                        actor=actor or actor_system(),
+                        permanently=False,
+                        note=f"thread dismissed by {user_name}",
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"dismiss_thread: proposal reject failed for {staged_proposal_id}: {e}",
+                    )
             msg.status = "ignored"
             msg.notes = (msg.notes or "") + f"\nDismissed by {user_name}"
             msg.notes = msg.notes.strip()
@@ -341,6 +359,18 @@ class ThreadActionService:
                         comments_text = " | Comments: " + "; ".join(c.text for c in a.comments)
                     actions_list.append(f"- ID:{a.id[:8]} [{a.action_type}] {a.description}{comments_text}")
 
+                # DNA rule 2 — every AI agent learns. Inject past
+                # job_evaluator corrections so the model improves over
+                # time as humans reopen jobs it mis-closes.
+                from src.services.agent_learning_service import (
+                    AGENT_JOB_EVALUATOR,
+                    AgentLearningService,
+                )
+                learner = AgentLearningService(self.db)
+                lessons = await learner.build_lessons_prompt(
+                    org_id, AGENT_JOB_EVALUATOR,
+                ) or ""
+
                 eval_prompt = f"""A follow-up email was just sent in a conversation thread. Based on its content, determine which open jobs are now complete.
 
 Follow-up email sent:
@@ -355,7 +385,9 @@ For each job, respond with JSON array:
 Rules:
 - "done" = the follow-up clearly addresses/completes this job
 - "open" = still needs work
-- Be conservative — only mark done if clearly covered"""
+- Be conservative — only mark done if clearly covered
+
+{lessons}"""
 
                 client = AsyncAnthropic(api_key=ANTHROPIC_KEY)
                 eval_response = await client.messages.create(

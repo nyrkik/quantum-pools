@@ -27,7 +27,6 @@ def _serialize_agent_msg(m: AgentMessage, include_body: bool = False) -> dict:
         "matched_customer_id": m.matched_customer_id,
         "match_method": m.match_method,
         "customer_name": m.customer_name,
-        "draft_response": m.draft_response,
         "final_response": m.final_response,
         "approved_by": m.approved_by,
         "notes": m.notes,
@@ -204,142 +203,6 @@ async def get_agent_message(
     return d
 
 
-@router.post("/agent-messages/{message_id}/approve")
-async def approve_agent_message(
-    message_id: str,
-    body: ApproveBody,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Approve and send an agent message from the dashboard."""
-    from datetime import datetime, timezone
-    from src.services.email_service import EmailService
-
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
-    msg = result.scalar_one_or_none()
-    if not msg:
-        raise HTTPException(status_code=404, detail="Message not found")
-    if msg.status not in ("pending",):
-        raise HTTPException(status_code=400, detail=f"Cannot approve message with status '{msg.status}'")
-
-    response_text = body.response_text or msg.draft_response
-    if not response_text:
-        raise HTTPException(status_code=400, detail="No response text provided")
-
-    sender_name = f"{ctx.user.first_name} {ctx.user.last_name}"
-    email_svc = EmailService(db)
-    from src.services.agents.send_failure import record_outbound_send_failure
-    try:
-        send_result = await email_svc.send_agent_reply(
-            ctx.organization_id, msg.from_email, msg.subject or "", response_text,
-            sender_name=sender_name,
-        )
-        if not send_result.success:
-            await record_outbound_send_failure(
-                db, org_id=ctx.organization_id, thread_id=msg.thread_id,
-                from_email="", to_email=msg.from_email,
-                subject=msg.subject, body=response_text,
-                matched_customer_id=msg.matched_customer_id,
-                customer_name=msg.customer_name,
-                error=send_result.error or "send returned success=False",
-            )
-            raise HTTPException(status_code=500, detail=send_result.error or "Failed to send email")
-
-        now = datetime.now(timezone.utc)
-        msg.status = "sent"
-        msg.final_response = response_text
-        msg.approved_by = sender_name
-        msg.approved_at = now
-        msg.sent_at = now
-        msg.postmark_message_id = send_result.message_id
-
-        # Record correction for agent learning
-        from src.services.agent_learning_service import AgentLearningService, AGENT_EMAIL_CLASSIFIER
-        learner = AgentLearningService(db)
-        draft = msg.draft_response
-        if draft and response_text != draft:
-            await learner.record_correction(
-                ctx.organization_id, AGENT_EMAIL_CLASSIFIER, "edit",
-                original_output=draft, corrected_output=response_text,
-                input_context=f"Subject: {msg.subject}\nFrom: {msg.from_email}",
-                category=msg.category, customer_id=msg.matched_customer_id,
-                source_id=msg.id, source_type="agent_message",
-            )
-
-        await db.commit()
-
-        # Recalculate thread status
-        if msg.thread_id:
-            from src.services.agents.thread_manager import update_thread_status
-            await update_thread_status(msg.thread_id)
-
-        # Save discovered contact info to customer record
-        from src.services.agents.orchestrator import save_discovered_contact
-        await save_discovered_contact(message_id)
-
-        return {"sent": True, "to": msg.from_email}
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        import logging
-        logging.getLogger(__name__).exception(f"approve_agent_message crashed for msg {message_id}: {exc}")
-        await record_outbound_send_failure(
-            db, org_id=ctx.organization_id, thread_id=msg.thread_id,
-            from_email="", to_email=msg.from_email,
-            subject=msg.subject, body=response_text,
-            matched_customer_id=msg.matched_customer_id,
-            customer_name=msg.customer_name,
-            error=f"{type(exc).__name__}: {exc}",
-        )
-        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
-
-
-@router.post("/agent-messages/{message_id}/reject")
-async def reject_agent_message(
-    message_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Reject an agent message."""
-    from datetime import datetime, timezone
-
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
-    msg = result.scalar_one_or_none()
-    if not msg:
-        raise HTTPException(status_code=404, detail="Message not found")
-    if msg.status not in ("pending",):
-        raise HTTPException(status_code=400, detail=f"Cannot reject message with status '{msg.status}'")
-
-    msg.status = "rejected"
-    msg.approved_by = f"{ctx.user.first_name} {ctx.user.last_name}"
-    msg.approved_at = datetime.now(timezone.utc)
-    await db.commit()
-
-    return {"rejected": True}
-
-
-@router.post("/agent-messages/{message_id}/dismiss")
-async def dismiss_agent_message(
-    message_id: str,
-    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
-    db: AsyncSession = Depends(get_db),
-):
-    """Dismiss a message — no reply needed, keeps action items open."""
-    result = await db.execute(select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.organization_id == ctx.organization_id))
-    msg = result.scalar_one_or_none()
-    if not msg:
-        raise HTTPException(status_code=404, detail="Message not found")
-    if msg.status not in ("pending",):
-        raise HTTPException(status_code=400, detail=f"Cannot dismiss message with status '{msg.status}'")
-
-    msg.status = "ignored"
-    msg.notes = (msg.notes or "") + "\nDismissed by " + f"{ctx.user.first_name} {ctx.user.last_name}"
-    msg.notes = msg.notes.strip()
-
-    await db.commit()
-    return {"dismissed": True}
-
-
 @router.delete("/agent-messages/{message_id}")
 async def delete_agent_message(
     message_id: str,
@@ -420,7 +283,7 @@ Subject: {msg.subject}
 {customer_info}
 
 Our previous reply:
-{msg.final_response or msg.draft_response or 'No reply sent yet'}
+{msg.final_response or 'No reply sent yet'}
 
 Action items and team comments:{actions_context or ' None'}
 

@@ -37,6 +37,13 @@ Rules enforced:
       app/src/ signals a regression — either a not-yet-migrated tool
       was re-added or someone restored the legacy pattern. Block at CI.
 
+  R7. **No `.draft_response` attribute access** (Phase 5 Step 5 closeout).
+      AI draft replies live exclusively on `agent_proposals` rows with
+      `entity_type='email_reply'`. Any `.draft_response` read or write on
+      `AgentMessage` in app/src/ signals a regression back to the legacy
+      path. The column itself stays pending Phase 5b schema drop; only
+      runtime attribute access is prohibited.
+
 Exit code:
   0 — no violations
   1 — one or more violations found
@@ -272,6 +279,28 @@ _ANTHROPIC_CALL_RE = re.compile(r"\.messages\.create\s*\(")
 
 
 _REQUIRES_CONFIRM_RE = re.compile(r'\brequires_confirmation\b')
+_DRAFT_RESPONSE_ATTR_RE = re.compile(r'\.draft_response\b')
+
+
+def rule_7_no_draft_response_attr_access(report: AuditReport):
+    """After Phase 5 Step 5, `AgentMessage.draft_response` has no runtime
+    read/write — drafts live on `agent_proposals`. Catches regressions of
+    `msg.draft_response = ...` or `msg.draft_response` reads. The column
+    stays pending Phase 5b; we police attribute access, not column exist."""
+    for py in _iter_py_files(APP_SRC):
+        rel = _rel(py)
+        text = py.read_text()
+        # Allow mention in the model's own definition + in this enforcer.
+        if rel in ("app/src/models/agent_message.py",
+                   "app/scripts/audit_event_discipline.py"):
+            continue
+        for m in _DRAFT_RESPONSE_ATTR_RE.finditer(text):
+            line = text[:m.start()].count("\n") + 1
+            report.add(
+                "R7", rel, line,
+                "`.draft_response` attribute access is retired — drafts live "
+                "on agent_proposals(entity_type='email_reply')",
+            )
 
 
 def rule_6_no_stale_requires_confirmation(report: AuditReport):
@@ -379,6 +408,7 @@ def main():
     rule_4_single_emit_path(report)
     rule_5_every_agent_learns(report)
     rule_6_no_stale_requires_confirmation(report)
+    rule_7_no_draft_response_attr_access(report)
 
     if args.write_baseline:
         _write_baseline(report.violations)
@@ -398,6 +428,7 @@ def main():
         "R4": "Single emit path",
         "R5": "Every AI agent learns",
         "R6": "No stale requires_confirmation",
+        "R7": "No .draft_response attribute access",
     }
 
     if resolved:
@@ -407,7 +438,7 @@ def main():
     if not new_violations:
         print(f"✓ Event discipline audit PASSED")
         print(f"  Taxonomy: {len(taxonomy)} documented event types")
-        print(f"  Rules checked: R1 R2 R3 R4 R5 R6")
+        print(f"  Rules checked: R1 R2 R3 R4 R5 R6 R7")
         print(f"  Baseline debt: {len(baseline)} (allowlisted)")
         return 0
 

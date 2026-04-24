@@ -196,6 +196,10 @@ Organized by subsystem. Each event specifies level and minimum expected `entity_
 | `proposal.expired` | system_action | agent_proposal_id | Background sweep marked stale. Payload: `{age_days}`. |
 | `proposal.superseded` | system_action \| agent_action | agent_proposal_id (new), agent_proposal_id (old, in payload) | Payload: `{superseded_id, reason}`. |
 
+**`entity_type` values shipping as of Phase 5 (2026-04-24):**
+`equipment_item`, `estimate`, `email_reply`, `customer_match_suggestion`, `job`, `customer_email`, `broadcast_email`, `case_link`, `case`, `chemical_reading`, `customer_note_update`, `org_config`.
+Creators register via `src/services/proposals/creators/__init__.py`. Adding a new one requires (a) a Pydantic payload schema, (b) a renderer in `frontend/src/components/proposals/renderers/`, (c) an entry in this doc in the same PR.
+
 ### 8.3 Agents (generic)
 
 Applies to any agent call — `email_drafter`, `email_classifier`, `customer_matcher`, `equipment_resolver`, `estimate_generator`, `inbox_summarizer`, `workflow_observer`, `sonar`, `deepblue_responder`, `command_executor`, etc.

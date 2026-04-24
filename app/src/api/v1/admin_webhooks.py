@@ -109,17 +109,11 @@ async def postmark_delivery_webhook(
 
 @router.post("/twilio-webhook")
 async def twilio_sms_webhook(request: Request):
-    """Handle incoming SMS from Twilio (approval replies)."""
-    form = await request.form()
-    from_number = form.get("From", "")
-    body = form.get("Body", "")
-
-    if from_number and body:
-        from src.services.agents.orchestrator import handle_sms_reply
-        import asyncio
-        asyncio.create_task(handle_sms_reply(from_number, body))
-
-    # Return empty TwiML to acknowledge
+    """Twilio SMS webhook — kept so replies to outbound SMS urgency pings
+    don't 404 on Twilio's side. The pre-Phase-5 SMS approve-via-text flow
+    (`handle_sms_reply`) was retired when drafts migrated to the proposal
+    system; replies now are ack-only. Approvals happen in the inbox UI via
+    ProposalCard. DNA rule 5 — AI never commits to the customer."""
     return Response(
         content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         media_type="application/xml",

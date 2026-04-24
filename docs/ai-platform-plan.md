@@ -149,7 +149,7 @@ The single biggest reason these systems fail in practice is inconsistent event t
 
 ## Phase 1: Event instrumentation foundation
 
-> **Status: SHIPPED 2026-04-19.** All 14 rollout steps complete + 11-item DoD green. See `docs/ai-platform-phase-1.md` for implementation spec; remove that file when this phase is archived. Known debt: 18 AI agents across the fleet (customer_matcher, triage_agent, deepblue engine, parts agents, satellite service, eval harnesses) don't yet wire into AgentLearningService. Frozen in `app/scripts/audit_event_discipline_baseline.txt`; CI blocks new R5 drift. Debt pays down in Phase 5 (unify existing agents into proposals).
+> **Status: SHIPPED 2026-04-19.** All 14 rollout steps complete + 11-item DoD green. See `docs/ai-platform-phase-1.md` for implementation spec; remove that file when this phase is archived. Known debt: 17 AI agents across the fleet (customer_matcher, triage_agent, deepblue engine, parts agents, satellite service, eval harnesses) don't yet wire into AgentLearningService. Frozen in `app/scripts/audit_event_discipline_baseline.txt`; CI blocks new R5 drift. Phase 5 closed one (email_drafter); remaining debt pays down as agents are touched.
 
 ### Why this phase exists
 
@@ -478,6 +478,8 @@ Secondary: makes workflow-observer (Phase 6) possible — the handler becomes th
 ---
 
 ## Phase 5: Unify existing agents into the proposal system
+
+> **Status: SHIPPED 2026-04-24.** Three agents migrated (`estimate_generator`, `email_drafter`, `customer_matcher`). 150 historical `draft_response` rows ported on Sapphire. Legacy paths deleted (`classifier.get_correction_history`, `thread_action_service.approve_thread`, `handle_sms_reply`, `/agent-threads/{id}/approve`, `save-draft`, `/agent-messages/{id}/approve|reject|dismiss`). R7 audit enforcer blocks `.draft_response` attribute access regressions in `app/src/`. `EMAIL_DRAFTER_USE_PROPOSALS` flag retired. Column drop to Phase 5b.
 
 ### Why this phase exists
 

@@ -1102,11 +1102,9 @@ export function ThreadDetailSheet({
 
   const pendingMessage = thread?.timeline.find((m) => m.status === "pending" && m.direction === "inbound");
 
-  // Phase 5 email_drafter migration: when the pending inbound carries
-  // a staged `email_reply` proposal, render <ProposalCard/> in place of
-  // the legacy draft_response inline block. The proposal owns its own
-  // edit/accept/reject flow; our only job here is to fetch it and
-  // refresh the thread on resolve.
+  // Phase 5: pending inbound carries a staged `email_reply` proposal;
+  // render <ProposalCard/> which owns its own edit/accept/reject flow.
+  // Our only job here is to fetch the proposal + refresh on resolve.
   const stagedReplyProposalId = pendingMessage?.email_reply_proposal_id ?? null;
   const [stagedReplyProposal, setStagedReplyProposal] = useState<Proposal | null>(null);
   useEffect(() => {
@@ -1703,11 +1701,10 @@ export function ThreadDetailSheet({
         )}
 
         {/* Inline reply composer — visible whenever there isn't a staged
-            email_reply proposal. Covers (a) no pending message at all (classic
-            follow-up case) and (b) post-Phase-5-Step-4: pending inbound without
-            a proposal (drafter skipped or proposal was rejected). The legacy
-            draft_response block was retired — every AI draft is now a proposal
-            rendered by ProposalCard above. */}
+            email_reply proposal. Covers (a) no pending message at all
+            (classic follow-up case) and (b) pending inbound without a
+            proposal (drafter skipped or proposal was rejected). Every AI
+            draft now lives as a proposal rendered by ProposalCard above. */}
         {!stagedReplyProposal && (
           <InlineReplyComposer
             threadId={threadId}

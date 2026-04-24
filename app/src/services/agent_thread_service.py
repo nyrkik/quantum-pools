@@ -680,7 +680,6 @@ class AgentThreadService:
                 "category": m.category,
                 "urgency": m.urgency,
                 "status": m.status,
-                "draft_response": m.draft_response if m.status == "pending" else None,
                 "email_reply_proposal_id": email_reply_prop_ids.get(m.id),
                 "received_at": m.received_at.isoformat() if m.received_at else None,
                 "sent_at": m.sent_at.isoformat() if m.sent_at else None,
@@ -706,7 +705,6 @@ class AgentThreadService:
                         "category": None,
                         "urgency": None,
                         "status": m.status,  # preserves "auto_sent" flag so UI can style differently
-                        "draft_response": None,
                         "received_at": m.sent_at.isoformat() if m.sent_at else m.received_at.isoformat(),
                         "sent_at": m.sent_at.isoformat() if m.sent_at else None,
                         "approved_by": m.approved_by,

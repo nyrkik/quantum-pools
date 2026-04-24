@@ -138,10 +138,8 @@ export interface TimelineMessage {
   category: string | null;
   urgency: string | null;
   status: string;
-  draft_response: string | null;
-  // Phase 5: set when a staged `email_reply` proposal exists for this
-  // message. UI renders <ProposalCard/> in place of the legacy draft
-  // block when present. Null for historical messages + org-not-migrated.
+  // Phase 5 Step 5 closeout: AI drafts live exclusively on staged
+  // `email_reply` proposals — the UI renders <ProposalCard/> here.
   email_reply_proposal_id?: string | null;
   received_at: string | null;
   sent_at: string | null;

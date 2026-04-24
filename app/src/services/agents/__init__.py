@@ -3,7 +3,7 @@
 Re-exports key functions for convenient top-level access.
 """
 
-from .orchestrator import process_incoming_email, handle_sms_reply, save_discovered_contact, auto_close_stale_visits
+from .orchestrator import process_incoming_email, save_discovered_contact, auto_close_stale_visits
 from .triage_agent import ai_triage
 from .customer_matcher import verify_customer_match
 from .thread_manager import get_or_create_thread, update_thread_status
@@ -19,7 +19,6 @@ from .resolution_evaluator import ResolutionEvaluator
 
 __all__ = [
     "process_incoming_email",
-    "handle_sms_reply",
     "save_discovered_contact",
     "auto_close_stale_visits",
     "get_or_create_thread",

@@ -244,10 +244,10 @@ export function LineItemsTable({ lineItems }: LineItemsTableProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Description</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead className="text-right">Unit Price</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Qty</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Unit Price</TableHead>
               <TableHead className="text-right">Amount</TableHead>
-              <TableHead>Tax</TableHead>
+              <TableHead className="hidden sm:table-cell">Tax</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -263,15 +263,26 @@ export function LineItemsTable({ lineItems }: LineItemsTableProps) {
             ) : (
               lineItems.map((li, i) => (
                 <TableRow key={li.id} className={`hover:bg-blue-50 dark:hover:bg-blue-950 ${i % 2 === 1 ? "bg-slate-50 dark:bg-slate-900" : ""}`}>
-                  <TableCell>{li.description}</TableCell>
-                  <TableCell className="text-right">{li.quantity}</TableCell>
-                  <TableCell className="text-right">
+                  {/* Description wraps so long item text doesn't push the
+                      table off-screen on mobile (FB-51). On phones Qty /
+                      Unit Price / Tax columns are hidden because the
+                      space they ate left description with no room to
+                      wrap usefully — those columns return at sm+. */}
+                  <TableCell className="whitespace-normal">
+                    <div>{li.description}</div>
+                    <div className="text-[11px] text-muted-foreground sm:hidden mt-0.5">
+                      {li.quantity} × ${li.unit_price.toFixed(2)}
+                      {li.is_taxed && <span className="ml-1.5">· Taxed</span>}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right hidden sm:table-cell">{li.quantity}</TableCell>
+                  <TableCell className="text-right hidden sm:table-cell">
                     ${li.unit_price.toFixed(2)}
                   </TableCell>
                   <TableCell className="text-right">
                     ${li.amount.toFixed(2)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     {li.is_taxed && (
                       <Badge variant="outline" className="text-xs">
                         Taxed

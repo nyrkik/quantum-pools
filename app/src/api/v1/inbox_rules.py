@@ -237,6 +237,30 @@ async def append_sender(
     return result
 
 
+class ApplyToExistingBody(BaseModel):
+    dry_run: bool = False
+
+
+@router.post("/{rule_id}/apply-to-existing")
+async def apply_rule_to_existing(
+    rule_id: str,
+    body: ApplyToExistingBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Back-apply a rule to existing threads.
+
+    `dry_run=true` returns the match count + sample so the UI can preview
+    "this will affect N threads" before the user confirms; `dry_run=false`
+    performs the apply + commits.
+    """
+    from src.services.inbox_rules_service import InboxRulesService
+
+    return await InboxRulesService(db).apply_to_existing_threads(
+        rule_id, ctx.organization_id, dry_run=body.dry_run,
+    )
+
+
 @router.get("")
 async def list_rules(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),

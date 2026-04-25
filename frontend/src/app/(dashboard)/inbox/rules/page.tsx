@@ -45,7 +45,7 @@ import {
   type RuleDraft,
 } from "@/components/inbox/rule-editor-dialog";
 import { api } from "@/lib/api";
-import { GripVertical, Pencil, Plus, Trash2, Wand2, X } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2, Wand2, X, PlayCircle, Loader2 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { toast } from "sonner";
 
@@ -210,6 +210,8 @@ function SortableRuleRow({
   threadContext,
   onAddSender,
   addingSenderFor,
+  onApplyToExisting,
+  applyingTo,
 }: {
   rule: RuleRow;
   folderNameById: Map<string, string>;
@@ -219,6 +221,8 @@ function SortableRuleRow({
   threadContext: ThreadContext | null;
   onAddSender: (rule: RuleRow) => void;
   addingSenderFor: string | null;
+  onApplyToExisting: (rule: RuleRow) => void;
+  applyingTo: string | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: rule.id });
@@ -283,6 +287,20 @@ function SortableRuleRow({
       <Button
         variant="ghost"
         size="icon"
+        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+        onClick={() => onApplyToExisting(rule)}
+        disabled={applyingTo !== null}
+        title="Apply this rule to existing matching emails"
+      >
+        {applyingTo === rule.id ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <PlayCircle className="h-3.5 w-3.5" />
+        )}
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
         className="h-7 w-7 shrink-0"
         onClick={() => onEdit(rule)}
       >
@@ -310,6 +328,25 @@ export default function InboxRulesPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<RuleDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<RuleRow | null>(null);
+  // Apply-to-existing flow: clicking the Play icon on a rule row first
+  // does a dry run to populate the preview dialog, then on confirm runs
+  // the real apply. `applyingTo` holds the rule id mid-request so the
+  // row's icon spins; `applyPreview` holds the dry-run result + the
+  // rule itself so the AlertDialog can describe what's about to change.
+  const [applyingTo, setApplyingTo] = useState<string | null>(null);
+  const [applyPreview, setApplyPreview] = useState<
+    | {
+        rule: RuleRow;
+        matched: number;
+        applied: number;
+        skipped_overrides: number;
+        has_body_condition: boolean;
+        mutates_thread: boolean;
+        sample: { thread_id: string; subject: string | null; contact_email: string }[];
+      }
+    | null
+  >(null);
+  const [confirmingApply, setConfirmingApply] = useState(false);
   const [threadContext, setThreadContext] = useState<ThreadContext | null>(null);
   const [addingSenderFor, setAddingSenderFor] = useState<string | null>(null);
 
@@ -393,8 +430,12 @@ export default function InboxRulesPage() {
     [folders],
   );
 
-  const handleSave = async (draft: RuleDraft) => {
+  const handleSave = async (
+    draft: RuleDraft,
+    options: { applyToExisting: boolean },
+  ) => {
     try {
+      let savedRuleId: string | null = null;
       if (draft.id) {
         await api.put(`/v1/inbox-rules/${draft.id}`, {
           name: draft.name || null,
@@ -402,19 +443,94 @@ export default function InboxRulesPage() {
           actions: draft.actions,
           is_active: draft.is_active,
         });
+        savedRuleId = draft.id;
         toast.success("Rule updated");
       } else {
-        await api.post("/v1/inbox-rules", {
+        const created = await api.post<{ id: string }>("/v1/inbox-rules", {
           name: draft.name || null,
           conditions: draft.conditions,
           actions: draft.actions,
           is_active: draft.is_active,
         });
+        savedRuleId = created.id;
         toast.success("Rule created");
       }
       await load();
+
+      // Back-apply to existing matches (Gmail's "Also apply filter to
+      // matching conversations" behavior). Skip silently when the rule
+      // is purely advisory (no thread mutations) or when no threads match.
+      if (options.applyToExisting && savedRuleId) {
+        try {
+          const result = await api.post<{
+            matched: number; applied: number;
+            mutates_thread: boolean; has_body_condition: boolean;
+          }>(`/v1/inbox-rules/${savedRuleId}/apply-to-existing`, { dry_run: false });
+          if (result.applied > 0) {
+            toast.success(
+              `Applied to ${result.applied} existing email${result.applied === 1 ? "" : "s"}`,
+            );
+          } else if (result.matched === 0) {
+            toast.info("No existing emails matched this rule");
+          } else if (!result.mutates_thread) {
+            // Pure advisory rule (assign_tag etc) — no retroactive change.
+            // Silent.
+          }
+          if (result.has_body_condition) {
+            toast.info("Body conditions don't apply retroactively");
+          }
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Save succeeded, but back-apply failed",
+          );
+        }
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
+    }
+  };
+
+  const handleApplyToExistingClick = async (rule: RuleRow) => {
+    setApplyingTo(rule.id);
+    try {
+      const preview = await api.post<{
+        matched: number; applied: number; skipped_overrides: number;
+        has_body_condition: boolean; mutates_thread: boolean;
+        sample: { thread_id: string; subject: string | null; contact_email: string }[];
+      }>(`/v1/inbox-rules/${rule.id}/apply-to-existing`, { dry_run: true });
+
+      if (preview.matched === 0) {
+        toast.info("No existing emails match this rule");
+        return;
+      }
+      if (!preview.mutates_thread) {
+        toast.info("This rule has no thread-mutating actions to back-apply");
+        return;
+      }
+      setApplyPreview({ rule, ...preview });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Preview failed");
+    } finally {
+      setApplyingTo(null);
+    }
+  };
+
+  const handleConfirmApply = async () => {
+    if (!applyPreview) return;
+    setConfirmingApply(true);
+    try {
+      const result = await api.post<{ matched: number; applied: number }>(
+        `/v1/inbox-rules/${applyPreview.rule.id}/apply-to-existing`,
+        { dry_run: false },
+      );
+      toast.success(
+        `Applied to ${result.applied} email${result.applied === 1 ? "" : "s"}`,
+      );
+      setApplyPreview(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Apply failed");
+    } finally {
+      setConfirmingApply(false);
     }
   };
 
@@ -524,6 +640,8 @@ export default function InboxRulesPage() {
                   threadContext={threadContext}
                   onAddSender={handleAddSender}
                   addingSenderFor={addingSenderFor}
+                  onApplyToExisting={handleApplyToExistingClick}
+                  applyingTo={applyingTo}
                 />
               ))}
             </SortableContext>
@@ -563,6 +681,63 @@ export default function InboxRulesPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Apply-to-existing preview confirm. Built from the dry-run
+          response: shows match count + a sample of which threads will
+          change so the user can sanity-check before committing. */}
+      <AlertDialog
+        open={!!applyPreview}
+        onOpenChange={(o) => { if (!o) setApplyPreview(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply rule to existing emails?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Found <span className="font-semibold">{applyPreview?.matched}</span>{" "}
+                  matching email{applyPreview?.matched === 1 ? "" : "s"}.
+                  This will run the rule&apos;s actions against{" "}
+                  {applyPreview && applyPreview.matched - applyPreview.skipped_overrides > 0
+                    ? `${applyPreview.matched - applyPreview.skipped_overrides} of them`
+                    : "them"}
+                  {applyPreview && applyPreview.skipped_overrides > 0
+                    ? ` (${applyPreview.skipped_overrides} skipped — already manually moved by you)`
+                    : ""}
+                  .
+                </p>
+                {applyPreview && applyPreview.sample.length > 0 && (
+                  <div className="rounded-md border p-2 max-h-40 overflow-y-auto bg-muted/30">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">
+                      Sample:
+                    </p>
+                    <ul className="space-y-0.5 text-xs">
+                      {applyPreview.sample.map((s) => (
+                        <li key={s.thread_id} className="truncate">
+                          <span className="font-mono">{s.contact_email}</span>
+                          {s.subject ? <> — {s.subject}</> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {applyPreview?.has_body_condition && (
+                  <p className="text-xs text-amber-600">
+                    Note: body conditions don&apos;t apply retroactively, so the count
+                    above only considers other conditions.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmingApply}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmApply} disabled={confirmingApply}>
+              {confirmingApply ? "Applying…" : "Apply"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

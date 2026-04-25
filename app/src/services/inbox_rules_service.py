@@ -508,6 +508,146 @@ class InboxRulesService:
     # Application
     # ------------------------------------------------------------------
 
+    async def apply_to_existing_threads(
+        self,
+        rule_id: str,
+        org_id: str,
+        *,
+        dry_run: bool = False,
+        sample_size: int = 5,
+    ) -> dict:
+        """Back-apply a single rule to threads already in the inbox.
+
+        Workflow when the user creates a rule like "from billing@stripe.com
+        → folder Billing": today the rule only fires on NEW inbound; old
+        Stripe threads stay where they are. This method finds every live
+        non-historical thread matching the rule's conditions and runs the
+        rule's actions against them.
+
+        Skipped:
+          * historical threads (pre-cutover ingest)
+          * threads with `folder_override=True` for ASSIGN_FOLDER /
+            ROUTE_TO_SPAM actions (user manually moved them; respect that)
+          * `body` conditions — would require loading every message body;
+            currently unsupported retroactively. Logged for the caller.
+          * advisory action types (assign_tag, suppress_contact_prompt,
+            skip_customer_match) — they don't mutate threads, so retro
+            application is a no-op.
+
+        Returns ``{matched, applied, skipped_overrides, has_body_condition,
+        sample[]}`` where ``sample`` is up to ``sample_size`` thread refs
+        for preview surfaces.
+        """
+        rule = (await self.db.execute(
+            select(InboxRule).where(
+                InboxRule.id == rule_id,
+                InboxRule.organization_id == org_id,
+            )
+        )).scalar_one_or_none()
+        if not rule:
+            return {
+                "matched": 0, "applied": 0, "skipped_overrides": 0,
+                "has_body_condition": False, "sample": [],
+            }
+
+        conditions = rule.conditions or []
+        actions = rule.actions or []
+        has_body_condition = any(
+            (c.get("field") or "") == "body" for c in conditions
+        )
+
+        # Mutating actions only — advisory types are excluded so we don't
+        # produce misleading "applied" counts when the rule is, say, a
+        # pure assign_tag. Tag/sender-tag display is read-time anyway.
+        mutating_action_types = {
+            ACTION_ASSIGN_FOLDER, ACTION_ROUTE_TO_SPAM,
+            ACTION_ASSIGN_CATEGORY, ACTION_SET_VISIBILITY,
+            ACTION_MARK_AS_READ,
+        }
+        mutates_thread = any(
+            a.get("type") in mutating_action_types for a in actions
+        )
+
+        # Resolve spam folder once for this org so the per-thread loop
+        # doesn't re-query.
+        spam_folder_id: str | None = None
+        if any(a.get("type") == ACTION_ROUTE_TO_SPAM for a in actions):
+            from src.models.inbox_folder import InboxFolder
+            spam_folder_id = (await self.db.execute(
+                select(InboxFolder.id).where(
+                    InboxFolder.organization_id == org_id,
+                    InboxFolder.system_key == "spam",
+                )
+            )).scalar_one_or_none()
+
+        # Whether ASSIGN_FOLDER / ROUTE_TO_SPAM is in this rule — drives
+        # the folder_override skip below.
+        moves_folder = any(
+            a.get("type") in (ACTION_ASSIGN_FOLDER, ACTION_ROUTE_TO_SPAM)
+            for a in actions
+        )
+
+        # Tagged actions for the per-thread apply call (apply expects the
+        # full action list with _rule_id annotated).
+        tagged_actions = [{**a, "_rule_id": rule.id} for a in actions]
+
+        from src.models.agent_thread import AgentThread
+        threads_q = (
+            select(AgentThread).where(
+                AgentThread.organization_id == org_id,
+                AgentThread.is_historical == False,  # noqa: E712
+            ).order_by(AgentThread.last_message_at.desc())
+        )
+        threads = (await self.db.execute(threads_q)).scalars().all()
+
+        matched = 0
+        applied = 0
+        skipped_overrides = 0
+        sample: list[dict] = []
+
+        for t in threads:
+            ctx = build_context(
+                sender_email=t.contact_email,
+                recipient_email=t.delivered_to,
+                subject=t.subject,
+                category=t.category,
+                customer_id=t.matched_customer_id,
+                # body intentionally omitted — see method docstring
+            )
+            if not self._matches(conditions, ctx):
+                continue
+            matched += 1
+
+            if moves_folder and t.folder_override:
+                skipped_overrides += 1
+                continue
+
+            if len(sample) < sample_size:
+                sample.append({
+                    "thread_id": t.id,
+                    "subject": t.subject,
+                    "contact_email": t.contact_email,
+                    "current_folder_id": t.folder_id,
+                })
+
+            if dry_run or not mutates_thread:
+                continue
+
+            await self.apply(tagged_actions, t, spam_folder_id=spam_folder_id)
+            applied += 1
+
+        if not dry_run and applied > 0:
+            await self.db.commit()
+
+        return {
+            "matched": matched,
+            "applied": applied,
+            "skipped_overrides": skipped_overrides,
+            "has_body_condition": has_body_condition,
+            "mutates_thread": mutates_thread,
+            "sample": sample,
+        }
+
     async def apply(
         self,
         actions: list[dict],

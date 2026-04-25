@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -97,7 +98,7 @@ interface RuleEditorDialogProps {
   /** Full permission catalog grouped by resource — renders the visibility
    * action's picker. Null until loaded; falls back to free-text input. */
   permissions?: PermissionCatalog | null;
-  onSave: (draft: RuleDraft) => Promise<void>;
+  onSave: (draft: RuleDraft, options: { applyToExisting: boolean }) => Promise<void>;
   /** Called after the editor creates a new folder via the inline prompt,
    * so the parent list can pick it up without refetching. */
   onFolderCreated?: (folder: InboxFolder) => void;
@@ -356,6 +357,10 @@ export function RuleEditorDialog({
 
   const [draft, setDraft] = useState<RuleDraft>(initialDraft);
   const [saving, setSaving] = useState(false);
+  // Default ON — most users want a rule they create to also clean up
+  // existing matches in their inbox (Gmail's default behavior). Reset on
+  // every open so a previous "off" choice doesn't silently persist.
+  const [applyToExisting, setApplyToExisting] = useState(true);
   const wasOpen = useRef(false);
 
   // Only snapshot initialDraft on the closed→open transition. While the
@@ -364,6 +369,7 @@ export function RuleEditorDialog({
   useEffect(() => {
     if (open && !wasOpen.current) {
       setDraft(initialDraft);
+      setApplyToExisting(true);
     }
     wasOpen.current = open;
   }, [open, initialDraft]);
@@ -386,7 +392,7 @@ export function RuleEditorDialog({
     if (draft.actions.length === 0) return;
     setSaving(true);
     try {
-      await onSave(draft);
+      await onSave(draft, { applyToExisting });
       onOpenChange(false);
     } finally {
       setSaving(false);
@@ -679,6 +685,22 @@ export function RuleEditorDialog({
               );
             })}
           </div>
+        </div>
+
+        {/* "Apply to existing emails" toggle — back-applies the rule's
+            actions to threads already in the inbox after save. Default
+            on so users don't have to remember to clean up old matches.
+            See InboxRulesService.apply_to_existing_threads for the
+            backend semantics (skips folder_override + body conditions). */}
+        <div className="flex items-center gap-2 px-1 pt-1">
+          <Checkbox
+            id="apply-to-existing"
+            checked={applyToExisting}
+            onCheckedChange={(v) => setApplyToExisting(v === true)}
+          />
+          <Label htmlFor="apply-to-existing" className="text-sm font-normal cursor-pointer">
+            Also apply to matching emails already in my inbox
+          </Label>
         </div>
 
         <DialogFooter>

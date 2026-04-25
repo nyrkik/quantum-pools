@@ -62,7 +62,7 @@ export default function DeepBlueUsagePage() {
 
   if (loading) {
     return (
-      <PageLayout title="DeepBlue Usage">
+      <PageLayout back="/settings" title="DeepBlue Usage">
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
@@ -71,7 +71,7 @@ export default function DeepBlueUsagePage() {
   }
 
   if (!stats) {
-    return <PageLayout title="DeepBlue Usage"><p>No data.</p></PageLayout>;
+    return <PageLayout back="/settings" title="DeepBlue Usage"><p>No data.</p></PageLayout>;
   }
 
   const { current_month: cur, previous_month: prev, limits, users } = stats;
@@ -87,7 +87,7 @@ export default function DeepBlueUsagePage() {
     : 0;
 
   return (
-    <PageLayout title="DeepBlue Usage">
+    <PageLayout back="/settings" title="DeepBlue Usage">
       <div className="space-y-4">
         {/* Current month summary */}
         <div className="grid gap-3 md:grid-cols-4">

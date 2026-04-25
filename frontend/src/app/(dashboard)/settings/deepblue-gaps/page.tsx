@@ -68,7 +68,7 @@ export default function DeepBlueGapsPage() {
   const groups = Object.entries(groupedGaps).sort((a, b) => b[1].length - a[1].length);
 
   return (
-    <PageLayout title="DeepBlue Knowledge Gaps">
+    <PageLayout back="/settings" title="DeepBlue Knowledge Gaps">
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Button

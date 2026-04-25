@@ -159,6 +159,7 @@ export default function WorkflowSettingsPage() {
 
   return (
     <PageLayout
+      back="/settings"
       title="Workflows"
       subtitle="How new jobs get handled after they're created"
     >

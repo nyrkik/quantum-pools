@@ -23,6 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, Calculator, Users, AlertCircle } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 import type {
   Jurisdiction,
   BatherLoadRequest,
@@ -103,11 +104,14 @@ export default function BatherLoadPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Bather Load Calculator</h1>
-        <p className="text-muted-foreground">
-          Calculate maximum bather load by jurisdiction
-        </p>
+      <div className="flex items-start gap-1">
+        <BackButton fallback="/profitability" label="" className="h-8 w-8 mt-0.5 shrink-0" />
+        <div>
+          <h1 className="text-2xl font-bold">Bather Load Calculator</h1>
+          <p className="text-muted-foreground">
+            Calculate maximum bather load by jurisdiction
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

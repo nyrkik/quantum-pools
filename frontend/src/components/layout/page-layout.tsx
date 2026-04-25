@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { BackButton } from "@/components/ui/back-button";
 
 /**
  * PageLayout — standardized page structure for all dashboard pages.
@@ -53,6 +54,14 @@ interface PageLayoutProps {
    * header's action buttons).
    */
   fullHeight?: boolean;
+  /**
+   * When set, renders an icon-only BackButton at the left of the header row.
+   * The string is the fallback path used when nav-history + browser-history
+   * are both empty. Pass for any page reached via navigation FROM another
+   * page (e.g. `back="/inbox"` on `/inbox/integrations`); skip on top-level
+   * sidebar destinations where the sidebar IS the way back.
+   */
+  back?: string;
 }
 
 export function PageLayout({
@@ -68,6 +77,7 @@ export function PageLayout({
   children,
   className,
   fullHeight,
+  back,
 }: PageLayoutProps) {
   return (
     <div
@@ -85,16 +95,21 @@ export function PageLayout({
           fullHeight && "shrink-0 mb-2",
         )}
       >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            {icon}
-            <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-          </div>
-          {subtitle && (
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {subtitle}
-            </p>
+        <div className="min-w-0 flex items-start gap-1">
+          {back && (
+            <BackButton fallback={back} label="" className="h-8 w-8 mt-0.5 shrink-0" />
           )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {icon}
+              <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+            </div>
+            {subtitle && (
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {subtitle}
+              </p>
+            )}
+          </div>
         </div>
         {(action || secondaryActions) && (
           <div className="flex items-center gap-2 shrink-0">

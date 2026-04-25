@@ -209,7 +209,7 @@ function EmailSettingsContent() {
   );
 
   return (
-    <PageLayout title="Email Integrations" subtitle="Connect your inbox so QP can send and receive customer email on your behalf.">
+    <PageLayout back="/inbox" title="Email Integrations" subtitle="Connect your inbox so QP can send and receive customer email on your behalf.">
       <div className="space-y-4">
         {/* Connect new integration */}
         <Card className="shadow-sm">
@@ -807,7 +807,7 @@ function SignaturePreview({
 export default function EmailSettingsPage() {
   return (
     <Suspense fallback={
-      <PageLayout title="Email Integrations">
+      <PageLayout back="/inbox" title="Email Integrations">
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>

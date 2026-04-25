@@ -293,8 +293,8 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                             <span className="font-normal text-muted-foreground"> ({t.contact_person_name})</span>
                           )}
                         </span>
-                        {t.visibility_permission && (
-                          <span title={`Restricted: ${t.visibility_permission}`}>
+                        {t.visibility_role_slugs && t.visibility_role_slugs.length > 0 && (
+                          <span title={`Visible to: ${t.visibility_role_slugs.join(", ")}`}>
                             <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                           </span>
                         )}

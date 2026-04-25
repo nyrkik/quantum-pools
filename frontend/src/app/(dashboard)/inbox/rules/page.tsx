@@ -178,16 +178,20 @@ function humanizeActions(
         case "route_to_spam":
           return "→ Spam folder";
         case "assign_folder": {
-          const fid = a.params?.folder_id;
+          const fid = typeof a.params?.folder_id === "string" ? a.params.folder_id : null;
           const name = fid ? folderNameById.get(fid) : null;
           return name ? `→ ${name} folder` : "→ folder";
         }
         case "assign_tag":
-          return `tag as ${a.params?.tag ?? "?"}`;
+          return `tag as ${typeof a.params?.tag === "string" ? a.params.tag : "?"}`;
         case "assign_category":
-          return `category: ${a.params?.category ?? "?"}`;
-        case "set_visibility":
-          return `visibility: ${a.params?.permission_slug ?? a.params?.slug ?? "?"}`;
+          return `category: ${typeof a.params?.category === "string" ? a.params.category : "?"}`;
+        case "set_visibility": {
+          const slugs = Array.isArray(a.params?.role_slugs) ? a.params.role_slugs : [];
+          return slugs.length > 0
+            ? `visible to ${slugs.join(", ")}`
+            : "visible to everyone";
+        }
         case "mark_as_read":
           return "mark read";
         case "suppress_contact_prompt":

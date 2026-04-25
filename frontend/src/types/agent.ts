@@ -108,7 +108,7 @@ export interface Thread {
   assigned_to_name: string | null;
   assigned_at: string | null;
   is_unread: boolean;
-  visibility_permission: string | null;
+  visibility_role_slugs: string[] | null;
   delivered_to: string | null;
   sender_tag: string | null;
   contact_person_name?: string | null;
@@ -180,7 +180,7 @@ export interface ThreadDetail {
   assigned_to_user_id: string | null;
   assigned_to_name: string | null;
   assigned_at: string | null;
-  visibility_permission: string | null;
+  visibility_role_slugs: string[] | null;
   delivered_to: string | null;
   folder_id: string | null;
   is_unread: boolean;

@@ -231,10 +231,10 @@ export function InboxThreadListV2({
                           >
                             {t.customer_name || t.contact_name || t.contact_email}
                           </span>
-                          {t.visibility_permission && (
+                          {t.visibility_role_slugs && t.visibility_role_slugs.length > 0 && (
                             <Lock
                               className="h-3 w-3 text-muted-foreground shrink-0"
-                              aria-label={`Restricted: ${t.visibility_permission}`}
+                              aria-label={`Visible to: ${t.visibility_role_slugs.join(", ")}`}
                             />
                           )}
                         </div>

@@ -489,9 +489,9 @@ async def process_incoming_email(
             atype = action.get("type")
             params = action.get("params") or {}
             if atype == ACTION_SET_VISIBILITY:
-                slug = params.get("permission_slug") or params.get("slug")
-                if slug:
-                    routing_kwargs["visibility_permission"] = slug
+                role_slugs = params.get("role_slugs") or []
+                if role_slugs:
+                    routing_kwargs["visibility_role_slugs"] = list(role_slugs)
             elif atype == ACTION_ASSIGN_CATEGORY:
                 cat = params.get("category")
                 if cat:

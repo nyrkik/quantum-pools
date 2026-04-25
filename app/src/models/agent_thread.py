@@ -66,8 +66,11 @@ class AgentThread(Base):
     folder_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("inbox_folders.id", ondelete="SET NULL"), nullable=True, index=True)
     folder_override: Mapped[bool] = mapped_column(Boolean, default=False)  # True = user manually moved, rules won't re-assign
 
-    # Inbox routing / visibility
-    visibility_permission: Mapped[str | None] = mapped_column(String(80), nullable=True)  # permission slug required to view (null = everyone)
+    # Inbox routing / visibility — role-group list (built-in slugs like
+    # "admin"/"manager" plus any custom role slugs). NULL means everyone
+    # in the org sees the thread; otherwise the user's effective role
+    # slug must appear in the list.
+    visibility_role_slugs: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
 
     # Thread assignment

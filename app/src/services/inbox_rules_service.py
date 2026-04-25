@@ -687,9 +687,13 @@ class InboxRulesService:
                     thread.category = category
 
             elif atype == ACTION_SET_VISIBILITY:
-                slug = params.get("permission_slug") or params.get("slug")
-                if hasattr(thread, "visibility_permission"):
-                    thread.visibility_permission = slug or None
+                # Role-group list (post-migration). Empty/missing list →
+                # visible to everyone in the org.
+                role_slugs = params.get("role_slugs")
+                if hasattr(thread, "visibility_role_slugs"):
+                    thread.visibility_role_slugs = (
+                        list(role_slugs) if role_slugs else None
+                    )
 
             elif atype == ACTION_MARK_AS_READ:
                 # Stamp the thread as "read for everyone up through the

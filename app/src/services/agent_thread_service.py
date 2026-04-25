@@ -78,7 +78,7 @@ class AgentThreadService:
         customer_id: str | None = None,
         has_customer: bool = False,
         current_user_id: str | None = None,
-        user_permission_slugs: set[str] | None = None,
+        user_role_slug: str | None = None,
         folder_id: str | None = None,
         folder_key: str | None = None,
     ) -> dict:
@@ -119,11 +119,11 @@ class AgentThreadService:
                 base = base.where(AgentThread.matched_customer_id == customer_id)
             if has_customer:
                 base = base.where(AgentThread.matched_customer_id.isnot(None))
-            if user_permission_slugs is not None:
+            if user_role_slug is not None:
                 base = base.where(
                     or_(
-                        AgentThread.visibility_permission.is_(None),
-                        AgentThread.visibility_permission.in_(user_permission_slugs),
+                        AgentThread.visibility_role_slugs.is_(None),
+                        AgentThread.visibility_role_slugs.contains([user_role_slug]),
                     )
                 )
             if search:
@@ -248,12 +248,12 @@ class AgentThreadService:
             base = base.where(AgentThread.matched_customer_id == customer_id)
         if has_customer:
             base = base.where(AgentThread.matched_customer_id.isnot(None))
-        # Visibility filtering: only show threads the user has permission to see
-        if user_permission_slugs is not None:
+        # Visibility filtering: only show threads visible to the user's role group
+        if user_role_slug is not None:
             base = base.where(
                 or_(
-                    AgentThread.visibility_permission.is_(None),
-                    AgentThread.visibility_permission.in_(user_permission_slugs),
+                    AgentThread.visibility_role_slugs.is_(None),
+                    AgentThread.visibility_role_slugs.contains([user_role_slug]),
                 )
             )
         # Folder filtering (skip when showing stale, auto_sent, auto_handled, or failed — those search all folders)
@@ -374,8 +374,8 @@ class AgentThreadService:
 
         return {"items": items, "total": total}
 
-    async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_permission_slugs: set[str] | None = None, can_manage_inbox: bool = False) -> dict:
-        """Thread-level stats. If user_permission_slugs provided, counts only visible threads.
+    async def get_thread_stats(self, org_id: str, user_id: str | None = None, user_role_slug: str | None = None, can_manage_inbox: bool = False) -> dict:
+        """Thread-level stats. If user_role_slug provided, counts only visible threads.
 
         Ops counts (failed, auto_handled_today, stale_pending) are
         zeroed out for users without inbox.manage — they're a billing/ops concern,
@@ -392,11 +392,11 @@ class AgentThreadService:
         )
 
         def _vis_filter(q):
-            """Apply visibility filter if permissions are scoped."""
-            if user_permission_slugs is not None:
+            """Apply visibility filter if a role group is scoped."""
+            if user_role_slug is not None:
                 return q.where(or_(
-                    AgentThread.visibility_permission.is_(None),
-                    AgentThread.visibility_permission.in_(user_permission_slugs),
+                    AgentThread.visibility_role_slugs.is_(None),
+                    AgentThread.visibility_role_slugs.contains([user_role_slug]),
                 ))
             return q
 
@@ -549,10 +549,11 @@ class AgentThreadService:
             "ai_review_count": ai_review_count if can_manage_inbox else 0,
         }
 
-    async def get_thread_detail(self, org_id: str, thread_id: str, user_permission_slugs: set[str] | None = None, user_id: str | None = None) -> dict | None:
+    async def get_thread_detail(self, org_id: str, thread_id: str, user_role_slug: str | None = None, user_id: str | None = None) -> dict | None:
         """Get thread with full conversation timeline.
 
-        Returns None if thread doesn't exist or user lacks required visibility permission.
+        Returns None if thread doesn't exist or the user's role isn't in
+        the thread's visibility list.
         """
         result = await self.db.execute(
             select(AgentThread)
@@ -563,9 +564,10 @@ class AgentThreadService:
         if not thread:
             return None
 
-        # Visibility check
-        if user_permission_slugs is not None and thread.visibility_permission:
-            if thread.visibility_permission not in user_permission_slugs:
+        # Visibility check — restrict access if the thread is scoped to a
+        # role-group list and the user's effective role isn't in it.
+        if user_role_slug is not None and thread.visibility_role_slugs:
+            if user_role_slug not in thread.visibility_role_slugs:
                 return None
 
         # Get all messages in thread
@@ -916,10 +918,12 @@ class AgentThreadService:
 
         now = datetime.now(timezone.utc)
         if user_id:
-            # Check target user has visibility permission for this thread
-            if thread.visibility_permission:
+            # Check the target user's role group is in the thread's
+            # visibility list — otherwise assigning would surface a
+            # thread to someone who can't actually open it.
+            if thread.visibility_role_slugs:
                 from src.models.organization_user import OrganizationUser
-                from src.services.permission_service import PermissionService
+                from src.models.org_role import OrgRole as OrgRoleModel
                 target_ou = (await self.db.execute(
                     select(OrganizationUser).where(
                         OrganizationUser.user_id == user_id,
@@ -928,10 +932,15 @@ class AgentThreadService:
                     )
                 )).scalar_one_or_none()
                 if target_ou:
-                    perm_svc = PermissionService(self.db)
-                    target_perms = await perm_svc.resolve_permissions(target_ou)
-                    if thread.visibility_permission not in target_perms:
-                        return {"error": "forbidden", "detail": f"User lacks required permission: {thread.visibility_permission}"}
+                    target_slug = target_ou.role.value
+                    if target_ou.org_role_id:
+                        custom_slug = (await self.db.execute(
+                            select(OrgRoleModel.slug).where(OrgRoleModel.id == target_ou.org_role_id)
+                        )).scalar_one_or_none()
+                        if custom_slug:
+                            target_slug = custom_slug
+                    if target_slug not in thread.visibility_role_slugs:
+                        return {"error": "forbidden", "detail": f"User's role ({target_slug}) isn't in this thread's visibility list"}
 
             thread.assigned_to_user_id = user_id
             thread.assigned_to_name = user_name
@@ -1070,8 +1079,11 @@ class AgentThreadService:
         except Exception:
             pass  # Non-blocking
 
-    async def update_visibility(self, org_id: str, thread_id: str, visibility_permission: str | None) -> dict:
-        """Admin override: change a thread's visibility permission."""
+    async def update_visibility(self, org_id: str, thread_id: str, role_slugs: list[str] | None) -> dict:
+        """Admin override: change a thread's visibility role-group list.
+
+        Empty list or None → visible to everyone in the org.
+        """
         result = await self.db.execute(
             select(AgentThread).where(AgentThread.id == thread_id, AgentThread.organization_id == org_id)
         )
@@ -1079,9 +1091,9 @@ class AgentThreadService:
         if not thread:
             return {"error": "not_found", "detail": "Thread not found"}
 
-        thread.visibility_permission = visibility_permission
+        thread.visibility_role_slugs = role_slugs if role_slugs else None
         await self.db.commit()
         return {
             "thread_id": thread.id,
-            "visibility_permission": thread.visibility_permission,
+            "visibility_role_slugs": thread.visibility_role_slugs,
         }

@@ -207,6 +207,82 @@ async def _require_role_management(ctx: OrgUserContext, db: AsyncSession):
         )
 
 
+class VisibilityTarget(BaseModel):
+    slug: str
+    name: str
+    is_builtin: bool
+    member_count: int
+
+
+_BUILTIN_ROLE_LABELS: dict[str, str] = {
+    "owner": "Owners",
+    "admin": "Admins",
+    "manager": "Managers",
+    "technician": "Technicians",
+    "readonly": "Read-only",
+}
+
+
+@router.get("/visibility-targets", response_model=list[VisibilityTarget])
+async def list_visibility_targets(
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Role groups available for the rule-editor visibility picker.
+
+    Returns built-in roles + the org's custom roles, each with the number
+    of active members. Drives the checkbox list that replaced the
+    permission-slug dropdown — DNA rule "plain-language opinionated
+    choices, never engineer-vocabulary enums".
+    """
+    from sqlalchemy import func
+
+    # Member counts per built-in role (excludes users on a custom role,
+    # which are reported separately below).
+    builtin_rows = (await db.execute(
+        select(OrganizationUser.role, func.count(OrganizationUser.id))
+        .where(
+            OrganizationUser.organization_id == ctx.organization_id,
+            OrganizationUser.is_active == True,  # noqa: E712
+            OrganizationUser.org_role_id.is_(None),
+        )
+        .group_by(OrganizationUser.role)
+    )).all()
+    builtin_counts: dict[str, int] = {}
+    for role_enum, cnt in builtin_rows:
+        slug = role_enum.value if hasattr(role_enum, "value") else str(role_enum)
+        builtin_counts[slug] = cnt
+
+    targets: list[VisibilityTarget] = []
+    for slug, label in _BUILTIN_ROLE_LABELS.items():
+        targets.append(VisibilityTarget(
+            slug=slug, name=label, is_builtin=True,
+            member_count=builtin_counts.get(slug, 0),
+        ))
+
+    # Custom roles for this org + their member counts.
+    custom_rows = (await db.execute(
+        select(OrgRole.slug, OrgRole.name, func.count(OrganizationUser.id))
+        .outerjoin(
+            OrganizationUser,
+            (OrganizationUser.org_role_id == OrgRole.id)
+            & (OrganizationUser.is_active == True),  # noqa: E712
+        )
+        .where(
+            OrgRole.organization_id == ctx.organization_id,
+            OrgRole.is_active == True,  # noqa: E712
+        )
+        .group_by(OrgRole.id, OrgRole.slug, OrgRole.name)
+        .order_by(OrgRole.name)
+    )).all()
+    for slug, name, cnt in custom_rows:
+        targets.append(VisibilityTarget(
+            slug=slug, name=name, is_builtin=False, member_count=cnt or 0,
+        ))
+
+    return targets
+
+
 @router.get("/roles", response_model=list[OrgRoleResponse])
 async def list_org_roles(
     ctx: OrgUserContext = Depends(get_current_org_user),

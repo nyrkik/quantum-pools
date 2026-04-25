@@ -22,10 +22,21 @@ from src.services.thread_ai_service import ThreadAIService
 router = APIRouter(prefix="/admin", tags=["admin-threads"])
 
 
-async def _get_user_perm_slugs(ctx: OrgUserContext, db: AsyncSession) -> set[str]:
-    """Load user's permission slugs for visibility filtering."""
-    perms = await ctx.load_permissions(db)
-    return set(perms.keys())
+async def _get_user_role_slug(ctx: OrgUserContext, db: AsyncSession) -> str:
+    """Derive the user's effective role slug for visibility filtering.
+
+    Custom-role users get the slug of their `OrgRole`; built-in users
+    get the enum value ("admin", "manager", etc). One slug per user.
+    """
+    ou = ctx.org_user
+    if ou.org_role_id:
+        from src.models.org_role import OrgRole as OrgRoleModel
+        slug = (await db.execute(
+            select(OrgRoleModel.slug).where(OrgRoleModel.id == ou.org_role_id)
+        )).scalar_one_or_none()
+        if slug:
+            return slug
+    return ou.role.value
 
 
 @router.get("/client-search")
@@ -56,7 +67,7 @@ async def list_threads(
     db: AsyncSession = Depends(get_db),
 ):
     """List conversation threads (visibility-filtered by user permissions)."""
-    perm_slugs = await _get_user_perm_slugs(ctx, db)
+    user_role_slug = await _get_user_role_slug(ctx, db)
     service = AgentThreadService(db)
     return await service.list_threads(
         org_id=ctx.organization_id,
@@ -70,7 +81,7 @@ async def list_threads(
         customer_id=customer_id,
         has_customer=has_customer,
         current_user_id=ctx.user.id,
-        user_permission_slugs=perm_slugs,
+        user_role_slug=user_role_slug,
         folder_id=folder_id,
         folder_key=folder,
     )
@@ -82,13 +93,14 @@ async def get_thread_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Thread-level stats (visibility-filtered)."""
-    perm_slugs = await _get_user_perm_slugs(ctx, db)
-    can_manage = "*" in perm_slugs or "inbox.manage" in perm_slugs
+    user_role_slug = await _get_user_role_slug(ctx, db)
+    perms = await ctx.load_permissions(db)
+    can_manage = "*" in perms or "inbox.manage" in perms
     service = AgentThreadService(db)
     return await service.get_thread_stats(
         org_id=ctx.organization_id,
         user_id=ctx.user.id,
-        user_permission_slugs=perm_slugs,
+        user_role_slug=user_role_slug,
         can_manage_inbox=can_manage,
     )
 
@@ -103,9 +115,9 @@ async def get_thread(
     from src.services.events.actor_factory import actor_from_org_ctx
     from src.services.events.platform_event_service import PlatformEventService
 
-    perm_slugs = await _get_user_perm_slugs(ctx, db)
+    user_role_slug = await _get_user_role_slug(ctx, db)
     service = AgentThreadService(db)
-    result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_permission_slugs=perm_slugs, user_id=ctx.user.id)
+    result = await service.get_thread_detail(org_id=ctx.organization_id, thread_id=thread_id, user_role_slug=user_role_slug, user_id=ctx.user.id)
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
     # Mark as read — admins/owners broadcast to all users
@@ -322,7 +334,7 @@ async def draft_thread_followup(
 # ── Thread visibility override ─────────────────────────────────────
 
 class VisibilityBody(BaseModel):
-    visibility_permission: Optional[str] = None
+    role_slugs: Optional[list[str]] = None
 
 
 @router.patch("/agent-threads/{thread_id}/visibility")
@@ -332,12 +344,16 @@ async def update_thread_visibility(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin override: change thread visibility permission."""
+    """Admin override: change thread visibility (role-group list).
+
+    Empty list or null → visible to everyone in the org. Otherwise the
+    user's effective role slug must appear in the list.
+    """
     service = AgentThreadService(db)
     result = await service.update_visibility(
         org_id=ctx.organization_id,
         thread_id=thread_id,
-        visibility_permission=body.visibility_permission,
+        role_slugs=body.role_slugs,
     )
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["detail"])

@@ -63,7 +63,10 @@ export interface RuleCondition {
 
 export interface RuleAction {
   type: ActionType;
-  params?: Record<string, string>;
+  // Per-action param shape varies: assign_folder needs {folder_id},
+  // assign_tag {tag}, set_visibility {role_slugs: string[]}, etc.
+  // string | string[] covers every current shape.
+  params?: Record<string, string | string[]>;
 }
 
 export interface RuleDraft {
@@ -127,7 +130,7 @@ const ACTION_OPTIONS: { value: ActionType; label: string; needs: string[] }[] = 
   { value: "assign_folder", label: "Move to folder", needs: ["folder_id"] },
   { value: "assign_tag", label: "Tag sender", needs: ["tag"] },
   { value: "assign_category", label: "Set category", needs: ["category"] },
-  { value: "set_visibility", label: "Restrict visibility", needs: ["permission_slug"] },
+  { value: "set_visibility", label: "Visible to (role groups)", needs: ["role_slugs"] },
   { value: "route_to_spam", label: "Route to Spam folder", needs: [] },
   { value: "mark_as_read", label: "Mark as read (don't inflate unread count)", needs: [] },
   { value: "suppress_contact_prompt", label: "Suppress Add-Contact prompt", needs: [] },
@@ -342,6 +345,92 @@ function FolderPickerOrCreate({
         </SelectItem>
       </SelectContent>
     </Select>
+  );
+}
+
+interface VisibilityTarget {
+  slug: string;
+  name: string;
+  is_builtin: boolean;
+  member_count: number;
+}
+
+/** Role-group checkbox list for the set_visibility action. Loads
+ *  built-in roles + the org's custom roles from /v1/permissions/
+ *  visibility-targets, with a member count next to each so admins can
+ *  sanity-check who they're restricting to before saving. Replaces the
+ *  pre-2026-04-25 permission-slug Select that exposed engineer vocab.
+ */
+function RoleCheckboxList({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (role_slugs: string[]) => void;
+}) {
+  const [targets, setTargets] = useState<VisibilityTarget[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<VisibilityTarget[]>("/v1/permissions/visibility-targets")
+      .then((data) => { if (alive) setTargets(data); })
+      .catch(() => { if (alive) setTargets([]); });
+    return () => { alive = false; };
+  }, []);
+
+  const toggle = (slug: string, checked: boolean) => {
+    const next = checked
+      ? Array.from(new Set([...selected, slug]))
+      : selected.filter((s) => s !== slug);
+    onChange(next);
+  };
+
+  if (targets === null) {
+    return (
+      <div className="flex-1 text-xs text-muted-foreground">Loading roles…</div>
+    );
+  }
+
+  if (targets.length === 0) {
+    return (
+      <div className="flex-1 text-xs text-muted-foreground">
+        No roles available
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-w-0 space-y-1.5 rounded-md border p-2">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        Visible to
+      </div>
+      {targets.map((t) => {
+        const id = `vis-${t.slug}`;
+        return (
+          <label
+            key={t.slug}
+            htmlFor={id}
+            className="flex items-center gap-2 text-sm cursor-pointer"
+          >
+            <Checkbox
+              id={id}
+              checked={selected.includes(t.slug)}
+              onCheckedChange={(v) => toggle(t.slug, v === true)}
+            />
+            <span className="flex-1">{t.name}</span>
+            <span className="text-xs text-muted-foreground">
+              {t.member_count} {t.member_count === 1 ? "user" : "users"}
+            </span>
+          </label>
+        );
+      })}
+      {selected.length === 0 && (
+        <p className="text-xs text-amber-600 pt-1">
+          No roles selected — thread will be visible to everyone.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -570,7 +659,7 @@ export function RuleEditorDialog({
 
                   {opt?.needs.includes("folder_id") && (
                     <FolderPickerOrCreate
-                      value={a.params?.folder_id || ""}
+                      value={(typeof a.params?.folder_id === "string" ? a.params.folder_id : "")}
                       folders={folders}
                       onSelect={(id) =>
                         updateAction(idx, { params: { ...a.params, folder_id: id } })
@@ -585,7 +674,7 @@ export function RuleEditorDialog({
                     <>
                       <Input
                         list={`tag-options-${idx}`}
-                        value={a.params?.tag || ""}
+                        value={(typeof a.params?.tag === "string" ? a.params.tag : "")}
                         onChange={(e) =>
                           updateAction(idx, {
                             params: { ...a.params, tag: e.target.value },
@@ -604,7 +693,7 @@ export function RuleEditorDialog({
 
                   {opt?.needs.includes("category") && (
                     <Input
-                      value={a.params?.category || ""}
+                      value={(typeof a.params?.category === "string" ? a.params.category : "")}
                       onChange={(e) =>
                         updateAction(idx, {
                           params: { ...a.params, category: e.target.value },
@@ -615,55 +704,15 @@ export function RuleEditorDialog({
                     />
                   )}
 
-                  {opt?.needs.includes("permission_slug") && (
-                    permissions && Object.keys(permissions.resources).length > 0 ? (
-                      <Select
-                        value={a.params?.permission_slug || ""}
-                        onValueChange={(v) =>
-                          updateAction(idx, {
-                            params: { ...a.params, permission_slug: v },
-                          })
-                        }
-                      >
-                        <SelectTrigger className="flex-1 min-w-0">
-                          <SelectValue placeholder="Pick a permission..." />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-80">
-                          {Object.entries(permissions.resources)
-                            .sort(([a], [b]) => a.localeCompare(b))
-                            .map(([resource, perms]) => (
-                              <SelectGroup key={resource}>
-                                <SelectLabel className="capitalize">
-                                  {resource.replace(/_/g, " ")}
-                                </SelectLabel>
-                                {perms.map((p) => (
-                                  <SelectItem key={p.slug} value={p.slug}>
-                                    <span className="flex flex-col text-left">
-                                      <span>{p.slug}</span>
-                                      {p.description && (
-                                        <span className="text-[10px] text-muted-foreground">
-                                          {p.description}
-                                        </span>
-                                      )}
-                                    </span>
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input
-                        value={a.params?.permission_slug || ""}
-                        onChange={(e) =>
-                          updateAction(idx, {
-                            params: { ...a.params, permission_slug: e.target.value },
-                          })
-                        }
-                        placeholder="permission slug"
-                        className="flex-1"
-                      />
-                    )
+                  {opt?.needs.includes("role_slugs") && (
+                    <RoleCheckboxList
+                      selected={(a.params?.role_slugs as string[] | undefined) || []}
+                      onChange={(role_slugs) =>
+                        updateAction(idx, {
+                          params: { ...a.params, role_slugs },
+                        })
+                      }
+                    />
                   )}
 
                   {opt && opt.needs.length === 0 && <div className="flex-1" />}

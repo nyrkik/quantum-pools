@@ -424,7 +424,7 @@ class ThreadPresenter(Presenter):
             "assigned_to_user_id": t.assigned_to_user_id,
             "assigned_to_name": t.assigned_to_name,
             "assigned_at": self._iso(t.assigned_at),
-            "visibility_permission": t.visibility_permission,
+            "visibility_role_slugs": t.visibility_role_slugs,
             "delivered_to": t.delivered_to,
             "case_id": t.case_id if hasattr(t, "case_id") else None,
             "case_number": (t.case.case_number if getattr(t, "case", None) else None),

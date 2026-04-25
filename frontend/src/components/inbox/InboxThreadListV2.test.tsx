@@ -43,7 +43,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     assigned_to_name: null,
     assigned_at: null,
     is_unread: false,
-    visibility_permission: null,
+    visibility_role_slugs: null,
     delivered_to: null,
     sender_tag: null,
     ai_summary_payload: null,

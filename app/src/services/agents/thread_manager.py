@@ -21,13 +21,13 @@ async def get_or_create_thread(
     customer_id: str | None = None, customer_name: str | None = None,
     property_address: str | None = None, category: str | None = None,
     urgency: str | None = None,
-    visibility_permission: str | None = None,
+    visibility_role_slugs: list[str] | None = None,
     delivered_to: str | None = None,
 ) -> "AgentThread":
     """Find existing thread or create new one.
 
-    Routing fields (visibility_permission, delivered_to) are only set on
-    NEW threads — existing threads keep their original visibility.
+    Routing fields (visibility_role_slugs, delivered_to) are only set
+    on NEW threads — existing threads keep their original visibility.
     """
     from src.models.agent_thread import AgentThread
 
@@ -86,7 +86,7 @@ async def get_or_create_thread(
                 urgency=urgency,
                 category=category,
                 message_count=0,
-                visibility_permission=visibility_permission,
+                visibility_role_slugs=list(visibility_role_slugs) if visibility_role_slugs else None,
                 delivered_to=delivered_to,
             )
             db.add(thread)

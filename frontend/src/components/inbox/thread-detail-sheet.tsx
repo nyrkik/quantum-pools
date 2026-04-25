@@ -1075,25 +1075,41 @@ export function ThreadDetailSheet({
     } catch { toast.error("Failed to move"); }
   };
 
-  const loadThread = useCallback(() => {
+  // Reload trigger — bumped to force a fresh fetch (Retry button after
+  // a failed load). Decoupled from threadId so retry works for the same
+  // thread without needing the user to navigate away.
+  const [reloadCount, setReloadCount] = useState(0);
+  const loadThread = useCallback(() => setReloadCount((n) => n + 1), []);
+  // Tracks whether the LAST fetch errored (so we can show a Retry surface
+  // instead of a blank panel when loading=false + thread=null — FB-53).
+  const [loadError, setLoadError] = useState(false);
+
+  // Single effect: clear stale state, fetch, and CANCEL via the alive
+  // flag if threadId changes (or a Retry happens) before the in-flight
+  // request resolves. Without cancellation an old fetch's setThread
+  // could clobber the new thread's state — when the old fetch errored
+  // the user got a blank panel until they unmounted via close/reopen.
+  useEffect(() => {
+    let alive = true;
+    setThread(null);
+    setLoadError(false);
     setLoading(true);
     api.get<ThreadDetail>(`/v1/admin/agent-threads/${threadId}`)
       .then((t) => {
+        if (!alive) return;
         setThread(t);
       })
-      .catch(() => toast.error("Failed to load thread"))
-      .finally(() => setLoading(false));
-  }, [threadId]);
-
-  // When threadId changes (user clicked a different thread in the left
-  // pane), clear local state so the detail pane shows a loading spinner
-  // instead of the previously-rendered thread. Without this the old body,
-  // toolbar, etc. linger until the new fetch resolves.
-  useEffect(() => {
-    setThread(null);
-  }, [threadId]);
-
-  useEffect(() => { loadThread(); }, [loadThread]);
+      .catch(() => {
+        if (!alive) return;
+        setLoadError(true);
+        toast.error("Failed to load thread");
+      })
+      .finally(() => {
+        if (!alive) return;
+        setLoading(false);
+      });
+    return () => { alive = false; };
+  }, [threadId, reloadCount]);
 
   useEffect(() => {
     if (!loading && false) { // Disabled: email pane starts at top, not bottom
@@ -1415,7 +1431,20 @@ export function ThreadDetailSheet({
     );
   }
 
-  if (!thread) return null;
+  if (!thread) {
+    // Failed-load surface (FB-53): the previous behavior of returning
+    // null left the user staring at a blank pane with no recovery —
+    // they had to close and reopen to retry. Now show the error +
+    // Retry button so they can recover in place.
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+        <p className="text-sm">{loadError ? "Couldn't load this conversation." : "Conversation unavailable."}</p>
+        <Button variant="outline" size="sm" onClick={loadThread}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   // Identify the latest outbound message in the timeline. If it's in a stuck
   // state (queued/failed/bounced/delivery_error), show the Outbox banner with

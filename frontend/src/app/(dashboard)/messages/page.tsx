@@ -229,7 +229,15 @@ export default function MessagesPage() {
                   <span className="text-[10px] text-muted-foreground shrink-0 ml-2">{formatTime(t.last_message_at)}</span>
                 </div>
                 {t.subject && <p className="text-xs text-muted-foreground truncate">{t.participants.join(", ")}</p>}
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{t.last_message || ""}</p>
+                {/* "Kim: <preview>" — matches the FB-50 inbox pattern so a
+                    glance at the row shows who sent last + what they said,
+                    without opening the thread (FB-52). */}
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                  {t.last_message_by && (
+                    <span className="font-medium">{t.last_message_by.split(" ")[0]}: </span>
+                  )}
+                  {t.last_message || ""}
+                </p>
                 <div className="flex items-center gap-1.5 mt-1">
                   {t.priority === "urgent" && <Badge variant="outline" className="text-[9px] px-1 border-amber-400 text-amber-600">Urgent</Badge>}
                   {t.customer_name && <Badge variant="secondary" className="text-[9px] px-1">{t.customer_name}</Badge>}

@@ -17,7 +17,7 @@ import {
   Plus,
   Send,
   Loader2,
-  ArrowRightToLine,
+  ArrowLeft,
   FolderOpen,
 } from "lucide-react";
 import { useTeamMembersFull } from "@/hooks/use-team-members";
@@ -249,40 +249,54 @@ export default function MessagesPage() {
               <p className="text-sm">Select a conversation</p>
             </div>
           </div>
-        ) : detailLoading ? (
-          <div className="flex-1 flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-        ) : detail ? (
+        ) : (
           <>
-            {/* Header */}
+            {/* Header — always renders when a thread is selected, even
+                while detail is loading or errored, so the back button is
+                never trapped behind a spinner (FB-48). */}
             <div className="p-3 border-b shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 lg:hidden shrink-0" onClick={() => setSelectedThreadId(null)}>
-                    <ArrowRightToLine className="h-4 w-4 rotate-180" />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 lg:hidden shrink-0" onClick={() => setSelectedThreadId(null)} title="Back to messages">
+                    <ArrowLeft className="h-4 w-4" />
                   </Button>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{detail.subject || detail.participants.join(", ")}</p>
-                    {detail.subject && <p className="text-xs text-muted-foreground truncate">{detail.participants.join(", ")}</p>}
-                    {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
+                    {detail ? (
+                      <>
+                        <p className="text-sm font-semibold truncate">{detail.subject || detail.participants.join(", ")}</p>
+                        {detail.subject && <p className="text-xs text-muted-foreground truncate">{detail.participants.join(", ")}</p>}
+                        {detail.customer_name && <p className="text-xs text-muted-foreground">Client: {detail.customer_name}</p>}
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{detailLoading ? "Loading…" : "Conversation"}</p>
+                    )}
                   </div>
                 </div>
-                <div className="flex gap-1.5 shrink-0">
-                  <LinkCasePicker
-                    entityType="internal_thread"
-                    entityId={selectedThreadId!}
-                    customerId={detail.customer_id || undefined}
-                    currentCaseId={detail.case_id}
-                    currentCaseNumber={detail.case_number}
-                    currentCaseTitle={detail.case_title}
-                    onChange={() => {
-                      if (selectedThreadId) loadDetail(selectedThreadId);
-                      loadThreads();
-                    }}
-                  />
-                </div>
+                {detail && (
+                  <div className="flex gap-1.5 shrink-0">
+                    <LinkCasePicker
+                      entityType="internal_thread"
+                      entityId={selectedThreadId!}
+                      customerId={detail.customer_id || undefined}
+                      currentCaseId={detail.case_id}
+                      currentCaseNumber={detail.case_number}
+                      currentCaseTitle={detail.case_title}
+                      onChange={() => {
+                        if (selectedThreadId) loadDetail(selectedThreadId);
+                        loadThreads();
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
+            {detailLoading && !detail ? (
+              <div className="flex-1 flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : !detail ? (
+              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Conversation unavailable</div>
+            ) : (
+              <>
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {detail.messages.map((m) => {
@@ -336,8 +350,10 @@ export default function MessagesPage() {
                 </Button>
               </div>
             </div>
+              </>
+            )}
           </>
-        ) : null}
+        )}
       </div>
 
       <ComposeMessage

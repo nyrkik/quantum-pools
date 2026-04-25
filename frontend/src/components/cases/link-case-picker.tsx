@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { FolderSymlink, Link2, Loader2, Plus, Search, X } from "lucide-react";
+import { FolderSymlink, Link2, Loader2, Plus, Search, Unlink2 } from "lucide-react";
 import { toast } from "sonner";
 
 export type LinkableEntityType =
@@ -163,6 +163,10 @@ export function LinkCasePicker({
   const visibleResults = query.trim().length >= 2 ? searchResults : suggested;
 
   // Render: attached pill OR "Link to case" trigger.
+  // Unlink lives INSIDE the picker popover (not as a standalone X next to
+  // the pill) — a top-right X iconographically reads as "close this panel"
+  // and was getting misclicked as exit when it's actually destructive
+  // (FB-48). Deliberate action: tap Link2 → "Unlink from case".
   if (currentCaseId && currentCaseNumber) {
     return (
       <div className="inline-flex items-center gap-1">
@@ -185,7 +189,7 @@ export function LinkCasePicker({
               size="icon"
               className="h-6 w-6 text-muted-foreground hover:text-foreground"
               disabled={working}
-              title="Change linked case"
+              title="Change or unlink case"
             >
               <Link2 className="h-3.5 w-3.5" />
             </Button>
@@ -194,16 +198,6 @@ export function LinkCasePicker({
             {renderPickerContent()}
           </PopoverContent>
         </Popover>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 text-muted-foreground hover:text-destructive"
-          onClick={unlink}
-          disabled={working}
-          title="Unlink from case"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
       </div>
     );
   }
@@ -337,6 +331,20 @@ export function LinkCasePicker({
             <Plus className="h-3.5 w-3.5" />
             Create new case{customerId ? " for this customer" : ""}
           </button>
+          {currentCaseId && (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 hover:bg-destructive/10 text-sm flex items-center gap-1.5 text-destructive border-t"
+              onClick={async () => {
+                await unlink();
+                setOpen(false);
+              }}
+              disabled={working}
+            >
+              <Unlink2 className="h-3.5 w-3.5" />
+              Unlink from {currentCaseNumber}
+            </button>
+          )}
         </div>
       </div>
     );

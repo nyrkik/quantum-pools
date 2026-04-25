@@ -100,6 +100,7 @@ Otherwise — for inline row actions, edit-mode field saves, and anything in den
 - **Status badges**: Active `variant="default"`; Inactive `variant="secondary"`; Pending `variant="outline" className="border-amber-400 text-amber-600"`; One-time `variant="outline" className="border-blue-400 text-blue-600"`.
 - **Enums**: never raw. Title-case with `.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())`. CSS `capitalize` is insufficient.
 - **General**: no gradients/heavy shadows/heavy rounded corners. Color is informational. Secondary text = `text-muted-foreground`, never full black.
+- **Back navigation on nested pages**: every page reached BY navigation (not from the sidebar) must show a back affordance. PageLayout has a `back="/path"` prop that renders an icon-only `BackButton` (the canonical `?from=` → nav-history → router.back → fallback resolution chain) at the left of the header row. Top-level main-nav destinations skip the prop — the sidebar is the way back.
 
 ## Network
 
@@ -258,7 +259,7 @@ Completed phases + full roadmap: see `docs/build-plan.md`. In-flight work:
 - [~] Phase 3c: Invoicing — webhook PARTIAL; email/PDF/Stripe Checkout/pay page/non-client invoices/AutoPay DONE.
 - [~] Phase 3d: Core Pool Ops — dosing engine + checklists PARTIAL; guided workflows NOT STARTED.
 - [x] Phase 5 (AI Platform) — shipped 2026-04-24. Three agents unified into `agent_proposals`, historical port complete, legacy paths + `EMAIL_DRAFTER_USE_PROPOSALS` flag retired, R7 enforcer blocks regressions. Phase 5b (same day) dropped `agent_messages.draft_response` — `final_response` stays pending a separate denormalization cleanup. Spec archived.
-- [~] Phase 5b: Email Integrations — managed mode + Gmail API OAuth DONE (Sapphire connected). No auto-send (see `memory/feedback_no_auto_send.md`). Unified `inbox_rules` JSONB; `InboxRulesService` is the sole matcher. Gmail spam bidirectional sync + 30-day retention. MS Graph/forwarding PLANNED. See `docs/email-strategy.md` + `docs/email-pipeline.md`.
+- [~] Phase 5b: Email Integrations — managed mode + Gmail API OAuth DONE (Sapphire connected). No auto-send (see `memory/feedback_no_auto_send.md`). Unified `inbox_rules` JSONB; `InboxRulesService` is the sole matcher. Service surface (post-2026-04-25): `evaluate(context)` + `apply(actions, thread)` for ingest; `apply_to_existing_threads(rule_id, dry_run)` for back-applying a rule to threads already in the inbox; `check_coverage(conditions, actions, exclude_id)` for the save-time "already covered by X" warning that prevents dup-rule sprawl. SET_VISIBILITY action stores `role_slugs[]` (built-in role + custom-role slugs) — mirrors `agent_threads.visibility_role_slugs`. Gmail spam bidirectional sync + 30-day retention. MS Graph/forwarding PLANNED. See `docs/email-strategy.md` + `docs/email-pipeline.md`.
 - [ ] Phase 4: Customer Portal.
 - [ ] Phase 6: Platform Admin (tenant management, subscriptions).
 - [ ] Phases 7-10: `docs/build-plan.md`.

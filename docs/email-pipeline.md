@@ -165,7 +165,7 @@ Cloudflare account: `brian.e.parrotte@gmail.com` (account ID `4f5794507b55069e37
        |
        |--- 1. Reply loop check (_is_own_email, INTERNAL_PATTERNS)
        |--- 2. Dedup check (AgentMessage.email_uid unique)
-       |--- 3. Routing rule match (Delivered-To → visibility_permission)
+       |--- 3. Routing rule match (Delivered-To → visibility_role_slugs)
        |--- 4. Thread: get_or_create_thread() (thread_manager.py)
        |--- 5. Customer match (customer_matcher.py, 7-layer cascade)
        |--- 6. AI triage (triage_agent.py — "does this need a response?")
@@ -286,7 +286,7 @@ Individual email records. Key fields: `email_uid` (unique, dedup key — `pm-{ha
 > **Column history**: `draft_response` was dropped in Phase 5b (2026-04-24). AI drafts now live on `agent_proposals(entity_type='email_reply')` exclusively; the R7 audit enforcer blocks any `.draft_response` attribute access in `app/src/` to prevent reintroduction.
 
 ### AgentThread (`agent_threads`)
-Groups related emails into a conversation. Key fields: `thread_key`, `contact_email`, `subject`, `matched_customer_id`, `status` (pending/handled/archived), `last_direction`, `has_pending`, `visibility_permission`, `delivered_to`, `assigned_to_user_id`.
+Groups related emails into a conversation. Key fields: `thread_key`, `contact_email`, `subject`, `matched_customer_id`, `status` (pending/handled/archived), `last_direction`, `has_pending`, `visibility_role_slugs` (JSONB list — see `docs/data-model.md` for the role-group visibility model), `delivered_to`, `assigned_to_user_id`.
 
 ### AgentAction (`agent_actions`)
 Job/action items extracted from emails or created manually.

@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -105,6 +106,9 @@ interface RuleEditorDialogProps {
   /** Called after the editor creates a new folder via the inline prompt,
    * so the parent list can pick it up without refetching. */
   onFolderCreated?: (folder: InboxFolder) => void;
+  /** Tag values currently in use across all rules. Surfaced as suggestions
+   * in the TagPicker so admins don't have to remember/retype them. */
+  existingTags?: string[];
 }
 
 const FIELD_OPTIONS: { value: ConditionField; label: string }[] = [
@@ -348,6 +352,84 @@ function FolderPickerOrCreate({
   );
 }
 
+/** TagPicker — input + always-visible dropdown of every known tag.
+ *
+ *  Replaces the previous `<input list="…">` datalist pattern, which only
+ *  showed suggestions that prefix-matched the current input value — so once
+ *  the user picked "billing" the dropdown collapsed to "billing" alone and
+ *  every other tag was unreachable without clearing the box. The suggestion
+ *  list also missed tags actually in use across other rules.
+ *
+ *  Behavior: input is free-form. Click/focus opens a dropdown with every
+ *  hardcoded suggestion AND every tag currently set on any other rule, plus
+ *  a "Use {typed value}" row when the typed text isn't already a known tag.
+ */
+function TagPicker({
+  value,
+  onChange,
+  knownTags,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  knownTags: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const merged = Array.from(new Set([...knownTags, ...TAG_OPTIONS])).sort();
+  const typed = value.trim();
+  const showCreateOption = typed && !merged.some((t) => t.toLowerCase() === typed.toLowerCase());
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          placeholder="tag (type or pick)"
+          className="flex-1 min-w-0"
+        />
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-1"
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="max-h-60 overflow-y-auto">
+          {merged.map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={`w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted ${
+                t.toLowerCase() === value.toLowerCase() ? "bg-muted/50 font-medium" : ""
+              }`}
+              onClick={() => {
+                onChange(t);
+                setOpen(false);
+              }}
+            >
+              {t}
+            </button>
+          ))}
+          {showCreateOption && (
+            <button
+              type="button"
+              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted border-t mt-1 pt-2"
+              onClick={() => {
+                onChange(typed);
+                setOpen(false);
+              }}
+            >
+              <span className="text-muted-foreground">Use </span>
+              <span className="font-medium">&quot;{typed}&quot;</span>
+            </button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 interface VisibilityTarget {
   slug: string;
   name: string;
@@ -442,6 +524,7 @@ export function RuleEditorDialog({
   permissions,
   onSave,
   onFolderCreated,
+  existingTags = [],
 }: RuleEditorDialogProps) {
 
   const [draft, setDraft] = useState<RuleDraft>(initialDraft);
@@ -711,24 +794,11 @@ export function RuleEditorDialog({
                   )}
 
                   {opt?.needs.includes("tag") && (
-                    <>
-                      <Input
-                        list={`tag-options-${idx}`}
-                        value={(typeof a.params?.tag === "string" ? a.params.tag : "")}
-                        onChange={(e) =>
-                          updateAction(idx, {
-                            params: { ...a.params, tag: e.target.value },
-                          })
-                        }
-                        placeholder="tag (type or pick)"
-                        className="flex-1 min-w-0"
-                      />
-                      <datalist id={`tag-options-${idx}`}>
-                        {TAG_OPTIONS.map((t) => (
-                          <option key={t} value={t} />
-                        ))}
-                      </datalist>
-                    </>
+                    <TagPicker
+                      value={(typeof a.params?.tag === "string" ? a.params.tag : "")}
+                      onChange={(v) => updateAction(idx, { params: { ...a.params, tag: v } })}
+                      knownTags={existingTags}
+                    />
                   )}
 
                   {opt?.needs.includes("category") && (

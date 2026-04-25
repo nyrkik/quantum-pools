@@ -667,6 +667,14 @@ export default function InboxRulesPage() {
               return [...current, f];
             })
           }
+          existingTags={Array.from(new Set(
+            rules.flatMap((r) =>
+              (r.actions || [])
+                .filter((a) => a.type === "assign_tag")
+                .map((a) => (typeof a.params?.tag === "string" ? a.params.tag : ""))
+                .filter(Boolean),
+            ),
+          ))}
         />
       )}
 

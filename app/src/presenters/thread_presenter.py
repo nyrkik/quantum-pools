@@ -93,6 +93,11 @@ class ThreadPresenter(Presenter):
         # fallback when no customer matched + no customer_name.
         from_name_by_thread = await self._load_from_names(threads)
 
+        # Batch-resolve the most recent OUTBOUND from_name per thread
+        # so the row can show "Kim replied" when last_direction is
+        # outbound (FB-50).
+        last_outbound_by_thread = await self._load_last_outbound_from_names(threads)
+
         # Batch-resolve sender tags via InboxRulesService (unified rule engine).
         # Each unique sender is looked up once; thread-level assignment happens
         # in the per-thread loop below.
@@ -142,6 +147,10 @@ class ThreadPresenter(Presenter):
 
             # Person-name (latest inbound sender), shown next to customer/org name.
             d["contact_person_name"] = contact_name_by_email.get(t.id)
+
+            # Surface the team-member who last replied, so glancing at the
+            # inbox shows "↑ Kim replied" without opening the thread (FB-50).
+            d["last_outbound_from_name"] = last_outbound_by_thread.get(t.id)
 
             # Unread status — rule-driven auto_read_at silences threads that
             # matched a mark_as_read rule up to last_message_at. A later
@@ -234,7 +243,53 @@ class ThreadPresenter(Presenter):
         names = await self._load_contact_names([thread])
         d["contact_person_name"] = names.get(thread.id)
 
+        # Last outbound team-member sender — see _load_last_outbound_from_names.
+        last_out = await self._load_last_outbound_from_names([thread])
+        d["last_outbound_from_name"] = last_out.get(thread.id)
+
         return d
+
+    async def _load_last_outbound_from_names(
+        self, threads: list[AgentThread],
+    ) -> dict[str, str]:
+        """Return `{thread_id: from_name}` for the most recent OUTBOUND
+        message per thread.
+
+        Powers the inbox row's "Replied by Kim" indicator (FB-50): when
+        teammates can't see who on the team last replied without
+        opening the thread, they double-handle replies. Falls back to
+        nothing when the latest outbound has no from_name (very old
+        rows); caller treats that as "we replied as the org" and
+        renders nothing rather than a wrong attribution.
+        """
+        if not threads:
+            return {}
+        from sqlalchemy import select
+        from src.models.agent_message import AgentMessage
+
+        rows = (await self.db.execute(
+            select(
+                AgentMessage.thread_id, AgentMessage.from_name,
+                AgentMessage.sent_at, AgentMessage.received_at,
+            )
+            .where(
+                AgentMessage.thread_id.in_([t.id for t in threads]),
+                AgentMessage.direction == "outbound",
+                AgentMessage.status.in_(("sent", "auto_sent")),
+                AgentMessage.from_name.is_not(None),
+            )
+            .order_by(
+                AgentMessage.thread_id,
+                AgentMessage.sent_at.desc().nullslast(),
+                AgentMessage.received_at.desc(),
+            )
+        )).all()
+
+        out: dict[str, str] = {}
+        for tid, fname, _sent, _rec in rows:
+            if tid not in out and fname and fname.strip() and "@" not in fname:
+                out[tid] = fname.strip()
+        return out
 
     async def _load_from_names(
         self, threads: list[AgentThread],

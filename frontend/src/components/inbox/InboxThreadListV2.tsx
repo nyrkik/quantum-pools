@@ -334,6 +334,18 @@ export function InboxThreadListV2({
                             />
                           )}
                           <div className="min-w-0 flex-1">
+                            {/* Team-member reply indicator (FB-50): when
+                                last_direction is outbound, surface the
+                                sender's first name + "replied" so anyone
+                                glancing at the row sees who responded
+                                last without opening the thread. Subtle —
+                                small + muted so it doesn't fight the
+                                snippet/bullets below. */}
+                            {t.last_direction === "outbound" && t.last_outbound_from_name && (
+                              <div className="text-[11px] text-muted-foreground truncate mb-0.5">
+                                ↑ {t.last_outbound_from_name.split(" ")[0]} replied
+                              </div>
+                            )}
                             {"bullets" in body ? (
                               <ul className="space-y-0.5">
                                 {body.bullets.map((b, i) => (

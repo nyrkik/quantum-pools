@@ -338,6 +338,12 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                         ) : (
                           <span className="flex-shrink-0"><ArrowDownLeft className="h-3 w-3 text-green-600" /></span>
                         )}
+                        {/* FB-50: who on the team replied last. */}
+                        {t.last_direction === "outbound" && t.last_outbound_from_name && (
+                          <span className="text-[10px] text-muted-foreground shrink-0">
+                            {t.last_outbound_from_name.split(" ")[0]}:
+                          </span>
+                        )}
                         <span className={`text-xs truncate ${t.is_unread ? "font-semibold" : "text-muted-foreground"}`}>
                           {t.subject || t.last_snippet || "No subject"}
                         </span>
@@ -350,6 +356,12 @@ export function InboxThreadTable({ threads, loading, currentUserId, onSelectThre
                             <span className="flex-shrink-0" title="Last: sent"><ArrowUpRight className="h-3 w-3 text-blue-500" /></span>
                           ) : (
                             <span className="flex-shrink-0" title="Last: received"><ArrowDownLeft className="h-3 w-3 text-green-600" /></span>
+                          )}
+                          {/* FB-50: who on the team replied last. */}
+                          {t.last_direction === "outbound" && t.last_outbound_from_name && (
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {t.last_outbound_from_name.split(" ")[0]}:
+                            </span>
                           )}
                           <span className={`truncate ${t.is_unread ? "font-semibold" : t.has_pending ? "" : "text-muted-foreground"}`}>
                             {t.subject || t.last_snippet || "No subject"}

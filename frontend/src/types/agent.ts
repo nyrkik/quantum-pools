@@ -112,6 +112,11 @@ export interface Thread {
   delivered_to: string | null;
   sender_tag: string | null;
   contact_person_name?: string | null;
+  // Most recent OUTBOUND from_name on the thread. Used by the inbox row
+  // to show "↑ Kim replied" so teammates see who responded last without
+  // opening the thread (FB-50). Null when the latest outbound has no
+  // from_name (very old rows).
+  last_outbound_from_name?: string | null;
   // Sticky AI marker — true once the classifier auto-closed this thread,
   // never clears. Drives the "AI" row pill in every Handled view.
   was_auto_handled?: boolean;

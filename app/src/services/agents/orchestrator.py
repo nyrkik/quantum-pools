@@ -214,6 +214,14 @@ async def _mark_thread_auto_handled(
             return
         if t.auto_handled_at is None:
             t.auto_handled_at = datetime.now(timezone.utc)
+        # Also stamp auto_read_at so the unread badge doesn't tick up
+        # for AI-auto-closed threads — the user didn't take action and
+        # the AI already did, so they shouldn't be nagged. Same field
+        # the mark_as_read rule action uses; the unread query honors it.
+        if t.last_message_at and (
+            t.auto_read_at is None or t.last_message_at > t.auto_read_at
+        ):
+            t.auto_read_at = t.last_message_at
 
         refs: dict = {"thread_id": thread_id}
         if matched_customer_id:

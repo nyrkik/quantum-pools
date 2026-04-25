@@ -82,6 +82,15 @@ class InboxFolderService:
                         ThreadRead.read_at.is_(None),
                         AgentThread.last_message_at > ThreadRead.read_at,
                     ),
+                    # Honor the rule-driven / AI-auto-handled "considered
+                    # read" stamp the same way agent_thread_service.get_thread_stats
+                    # does. Otherwise auto-handled threads silently inflate
+                    # the folder badge after the user already had the AI
+                    # process them on their behalf.
+                    or_(
+                        AgentThread.auto_read_at.is_(None),
+                        AgentThread.last_message_at > AgentThread.auto_read_at,
+                    ),
                 )
                 .group_by(AgentThread.folder_id)
             )).all()

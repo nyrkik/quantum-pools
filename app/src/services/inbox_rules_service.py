@@ -508,6 +508,96 @@ class InboxRulesService:
     # Application
     # ------------------------------------------------------------------
 
+    async def check_coverage(
+        self,
+        org_id: str,
+        conditions: list[dict],
+        actions: list[dict],
+        *,
+        exclude_id: str | None = None,
+    ) -> dict | None:
+        """Detect whether a proposed new rule is already covered by an
+        existing active rule.
+
+        Use case: Kim was creating per-sender rules for `donotreply@yardi.com`,
+        `0100019db...@mail.coupahost.com`, etc., not realizing the
+        billing-domain catch-all already matched all of them. This check
+        runs at save time so the editor can warn "X already covers this —
+        add to that rule instead?" rather than silently growing the dup pile.
+
+        Returns ``{rule_id, rule_name, covered_values, total_values}``
+        when EVERY sender value the new rule targets is matched by the
+        SAME existing rule AND that rule has at least one action type in
+        common with the new rule (otherwise the new rule is doing
+        different work and isn't a true duplicate). Returns None when
+        no full coverage is found.
+        """
+        # Collect the sender values the new rule is asserting against.
+        # Other fields (subject/category/customer_id) aren't checked
+        # because the cardinality of meaningful overlap is much lower
+        # there — sender-based catch-alls are the dominant duplication
+        # vector in practice.
+        sender_values: list[str] = []
+        for c in conditions:
+            field = c.get("field")
+            if field not in ("sender_email", "sender_domain"):
+                continue
+            v = c.get("value")
+            vals = v if isinstance(v, list) else [v]
+            for x in vals:
+                if isinstance(x, str) and x.strip():
+                    sender_values.append(x.strip().lower())
+        if not sender_values:
+            return None
+
+        # Mutating action types the new rule is performing. Empty set →
+        # advisory rule (skip_customer_match etc.) — never blocked.
+        new_action_types = {a.get("type") for a in actions if a.get("type")}
+        if not new_action_types:
+            return None
+
+        # Load existing active rules once.
+        rules = (await self.db.execute(
+            select(InboxRule).where(
+                InboxRule.organization_id == org_id,
+                InboxRule.is_active.is_(True),
+            )
+        )).scalars().all()
+        rules = [r for r in rules if r.id != exclude_id]
+
+        # Per-rule: count how many of the new rule's sender values it
+        # would match. The first rule that covers ALL values + shares an
+        # action type wins (we don't try to find the "best" coverage —
+        # one match is enough to surface the warning).
+        for r in rules:
+            r_action_types = {a.get("type") for a in (r.actions or []) if a.get("type")}
+            if not (r_action_types & new_action_types):
+                continue
+            covered = 0
+            sample = None
+            for v in sender_values:
+                # Build the sender-only context the catch-all rule would
+                # see at ingest. The matcher already lowercases haystacks.
+                ctx_sender = v if "@" in v else f"x@{v}"  # bare domain → fake an addr so sender_domain = v
+                # If the new rule was already a sender_domain rule, v is
+                # the bare domain; the matcher's _context_from_sender
+                # would derive that anyway. Either way we want the same
+                # downstream context shape.
+                if self._matches(r.conditions or [], _context_from_sender(ctx_sender)):
+                    covered += 1
+                    if sample is None:
+                        sample = v
+            if covered == len(sender_values):
+                return {
+                    "rule_id": r.id,
+                    "rule_name": r.name,
+                    "covered_values": covered,
+                    "total_values": len(sender_values),
+                    "sample_value": sample,
+                    "shared_actions": sorted(r_action_types & new_action_types),
+                }
+        return None
+
     async def apply_to_existing_threads(
         self,
         rule_id: str,

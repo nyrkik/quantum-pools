@@ -446,6 +446,15 @@ export function RuleEditorDialog({
 
   const [draft, setDraft] = useState<RuleDraft>(initialDraft);
   const [saving, setSaving] = useState(false);
+  const [coverageWarning, setCoverageWarning] = useState<{
+    rule_id: string;
+    rule_name: string | null;
+    sample_value: string;
+    shared_actions: string[];
+  } | null>(null);
+  // Once the user clicks "Save anyway", we bypass the coverage gate for
+  // this open of the dialog. Reset on close.
+  const [bypassCoverage, setBypassCoverage] = useState(false);
   // Default ON — most users want a rule they create to also clean up
   // existing matches in their inbox (Gmail's default behavior). Reset on
   // every open so a previous "off" choice doesn't silently persist.
@@ -459,6 +468,8 @@ export function RuleEditorDialog({
     if (open && !wasOpen.current) {
       setDraft(initialDraft);
       setApplyToExisting(true);
+      setCoverageWarning(null);
+      setBypassCoverage(false);
     }
     wasOpen.current = open;
   }, [open, initialDraft]);
@@ -477,15 +488,44 @@ export function RuleEditorDialog({
     }));
   };
 
-  const handleSave = async () => {
+  const handleSave = async (skipCoverageCheck = false) => {
     if (draft.actions.length === 0) return;
     setSaving(true);
     try {
+      // Coverage check: prevent the "many rules for the same domain"
+      // pattern Brian flagged. Skipped when the user clicks "Save
+      // anyway" on the warning surface.
+      if (!skipCoverageCheck && !bypassCoverage) {
+        try {
+          const res = await api.post<{ covered_by: typeof coverageWarning }>(
+            "/v1/inbox-rules/check-coverage",
+            {
+              conditions: draft.conditions,
+              actions: draft.actions,
+              exclude_id: draft.id ?? null,
+            },
+          );
+          if (res.covered_by) {
+            setCoverageWarning(res.covered_by);
+            setSaving(false);
+            return;
+          }
+        } catch {
+          // Non-blocking: if the check itself fails, proceed with save
+          // rather than wedging the editor.
+        }
+      }
       await onSave(draft, { applyToExisting });
       onOpenChange(false);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveAnyway = async () => {
+    setBypassCoverage(true);
+    setCoverageWarning(null);
+    await handleSave(true);
   };
 
   const isEditing = Boolean(initialDraft.id);
@@ -736,6 +776,25 @@ export function RuleEditorDialog({
           </div>
         </div>
 
+        {/* Coverage warning — surfaced when an existing active rule
+            already matches all of the new rule's sender values + shares
+            an action type. Prevents accidental dup-rule sprawl (see
+            InboxRulesService.check_coverage for the predicate). */}
+        {coverageWarning && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+            <p className="font-medium text-amber-900 dark:text-amber-200">
+              Already covered
+            </p>
+            <p className="text-amber-800 dark:text-amber-300 mt-0.5 text-xs">
+              <span className="font-mono">{coverageWarning.sample_value}</span>{" "}
+              is already matched by an existing rule
+              {coverageWarning.rule_name ? <> — <span className="font-medium">{coverageWarning.rule_name}</span></> : null}
+              . That rule already does:{" "}
+              <span className="font-medium">{coverageWarning.shared_actions.join(", ")}</span>.
+            </p>
+          </div>
+        )}
+
         {/* "Apply to existing emails" toggle — back-applies the rule's
             actions to threads already in the inbox after save. Default
             on so users don't have to remember to clean up old matches.
@@ -756,12 +815,22 @@ export function RuleEditorDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            onClick={handleSave}
-            disabled={saving || draft.actions.length === 0}
-          >
-            {saving ? "Saving…" : isEditing ? "Save" : "Create rule"}
-          </Button>
+          {coverageWarning ? (
+            <Button
+              variant="outline"
+              onClick={handleSaveAnyway}
+              disabled={saving}
+            >
+              {saving ? "Saving…" : "Save anyway"}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => handleSave()}
+              disabled={saving || draft.actions.length === 0}
+            >
+              {saving ? "Saving…" : isEditing ? "Save" : "Create rule"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

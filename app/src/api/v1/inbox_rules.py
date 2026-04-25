@@ -237,6 +237,35 @@ async def append_sender(
     return result
 
 
+class CoverageCheckBody(BaseModel):
+    conditions: list[Condition]
+    actions: list[Action]
+    exclude_id: str | None = None
+
+
+@router.post("/check-coverage")
+async def check_coverage(
+    body: CoverageCheckBody,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pre-save check: is this rule already covered by an existing one?
+
+    Returns ``{covered_by: {...}}`` when an existing active rule already
+    matches every sender value the new rule targets AND shares at least
+    one action type. Drives the editor's "X already covers this" warning.
+    """
+    from src.services.inbox_rules_service import InboxRulesService
+
+    result = await InboxRulesService(db).check_coverage(
+        ctx.organization_id,
+        [c.model_dump() for c in body.conditions],
+        [a.model_dump() for a in body.actions],
+        exclude_id=body.exclude_id,
+    )
+    return {"covered_by": result}
+
+
 class ApplyToExistingBody(BaseModel):
     dry_run: bool = False
 

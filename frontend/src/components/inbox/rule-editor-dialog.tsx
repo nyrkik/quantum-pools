@@ -391,7 +391,7 @@ function TagPicker({
         />
       </PopoverTrigger>
       <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-1"
+        className="w-[--radix-popover-trigger-width] p-1 z-[70]"
         align="start"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >

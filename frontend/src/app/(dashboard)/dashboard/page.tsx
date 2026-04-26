@@ -141,7 +141,19 @@ export default function DashboardPage() {
     return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   }
 
-  if (!data) return null;
+  // Recovery surface — without this the user lands on a silent blank
+  // page when the parallel fetch chain errors. Same class of bug as
+  // FB-53's thread-detail blank.
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+        <p className="text-sm">Couldn&apos;t load the dashboard.</p>
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   // Build "needs attention" items
   const alerts: { label: string; count: number; icon: React.ElementType; color: string; href: string }[] = [];

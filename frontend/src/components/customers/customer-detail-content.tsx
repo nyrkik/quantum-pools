@@ -253,10 +253,27 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
       .sort((a, b) => a.order[roleKey] - b.order[roleKey]);
   }, [customer, properties, perms, id, roleKey, displayName]);
 
-  if (loading || !customer) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    );
+  }
+
+  // Recovery surface — toast.error in load() clears after 4s, leaving
+  // the user staring at an empty page. Same FB-53 class. Render an
+  // explicit retry/back affordance instead.
+  if (!customer) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+        <p className="text-sm">Couldn&apos;t load this client.</p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={load}>Retry</Button>
+          <Button variant="outline" size="sm" onClick={() => router.push("/customers")}>
+            Back to Clients
+          </Button>
+        </div>
       </div>
     );
   }

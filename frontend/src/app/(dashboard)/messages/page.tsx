@@ -116,22 +116,43 @@ export default function MessagesPage() {
   useWSEvent("message.new", (event) => {
     const tid = event.data?.thread_id as string | undefined;
     if (tid && tid === selectedThreadId) {
-      loadDetail(selectedThreadId);
+      loadDetail();
     }
   });
 
-  const loadDetail = useCallback((threadId: string) => {
-    setDetailLoading(true);
-    api.get<ThreadDetail>(`/v1/messages/${threadId}`)
-      .then((d) => { setDetail(d); setTimeout(() => replyRef.current?.focus(), 100); })
-      .catch(() => toast.error("Failed to load"))
-      .finally(() => setDetailLoading(false));
-  }, []);
+  // Reload trigger — bumped via the inline Retry to refetch the
+  // current threadId without navigating. Same shape as the inbox
+  // ThreadDetailSheet's recovery loop.
+  const [reloadTick, setReloadTick] = useState(0);
+  const loadDetail = useCallback(() => setReloadTick((n) => n + 1), []);
 
+  // Single effect: clear stale state, fetch, cancel via alive flag if
+  // selectedThreadId changes (or Retry fires) before the in-flight
+  // request resolves. Without cancellation an old fetch's setDetail
+  // could clobber a newer thread's state and leave the user staring
+  // at the wrong conversation.
   useEffect(() => {
-    if (selectedThreadId) loadDetail(selectedThreadId);
-    else setDetail(null);
-  }, [selectedThreadId, loadDetail]);
+    if (!selectedThreadId) {
+      setDetail(null);
+      return;
+    }
+    let alive = true;
+    setDetail(null);
+    setDetailLoading(true);
+    api.get<ThreadDetail>(`/v1/messages/${selectedThreadId}`)
+      .then((d) => {
+        if (!alive) return;
+        setDetail(d);
+        setTimeout(() => replyRef.current?.focus(), 100);
+      })
+      .catch(() => {
+        if (alive) toast.error("Failed to load");
+      })
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => { alive = false; };
+  }, [selectedThreadId, reloadTick]);
 
   // Scroll to the most recent message when a thread opens or new messages
   // arrive. Chat-app convention: reading pane starts at the bottom.
@@ -152,7 +173,7 @@ export default function MessagesPage() {
       });
       setReply("");
       setReplyAttachments([]);
-      loadDetail(selectedThreadId);
+      loadDetail();
       loadThreads();
     } catch { toast.error("Failed to send"); }
     finally { setSending(false); }
@@ -163,7 +184,7 @@ export default function MessagesPage() {
     try {
       const result = await api.post<{ action_id: string }>(`/v1/messages/${selectedThreadId}/convert-to-job`);
       toast.success("Converted to job");
-      loadDetail(selectedThreadId);
+      loadDetail();
       loadThreads();
     } catch { toast.error("Failed"); }
   };
@@ -290,7 +311,7 @@ export default function MessagesPage() {
                       currentCaseNumber={detail.case_number}
                       currentCaseTitle={detail.case_title}
                       onChange={() => {
-                        if (selectedThreadId) loadDetail(selectedThreadId);
+                        if (selectedThreadId) loadDetail();
                         loadThreads();
                       }}
                     />
@@ -325,7 +346,7 @@ export default function MessagesPage() {
                         reactions={m.reactions || []}
                         currentUserId={user.id}
                         alignRight={isMe}
-                        onChange={() => { if (selectedThreadId) loadDetail(selectedThreadId); }}
+                        onChange={() => { if (selectedThreadId) loadDetail(); }}
                       />
                     )}
                   </div>

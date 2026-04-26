@@ -58,13 +58,29 @@ class Action(BaseModel):
 
 
 def _validate_rule_body(conditions: list[Condition], actions: list[Action]) -> None:
-    """Fail closed on unknown fields or action types."""
+    """Fail closed on unknown fields, action types, and field/value
+    mismatches that would silently never match.
+    """
     for c in conditions:
         if c.field not in ALL_CONDITION_FIELDS:
             raise HTTPException(
                 400, f"Unknown condition field '{c.field}'. "
                      f"Allowed: {sorted(ALL_CONDITION_FIELDS)}"
             )
+        # Class-of-bug guard: `sender_domain` is the bare domain (no `@`),
+        # so any value containing `@` can never match. Caught the broken
+        # b0b2ce62 catch-all in the wild — tell the user to use
+        # `sender_email` for those values, or strip the `@`.
+        if c.field == "sender_domain":
+            vals = c.value if isinstance(c.value, list) else [c.value]
+            bad = [v for v in vals if isinstance(v, str) and "@" in v]
+            if bad:
+                raise HTTPException(
+                    400,
+                    "Condition field 'sender_domain' is the bare domain "
+                    "(no '@'). Use 'sender_email' for these values, or strip "
+                    f"the '@': {bad[:3]}",
+                )
     for a in actions:
         if a.type not in ALL_ACTION_TYPES:
             raise HTTPException(

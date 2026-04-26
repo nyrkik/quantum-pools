@@ -393,10 +393,6 @@ function TagPicker({
       <PopoverContent
         className="w-[--radix-popover-trigger-width] p-1"
         align="start"
-        // Inline z-index beats the dialog (z-50) without fighting
-        // tailwind-merge over arbitrary z-[…] class precedence — same
-        // pattern shadcn's SelectContent uses (zIndex: 9999).
-        style={{ zIndex: 9999 }}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="max-h-60 overflow-y-auto">

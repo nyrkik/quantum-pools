@@ -248,6 +248,47 @@ async def test_ach_auto_matches_as_completed_and_marks_invoice_paid(db_session, 
 
 
 @pytest.mark.asyncio
+async def test_sapphire_shape_property_name_in_customer_first_name(db_session, org_a):
+    """Real Sapphire data: Customer.first_name = property name,
+    Customer.company_name = PM company, Property table mostly empty.
+
+    The Entrata parser puts "Arbor Ridge 2" in payer_name + property_hint.
+    The matcher must find this as a fuzzy match against
+    Customer.first_name="Arbor Ridge 2" even though company_name is
+    "Greystar" (which doesn't fuzzy-match the property name).
+    """
+    cust = Customer(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        company_name="Greystar",            # PM company
+        first_name="Arbor Ridge 2",          # property name
+        last_name="",
+        balance=0.0,
+    )
+    db_session.add(cust)
+    await db_session.flush()
+    inv = await _seed_invoice(db_session, org_a.id, cust.id, total=1776.00)
+    msg = await _seed_message(db_session, org_a.id)
+    pp = _seed_parsed(
+        msg,
+        amount=Decimal("1776.00"),
+        payer="Arbor Ridge 2",
+        property_hint="Arbor Ridge 2",
+        payment_method="ach",
+        payment_date=date(2026, 4, 24),
+    )
+    db_session.add(pp)
+    await db_session.commit()
+
+    await match_parsed_payments(db_session, parsed_payments=[pp])
+    await db_session.commit()
+
+    assert pp.match_status == ParsedPaymentStatus.auto_matched.value
+    assert pp.payment_id is not None
+    assert pp.match_confidence and pp.match_confidence >= 0.95
+
+
+@pytest.mark.asyncio
 async def test_invoice_number_exact_match_auto_even_without_amount_match(db_session, org_a):
     """Invoice# parser-supplied exact match scores 1.0 regardless of
     other fields. Useful for processors that DO supply our invoice

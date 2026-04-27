@@ -146,9 +146,38 @@ async def _load_customers(
     return {c.id: c for c in rows}
 
 
-def _customer_display(c: Customer) -> str:
-    bits = [c.company_name, f"{c.first_name or ''} {c.last_name or ''}".strip()]
-    return next((b for b in bits if b), "")
+def _customer_haystacks(c: Customer) -> list[str]:
+    """All viable string representations of a customer, lowercased.
+
+    Sapphire's customer shape stores the property name in `first_name`
+    (e.g. company_name="AIR", first_name="Slate Creek Apartments") so a
+    fuzzy match against ONLY `company_name` would miss every payment
+    where Entrata's `payer_name` is the property. We score the parsed
+    hint against every representation and take the max — robust to:
+      - B2B with property in first_name (Sapphire's shape)
+      - B2B with the contact person in first_name
+      - residential where company_name is empty
+    """
+    bits = []
+    if c.company_name:
+        bits.append(c.company_name.lower())
+    fn = (c.first_name or "").strip().lower()
+    ln = (c.last_name or "").strip().lower()
+    if fn:
+        bits.append(fn)
+    if ln:
+        bits.append(ln)
+    if fn and ln:
+        bits.append(f"{fn} {ln}")
+    if c.company_name and fn:
+        bits.append(f"{c.company_name.lower()} {fn}")
+    return bits
+
+
+def _best_fuzzy_score(needle: str, haystacks: list[str]) -> int:
+    if not needle or not haystacks:
+        return 0
+    return max((fuzz.token_set_ratio(needle, h) for h in haystacks), default=0)
 
 
 def _score_candidates(
@@ -174,22 +203,29 @@ def _score_candidates(
             score = 1.0
             reasoning_parts.append(f"invoice# {pp.invoice_hint} exact")
 
-        # Amount + customer fuzzy
+        # Amount + customer/property fuzzy
         if parsed_amount is not None and abs(parsed_amount - (inv.total or 0)) < 0.01:
             customer = customers.get(inv.customer_id)
-            customer_name = _customer_display(customer).lower() if customer else ""
-            customer_score = (
-                fuzz.token_set_ratio(payer_lower, customer_name)
-                if payer_lower and customer_name else 0
-            )
-            if customer_score >= FUZZY_NAME_THRESHOLD:
+            haystacks = _customer_haystacks(customer) if customer else []
+
+            # Score parser's payer + property hints against EVERY customer
+            # representation. Sapphire stores property names in
+            # Customer.first_name; standard SaaS shape has them in
+            # Customer.company_name. We don't care which — best score wins.
+            payer_score = _best_fuzzy_score(payer_lower, haystacks)
+            property_score = _best_fuzzy_score(property_lower, haystacks)
+            best_customer_score = max(payer_score, property_score)
+
+            if best_customer_score >= FUZZY_NAME_THRESHOLD:
                 if score < 0.95:
                     score = 0.95
                     reasoning_parts.append(
-                        f"amount=${parsed_amount:.2f} + customer fuzzy={customer_score}"
+                        f"amount=${parsed_amount:.2f} + customer fuzzy={best_customer_score}"
                     )
 
-            # Amount + property hint
+            # Amount + named-Property fuzzy (separate path for orgs that
+            # actually use Property.name — currently rare in Sapphire, but
+            # the right architecture for the 1,000th customer).
             if property_lower:
                 props = properties.get(inv.customer_id, [])
                 best_prop_score = 0

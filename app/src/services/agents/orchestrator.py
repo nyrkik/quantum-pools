@@ -64,6 +64,24 @@ def _msg_has_cc(msg) -> bool:
         return False
 
 
+# Categories where the AI must NEVER produce a draft reply. Humans reply
+# with verified figures (account state, payment status, financial data) —
+# AI approximations on these threads are a customer-trust + liability
+# risk. The classifier prompt tells the model to leave draft_response
+# null; this set is the backstop applied in process_incoming_email.
+# See `memory/feedback_no_ai_draft_for_billing.md`.
+NO_AUTO_DRAFT_CATEGORIES: frozenset[str] = frozenset({"billing"})
+
+
+def _gated_draft(category: str | None, classifier_draft: str | None) -> str | None:
+    """Suppress the classifier's draft for categories that humans must
+    reply to. Pure function — easy to unit test without the orchestrator's
+    side effects."""
+    if category in NO_AUTO_DRAFT_CATEGORIES:
+        return None
+    return classifier_draft
+
+
 async def _queue_summary_if_inbox_v2(db, thread, organization_id: str) -> None:
     """If the org is on inbox v2, mark this thread to be summarized by
     the InboxSummarizerService on the next APScheduler sweep.
@@ -784,7 +802,14 @@ async def process_incoming_email(
         # Phase 5 Step 5 closeout (2026-04-24): classifier drafts are ALWAYS
         # staged as email_reply proposals — the inbox reading pane renders
         # ProposalCard exclusively. DNA rule 5: AI never commits to customer.
-        classifier_draft = result.get("draft_response")
+        #
+        # 2026-04-27: never draft replies for the `billing` category.
+        # Billing/accounting threads carry payment status, account state,
+        # and financial figures the AI shouldn't approximate. The
+        # classifier prompt instructs the model to leave draft_response
+        # null for billing; _gated_draft is the backstop. Categories
+        # listed in NO_AUTO_DRAFT_CATEGORIES (top of file).
+        classifier_draft = _gated_draft(category, result.get("draft_response"))
 
         agent_msg = AgentMessage(
             organization_id=organization_id,

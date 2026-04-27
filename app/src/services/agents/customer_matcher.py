@@ -5,7 +5,7 @@ import re
 import logging
 
 import anthropic
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, text
 from src.core.database import get_db_context
 from src.models.agent_message import AgentMessage
 from src.models.agent_thread import AgentThread
@@ -126,6 +126,52 @@ def _extract_sender_name(from_header: str) -> str | None:
     return None
 
 
+async def rematch_unmatched_messages(
+    db,
+    *,
+    organization_id: str,
+    email: str,
+    customer_id: str,
+) -> tuple[int, int]:
+    """Backfill: link any unmatched threads/messages whose from_email matches
+    `email` to `customer_id`. Called from customer/customer_contact create
+    & update hooks so a late-added contact retroactively matches the
+    history that arrived before the contact existed.
+
+    Returns (threads_linked, messages_linked). Caller commits.
+
+    Found via dogfood audit 2026-04-27 — 4 threads + 137 messages were
+    silently unmatched because the contact was added AFTER the messages
+    arrived. Without this hook, the matcher only fires at ingest time.
+    """
+    if not email or not email.strip():
+        return (0, 0)
+    em = email.lower().strip()
+    threads_linked = (await db.execute(
+        text("""
+            UPDATE agent_threads SET matched_customer_id = :cid
+            WHERE organization_id = :org
+              AND matched_customer_id IS NULL
+              AND is_historical = false
+              AND LOWER(contact_email) = :em
+        """),
+        {"org": organization_id, "em": em, "cid": customer_id},
+    )).rowcount or 0
+    messages_linked = (await db.execute(
+        text("""
+            UPDATE agent_messages
+            SET matched_customer_id = :cid,
+                match_method = COALESCE(match_method, 'rematch_on_contact_add')
+            WHERE organization_id = :org
+              AND matched_customer_id IS NULL
+              AND direction = 'inbound'
+              AND LOWER(from_email) = :em
+        """),
+        {"org": organization_id, "em": em, "cid": customer_id},
+    )).rowcount or 0
+    return (threads_linked, messages_linked)
+
+
 async def match_customer(
     from_email: str,
     subject: str,
@@ -159,10 +205,21 @@ async def match_customer(
     async with get_db_context() as db:
         customer = None
 
-        # 1. Direct email match (handles comma-separated email fields)
+        # 1. Direct email match (handles comma-separated email fields).
+        # Intentionally NOT filtered by Customer.is_active — a canceled
+        # customer who still emails us must link to their record so the
+        # thread surfaces on their customer page, the conversation
+        # history is preserved, and the matcher_method audit is accurate.
+        # If the inactive customer reactivates, no re-link is needed.
+        # Found via dogfood audit 2026-04-27 (Jim Stillens "Cancel Service"
+        # thread, 4 threads + 137 messages backfilled).
         result = await db.execute(
             select(Customer).where(
-                Customer.is_active == True,
+                Customer.organization_id == organization_id,
+                func.lower(Customer.email).contains(from_email.lower()),
+            ).limit(5)
+        ) if organization_id else await db.execute(
+            select(Customer).where(
                 func.lower(Customer.email).contains(from_email.lower()),
             ).limit(5)
         )
@@ -174,7 +231,8 @@ async def match_customer(
                 match_method = "email"
                 break
 
-        # 1b. Check customer contacts (alternate emails)
+        # 1b. Check customer contacts (alternate emails). Same rule as
+        # step 1 — match against ALL customers regardless of is_active.
         if not customer:
             from src.models.customer_contact import CustomerContact
             cc_result = await db.execute(
@@ -184,9 +242,10 @@ async def match_customer(
             )
             contact = cc_result.scalar_one_or_none()
             if contact:
-                cust_result = await db.execute(
-                    select(Customer).where(Customer.id == contact.customer_id, Customer.is_active == True)
-                )
+                cust_q = select(Customer).where(Customer.id == contact.customer_id)
+                if organization_id:
+                    cust_q = cust_q.where(Customer.organization_id == organization_id)
+                cust_result = await db.execute(cust_q)
                 customer = cust_result.scalar_one_or_none()
                 if customer:
                     match_method = "contact_email"

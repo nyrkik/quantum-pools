@@ -95,6 +95,33 @@ async def create_contact(
     db.add(contact)
     await db.commit()
     await db.refresh(contact)
+
+    # Re-match: link any unmatched threads/messages from this email
+    # to the customer. Closes the late-added-contact gap surfaced in
+    # the 2026-04-27 dogfood audit.
+    if contact.email:
+        try:
+            from src.services.agents.customer_matcher import rematch_unmatched_messages
+            t_linked, m_linked = await rematch_unmatched_messages(
+                db,
+                organization_id=ctx.organization_id,
+                email=contact.email,
+                customer_id=customer_id,
+            )
+            if t_linked or m_linked:
+                await db.commit()
+                import logging
+                logging.getLogger(__name__).info(
+                    f"contact-create rematch: linked {t_linked} threads + "
+                    f"{m_linked} messages for {contact.email}"
+                )
+        except Exception as e:  # noqa: BLE001
+            # Re-match is non-blocking — never break contact creation
+            import logging
+            logging.getLogger(__name__).warning(
+                f"contact-create rematch failed for {contact.email}: {e}"
+            )
+
     return _serialize(contact)
 
 

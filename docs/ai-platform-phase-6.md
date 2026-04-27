@@ -148,7 +148,7 @@ Each detector keeps its query in a single async method, returns a list of MetaPr
 ### 6.1 `DefaultAssigneeDetector`
 - **Observes**: `agent_proposal.accepted` events for `entity_type=job` over the window.
 - **Pattern**: ≥80% of accepts route the resulting job to the same user.
-- **Proposal**: `target=default_assignee_strategy`, `op=set`, `value={"strategy": "fixed_user", "user_id": "<uuid>"}`.
+- **Proposal**: `target=default_assignee_strategy`, `op=set`, `value={"strategy": "fixed", "fallback_user_id": "<uuid>"}`. (Shape mirrors the existing `_assignee.py` resolver — `strategy` ∈ `{last_used_in_org, fixed, always_ask}` with optional `fallback_user_id`.)
 - **Confidence**: ratio of dominant assignee × log10(sample_size / 5), capped at 1.0. Requires ≥10 accepts in window.
 
 ### 6.2 `HandlerMismatchDetector`

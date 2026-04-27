@@ -1,17 +1,24 @@
-"""Workflow config API — per-org post-creation handler configuration.
+"""Workflow config API — per-org post-creation handler configuration
+plus Phase 6 workflow_observer mute-list management.
 
-GET is open to any org user — the frontend uses it to know which
-next_step components to prepare to render. PUT is gated by
-`workflow.manage_config` (new Phase 4 permission slug).
+GETs on /config and /handlers are open to any org user — the frontend
+uses them to render the right next_step UI even for roles that can't
+change config. PUT /config is gated by `workflow.manage_config` (Phase
+4). The observer mute endpoints are gated by `workflow.review`
+(Phase 6).
 
 Surface:
-    GET  /v1/workflow/config           → current effective config
-    PUT  /v1/workflow/config           → upsert (workflow.manage_config)
-    GET  /v1/workflow/handlers         → registry listing for the UI
+    GET    /v1/workflow/config                   → current effective config
+    PUT    /v1/workflow/config                   → upsert (workflow.manage_config)
+    GET    /v1/workflow/handlers                 → registry listing
+    GET    /v1/workflow/observer-mutes           → muted detector ids (workflow.review)
+    PUT    /v1/workflow/observer-mutes/{id}      → mute detector (workflow.review)
+    DELETE /v1/workflow/observer-mutes/{id}      → unmute detector (workflow.review)
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +31,7 @@ from src.api.deps import (
     require_permissions,
 )
 from src.core.database import get_db
+from src.models.org_workflow_config import OrgWorkflowConfig
 from src.services.events.actor_factory import actor_from_org_ctx
 from src.services.workflow.config_service import (
     UnknownHandlerError,
@@ -88,3 +96,76 @@ async def list_handlers(
             for name, h in sorted(HANDLERS.items())
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: workflow_observer mute list
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_config_row(db: AsyncSession, org_id: str) -> OrgWorkflowConfig:
+    """Lazy-create the config row so mute writes don't have to think
+    about whether one exists yet."""
+    row = await db.get(OrgWorkflowConfig, org_id)
+    if row is None:
+        row = OrgWorkflowConfig(
+            organization_id=org_id,
+            post_creation_handlers={},
+            default_assignee_strategy={"strategy": "last_used_in_org"},
+            observer_mutes={},
+            observer_thresholds={},
+        )
+        db.add(row)
+        await db.flush()
+    return row
+
+
+@router.get("/observer-mutes")
+async def list_observer_mutes(
+    ctx: OrgUserContext = Depends(require_permissions("workflow.review")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the org's muted-detector map — `{detector_id: {muted_at,
+    muted_by_user_id}}`. The dashboard surface uses this to mark which
+    suggestion classes the org has opted out of."""
+    row = await db.get(OrgWorkflowConfig, ctx.organization_id)
+    return {"mutes": (row.observer_mutes if row else None) or {}}
+
+
+@router.put("/observer-mutes/{detector_id}")
+async def mute_observer_detector(
+    detector_id: str,
+    ctx: OrgUserContext = Depends(require_permissions("workflow.review")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Add the detector to the mute list. Idempotent — re-muting an
+    already-muted detector updates the timestamp/user without error."""
+    if not detector_id or len(detector_id) > 64:
+        raise HTTPException(400, "detector_id must be 1-64 chars")
+    row = await _ensure_config_row(db, ctx.organization_id)
+    mutes = dict(row.observer_mutes or {})
+    mutes[detector_id] = {
+        "muted_at": datetime.now(timezone.utc).isoformat(),
+        "muted_by_user_id": ctx.user.id,
+    }
+    row.observer_mutes = mutes
+    await db.commit()
+    return {"detector_id": detector_id, "muted": True, "mutes": mutes}
+
+
+@router.delete("/observer-mutes/{detector_id}")
+async def unmute_observer_detector(
+    detector_id: str,
+    ctx: OrgUserContext = Depends(require_permissions("workflow.review")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Remove the detector from the mute list. Idempotent — unmuting
+    a non-muted detector is a no-op success."""
+    row = await db.get(OrgWorkflowConfig, ctx.organization_id)
+    if row is None or detector_id not in (row.observer_mutes or {}):
+        return {"detector_id": detector_id, "muted": False, "mutes": {}}
+    mutes = dict(row.observer_mutes)
+    mutes.pop(detector_id, None)
+    row.observer_mutes = mutes
+    await db.commit()
+    return {"detector_id": detector_id, "muted": False, "mutes": mutes}

@@ -237,3 +237,151 @@ async def test_threshold_tuning_bumps_on_rejection_pressure(db_session, org_a):
 
     cfg = await db_session.get(OrgWorkflowConfig, org_a.id)
     assert cfg.observer_thresholds.get("tuning_test") == pytest.approx(0.85, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_threshold_tuning_lowers_on_acceptance_pressure(db_session, org_a):
+    """≥5 corrections, >70% accept rate → threshold lowers by 0.05.
+    Floor is the detector's own default — never go below it."""
+    # Pre-seed an elevated threshold so the snap-back has somewhere to go.
+    cfg = OrgWorkflowConfig(
+        organization_id=org_a.id,
+        post_creation_handlers={},
+        default_assignee_strategy={"strategy": "last_used_in_org"},
+        observer_mutes={},
+        observer_thresholds={"snapback_test": 0.90},
+    )
+    db_session.add(cfg)
+
+    # Seed 8 corrections: 7 acceptances (87% accept rate), 1 rejection.
+    for _ in range(7):
+        db_session.add(AgentCorrection(
+            id=str(uuid.uuid4()),
+            organization_id=org_a.id,
+            agent_type=AGENT_WORKFLOW_OBSERVER,
+            correction_type="acceptance",
+            category="workflow_config",
+            input_context="[snapback_test] synthetic",
+        ))
+    db_session.add(AgentCorrection(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        agent_type=AGENT_WORKFLOW_OBSERVER,
+        correction_type="rejection",
+        input_context="[snapback_test] synthetic",
+    ))
+    await db_session.commit()
+
+    detector = _StaticDetector(
+        detector_id="snapback_test",
+        description="synthetic",
+        default_threshold=0.80,
+        proposals=[],  # focus on threshold behavior, not staging
+    )
+    agent = WorkflowObserverAgent(db_session)
+    await agent.scan_org(org_a.id, detectors=[detector])
+    await db_session.commit()
+
+    refreshed = await db_session.get(OrgWorkflowConfig, org_a.id)
+    # 0.90 - 0.05 = 0.85; floor is detector_default=0.80, well below.
+    assert refreshed.observer_thresholds.get("snapback_test") == pytest.approx(0.85, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_production_reject_feeds_threshold_tuner(db_session, org_a):
+    """End-to-end: agent stages → user rejects → AgentCorrection lands
+    with the [detector_id] prefix in input_context, which the tuner
+    can find on the next scan. Validates the full feedback loop runs
+    through real ProposalService code, not just the tuner's seeded
+    fixtures."""
+    from src.models.user import User as _User
+    from src.services.events.platform_event_service import Actor
+    from src.services.proposals import ProposalService
+
+    user_id = str(uuid.uuid4())
+    db_session.add(_User(
+        id=user_id, email=f"loop-{uuid.uuid4().hex[:6]}@test.com",
+        hashed_password="x", first_name="Loop", last_name="Tester",
+    ))
+    await db_session.commit()
+
+    detector = _StaticDetector(
+        detector_id="loop_test", description="synthetic", default_threshold=0.80,
+        proposals=[
+            _mp("loop_test", confidence=0.95,
+                value={"strategy": "fixed", "fallback_user_id": user_id}),
+        ],
+    )
+    agent = WorkflowObserverAgent(db_session)
+    r1 = await agent.scan_org(org_a.id, detectors=[detector])
+    await db_session.commit()
+    assert r1.proposals_staged == 1
+
+    # Find the staged proposal and reject it through the real service.
+    from sqlalchemy import select
+    from src.models.agent_proposal import AgentProposal
+    proposal = (await db_session.execute(
+        select(AgentProposal).where(
+            AgentProposal.organization_id == org_a.id,
+            AgentProposal.agent_type == AGENT_WORKFLOW_OBSERVER,
+        )
+    )).scalar_one()
+    assert proposal.input_context.startswith("[loop_test]")
+
+    actor = Actor(actor_type="user", user_id=user_id)
+    svc = ProposalService(db_session)
+    await svc.reject(proposal_id=proposal.id, actor=actor, permanently=False)
+    await db_session.commit()
+
+    # AgentCorrection got the input_context forwarded; tuner can find it.
+    rows = (await db_session.execute(
+        select(AgentCorrection).where(
+            AgentCorrection.organization_id == org_a.id,
+            AgentCorrection.agent_type == AGENT_WORKFLOW_OBSERVER,
+        )
+    )).scalars().all()
+    assert len(rows) == 1
+    assert (rows[0].input_context or "").startswith("[loop_test]")
+    assert rows[0].correction_type == "rejection"
+
+
+@pytest.mark.asyncio
+async def test_threshold_tuning_floor_at_detector_default(db_session, org_a):
+    """Acceptance pressure at the floor doesn't push below default."""
+    cfg = OrgWorkflowConfig(
+        organization_id=org_a.id,
+        post_creation_handlers={},
+        default_assignee_strategy={"strategy": "last_used_in_org"},
+        observer_mutes={},
+        observer_thresholds={"floor_test": 0.80},  # already at default
+    )
+    db_session.add(cfg)
+    for _ in range(7):
+        db_session.add(AgentCorrection(
+            id=str(uuid.uuid4()),
+            organization_id=org_a.id,
+            agent_type=AGENT_WORKFLOW_OBSERVER,
+            correction_type="acceptance",
+            category="workflow_config",
+            input_context="[floor_test] synthetic",
+        ))
+    db_session.add(AgentCorrection(
+        id=str(uuid.uuid4()),
+        organization_id=org_a.id,
+        agent_type=AGENT_WORKFLOW_OBSERVER,
+        correction_type="rejection",
+        input_context="[floor_test] synthetic",
+    ))
+    await db_session.commit()
+
+    detector = _StaticDetector(
+        detector_id="floor_test", description="x",
+        default_threshold=0.80, proposals=[],
+    )
+    agent = WorkflowObserverAgent(db_session)
+    await agent.scan_org(org_a.id, detectors=[detector])
+    await db_session.commit()
+
+    refreshed = await db_session.get(OrgWorkflowConfig, org_a.id)
+    # Tried to lower to 0.75; clamped at detector_default 0.80.
+    assert refreshed.observer_thresholds.get("floor_test") == pytest.approx(0.80, abs=1e-6)

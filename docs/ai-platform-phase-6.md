@@ -210,7 +210,7 @@ Three detectors v1. Conservative is right: master plan explicitly says "Better t
 - Shows up to 5 most-recent staged `workflow_config` + `inbox_rule` (when staged by `actor_agent_type=workflow_observer`) proposals.
 - Each row uses the existing `<ProposalCard>` (no new component) with the standard Accept / Edit / Reject / Never-suggest controls.
 - Empty state: "No workflow suggestions yet. The product learns from your activity over time."
-- Gated by new `workflow.review` slug. Reasoning: Phase 6 surface area (default assignees, post-creation handlers, future detectors) is broader than inbox configuration; reusing `inbox.manage` would be a category error. Owner + admin presets get the slug by default. Add to the 60-slug system as slug 61.
+- Gated by new `workflow.review` slug (added in Phase 6). Reasoning: Phase 6 surface area (default assignees, post-creation handlers, future detectors) is broader than inbox configuration; reusing `inbox.manage` would be a category error. Owner + admin presets get the slug by default; manager and below skip it.
 
 ### 8.2 No "/settings/workflows" addition
 Per `feedback_phase4_workflows_settings_is_vestigial.md`, that page is vestigial. Don't add Phase 6 surfaces there. The dashboard widget is the surface.

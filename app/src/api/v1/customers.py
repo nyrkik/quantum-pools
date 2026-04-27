@@ -63,6 +63,27 @@ async def list_companies(
     return [row[0] for row in result.all()]
 
 
+@router.get("/companies/suggest")
+async def suggest_company(
+    q: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """As-you-type fuzzy match: surface existing company spellings that
+    are similar to `q` so the user picks the canonical form instead of
+    creating a new variant. Returns up to 5 suggestions sorted by score
+    (then customer count). Empty list when no match crosses threshold."""
+    from src.services.customers.normalizer import CompanyNameNormalizer
+    norm = CompanyNameNormalizer(db)
+    matches = await norm.find_similar(ctx.organization_id, q)
+    return {
+        "suggestions": [
+            {"name": m.name, "score": m.score, "customer_count": m.customer_count}
+            for m in matches
+        ],
+    }
+
+
 async def _geocode_property(property_id: str, address: str):
     """Background task to geocode a property."""
     from src.services.property_service import PropertyService

@@ -20,8 +20,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Plus, Lightbulb } from "lucide-react";
 import type { CustomerListItem } from "./client-section";
+
+interface CompanySuggestion {
+  name: string;
+  score: number;
+  customer_count: number;
+}
 
 interface CreateClientDialogProps {
   refreshKey: number;
@@ -34,6 +40,7 @@ export function CreateClientDialog({ refreshKey, onCreated }: CreateClientDialog
   const [newCompany, setNewCompany] = useState("");
   const [newCompanyCustom, setNewCompanyCustom] = useState("");
   const [existingCompanies, setExistingCompanies] = useState<string[]>([]);
+  const [companySuggestions, setCompanySuggestions] = useState<CompanySuggestion[]>([]);
 
   useEffect(() => {
     api.get<{ items: CustomerListItem[] }>("/v1/customers?limit=200&sort_by=name")
@@ -43,6 +50,33 @@ export function CreateClientDialog({ refreshKey, onCreated }: CreateClientDialog
         setExistingCompanies([...names].sort());
       }).catch(() => {});
   }, [refreshKey]);
+
+  // As-you-type fuzzy match the new company name against existing
+  // org spellings — surfaces "Did you mean Conam?" when the user types
+  // "CONAM" and an existing canonical "Conam" exists.
+  useEffect(() => {
+    const q = newCompanyCustom.trim();
+    if (q.length < 2) {
+      setCompanySuggestions([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      api.get<{ suggestions: CompanySuggestion[] }>(
+        `/v1/customers/companies/suggest?q=${encodeURIComponent(q)}`,
+      )
+        .then(res => setCompanySuggestions(res.suggestions || []))
+        .catch(() => setCompanySuggestions([]));
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [newCompanyCustom]);
+
+  function applyCompanySuggestion(name: string) {
+    // Switch the Select back to the existing canonical so it submits
+    // through the standard path; clear the custom-input + suggestions.
+    setNewCompany(name);
+    setNewCompanyCustom("");
+    setCompanySuggestions([]);
+  }
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -134,19 +168,76 @@ export function CreateClientDialog({ refreshKey, onCreated }: CreateClientDialog
                       </SelectContent>
                     </Select>
                     {newCompany === "__new__" && (
-                      <Input
-                        placeholder="New company name..."
-                        value={newCompanyCustom}
-                        onChange={(e) => setNewCompanyCustom(e.target.value)}
-                      />
+                      <>
+                        <Input
+                          placeholder="New company name..."
+                          value={newCompanyCustom}
+                          onChange={(e) => setNewCompanyCustom(e.target.value)}
+                        />
+                        {companySuggestions.length > 0 && (
+                          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs space-y-1">
+                            <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                              <Lightbulb className="h-3.5 w-3.5" />
+                              <span className="font-medium">
+                                Already in your customers — did you mean:
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {companySuggestions.map((s) => (
+                                <button
+                                  key={s.name}
+                                  type="button"
+                                  onClick={() => applyCompanySuggestion(s.name)}
+                                  className="rounded bg-background border px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition"
+                                >
+                                  <span className="font-medium">{s.name}</span>
+                                  <span className="text-muted-foreground ml-1">
+                                    ({s.customer_count})
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </>
                 ) : (
-                  <Input
-                    placeholder="e.g. Bright PM"
-                    value={newCompany}
-                    onChange={(e) => setNewCompany(e.target.value)}
-                  />
+                  <>
+                    <Input
+                      placeholder="e.g. Bright PM"
+                      value={newCompany}
+                      onChange={(e) => {
+                        setNewCompany(e.target.value);
+                        setNewCompanyCustom(e.target.value);
+                      }}
+                    />
+                    {companySuggestions.length > 0 && (
+                      <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs space-y-1">
+                        <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                          <Lightbulb className="h-3.5 w-3.5" />
+                          <span className="font-medium">
+                            Did you mean:
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {companySuggestions.map((s) => (
+                            <button
+                              key={s.name}
+                              type="button"
+                              onClick={() => applyCompanySuggestion(s.name)}
+                              className="rounded bg-background border px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition"
+                            >
+                              <span className="font-medium">{s.name}</span>
+                              <span className="text-muted-foreground ml-1">
+                                ({s.customer_count})
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </>

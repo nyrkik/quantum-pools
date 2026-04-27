@@ -520,6 +520,8 @@ For each migrated agent:
 
 ## Phase 6: `workflow_observer` agent
 
+> **Status: SHIPPED 2026-04-27.** All 15 rollout steps complete. Three v1 detectors live: `default_assignee`, `handler_mismatch`, `classification_override` (the third stages `inbox_rule` proposals; the others target `workflow_config`). Symmetric self-tuning in place — accept rate >70% lowers per-detector threshold, reject rate >30% raises it; floor at the detector's default. Dashboard widget on `/dashboard` gated by `workflow.review`. Daily 06:00 UTC cron. Sapphire dry-run produces zero false positives at v1 thresholds (sparse 8-day data hasn't crossed thresholds — by design, the system prefers silence over noise). Spec: `docs/ai-platform-phase-6.md` (remove on archive). Deferred to v1.x: TimeOfDayDetector + RejectionClusterDetector (need a non-proposal alert primitive that Phase 7 Sonar will introduce); weekly digest email.
+
 ### Why this phase exists
 
 This phase is where **the product learns the org**. Without it, we have data capture (Phase 1) and proposal infrastructure (Phase 2), but nothing that closes the loop from observation → meta-proposal. Rule 3 becomes real code here.

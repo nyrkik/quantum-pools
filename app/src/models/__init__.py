@@ -82,6 +82,7 @@ from src.models.email_integration import EmailIntegration, IntegrationType, Inte
 from src.models.autopay_attempt import AutopayAttempt
 from src.models.inbox_folder import InboxFolder, SYSTEM_FOLDERS
 from src.models.org_workflow_config import OrgWorkflowConfig
+from src.models.parsed_payment import ParsedPayment, ParsedPaymentStatus
 
 __all__ = [
     "Base",
@@ -150,4 +151,6 @@ __all__ = [
     "IntegrationStatus",
     "AutopayAttempt",
     "OrgWorkflowConfig",
+    "ParsedPayment",
+    "ParsedPaymentStatus",
 ]

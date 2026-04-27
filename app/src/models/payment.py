@@ -47,6 +47,15 @@ class Payment(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     recorded_by: Mapped[str | None] = mapped_column(String(200))
 
+    # Phase 1 payment reconciliation: audit-trail link from a Payment
+    # back to the email it was extracted from. NULL for manually-entered
+    # or Stripe-webhook-sourced payments.
+    source_message_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("agent_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

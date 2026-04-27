@@ -49,8 +49,18 @@ class PaymentService:
         return list(result.scalars().all()), total
 
     async def create(self, org_id: str, **kwargs) -> Payment:
+        """Record a payment.
+
+        Status defaults to `completed`. Pass `status=PaymentStatus.pending`
+        for mailed-check notifications where the funds haven't arrived
+        yet — in that case `record_payment` is NOT called on the invoice
+        and customer balance is NOT decremented. Both happen later when
+        `mark_received()` flips the status to completed.
+        """
         customer_id = kwargs["customer_id"]
         invoice_id = kwargs.get("invoice_id")
+        # Pop status so it doesn't collide with the explicit kwarg below.
+        status = kwargs.pop("status", PaymentStatus.completed.value)
 
         # Verify customer
         cust_result = await self.db.execute(
@@ -71,30 +81,84 @@ class PaymentService:
         payment = Payment(
             id=str(uuid.uuid4()),
             organization_id=org_id,
-            status=PaymentStatus.completed.value,
+            status=status,
             **kwargs,
         )
         self.db.add(payment)
 
-        # Update invoice balance
-        if invoice:
-            inv_svc = InvoiceService(self.db)
-            await inv_svc.record_payment(invoice, payment.amount)
+        is_pending = status == PaymentStatus.pending.value
 
-        # Update customer balance
-        customer.balance = round(customer.balance - payment.amount, 2)
+        # Update invoice balance + customer balance only when funds are
+        # confirmed received. Pending check notifications book the
+        # Payment row but leave invoice/balance alone until mark_received.
+        if not is_pending:
+            if invoice:
+                inv_svc = InvoiceService(self.db)
+                await inv_svc.record_payment(invoice, payment.amount)
+            customer.balance = round(customer.balance - payment.amount, 2)
 
         await self.db.flush()
 
         # Activation funnel — first-payment-received for this org.
+        # Skip on pending: only completed payments count as "received."
+        if not is_pending:
+            from src.services.events.activation_tracker import emit_if_first
+            await emit_if_first(
+                self.db,
+                "activation.first_payment_received",
+                organization_id=org_id,
+                entity_refs={
+                    "customer_id": customer_id,
+                    **({"invoice_id": invoice_id} if invoice_id else {}),
+                },
+                source="payment_service",
+            )
+
+        await self.db.refresh(payment)
+        return payment
+
+    async def mark_received(self, org_id: str, payment_id: str) -> Payment:
+        """Flip a `pending` Payment to `completed` — funds arrived. Bumps
+        invoice + customer balance the way create() would have on a
+        completed payment. Idempotent on already-completed payments."""
+        result = await self.db.execute(
+            select(Payment)
+            .where(Payment.id == payment_id, Payment.organization_id == org_id)
+            .options(selectinload(Payment.customer), selectinload(Payment.invoice))
+        )
+        payment = result.scalar_one_or_none()
+        if not payment:
+            raise NotFoundError("Payment")
+        if payment.status == PaymentStatus.completed.value:
+            return payment  # idempotent
+        if payment.status != PaymentStatus.pending.value:
+            raise ValidationError(
+                f"Cannot mark received: payment status is {payment.status!r}"
+            )
+
+        payment.status = PaymentStatus.completed.value
+
+        if payment.invoice_id:
+            inv_svc = InvoiceService(self.db)
+            invoice = await inv_svc.get(org_id, payment.invoice_id)
+            await inv_svc.record_payment(invoice, payment.amount)
+
+        if payment.customer:
+            payment.customer.balance = round(
+                (payment.customer.balance or 0) - payment.amount, 2,
+            )
+
+        await self.db.flush()
+
+        # Activation funnel: first completed payment counts.
         from src.services.events.activation_tracker import emit_if_first
         await emit_if_first(
             self.db,
             "activation.first_payment_received",
             organization_id=org_id,
             entity_refs={
-                "customer_id": customer_id,
-                **({"invoice_id": invoice_id} if invoice_id else {}),
+                "customer_id": payment.customer_id,
+                **({"invoice_id": payment.invoice_id} if payment.invoice_id else {}),
             },
             source="payment_service",
         )

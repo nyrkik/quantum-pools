@@ -867,6 +867,23 @@ async def process_incoming_email(
                 # reply manually from the thread sheet's inline composer.
                 logger.warning(f"email_reply proposal stage failed for msg {agent_msg.id}: {e}")
 
+        # Phase 1 payment reconciliation: parse billing-category emails
+        # against the parser registry and persist parsed_payments rows.
+        # The matcher (next step) scores them against open invoices and
+        # auto-creates Payments on unambiguous matches. Wrapped in
+        # try/except so a parser failure never breaks email ingest.
+        if category == "billing":
+            try:
+                from src.services.payments.ingest import ingest_billing_message
+                from src.services.payments.matcher import match_parsed_payments
+                parsed = await ingest_billing_message(db, msg=agent_msg)
+                if parsed:
+                    await match_parsed_payments(db, parsed_payments=parsed)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    f"payment ingest/match failed for msg {agent_msg.id}: {e}"
+                )
+
         # Low-confidence customer-match candidates dropped by the QC verifier
         # become review proposals at /inbox/matches (owner+admin).
         if unverified_candidates:

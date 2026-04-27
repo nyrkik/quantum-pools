@@ -24,9 +24,8 @@ The AI Platform tax is paid (Phase 5/6). Future hooks (auto-suggest target pH fo
 - Frontend `LSIGauge` component — color-coded radial showing -1.0 (corrosive) to +1.0 (scaling) with the calc'd value pinned. Mobile-first (40% of techs use phones).
 - Frontend `DosingCards` component — one card per parameter that needs adjustment, with chemical name, amount in field-friendly units (oz + cups for liquid, lb for granular), and the engine's safety notes.
 - Integration into `visit-readings.tsx`: as the tech enters/edits each reading, fire the dosing endpoint (debounced 300ms) and render cards below. LSI gauge above the form.
-- A tech's "this is wrong, I dosed X instead" override stamps an `agent_corrections` row with `agent_type="dosing_engine"` for future AI use. **No** AI generates dosing — corrections are pure human-source-of-truth annotations.
-
-### Out of scope (deferred to 3d.2.1+)
+### Out of scope (deferred to 3d.2.1+ or 3d.3)
+- **Tracking what the tech actually dosed (vs. what was recommended).** No `applied_doses` capture exists in the current schema. Correction stamping for `agent_type="dosing_engine"` requires this column + a UI to enter it. Both belong to Phase 3d.3 (guided workflows) — that's where "tech confirms each step" lives. 3d.2 is read-only display: here's what to dose. 3d.3 closes the loop with "here's what I dosed."
 - A full standalone `/chemistry/{bow_id}` page. Visit screen integration is the primary surface; standalone page is a v1.x convenience.
 - LSI history/trend chart (the build-plan lists it under Phase 4 portal — that's the right home).
 - Dosing recommendations reaching past pH/FC into LSI-driven calcium/alkalinity adjustments. Engine handles each parameter independently today; LSI-coupled multi-parameter solving is its own design problem.
@@ -34,14 +33,16 @@ The AI Platform tax is paid (Phase 5/6). Future hooks (auto-suggest target pH fo
 
 ## 4. Architecture
 
-### 4.1 LSI math (verify existing or add)
+### 4.1 LSI math + the temperature constant
 
 LSI = pH + TF + CF + AF − 12.1
-- TF: temperature factor (table lookup, °F)
+- TF: temperature factor (table lookup, °F) — **uses a hardcoded 75°F constant**
 - CF: calcium hardness factor (log10-based)
 - AF: alkalinity factor (log10-based)
 
-If `dosing_engine.py` already has it, expose it as a pure function `calculate_lsi(ph, temp_f, calcium_hardness, alkalinity, cyanuric_acid)`. If not, add it in this phase.
+`calculate_lsi(ph, calcium_hardness, alkalinity, cyanuric_acid)` — note no `temp_f` parameter. The function imports `WATER_TEMP_F_DEFAULT = 75.0` from a small config module. The LSI endpoint's `based_on` payload includes `temp_f: 75` so the UI can label it ("temp: 75°F (assumed)") — full transparency, no hidden assumption.
+
+If `chemical_readings.water_temp` is set on a row (legacy column, not currently surfaced as required), the LSI endpoint MAY use it instead of the constant. v1: ignore the column entirely; the constant is the only path. Per `feedback_water_temp_constant.md`: real-time temp isn't worth the UI tax.
 
 ### 4.2 API surface
 
@@ -71,53 +72,44 @@ frontend/src/components/chemistry/
 
 `visit-readings.tsx` integrates both above the existing readings form. As readings change, debounced POST fires and updates the cards.
 
-### 4.4 Correction stamping
+### 4.4 No dose-tracking column added in this phase
 
-When a tech logs a dosing amount different from what the engine recommended (current code path: `actual_dose` field on the visit), record an `AgentCorrection`:
-- `agent_type = "dosing_engine"`
-- `original_output` = engine's recommendation JSON
-- `corrected_output` = `{chemical, amount}` the tech actually used
-- `correction_type = "edit"`
-- `category = parameter` (e.g. `"ph"`)
-- `customer_id = visit.customer_id`
+`chemical_readings.recommendations` (existing JSONB) already stores the engine's output at save time — that's all 3d.2 writes. There's no `applied_doses` column for "what the tech actually used"; that's a Phase 3d.3 concern (guided workflows close the loop with apply-and-confirm steps).
 
-**Critical:** the AI consumes corrections, but **never** writes dosing values. The dosing engine is and stays deterministic. Future v1.x AI surfaces (e.g. "this property's pH falls fast — recommend higher target") observe corrections to surface *suggestions to humans*, not auto-doses.
+**Critical:** the AI consumes future corrections (when 3d.3 wires them), but **never** writes dosing values. The dosing engine is and stays deterministic. Future AI surfaces (e.g. "this property's pH falls fast — recommend higher target") observe corrections to surface *suggestions to humans*, not auto-doses.
 
 ## 5. Rollout steps
 
-1. Verify `calculate_lsi` exists in `dosing_engine.py`; add if missing. Unit tests for the formula against known good values (NSF reference table).
-2. New `chemistry.py` API router with the 2 endpoints. Tests for each (happy path + 404 + bad-input).
-3. Frontend `LSIGauge` component + visual tests (vitest). Color thresholds: ≤-0.3 red, -0.3..-0.1 amber, -0.1..+0.1 green, +0.1..+0.3 amber, >+0.3 red.
+1. Verify `calculate_lsi(ph, calcium_hardness, alkalinity, cyanuric_acid)` exists in `dosing_engine.py`; add if missing, importing `WATER_TEMP_F_DEFAULT = 75.0` from a tiny config module. Unit tests for the formula against known good values (NSF reference table).
+2. New `chemistry.py` API router with the 2 endpoints. Tests for each (happy path + 404 + bad-input). `/lsi` returns `based_on.temp_f = 75` so the UI can label the assumption.
+3. Frontend `LSIGauge` component + visual tests (vitest). **3-band coloring**: < -0.3 red (corrosive), -0.3 to +0.3 green (balanced), > +0.3 red (scaling). Renders the value + classification; small caption "temp: 75°F (assumed)" at the bottom for transparency.
 4. Frontend `DosingCards` component + visual tests. Renders engine output verbatim — no client-side reformatting beyond unit display.
 5. Wire both into `visit-readings.tsx` with a 300ms debounce on reading changes. Empty state when no readings yet.
-6. Correction stamping: on visit save, if `actual_dose` (or equivalent) differs from engine recommendation, stage an AgentCorrection. Tests cover the diff comparator.
-7. Update `docs/event-taxonomy.md` if any new events emit (probably none — endpoints are read-only/calculator). Update build-plan.md to mark 3d.2 items checked.
-8. Mobile audit: open the visit screen on a phone (320px width), verify gauge readable, cards stack cleanly, debounced calc doesn't lag entry.
+6. Update build-plan.md to mark 3d.2 items checked. (No new events emit — endpoints are read-only/calculator.)
+7. Mobile audit: open the visit screen on a phone (320px width), verify gauge readable, cards stack cleanly, debounced calc doesn't lag entry.
 
 ## 6. Definition of done
 
-- [ ] `calculate_lsi` exists in `dosing_engine.py` with unit tests covering 6+ reference values from the standard table.
-- [ ] `/v1/chemistry/water-features/{bow_id}/lsi` and `/v1/chemistry/water-features/{bow_id}/dosing` registered + tested.
-- [ ] `LSIGauge` renders the value with correct color band; vitest covers the 5 thresholds.
+- [ ] `calculate_lsi(ph, calcium_hardness, alkalinity, cyanuric_acid)` exists in `dosing_engine.py` with unit tests covering 4+ reference values from the standard table at the 75°F constant.
+- [ ] `/v1/chemistry/water-features/{bow_id}/lsi` and `/v1/chemistry/water-features/{bow_id}/dosing` registered + tested. `/lsi` payload includes `based_on.temp_f = 75`.
+- [ ] `LSIGauge` renders the value with correct 3-band color (red/green/red); vitest covers the 3 thresholds + boundary edges.
 - [ ] `DosingCards` renders engine output 1:1; missing-parameter rows show "OK" rather than empty.
 - [ ] `visit-readings.tsx` shows gauge + cards reactively; debounce verified.
-- [ ] Correction stamping fires on visit save when actual ≠ recommended; AgentCorrection rows visible in `/v1/learning/corrections?agent_type=dosing_engine`.
 - [ ] R5 + R7 audits clean.
 - [ ] Mobile audit (320px) passes — gauge readable, cards stack, no horizontal scroll.
 
 ## 7. Estimated scope
 
-3–5 working days:
+2.5–4 working days (down from 3–5 after deferring correction stamping to 3d.3):
 - LSI math + tests: 0.5 day (mostly verification; if missing, 1 day)
 - 2 API endpoints + tests: 0.5 day
 - LSIGauge component + tests: 0.5 day
 - DosingCards component + tests: 0.5 day
 - visit-readings integration + debounce: 0.5–1 day
-- Correction stamping + tests: 0.5 day
 - Mobile audit + polish: 0.5 day
 
-## 8. Open questions
+## 8. Resolved decisions (was open questions)
 
-- **Where does temp_f come from?** Tech enters water temp on the reading? Auto-pull from a property field? Default 78°F? Spec assumes reading carries `water_temp_f` — verify the model.
-- **Does the visit save flow currently capture `actual_dose` per parameter?** If not, that's a small schema addition (likely a JSONB column on `Visit` keyed by parameter). Either Phase 3d.2 or deferred to 3d.3.
-- **Should the 5-class LSI gauge use a 3-class color set instead?** Two-amber-bands risks ambiguity. Test in mobile audit.
+- **Water temp:** hardcoded 75°F constant; no per-reading entry, no per-property override v1. Resolved 2026-04-27 — see `memory/feedback_water_temp_constant.md`. Real-time temp isn't worth the UI tax for the precision a coarsely-banded gauge exposes.
+- **Tech-actually-dosed capture:** deferred to Phase 3d.3 (guided workflows). 3d.2 is read-only "here's what to dose"; 3d.3 closes the loop with apply-and-confirm. No `applied_doses` column added in this phase.
+- **LSI gauge banding:** 3-band (red/green/red), not 5-band. Industry standard, less ambiguous, and amber-without-different-action is cosmetic.

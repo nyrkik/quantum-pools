@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronUp, Loader2, Check, Camera, Sparkles } from "lucide-react";
 import type { VisitWaterFeature, VisitReading, LastReadings } from "@/types/visit";
+import { LSIGauge } from "@/components/chemistry/LSIGauge";
+import { DosingCards, type DosingRecord } from "@/components/chemistry/DosingCards";
 
 interface VisitReadingsProps {
   visitId: string;
@@ -95,6 +97,63 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
   };
 
   const lastForWf = lastReadings[activeWfId] || {};
+
+  // ---- Phase 3d.2: live LSI + dosing recommendations ---------------------
+  // As the tech enters/edits readings, hit the chemistry endpoint with a
+  // 300ms debounce and show the gauge + cards below. No DB write — the
+  // visit save flow remains the canonical store. Dosing engine is pure
+  // determinism; this is just live preview.
+  type DosingResponse = {
+    dosing: DosingRecord[];
+    lsi: { value: number; classification: "corrosive" | "balanced" | "scaling"; based_on: { temp_f: number } } | null;
+  };
+  const [chemistry, setChemistry] = useState<DosingResponse | null>(null);
+  const activeWf = waterFeatures.find((wf) => wf.id === activeWfId);
+  const poolGallons = activeWf?.pool_gallons ?? null;
+
+  useEffect(() => {
+    if (!activeWfId || !poolGallons || poolGallons <= 0) {
+      setChemistry(null);
+      return;
+    }
+    const numFor = (k: string) => {
+      const raw = values[k];
+      if (raw === undefined || raw === null || raw === "") return null;
+      const n = parseFloat(raw);
+      return Number.isFinite(n) ? n : null;
+    };
+    const body: Record<string, number | null> = {
+      pool_gallons: poolGallons,
+      ph: numFor("ph"),
+      free_chlorine: numFor("free_chlorine"),
+      combined_chlorine: numFor("combined_chlorine"),
+      alkalinity: numFor("alkalinity"),
+      calcium_hardness: numFor("calcium_hardness"),
+      cyanuric_acid: numFor("cya"),
+      phosphates: numFor("phosphates"),
+    };
+    // Skip the call if every reading field is empty — nothing to compute.
+    const hasAny = Object.entries(body).some(
+      ([k, v]) => k !== "pool_gallons" && v !== null,
+    );
+    if (!hasAny) {
+      setChemistry(null);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const res = await api.post<DosingResponse>(
+          `/v1/chemistry/water-features/${activeWfId}/dosing`,
+          body,
+        );
+        setChemistry(res);
+      } catch {
+        // Non-fatal — preview just disappears, form still works.
+        setChemistry(null);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [activeWfId, poolGallons, values]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -227,6 +286,21 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
               })}
             </div>
           )}
+
+          {/* LSI gauge + dosing cards (live, debounced; renders only
+              when there's enough input to compute). */}
+          {chemistry && chemistry.lsi ? (
+            <div className="flex justify-center pt-1">
+              <LSIGauge
+                value={chemistry.lsi.value}
+                classification={chemistry.lsi.classification}
+                caption={`temp: ${chemistry.lsi.based_on.temp_f}°F (assumed)`}
+              />
+            </div>
+          ) : null}
+          {chemistry && chemistry.dosing.length > 0 ? (
+            <DosingCards recommendations={chemistry.dosing} />
+          ) : null}
 
           {/* Scan strip control */}
           <div className="flex items-center gap-2">

@@ -188,13 +188,14 @@ _Priority: CRITICAL — table stakes features missing from current build_
 - [x] Frontend: WF tiles on property detail with progressive disclosure
 - [ ] Separate billing rates per body of water (rate allocation exists but not fully wired)
 
-### 3d.2 LSI Calculator & Dosing Engine — PARTIAL
-- [x] `dosing_engine.py` exists with LSI calculation and dosing formulas
+### 3d.2 LSI Calculator & Dosing Engine — COMPLETE (2026-04-27)
+- [x] `dosing_engine.calculate_dosing` with industry-standard formulas
+- [x] `dosing_engine.calculate_lsi` with hardcoded 75°F constant (per `memory/feedback_water_temp_constant.md` — real-time temp not worth the UI tax)
 - [x] DeepBlue `_exec_dosing()` tool provides conversational dosing guidance
-- [ ] Standalone API endpoints (`/chemistry/{bow_id}/lsi`, `/chemistry/{bow_id}/dosing`)
-- [ ] Frontend LSI gauge visualization
-- [ ] Frontend dosing recommendation cards
-- [ ] Mobile-friendly tech field entry flow
+- [x] API endpoints `/v1/chemistry/water-features/{bow_id}/{lsi,dosing}` — see `docs/phase-3d-2-spec.md`
+- [x] `LSIGauge` component — 3-band semicircle (red/green/red), pure SVG, mobile-first
+- [x] `DosingCards` component — engine output 1:1, status-driven left border + icon
+- [x] Mobile-friendly tech field entry — `visit-readings.tsx` shows live LSI gauge + dosing cards (300ms debounced) above the form. Test strip vision (shipped 2026-04-26 in `66c9fd6`) already covers entry input.
 
 ### 3d.3 Guided Workflows & Service Checklists — PARTIAL
 - [x] `ServiceChecklistItem` model (org-scoped checklist templates)

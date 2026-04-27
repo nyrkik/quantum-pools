@@ -874,6 +874,19 @@ async def process_incoming_email(
             if result.get("_property_address") and not thread_obj.property_address:
                 thread_obj.property_address = result["_property_address"]
 
+            # Promise tracker (2026-04-27): if THIS inbound is a follow-up
+            # promise from a customer, set the awaiting-reply timer. If
+            # the thread was already awaiting and this inbound is NOT a
+            # promise, clear the timer (the customer responded normally,
+            # the wait is over). See `docs/promise-tracker-spec.md`.
+            from datetime import timedelta
+            if sender_is_customer and _is_followup_promise(body or ""):
+                thread_obj.awaiting_reply_until = (
+                    datetime.now(timezone.utc) + timedelta(days=7)
+                )
+            elif thread_obj.awaiting_reply_until is not None:
+                thread_obj.awaiting_reply_until = None
+
         # Inherit case_id from thread if it already has one (don't create cases from emails)
         case_id = thread_obj.case_id if thread_obj else None
 

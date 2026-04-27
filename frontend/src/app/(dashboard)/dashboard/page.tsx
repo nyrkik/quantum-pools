@@ -30,6 +30,7 @@ import type { AgentAction, ServiceCase } from "@/types/agent";
 import { CasesAnnouncement } from "@/components/layout/cases-announcement";
 import { useDeepBlue } from "@/components/deepblue/deepblue-provider";
 import { WorkflowSuggestionsWidget } from "@/components/workflow/WorkflowSuggestionsWidget";
+import { AwaitingReplyWidget } from "@/components/dashboard/awaiting-reply-widget";
 
 interface DashboardData {
   // My stuff
@@ -174,6 +175,9 @@ export default function DashboardPage() {
           {data.openCases.length > 0 ? ` · ${data.openCases.length} open case${data.openCases.length > 1 ? "s" : ""}` : ""}
         </p>
       </div>
+
+      {/* Awaiting customer reply (promise tracker) */}
+      <AwaitingReplyWidget />
 
       {/* Phase 6: workflow_observer suggestions (no-op for users without workflow.review) */}
       <WorkflowSuggestionsWidget />

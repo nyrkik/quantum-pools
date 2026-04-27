@@ -18,6 +18,10 @@ from src.api.v1.dimensions import router as dimensions_router
 from src.api.v1.chemical_costs import router as chemical_costs_router
 from src.api.v1.chemistry import router as chemistry_router
 from src.api.v1.reconciliation import router as reconciliation_router
+from src.api.v1.awaiting_reply import (
+    inbox_router as awaiting_reply_inbox_router,
+    admin_threads_router as awaiting_reply_admin_router,
+)
 from src.api.v1.inspection import router as inspection_router
 from src.api.v1.billing import router as billing_router
 from src.api.v1.service_tiers import router as service_tiers_router
@@ -74,6 +78,8 @@ api_router.include_router(dimensions_router)
 api_router.include_router(chemical_costs_router)
 api_router.include_router(chemistry_router)
 api_router.include_router(reconciliation_router)
+api_router.include_router(awaiting_reply_inbox_router)
+api_router.include_router(awaiting_reply_admin_router)
 api_router.include_router(inspection_router)
 api_router.include_router(billing_router)
 api_router.include_router(service_tiers_router)

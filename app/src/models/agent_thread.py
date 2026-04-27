@@ -97,6 +97,14 @@ class AgentThread(Base):
     )
     primary_owner_email: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Promise tracker: when a customer says "I'll get back to you" the
+    # orchestrator sets this to NOW() + 7 days. A subsequent inbound
+    # clears it. Dashboard widget surfaces threads where this <= NOW().
+    # See `docs/promise-tracker-spec.md`.
+    awaiting_reply_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -66,6 +66,13 @@ class AgentProposal(Base):
     # in `src/services/proposals/creators/<entity_type>.py`.
     proposed_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float)
+    # Persistent natural-language summary the staging agent supplied
+    # (e.g. "[default_assignee] 12 of 14 jobs went to Brian"). Forwarded
+    # to AgentCorrection.input_context on resolve. Used by Phase 6
+    # workflow_observer for per-detector threshold tuning, but
+    # general-purpose for any agent that wants a breadcrumb that
+    # survives the request cycle.
+    input_context: Mapped[str | None] = mapped_column(Text)
 
     # State machine.
     status: Mapped[str] = mapped_column(

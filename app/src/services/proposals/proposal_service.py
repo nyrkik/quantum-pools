@@ -244,11 +244,8 @@ class ProposalService:
             proposed_payload=proposed_payload,
             confidence=confidence,
             status=STATUS_STAGED,
+            input_context=input_context,
         )
-        # Stash input_context on the model via a transient attr — we use
-        # it on resolve to feed the learning signal. Not persisted.
-        p._input_context = input_context  # type: ignore[attr-defined]
-
         self.db.add(p)
         await self.db.flush()
 
@@ -306,7 +303,7 @@ class ProposalService:
             entity_type=p.entity_type,
             original_payload=p.proposed_payload,
             corrected_payload=None,
-            input_context=getattr(p, "_input_context", None),
+            input_context=p.input_context,
             customer_id=self._extract_customer_id(p.proposed_payload),
             source_id=p.id,
         )
@@ -366,7 +363,7 @@ class ProposalService:
             entity_type=p.entity_type,
             original_payload=p.proposed_payload,
             corrected_payload=edited_payload,
-            input_context=getattr(p, "_input_context", None),
+            input_context=p.input_context,
             customer_id=self._extract_customer_id(edited_payload),
             source_id=p.id,
         )
@@ -407,7 +404,7 @@ class ProposalService:
             entity_type=p.entity_type,
             original_payload=p.proposed_payload,
             corrected_payload=None,
-            input_context=getattr(p, "_input_context", None),
+            input_context=p.input_context,
             customer_id=self._extract_customer_id(p.proposed_payload),
             source_id=p.id,
         )
@@ -440,7 +437,7 @@ class ProposalService:
             entity_type=p.entity_type,
             original_payload=p.proposed_payload,
             corrected_payload=None,
-            input_context=getattr(p, "_input_context", None),
+            input_context=p.input_context,
             customer_id=self._extract_customer_id(p.proposed_payload),
             source_id=p.id,
         )

@@ -209,11 +209,21 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversat
   };
 
   const handleConfirm = async () => {
+    const proposalId = preview.proposal_id as string | undefined;
+    if (!proposalId) {
+      // Old preview without a proposal_id — should never happen post-
+      // Phase 2 Step 9; surface explicitly so we don't silent-fail.
+      toast.error("Cannot create case: proposal_id missing from tool output");
+      return;
+    }
     setSaving(true);
     try {
       const res = await api.post<{ case_id: string; case_number: number; title: string }>(
         "/v1/deepblue/confirm-create-case",
         {
+          proposal_id: proposalId,
+          // Legacy fields (server uses staged proposal as authoritative,
+          // but pass through for parity with the old contract):
           title: preview.title,
           customer_id: customerId,
           billing_name: billingName,
@@ -224,8 +234,10 @@ function CreateCaseCard({ preview, stale = false, isLastOfType = true, conversat
       setCaseResult(res);
       setSaved(true);
       toast.success(`Case #${res.case_number} created`);
-    } catch {
-      toast.error("Failed to create case");
+    } catch (err) {
+      // Surface the real error so the next FB-54-style report has
+      // something actionable instead of "Failed to create case."
+      toast.error((err as Error).message || "Failed to create case");
     } finally {
       setSaving(false);
     }

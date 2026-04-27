@@ -297,6 +297,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/event-taxonomy.md` | Canonical catalog of event types for `platform_events`. Every new event added to code requires updating this doc in the same PR. Phase 0 of ai-platform-plan. **Lives as long as platform_events does** (not a "remove when complete" doc — permanent reference). |
 | `docs/ai-platform-phase-3.md` | Phase 3 implementation spec — inbox summarizer + V2 inbox redesign. Shipped on Sapphire 2026-04-19; keep while Sapphire is the sole dogfood org. **Remove when Phase 3 GA'd to all orgs.** |
 | `docs/ai-platform-phase-6.md` | Phase 6 refinement spec — `workflow_observer` agent. Daily per-org scan over `platform_events` + proposal outcomes; 3 v1 detectors stage meta-proposals (`workflow_config` + `inbox_rule`) for admin review on a dashboard widget. Anti-spam discipline (threshold + sample size + dedup + mute list + self-tuning via AgentLearningService). **Remove when Phase 6 shipped + archived.** |
+| `docs/phase-3d-2-spec.md` | Phase 3d.2 refinement spec — LSI gauge + dosing recommendation cards on the visit-readings screen. New `/v1/chemistry/water-features/{bow_id}/{lsi,dosing}` endpoints; LSIGauge + DosingCards components. Dosing engine stays deterministic — corrections feed AgentLearningService but AI never writes dosing values. **Remove when 3d.2 shipped + archived.** |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |

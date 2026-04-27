@@ -90,11 +90,11 @@ Work through in order. Check off as completed.
 
 > Claude can do all Cloudflare DNS changes via API if Brian confirms the API key from `memory/sapphire-recovery-in-progress.md` still works.
 
-- [ ] **4.1** Lower MX TTL on current Cloudflare MX records to 3600 (1 hour) via Cloudflare API. Wait ≥24h before cutover to shorten the dual-routing window.
-- [ ] **4.2** Generate Google DKIM: admin.google.com → Apps → Google Workspace → Gmail → Authenticate email → Generate new record (2048-bit). Copy the TXT value.
-- [ ] **4.3** Publish DKIM in Cloudflare: TXT record host `google._domainkey`, value from step 4.2. Wait 1 hour, then click **Start authentication** in Workspace.
-- [ ] **4.4** Update SPF in Cloudflare: replace `v=spf1 include:spf.mtasv.net include:_spf.mx.cloudflare.net ~all` with `v=spf1 include:_spf.google.com include:spf.mtasv.net ~all`.
-- [ ] **4.5** Cutover MX in Cloudflare: delete the three `route*.mx.cloudflare.net` records; add Google MX:
+- [x] **4.1** ~~Lower MX TTL~~ — done; cutover already executed (see 4.5).
+- [x] **4.2** ~~Generate Google DKIM~~ — done; selector `google` published, passing in the wild via Microsoft DMARC report 2026-04-26 (verified `selector=google d=sapphire-pools.com result=pass` on Gmail-originated outbound).
+- [x] **4.3** ~~Publish DKIM in Cloudflare~~ — done; verified by DMARC report.
+- [x] **4.4** ~~Update SPF~~ — done; live record is `v=spf1 include:_spf.google.com include:spf.mtasv.net ~all` (verified 2026-04-26 via dig).
+- [x] **4.5** Cutover MX in Cloudflare — done; live MX (verified 2026-04-26 via dig) is pure Google:
 
     | Priority | Mail server |
     |---|---|
@@ -104,27 +104,37 @@ Work through in order. Check off as completed.
     | 10 | ALT3.ASPMX.L.GOOGLE.COM |
     | 10 | ALT4.ASPMX.L.GOOGLE.COM |
 
-- [ ] **4.6** Disable Cloudflare Email Routing on the zone (dashboard or API) — stops the managed-mode path.
-- [ ] **4.7** DMARC stays at `p=none` for now. Revisit after 2 weeks of clean reports.
+- [x] **4.6** ~~Disable Cloudflare Email Routing on the zone~~ — fully cleaned up 2026-04-26: Email Routing engine disabled, 4 custom address rules deleted, destination address `sapphpools@gmail.com` deleted, catch-all action set to `Drop`. Only one zone on the account so nothing else depends on these. Cloudflare email side is fully retired.
+- [x] **4.7** DMARC stays at `p=none` — current state. As of 2026-04-26 also reporting via Postmark DMARC monitor (`re+o1sgzd6zfud@dmarc.postmarkapp.com` as primary `rua`, pm.me as secondary). See `memory/sapphire_dmarc_monitor.md` + `memory/notify_watchdog.md`. Revisit `p=quarantine` after 2 weeks of clean reports + Phase 8.1a resolved.
 
 ### Phase 5 — Verify new inbound flow
 
-- [ ] **5.1** From a personal account, send a test to `contact@sapphire-pools.com`. Should land in Workspace `brian@` Gmail inbox within 1–2 minutes. "Show original" → confirm Received-from Google, DKIM pass, SPF pass.
-- [ ] **5.2** Repeat test to each alias — `kim@`, `chance@`, `shane@`, `accounting@`, `info@`, `sales@`, `support@`, `brian@`. All should land in the same inbox. (Skip `noreply@` — reserved, not in use.)
-- [ ] **5.3** Reply from Gmail using the "Send mail as" dropdown — verify the recipient sees the correct from-address (not `brian@`).
-- [ ] **5.4** External delivery check: send from Gmail to a personal account on a different provider. Confirm DKIM + SPF pass at the recipient side (check "Show original").
+- [x] **5.1** ~~Inbound test~~ — implicitly validated; mail flow has been live for days, customers are replying, watchdog probe email sent today reached `brian@sapphire-pools.com` (Postmark return code 0).
+- [ ] **5.2** Per-alias spot check — not formally executed; aliases delivered fine in production but no individual test pass on file. **Defer to Phase 7.1a final-verification audit.**
+- [ ] **5.3** Reply via "Send mail as" — not formally executed. Real outbound goes through QP, not raw Gmail Send-mail-as, so this is mostly for the rare case Brian/Kim reply directly from Gmail. Defer to 7.1a audit.
+- [x] **5.4** ~~External delivery check~~ — implicitly validated; today's DMARC report shows DKIM + SPF passing on outbound to blvdresidential.com, westcal.net, newportpacific.com, conam.us.
 
 ### Phase 6 — Reconnect QP to the new mailbox
 
-- [ ] **6.1** QP → Inbox → Integrations (`/inbox/integrations`) → remove the existing Gmail OAuth integration pointed at `sapphpools@gmail.com`.
-- [ ] **6.2** Add a new Gmail integration. Authorize as `brian@sapphire-pools.com` (Workspace). Confirm OAuth scopes approved.
-- [ ] **6.3** Trigger initial sync / backfill. QP should pull recent inbound (new mail landing since MX cutover) plus whatever backfill window QP uses. Historical Zoho mail stays in Gmail under labels — QP may or may not ingest it depending on backfill window; fine either way since QP can search Gmail directly via future features if needed.
-- [ ] **6.4** Remove the QP managed-mode integration entry (`inbox-sapphire@mail.quantumpoolspro.com` or similar) if it still exists. Managed mode is now off.
-- [ ] **6.5** End-to-end test: customer sends to `contact@sapphire-pools.com` → lands in Workspace Gmail → QP ingests within polling window → draft is generated → send reply from QP → verify the reply appears in Gmail Sent folder and reaches the customer.
+- [x] **6.1** ~~Remove old `sapphpools@gmail.com` integration~~ — verified 2026-04-26: only one `email_integrations` row for Sapphire org, type `gmail_api`, account `brian@sapphire-pools.com`, status `connected`, `is_primary=True`. The old `sapphpools@gmail.com` row no longer exists.
+- [x] **6.2** ~~Add Gmail integration for `brian@sapphire-pools.com`~~ — done; `last_sync_at` is recent.
+- [x] **6.3** ~~Trigger initial sync~~ — done; QP is actively syncing.
+- [x] **6.4** ~~Remove managed-mode integration~~ — done; only the gmail_api row exists for the org.
+- [ ] **6.5** End-to-end customer-flow test — formally not run, but is being executed in production (customer mail flowing in/out via QP daily). Defer to 7.1a audit.
 
 ### Phase 7 — Decommission Zoho and old pullers
 
-- [ ] **7.1** **Legacy-cruft cleanup inside the converted Workspace mailbox** (brian@sapphire-pools.com Gmail = old sapphpools@gmail.com). This account is a 10+ year personal Gmail that got Workspace-ified; every Gmail surface below needs an audit pass, not just Accounts. Settings → :
+- [x] **7.1** ~~Legacy-cruft cleanup inside the converted Workspace mailbox~~ — done 2026-04-26. Audit via Gmail API + manual cleanup confirmed:
+    - Send-mail-as: 8 aliases all `treatAs=alias` and verified, no Bluehost/Zoho SMTP entries (those were already deleted 2026-04-21).
+    - brian@ POP3 puller: deleted.
+    - Filters: reviewed and pruned.
+    - Forwarding: no addresses configured, auto-forwarding off.
+    - IMAP + POP: disabled at the Workspace admin level (admin.google.com → Apps → Google Workspace → Gmail → End User Access). User-level POP was already off.
+    - Stale labels (`[Imap]/Archive`, `_Archive`, `legacy-gmail`): left as-is, purely cosmetic.
+
+    Original audit checklist preserved below for reference.
+
+    Original (pre-2026-04-26): This account is a 10+ year personal Gmail that got Workspace-ified; every Gmail surface below needs an audit pass, not just Accounts. Settings → :
     - **Accounts → Check mail from other accounts**: delete the `brian@sapphire-pools.com` POP3 puller. (Phase 4 cutover makes it redundant — Zoho is being shut down.) Kept running until Phase 4 as a safety net per 2026-04-21 decision.
     - **Accounts → Send mail as**: should end up with only the 8 Phase-1.5 aliases (`kim`, `chance`, `shane`, `contact`, `accounting`, `info`, `sales`, `support`) + the un-deletable legacy `sapphpools@gmail.com` entry. Delete anything else. `sapphpools@gmail.com` is Google-managed and un-deletable via Gmail settings.
     - **Filters and Blocked Addresses**: review every filter. Delete any referencing Zoho (`mx.zoho.com`, `imap.zoho.com`), Bluehost (`bluehost.com`, `box5721`), old POP3 puller labels, or otherwise-obsolete routing. Keep only filters that will still be valid post-migration.
@@ -137,15 +147,20 @@ Work through in order. Check off as completed.
 - [ ] **7.3** mailadmin.zoho.com → Domains → `sapphire-pools.com` → Remove domain. (Or close the whole Zoho org if Sapphire is its only domain.)
 - [ ] **7.4** Zoho One apps — if the org uses any: CRM, Campaigns, Bookings, Desk, Sign, SalesIQ, etc. Remove domain from each, or close the Zoho One account outright.
 - [ ] **7.5** Revoke any remaining Zoho app passwords / OAuth tokens tied to Sapphire addresses.
-- [ ] **7.6** Disable the `sapphire-pools-email` Cloudflare Worker (leave deployed, just disabled — removes active reference without deleting code). Clear any Postmark inbound webhook URL config pointing at it. **Do NOT** touch the Postmark outbound sender token; QP transactional still uses it.
+- [x] **7.6** ~~Disable the `sapphire-pools-email` Cloudflare Worker~~ — Worker fully deleted 2026-04-26. Source preserved in git at `email-worker/` (deployable via `wrangler deploy` if ever needed). Postmark outbound sender token untouched.
 
 ### Phase 8 — Confirm and document
 
 - [ ] **8.1** Monitor the next DMARC aggregate report (24–48h after Zoho teardown). Confirm zero records from Zoho IP ranges (`136.143.x.x`, `165.22.x.x`, `204.141.32.0/21`).
-- [ ] **8.1a** **Identify + resolve the failing senders before tightening DMARC.** Multiple DMARC reports (MS 2026-04-13, Google 2026-04-17) show low-volume outbound traffic from `35.89.44.{33,35,39}` + `44.202.169.39`, all DKIM-fail-on-`default`-selector + SPF-softfail, to `conam.us` (ConAm Management, a Sapphire customer). Reverse-DNS resolved on 2026-04-21 — these are **NOT mystery AWS workloads**; they're `omta##.*.cloudfilter.net` = OpenSRS / Bluehost / Tucows shared-hosting mail-relay infrastructure. The likely cause is a still-active Bluehost (or OpenSRS-reseller) mailbox on `@sapphire-pools.com` that Brian has somewhere. Under `p=none` it's noise; under `p=quarantine`/`p=reject` the mail gets filtered or bounced.
-    - Investigate: active Bluehost hosting account with a sapphire-pools.com mailbox still configured? Automated integration with cached Bluehost SMTP creds (CRM, invoicing, property-mgmt portal)? Third-party service relaying on Sapphire's behalf?
-    - Search Brian's ~10y converted Workspace mailbox + billing records for "Bluehost" or "OpenSRS" activity. Log into any legacy Bluehost/hosting cPanel accounts, disable sapphire-pools.com email hosting.
-    - Once source is shut down OR added to SPF (if legitimate), DMARC reports should go clean within 1-2 aggregate cycles.
+- [x] **8.1a** ~~Identify + resolve cloudfilter.net senders~~ — **resolved 2026-04-21, verified 2026-04-26.**
+
+    **Root cause:** Bluehost cPanel email account for `contact@sapphire-pools.com` was set up 2024-08-23 (verified via QP DB — 22 Bluehost-related messages between 2024-08-21 and 2024-11-12). Brian configured a Gmail "Send mail as" entry that routed `contact@sapphire-pools.com` outbound through Bluehost's SMTP relay (which uses OpenSRS / cloudfilter.net infrastructure). Bluehost service was cancelled 2024-11-12 but the SMTP relay kept accepting connections from Gmail's cached send-as credentials — Bluehost/OpenSRS doesn't tear down SMTP infrastructure when accounts cancel. Every time Brian/Kim manually replied in the Gmail web UI to mail addressed to `contact@`, Gmail used that send-as → routed via Bluehost → DKIM-signed with `default` selector (not in DNS) → DMARC alignment fail.
+
+    **Fix:** During the 2026-04-21 cleanup pass, the obsolete Bluehost-SMTP send-as entries for `contact@` and `shane@` were deleted; the new Phase 1.5 send-as entries (8 aliases) all use "Treat as alias" → relay through Google Workspace → properly signed with `selector=google`.
+
+    **Verification:** Microsoft DMARC aggregate report covering 2026-04-22 / 2026-04-23 traffic (post-cleanup) shows zero cloudfilter.net records, all 10 records pass DKIM + SPF aligned. The cleanup and the clean report are causally linked.
+
+    **What's still required for Phase 8.2:** 2 weeks of continued clean DMARC reports as a confidence window. Postmark DMARC monitor (added 2026-04-26 per `memory/sapphire_dmarc_monitor.md`) will alert if cloudfilter.net or any other unaligned source reappears.
 - [ ] **8.2** After 2 weeks of clean DMARC reports **AND** step 8.1a resolved: raise DMARC to `p=quarantine` (can do `p=reject` after another 2 weeks if still clean).
 - [ ] **8.3** Update memory: delete `sapphire-recovery-in-progress.md` and `sapphire-workspace-downgrade-reminder.md`, replace with a short completion note (or the migration plan's final-state section suffices).
 - [ ] **8.4** Update `docs/sapphire-recovery-plan.md` with completion status or supersede.

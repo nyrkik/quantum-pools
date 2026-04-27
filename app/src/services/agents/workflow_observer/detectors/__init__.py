@@ -14,11 +14,19 @@ from src.services.agents.workflow_observer.agent import Detector
 from src.services.agents.workflow_observer.detectors.default_assignee import (
     DefaultAssigneeDetector,
 )
+from src.services.agents.workflow_observer.detectors.handler_mismatch import (
+    HandlerMismatchDetector,
+)
 
 
 DETECTORS: list[Detector] = [
     DefaultAssigneeDetector(),
+    HandlerMismatchDetector(),
 ]
 
 
-__all__ = ["DETECTORS", "DefaultAssigneeDetector"]
+__all__ = [
+    "DETECTORS",
+    "DefaultAssigneeDetector",
+    "HandlerMismatchDetector",
+]

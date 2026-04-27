@@ -115,6 +115,56 @@ def _glob_match(haystack: str, pattern: str) -> bool:
     return True
 
 
+class InvalidRuleError(ValueError):
+    """Raised when a rule body fails validation. Caller (router or
+    proposal creator) translates to the right surface (HTTP 400 or
+    proposal stage rejection)."""
+
+
+def validate_rule_body(conditions: Iterable[dict], actions: Iterable[dict]) -> None:
+    """Fail closed on unknown fields, action types, and field/value
+    mismatches that would silently never match. Raises InvalidRuleError.
+
+    Single source of truth — used by both the inbox-rules router and the
+    workflow_observer's inbox_rule proposal creator. Any new validation
+    rule belongs here, not in the caller.
+    """
+    cond_list = list(conditions)
+    action_list = list(actions)
+
+    for c in cond_list:
+        field = c.get("field") if isinstance(c, dict) else None
+        if not field or field not in ALL_CONDITION_FIELDS:
+            raise InvalidRuleError(
+                f"Unknown condition field {field!r}. "
+                f"Allowed: {sorted(ALL_CONDITION_FIELDS)}"
+            )
+        # Class-of-bug guard: `sender_domain` is the bare domain (no `@`),
+        # so any value containing `@` can never match. Caught the broken
+        # b0b2ce62 catch-all in the wild.
+        if field == "sender_domain":
+            raw = c.get("value")
+            vals = raw if isinstance(raw, list) else [raw]
+            bad = [v for v in vals if isinstance(v, str) and "@" in v]
+            if bad:
+                raise InvalidRuleError(
+                    "Condition field 'sender_domain' is the bare domain "
+                    "(no '@'). Use 'sender_email' for those values, or "
+                    f"strip the '@': {bad[:3]}"
+                )
+
+    for a in action_list:
+        atype = a.get("type") if isinstance(a, dict) else None
+        if not atype or atype not in ALL_ACTION_TYPES:
+            raise InvalidRuleError(
+                f"Unknown action type {atype!r}. "
+                f"Allowed: {sorted(ALL_ACTION_TYPES)}"
+            )
+
+    if not action_list:
+        raise InvalidRuleError("Rule must have at least one action")
+
+
 class InboxRulesService:
     """Single source of truth for sender/recipient pattern matching.
 
@@ -126,6 +176,50 @@ class InboxRulesService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    # ------------------------------------------------------------------
+    # Create — used by the API router AND the inbox_rule proposal creator
+    # so validation + priority assignment + insert all live in one path.
+    # ------------------------------------------------------------------
+
+    async def create_rule(
+        self,
+        *,
+        org_id: str,
+        conditions: list[dict],
+        actions: list[dict],
+        name: str | None = None,
+        priority: int | None = None,
+        is_active: bool = True,
+        created_by: str | None = None,
+    ) -> InboxRule:
+        """Validate, compute priority if absent, and insert the rule.
+        Caller commits."""
+        validate_rule_body(conditions, actions)
+
+        if priority is None:
+            max_priority = (await self.db.execute(
+                select(InboxRule.priority)
+                .where(InboxRule.organization_id == org_id)
+                .order_by(InboxRule.priority.desc())
+                .limit(1)
+            )).scalar()
+            priority = (max_priority or 0) + 10
+
+        import uuid as _uuid
+        rule = InboxRule(
+            id=str(_uuid.uuid4()),
+            organization_id=org_id,
+            name=name,
+            priority=priority,
+            conditions=conditions,
+            actions=actions,
+            is_active=is_active,
+            created_by=created_by,
+        )
+        self.db.add(rule)
+        await self.db.flush()
+        return rule
 
     # ------------------------------------------------------------------
     # Evaluation

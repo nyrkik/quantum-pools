@@ -20,3 +20,4 @@ from . import case_link  # noqa: F401
 from . import email_reply  # noqa: F401
 from . import customer_match_suggestion  # noqa: F401
 from . import workflow_config  # noqa: F401
+from . import inbox_rule  # noqa: F401

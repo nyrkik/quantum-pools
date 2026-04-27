@@ -24,6 +24,9 @@ from src.models.organization_user import OrgRole
 from src.services.inbox_rules_service import (
     ALL_ACTION_TYPES,
     ALL_CONDITION_FIELDS,
+    InboxRulesService,
+    InvalidRuleError,
+    validate_rule_body,
 )
 
 router = APIRouter(prefix="/inbox-rules", tags=["inbox-rules"])
@@ -58,37 +61,17 @@ class Action(BaseModel):
 
 
 def _validate_rule_body(conditions: list[Condition], actions: list[Action]) -> None:
-    """Fail closed on unknown fields, action types, and field/value
-    mismatches that would silently never match.
-    """
-    for c in conditions:
-        if c.field not in ALL_CONDITION_FIELDS:
-            raise HTTPException(
-                400, f"Unknown condition field '{c.field}'. "
-                     f"Allowed: {sorted(ALL_CONDITION_FIELDS)}"
-            )
-        # Class-of-bug guard: `sender_domain` is the bare domain (no `@`),
-        # so any value containing `@` can never match. Caught the broken
-        # b0b2ce62 catch-all in the wild — tell the user to use
-        # `sender_email` for those values, or strip the `@`.
-        if c.field == "sender_domain":
-            vals = c.value if isinstance(c.value, list) else [c.value]
-            bad = [v for v in vals if isinstance(v, str) and "@" in v]
-            if bad:
-                raise HTTPException(
-                    400,
-                    "Condition field 'sender_domain' is the bare domain "
-                    "(no '@'). Use 'sender_email' for these values, or strip "
-                    f"the '@': {bad[:3]}",
-                )
-    for a in actions:
-        if a.type not in ALL_ACTION_TYPES:
-            raise HTTPException(
-                400, f"Unknown action type '{a.type}'. "
-                     f"Allowed: {sorted(ALL_ACTION_TYPES)}"
-            )
-    if not actions:
-        raise HTTPException(400, "Rule must have at least one action")
+    """Thin wrapper: dispatches to the service-layer validator and
+    translates InvalidRuleError → HTTP 400. Validation logic lives in
+    InboxRulesService.validate_rule_body so the proposal creator and
+    this router share one source of truth."""
+    try:
+        validate_rule_body(
+            [c.model_dump() for c in conditions],
+            [a.model_dump() for a in actions],
+        )
+    except InvalidRuleError as e:
+        raise HTTPException(400, str(e))
 
 
 class RuleCreate(BaseModel):
@@ -326,37 +309,21 @@ async def create_rule(
     ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
     db: AsyncSession = Depends(get_db),
 ):
-    _validate_rule_body(body.conditions, body.actions)
-
-    # Default: append to the end. Pull the current max priority and add 10 so
-    # there's room for the user to drag a new rule above an existing one
-    # without re-numbering everything.
-    if body.priority is None:
-        max_priority = (
-            await db.execute(
-                select(InboxRule.priority)
-                .where(InboxRule.organization_id == ctx.organization_id)
-                .order_by(InboxRule.priority.desc())
-                .limit(1)
-            )
-        ).scalar()
-        priority = (max_priority or 0) + 10
-    else:
-        priority = body.priority
-
-    rule = InboxRule(
-        id=str(uuid.uuid4()),
-        organization_id=ctx.organization_id,
-        name=body.name,
-        priority=priority,
-        conditions=[c.model_dump() for c in body.conditions],
-        actions=[a.model_dump() for a in body.actions],
-        is_active=body.is_active,
-        created_by=(
-            f"{ctx.user.first_name} {ctx.user.last_name}".strip() or ctx.user.email
-        ),
-    )
-    db.add(rule)
+    try:
+        rule = await InboxRulesService(db).create_rule(
+            org_id=ctx.organization_id,
+            conditions=[c.model_dump() for c in body.conditions],
+            actions=[a.model_dump() for a in body.actions],
+            name=body.name,
+            priority=body.priority,
+            is_active=body.is_active,
+            created_by=(
+                f"{ctx.user.first_name} {ctx.user.last_name}".strip()
+                or ctx.user.email
+            ),
+        )
+    except InvalidRuleError as e:
+        raise HTTPException(400, str(e))
     await db.commit()
     await db.refresh(rule)
     return _to_response(rule)

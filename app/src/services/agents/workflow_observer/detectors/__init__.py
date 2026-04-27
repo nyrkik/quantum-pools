@@ -11,6 +11,9 @@ will append to DETECTORS as each lands.
 from __future__ import annotations
 
 from src.services.agents.workflow_observer.agent import Detector
+from src.services.agents.workflow_observer.detectors.classification_override import (
+    ClassificationOverrideDetector,
+)
 from src.services.agents.workflow_observer.detectors.default_assignee import (
     DefaultAssigneeDetector,
 )
@@ -22,6 +25,7 @@ from src.services.agents.workflow_observer.detectors.handler_mismatch import (
 DETECTORS: list[Detector] = [
     DefaultAssigneeDetector(),
     HandlerMismatchDetector(),
+    ClassificationOverrideDetector(),
 ]
 
 
@@ -29,4 +33,5 @@ __all__ = [
     "DETECTORS",
     "DefaultAssigneeDetector",
     "HandlerMismatchDetector",
+    "ClassificationOverrideDetector",
 ]

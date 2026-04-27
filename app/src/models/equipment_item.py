@@ -43,6 +43,11 @@ class EquipmentItem(Base):
         String(36), ForeignKey("equipment_items.id", ondelete="SET NULL")
     )
 
+    source_inspection_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("inspections.id", ondelete="SET NULL"), index=True
+    )
+    source_slot: Mapped[str | None] = mapped_column(String(50))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

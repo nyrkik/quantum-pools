@@ -20,6 +20,51 @@ from src.models.customer import Customer
 
 logger = logging.getLogger(__name__)
 
+def _norm(s: str | None) -> str:
+    return (s or "").strip().lower()
+
+
+def _parse_hp(s: str | None) -> float | None:
+    """Best-effort HP parse from inspection text like '1.5', '1 1/2 HP', '3HP'."""
+    if not s:
+        return None
+    s = str(s).strip().lower().replace("hp", "").strip()
+    if not s:
+        return None
+    # Handle fractional notation '1 1/2'
+    if "/" in s:
+        try:
+            parts = s.split()
+            if len(parts) == 2:
+                whole = float(parts[0])
+                num, denom = parts[1].split("/")
+                return whole + (float(num) / float(denom))
+            if len(parts) == 1 and "/" in parts[0]:
+                num, denom = parts[0].split("/")
+                return float(num) / float(denom)
+        except (ValueError, ZeroDivisionError):
+            return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_install_date(s: str | None):
+    """Best-effort date parse from inspection text. Returns date or None."""
+    if not s:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 VIOLATION_LABELS = {
     "1a": "Gate Self-Close/Latch", "1b": "Gate Hardware", "1c": "Emergency Exit Gate",
     "2a": "Pool Enclosure", "2b": "Non-Climbable Enclosure",
@@ -415,6 +460,11 @@ class InspectionService:
         facility.matched_at = datetime.now(timezone.utc)
         facility.organization_id = organization_id
         await self.db.flush()
+        # Auto-sync equipment to the newly matched property's primary WF
+        try:
+            await self.sync_equipment_to_bow(facility_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"auto sync_equipment_to_bow failed for facility {facility_id}: {e}")
         return facility
 
     async def auto_match_facilities(self, organization_id: str) -> dict:
@@ -539,6 +589,12 @@ class InspectionService:
         if matched > 0:
             await self.db.flush()
             logger.info(f"Auto-matched {matched} EMD facilities to properties")
+            for facility in unmatched:
+                if facility.matched_property_id:
+                    try:
+                        await self.sync_equipment_to_bow(facility.id)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"auto sync_equipment_to_bow failed for facility {facility.id}: {e}")
 
         return {"total_unmatched": len(unmatched), "matched": matched, "removed": removed, "details": matches_detail}
 
@@ -1328,8 +1384,18 @@ class InspectionService:
     # --- Sync equipment to WF ---
 
     async def sync_equipment_to_bow(self, facility_id: str) -> Optional[dict]:
-        """Copy latest EMD equipment data to the matched property's primary WF."""
+        """Copy latest EMD equipment data to the matched property's primary WF.
+
+        Two passes:
+          1) Pool specs (pool_gallons) onto the WaterFeature itself.
+          2) Per-piece equipment (pumps, filters, sanitizers, drains) into
+             `equipment_items`, with catalog matching via the
+             `equipment_resolver` agent. Idempotent on re-parse via
+             `(water_feature_id, source_inspection_id, source_slot)`.
+        """
         from src.models.water_feature import WaterFeature
+        from src.models.equipment_item import EquipmentItem
+        from src.services.equipment.resolver import resolve as resolve_catalog
 
         # Get facility with match
         result = await self.db.execute(
@@ -1339,17 +1405,21 @@ class InspectionService:
         if not facility or not facility.matched_property_id:
             return None
 
-        # Get latest equipment
+        # Get latest equipment (and the inspection row for source FK)
         equipment = await self.get_facility_equipment(facility_id)
         if not equipment:
             return None
 
-        # Get primary WF for the property
+        # Resolve the "primary" WF for the property. WaterFeature has no is_primary
+        # column today, so we pick the oldest pool first, then fall back to oldest WF.
         result = await self.db.execute(
-            select(WaterFeature).where(
-                WaterFeature.property_id == facility.matched_property_id,
-                WaterFeature.is_primary == True,
+            select(WaterFeature)
+            .where(WaterFeature.property_id == facility.matched_property_id)
+            .order_by(
+                (WaterFeature.water_type == "pool").desc(),
+                WaterFeature.created_at.asc(),
             )
+            .limit(1)
         )
         wf = result.scalar_one_or_none()
         if not wf:
@@ -1361,12 +1431,181 @@ class InspectionService:
             wf.pool_gallons = equipment.pool_capacity_gallons
             updated["pool_gallons"] = equipment.pool_capacity_gallons
 
+        # Pass 2: per-piece equipment items
+        org_id = wf.organization_id if hasattr(wf, "organization_id") else None
+        if not org_id:
+            # WF doesn't have org_id directly; fall back via property
+            result = await self.db.execute(
+                select(Property.organization_id).where(Property.id == wf.property_id)
+            )
+            org_id = result.scalar_one_or_none()
+
+        items_summary = await self._sync_equipment_items_from_inspection(
+            org_id=org_id,
+            wf=wf,
+            inspection_equipment=equipment,
+        )
+        if items_summary:
+            updated["equipment_items"] = items_summary
+
         await self.db.flush()
         return {"wf_id": wf.id, "updated_fields": updated}
 
+    async def _sync_equipment_items_from_inspection(
+        self,
+        *,
+        org_id: str,
+        wf,
+        inspection_equipment: InspectionEquipment,
+    ) -> dict:
+        """Create or update EquipmentItem rows from an InspectionEquipment record.
+
+        Returns a summary dict: {created, updated, skipped, slots: [...]}.
+        """
+        from src.models.equipment_item import EquipmentItem
+        from src.services.equipment.resolver import resolve as resolve_catalog
+        from src.services.equipment.brand_authority import authoritative_type
+        from src.services.equipment.brand_reassembler import reassemble as reassemble_brand
+
+        if not org_id:
+            logger.warning(
+                f"sync_equipment_items: missing org_id for wf={wf.id}; skipping items pass"
+            )
+            return {"created": 0, "updated": 0, "skipped": 0, "slots": []}
+
+        ie = inspection_equipment
+        inspection_id = ie.inspection_id
+
+        # (slot, equipment_type, system_group, brand, model, hp, install_date_str, notes_extra)
+        slot_specs = [
+            ("filter_pump_1", "pump", "filter", ie.filter_pump_1_make, ie.filter_pump_1_model, ie.filter_pump_1_hp, None, None),
+            ("filter_pump_2", "pump", "filter", ie.filter_pump_2_make, ie.filter_pump_2_model, ie.filter_pump_2_hp, None, None),
+            ("filter_pump_3", "pump", "filter", ie.filter_pump_3_make, ie.filter_pump_3_model, ie.filter_pump_3_hp, None, None),
+            ("jet_pump_1", "pump", "jet", ie.jet_pump_1_make, ie.jet_pump_1_model, ie.jet_pump_1_hp, None, None),
+            ("recirc_pump", "pump", "recirc", ie.rp_make, ie.rp_model, ie.rp_hp, None, None),
+            ("booster_pump", "pump", "booster", ie.bp_make, ie.bp_model, ie.bp_hp, None, None),
+            ("filter_1", "filter", None, ie.filter_1_make, ie.filter_1_model, None, None, ie.filter_1_type),
+            ("de_filter", "filter", None, ie.df_make, None, None, None, ie.df_type),
+            ("sanitizer_1", "sanitizer", None, None, ie.sanitizer_1_details, None, None, ie.sanitizer_1_type),
+            ("sanitizer_2", "sanitizer", None, None, ie.sanitizer_2_details, None, None, ie.sanitizer_2_type),
+            ("main_drain", "drain", None, None, ie.main_drain_model, None, ie.main_drain_install_date, ie.main_drain_type),
+            ("equalizer", "drain", "equalizer", None, ie.equalizer_model, None, ie.equalizer_install_date, None),
+        ]
+
+        # Pre-load existing rows for this (wf, inspection_id) for upsert
+        result = await self.db.execute(
+            select(EquipmentItem).where(
+                EquipmentItem.water_feature_id == wf.id,
+                EquipmentItem.source_inspection_id == inspection_id,
+            )
+        )
+        existing_by_slot = {row.source_slot: row for row in result.scalars().all()}
+
+        # Pre-load brand/model of MANUAL items on this WF for collision detection
+        result = await self.db.execute(
+            select(EquipmentItem).where(
+                EquipmentItem.water_feature_id == wf.id,
+                EquipmentItem.source_inspection_id.is_(None),
+            )
+        )
+        manual_items = result.scalars().all()
+        manual_keys = {(_norm(m.brand), _norm(m.model)) for m in manual_items if m.brand or m.model}
+
+        created = updated = skipped = 0
+        slots_touched: list[str] = []
+
+        for (slot, etype, sgroup, brand, model, hp, install_date_str, notes_extra) in slot_specs:
+            # Skip empty slots (no input data)
+            if not (brand or model):
+                continue
+
+            # Brand reassembly: PDF extractor sometimes splits a brand mid-word
+            # ("P" + "urex Triton CC" → "Purex Triton CC"). Stitch back before
+            # we use brand for matching/authority/catalog resolution.
+            reassembled = reassemble_brand(brand, model)
+            if reassembled is not None:
+                brand, model = reassembled
+
+            # Brand-authority override: industry-known brands that should never
+            # be in this slot get their type rewritten. If the override conflicts
+            # with the slot's nominal type AND a real slot for the override type
+            # already produced a row this run, skip — the other slot already
+            # captured the entity (likely a PDF extractor double-capture).
+            override_type = authoritative_type(brand)
+            if override_type and override_type != etype:
+                # Detect double-capture: another slot of the override type
+                # already represents this entity (matches by brand text in any
+                # of the other slot's brand/model/notes-extra fields).
+                bn = _norm(brand)
+                same_entity_other_slot = False
+                for (slot_other, etype_other, _sg2, b2, m2, _hp2, _id2, nx2) in slot_specs:
+                    if slot_other == slot or etype_other != override_type:
+                        continue
+                    haystack = " ".join([_norm(b2), _norm(m2), _norm(nx2)])
+                    if bn and (bn in haystack or _norm(b2) == bn):
+                        same_entity_other_slot = True
+                        break
+                if same_entity_other_slot:
+                    skipped += 1
+                    continue
+                # Otherwise: rewrite type/group, keep the row but in the right category.
+                etype = override_type
+                sgroup = None
+
+            # Manual-entry collision: same brand+model already entered manually = skip
+            key = (_norm(brand), _norm(model))
+            if key in manual_keys:
+                skipped += 1
+                continue
+
+            # Resolve catalog
+            resolver = await resolve_catalog(
+                self.db, org_id=org_id, brand=brand, model=model, hp=hp, equipment_type=etype,
+            )
+
+            # Parse hp to float if possible
+            hp_float = _parse_hp(hp)
+            install_date_parsed = _parse_install_date(install_date_str)
+
+            existing = existing_by_slot.get(slot)
+            if existing:
+                # Update in place
+                existing.brand = brand or existing.brand
+                existing.model = model or existing.model
+                existing.horsepower = hp_float if hp_float is not None else existing.horsepower
+                existing.install_date = install_date_parsed or existing.install_date
+                existing.system_group = sgroup or existing.system_group
+                if notes_extra:
+                    existing.notes = notes_extra
+                if resolver.catalog_equipment_id:
+                    existing.catalog_equipment_id = resolver.catalog_equipment_id
+                updated += 1
+            else:
+                item = EquipmentItem(
+                    id=str(uuid.uuid4()),
+                    organization_id=org_id,
+                    water_feature_id=wf.id,
+                    equipment_type=etype,
+                    brand=brand,
+                    model=model,
+                    horsepower=hp_float,
+                    install_date=install_date_parsed,
+                    system_group=sgroup,
+                    notes=notes_extra,
+                    catalog_equipment_id=resolver.catalog_equipment_id,
+                    is_active=True,
+                    source_inspection_id=inspection_id,
+                    source_slot=slot,
+                )
+                self.db.add(item)
+                created += 1
+
+            slots_touched.append(slot)
+
+        return {"created": created, "updated": updated, "skipped": skipped, "slots": slots_touched}
+
     # --- Helpers ---
 
-    @staticmethod
     @staticmethod
     def _extract_program_address(prog_id: str | None) -> str | None:
         """Pull the address suffix from a program_identifier like

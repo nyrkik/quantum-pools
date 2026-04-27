@@ -260,6 +260,7 @@ function WfSection({
 function EquipmentRow({ item, onClick }: { item: EquipmentItem; onClick: () => void }) {
   const name = displayName(item);
   const inService = formatInstallDate(item.install_date);
+  const fromInspection = !!item.source_inspection_id;
   return (
     <div
       className="flex items-center justify-between text-xs py-1 -mx-1 px-1 rounded cursor-pointer hover:bg-muted/50 transition-colors"
@@ -268,6 +269,14 @@ function EquipmentRow({ item, onClick }: { item: EquipmentItem; onClick: () => v
       <span className="text-muted-foreground">{typeLabel(item.equipment_type)}</span>
       <div className="flex items-center gap-1">
         <span className="font-medium">{name}</span>
+        {fromInspection && (
+          <span
+            className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 ml-1"
+            title="Auto-imported from inspection report"
+          >
+            inspection
+          </span>
+        )}
         {inService && (
           <span className="text-[10px] text-muted-foreground ml-1">
             · in service {inService}

@@ -66,6 +66,8 @@ class EquipmentItemResponse(BaseModel):
     catalog_equipment_id: Optional[str] = None
     catalog_canonical_name: Optional[str] = None
     install_date: Optional[date] = None
+    source_inspection_id: Optional[str] = None
+    source_slot: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -151,6 +153,14 @@ async def update_equipment(
     if not item:
         raise HTTPException(status_code=404, detail="Equipment not found")
 
+    # Snapshot original values before mutation (for AgentLearningService corrections)
+    pre = {
+        "brand": item.brand, "model": item.model, "horsepower": item.horsepower,
+        "equipment_type": item.equipment_type, "system_group": item.system_group,
+        "catalog_equipment_id": item.catalog_equipment_id, "notes": item.notes,
+    }
+    was_inspection_sourced = item.source_inspection_id is not None
+
     updates = body.model_dump(exclude_unset=True)
     for k, v in updates.items():
         setattr(item, k, v if v != "" else None)
@@ -161,6 +171,38 @@ async def update_equipment(
 
     await db.commit()
     await db.refresh(item)
+
+    # Log correction if this was an inspection-sourced item being edited
+    if was_inspection_sourced:
+        try:
+            from src.services.agent_learning_service import (
+                AGENT_EQUIPMENT_RESOLVER,
+                AgentLearningService,
+            )
+            post = {
+                "brand": item.brand, "model": item.model, "horsepower": item.horsepower,
+                "equipment_type": item.equipment_type, "system_group": item.system_group,
+                "catalog_equipment_id": item.catalog_equipment_id, "notes": item.notes,
+            }
+            if pre != post:
+                learner = AgentLearningService(db)
+                import json
+                await learner.record_correction(
+                    org_id=ctx.organization_id,
+                    agent_type=AGENT_EQUIPMENT_RESOLVER,
+                    correction_type="edit",
+                    original_output=json.dumps(pre, default=str),
+                    corrected_output=json.dumps(post, default=str),
+                    input_context=f"slot={item.source_slot} inspection={item.source_inspection_id}",
+                    category=item.equipment_type,
+                    source_id=item.id,
+                    source_type="equipment_item",
+                )
+                await db.commit()
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(f"equipment_resolver edit correction logging failed: {e}")
+
     return EquipmentItemResponse.model_validate(item)
 
 
@@ -180,8 +222,38 @@ async def delete_equipment(
     if not item:
         raise HTTPException(status_code=404, detail="Equipment not found")
 
+    was_inspection_sourced = item.source_inspection_id is not None
+    pre_snapshot = {
+        "brand": item.brand, "model": item.model,
+        "equipment_type": item.equipment_type, "system_group": item.system_group,
+        "source_slot": item.source_slot,
+    }
+
     item.is_active = False
     await db.commit()
+
+    if was_inspection_sourced:
+        try:
+            from src.services.agent_learning_service import (
+                AGENT_EQUIPMENT_RESOLVER,
+                AgentLearningService,
+            )
+            import json
+            learner = AgentLearningService(db)
+            await learner.record_correction(
+                org_id=ctx.organization_id,
+                agent_type=AGENT_EQUIPMENT_RESOLVER,
+                correction_type="rejection",
+                original_output=json.dumps(pre_snapshot, default=str),
+                input_context=f"slot={item.source_slot} inspection={item.source_inspection_id}",
+                category=item.equipment_type,
+                source_id=item.id,
+                source_type="equipment_item",
+            )
+            await db.commit()
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(f"equipment_resolver delete correction logging failed: {e}")
 
 
 @router.post("/wf/{wf_id}/copy-from/{source_wf_id}", response_model=List[EquipmentItemResponse])

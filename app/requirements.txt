@@ -32,6 +32,7 @@ sentry-sdk[fastapi]>=1.39.0
 
 # AI
 anthropic>=0.40.0
+rapidfuzz>=3.10.0  # Fuzzy string matching for catalog resolution (equipment-from-inspections)
 
 # Email
 aiosmtplib>=3.0.1

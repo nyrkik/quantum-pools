@@ -148,6 +148,10 @@ export interface EquipmentItem {
    * placed in service. Used for lifecycle tracking (PRX filter
    * cartridge age, pump warranty windows, etc). */
   install_date: string | null;
+  /** Set when this row was auto-created from an inspection PDF.
+   * Renders the "from inspection" badge and links to the report. */
+  source_inspection_id: string | null;
+  source_slot: string | null;
 }
 
 export interface CatalogEntry {

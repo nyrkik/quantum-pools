@@ -2,8 +2,9 @@
 
 from typing import Optional
 from datetime import date
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -309,6 +310,42 @@ async def update_invoice(
         **data,
     )
     return _invoice_to_response(invoice)
+
+
+class POBody(BaseModel):
+    po_number: str | None = None
+
+
+@router.patch("/{invoice_id}/po-number")
+async def patch_po_number(
+    invoice_id: str,
+    body: POBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set / update / clear the customer-supplied PO# on an invoice
+    or estimate.
+
+    Distinct from PUT /{id} (which goes through InvoiceService.update
+    and bumps revision_count, marks `revised`, and invalidates an
+    existing approval) — this endpoint touches ONLY the po_number
+    column. Approval state, revision_count, status, and approval_id
+    are preserved.
+
+    See FB-56: customers send a PO# AFTER approving the estimate; the
+    workflow shouldn't force a re-approve just to record it.
+    """
+    from src.models.invoice import Invoice
+    inv = await db.get(Invoice, invoice_id)
+    if inv is None or inv.organization_id != ctx.organization_id:
+        raise HTTPException(404, "invoice not found")
+    raw = (body.po_number or "").strip() or None
+    if raw and len(raw) > 50:
+        raise HTTPException(422, "po_number must be ≤ 50 characters")
+    inv.po_number = raw
+    await db.commit()
+    await db.refresh(inv)
+    return _invoice_to_response(inv)
 
 
 @router.post("/{invoice_id}/send", )

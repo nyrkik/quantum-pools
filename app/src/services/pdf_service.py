@@ -139,6 +139,8 @@ def generate_invoice_pdf(
         right_parts.append(Paragraph(f"<b>Due:</b> {d}", style_value))
     if invoice.get("subject"):
         right_parts.append(Paragraph(f"<b>Subject:</b> {invoice['subject']}", style_value))
+    if invoice.get("po_number"):
+        right_parts.append(Paragraph(f"<b>PO #:</b> {invoice['po_number']}", style_value))
 
     info_data = [[left_cell, right_parts]]
     info_table = Table(info_data, colWidths=[3.5 * inch, 3.5 * inch])

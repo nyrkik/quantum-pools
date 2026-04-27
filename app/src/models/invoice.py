@@ -68,6 +68,12 @@ class Invoice(Base):
     # PSS migration reference
     pss_invoice_id: Mapped[str | None] = mapped_column(String(50), index=True)
 
+    # Customer-supplied purchase order number. Editable AFTER approval
+    # (and at any other status) without disturbing approval state — the
+    # PATCH /v1/invoices/{id}/po-number endpoint only writes this column.
+    # See FB-56.
+    po_number: Mapped[str | None] = mapped_column(String(50), index=True)
+
     # Stripe
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255))
 

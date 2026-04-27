@@ -55,6 +55,9 @@ import {
   Trash2,
   ExternalLink,
   Download,
+  Check,
+  X as XIcon,
+  FileText,
 } from "lucide-react";
 import { InvoiceStatusBadge } from "@/components/badges/invoice-status-badge";
 import {
@@ -576,6 +579,13 @@ export default function InvoiceDetailPage({
         </Card>
       )}
 
+      {/* PO# — editable independent of approval state (FB-56) */}
+      <PoNumberCard
+        invoiceId={invoice.id}
+        currentValue={invoice.po_number}
+        onUpdated={(po) => setInvoice((inv) => inv ? { ...inv, po_number: po } : inv)}
+      />
+
       {/* Internal Notes */}
       {invoice.internal_notes && (
         <Card className="border-l-4 border-amber-400">
@@ -599,5 +609,123 @@ export default function InvoiceDetailPage({
       {!isEstimate && <PaymentHistory payments={payments} />}
 
     </div>
+  );
+}
+
+
+/**
+ * Inline PO# editor. Distinct from the InvoiceUpdate flow because
+ * editing PO# must NOT bump revision_count or invalidate an existing
+ * approval (FB-56). Hits PATCH /v1/invoices/{id}/po-number which
+ * touches only the po_number column.
+ */
+function PoNumberCard({
+  invoiceId,
+  currentValue,
+  onUpdated,
+}: {
+  invoiceId: string;
+  currentValue: string | null;
+  onUpdated: (next: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string>(currentValue || "");
+  const [saving, setSaving] = useState(false);
+
+  // Keep draft in sync if the parent reloads the invoice externally.
+  useEffect(() => {
+    if (!editing) setDraft(currentValue || "");
+  }, [currentValue, editing]);
+
+  async function save() {
+    const trimmed = draft.trim();
+    setSaving(true);
+    try {
+      const res = await api.patch<{ po_number: string | null }>(
+        `/v1/invoices/${invoiceId}/po-number`,
+        { po_number: trimmed || null },
+      );
+      onUpdated(res.po_number);
+      setEditing(false);
+      toast.success(trimmed ? "PO # saved" : "PO # cleared");
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to save PO #");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-1.5">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          PO #
+          <span className="text-xs font-normal text-muted-foreground">
+            (customer purchase order)
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              value={draft}
+              maxLength={50}
+              placeholder="e.g. PO-12345"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") save();
+                if (e.key === "Escape") {
+                  setEditing(false);
+                  setDraft(currentValue || "");
+                }
+              }}
+              className="max-w-xs"
+              disabled={saving}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={save}
+              disabled={saving}
+              className="text-muted-foreground hover:text-green-600"
+              title="Save"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setEditing(false);
+                setDraft(currentValue || "");
+              }}
+              disabled={saving}
+              className="text-muted-foreground hover:text-destructive"
+              title="Cancel"
+            >
+              <XIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">
+              {currentValue || <span className="text-muted-foreground italic">—</span>}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditing(true)}
+              className="text-muted-foreground hover:text-foreground"
+              title="Edit PO #"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

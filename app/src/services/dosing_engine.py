@@ -1,8 +1,115 @@
-"""Deterministic chemical dosing calculator.
+"""Deterministic chemical dosing calculator + LSI calculator.
 
 Pure functions — no DB access, no AI. All formulas are industry-standard.
 This is safety-critical: never let AI generate dosing amounts.
+
+LSI (Langelier Saturation Index) is calculated using a hardcoded water
+temperature constant (75°F). Per `feedback_water_temp_constant.md`,
+real-time temperature isn't worth the UI tax for the precision a
+coarsely-banded gauge exposes; the tech can mentally adjust if their
+pool runs hot or cold.
 """
+
+import math
+
+
+WATER_TEMP_F_DEFAULT = 75.0  # See module docstring + feedback memo.
+
+
+# Industry-standard temperature factor table — ASR/Pool Operator's
+# Handbook. Linearly interpolate between anchor points.
+_TF_TABLE = [
+    (32, 0.0),
+    (37, 0.1),
+    (46, 0.2),
+    (53, 0.3),
+    (60, 0.4),
+    (66, 0.5),
+    (76, 0.6),
+    (84, 0.7),
+    (94, 0.8),
+    (105, 0.9),
+]
+
+
+def _tf(temp_f: float) -> float:
+    """Temperature factor via linear interpolation against the standard
+    LSI table. Clamped to the table's range."""
+    if temp_f <= _TF_TABLE[0][0]:
+        return _TF_TABLE[0][1]
+    if temp_f >= _TF_TABLE[-1][0]:
+        return _TF_TABLE[-1][1]
+    for (t_lo, f_lo), (t_hi, f_hi) in zip(_TF_TABLE, _TF_TABLE[1:]):
+        if t_lo <= temp_f <= t_hi:
+            ratio = (temp_f - t_lo) / (t_hi - t_lo)
+            return f_lo + ratio * (f_hi - f_lo)
+    return _TF_TABLE[-1][1]  # unreachable; satisfy linter
+
+
+def calculate_lsi(
+    ph: float,
+    calcium_hardness: float,
+    alkalinity: float,
+    cyanuric_acid: float | None = None,
+    temp_f: float = WATER_TEMP_F_DEFAULT,
+) -> dict:
+    """Langelier Saturation Index.
+
+    LSI = pH + TF + CF + AF − 12.1
+
+    Where:
+    - TF (temperature factor): interpolated from the standard table
+    - CF (calcium hardness factor): log10(Ca) − 0.4
+    - AF (alkalinity factor): log10(effective_alk), where
+      effective_alk = alkalinity − cyanuric_acid / 3 (when CYA present)
+
+    Returns a dict with the value, a 3-band classification
+    (corrosive | balanced | scaling), and the inputs used so callers
+    can surface the assumption ("temp: 75°F (assumed)").
+
+    Classification thresholds:
+      < -0.3  corrosive (water dissolves calcium → etching, pitting)
+      -0.3..+0.3  balanced
+      > +0.3  scaling (calcium precipitates → cloudy water, scale)
+    """
+    if calcium_hardness <= 0 or alkalinity <= 0:
+        # log10 undefined; surface as a degenerate-input error rather
+        # than crashing or returning a misleading number.
+        raise ValueError(
+            "calcium_hardness and alkalinity must be > 0 for LSI calculation"
+        )
+
+    cya = cyanuric_acid or 0.0
+    effective_alk = alkalinity - (cya / 3.0)
+    if effective_alk <= 0:
+        raise ValueError(
+            "effective_alk (alkalinity − CYA/3) must be > 0 for LSI calculation"
+        )
+
+    tf = _tf(temp_f)
+    cf = math.log10(calcium_hardness) - 0.4
+    af = math.log10(effective_alk)
+    lsi = ph + tf + cf + af - 12.1
+    lsi = round(lsi, 2)
+
+    if lsi < -0.3:
+        classification = "corrosive"
+    elif lsi > 0.3:
+        classification = "scaling"
+    else:
+        classification = "balanced"
+
+    return {
+        "value": lsi,
+        "classification": classification,
+        "based_on": {
+            "ph": ph,
+            "temp_f": temp_f,
+            "calcium_hardness": calcium_hardness,
+            "alkalinity": alkalinity,
+            "cyanuric_acid": cya,
+        },
+    }
 
 
 def calculate_dosing(

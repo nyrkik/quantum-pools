@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChevronDown, ChevronUp, Loader2, Check } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Check, Camera, Sparkles } from "lucide-react";
 import type { VisitWaterFeature, VisitReading, LastReadings } from "@/types/visit";
 
 interface VisitReadingsProps {
@@ -64,6 +64,16 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
   );
 
   const [values, setValues] = useState<ReadingValues>(() => buildValues(existingReading));
+  const [scanning, setScanning] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<Record<string, number> | null>(null);
+  const [aiBrand, setAiBrand] = useState<string | null>(null);
+  const [aiConfidence, setAiConfidence] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Backend chemistry-field name ↔ FIELDS.key mapping. The frontend collapsed
+  // `cyanuric_acid` to `cya`; everything else is identical.
+  const BACKEND_TO_UI: Record<string, string> = { cyanuric_acid: "cya" };
+  const UI_TO_BACKEND: Record<string, string> = { cya: "cyanuric_acid" };
 
   function buildValues(reading?: VisitReading): ReadingValues {
     const v: ReadingValues = {};
@@ -78,6 +88,9 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
     setActiveWfId(wfId);
     const r = readings.find((r) => r.water_feature_id === wfId);
     setValues(buildValues(r));
+    setAiSuggestion(null);
+    setAiBrand(null);
+    setAiConfidence(null);
     setSaved(false);
   };
 
@@ -90,7 +103,8 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
       const payload: Record<string, unknown> = { water_feature_id: activeWfId };
       for (const f of FIELDS) {
         const v = values[f.key];
-        payload[f.key] = v ? parseFloat(v) : null;
+        const backendKey = UI_TO_BACKEND[f.key] || f.key;
+        payload[backendKey] = v ? parseFloat(v) : null;
       }
       const result = await api.post<VisitReading>(`/v1/visits/${visitId}/readings`, payload);
       const newReadings = readings.filter((r) => r.water_feature_id !== activeWfId);
@@ -98,10 +112,72 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
       onUpdate(newReadings);
       setSaved(true);
       toast.success("Readings saved");
+
+      // If AI pre-populated, fire-and-forget the correction-logging endpoint
+      // so the next scan in this org gets better.
+      if (aiSuggestion) {
+        const saved: Record<string, number> = {};
+        for (const f of FIELDS) {
+          const v = values[f.key];
+          if (!v) continue;
+          const backendKey = UI_TO_BACKEND[f.key] || f.key;
+          saved[backendKey] = parseFloat(v);
+        }
+        api.post(`/v1/visits/${visitId}/scan-test-strip/correction`, {
+          ai_suggested: aiSuggestion,
+          saved,
+          brand_detected: aiBrand,
+          confidence: aiConfidence,
+        }).catch(() => { /* fire-and-forget */ });
+        setAiSuggestion(null);
+        setAiBrand(null);
+        setAiConfidence(null);
+      }
     } catch {
       toast.error("Failed to save readings");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleScanFile = async (file: File) => {
+    setScanning(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const result = await api.upload<{
+        values: Record<string, number>;
+        confidence: number;
+        brand_detected: string | null;
+        notes: string | null;
+      }>(`/v1/visits/${visitId}/scan-test-strip`, fd);
+
+      // Apply scanned values to the form, mapping backend → UI keys
+      setValues((prev) => {
+        const next = { ...prev };
+        for (const [backendKey, val] of Object.entries(result.values)) {
+          const uiKey = BACKEND_TO_UI[backendKey] || backendKey;
+          if (FIELDS.some((f) => f.key === uiKey)) {
+            next[uiKey] = String(val);
+          }
+        }
+        return next;
+      });
+      setAiSuggestion(result.values);
+      setAiBrand(result.brand_detected);
+      setAiConfidence(result.confidence);
+      const filledCount = Object.keys(result.values).length;
+      const brandLabel = result.brand_detected ? ` (${result.brand_detected})` : "";
+      toast.success(`Strip scanned${brandLabel}: ${filledCount} values filled · review and save`);
+      if (result.notes) {
+        toast.message(result.notes);
+      }
+    } catch (e) {
+      toast.error("Strip scan failed — enter values manually");
+      console.error("scan-test-strip error", e);
+    } finally {
+      setScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -151,6 +227,43 @@ export function VisitReadings({ visitId, waterFeatures, readings, lastReadings, 
               })}
             </div>
           )}
+
+          {/* Scan strip control */}
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleScanFile(f);
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={scanning}
+              className="flex-1 h-10"
+            >
+              {scanning ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Camera className="h-4 w-4 mr-2" />
+              )}
+              {scanning ? "Reading strip…" : "Scan test strip"}
+            </Button>
+            {aiBrand && (
+              <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
+                <Sparkles className="h-3 w-3" />
+                {aiBrand}
+                {aiConfidence != null && ` · ${Math.round(aiConfidence * 100)}%`}
+              </span>
+            )}
+          </div>
 
           {/* Input grid */}
           <div className="grid grid-cols-2 gap-x-3 gap-y-3">

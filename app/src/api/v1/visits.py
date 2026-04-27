@@ -277,6 +277,109 @@ async def create_visit_reading(
         raise HTTPException(status_code=404, detail=str(e))
 
 
+class TestStripCorrectionBody(BaseModel):
+    ai_suggested: dict[str, float]
+    saved: dict[str, float]
+    brand_detected: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+@router.post("/visits/{visit_id}/scan-test-strip/correction")
+async def log_test_strip_correction(
+    visit_id: str,
+    body: TestStripCorrectionBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fire-and-forget endpoint the frontend hits AFTER saving a reading that
+    was pre-populated from a test-strip scan. Logs the delta to
+    `agent_corrections` so the next read for this org gets better.
+
+    The frontend echoes back the AI's original suggestion + the values the
+    tech actually saved. We compute the diff server-side."""
+    import json as _json
+    from src.services.agent_learning_service import (
+        AGENT_TEST_STRIP_READER,
+        AgentLearningService,
+    )
+
+    diff: dict[str, dict] = {}
+    for k in set(body.ai_suggested) | set(body.saved):
+        ai_v = body.ai_suggested.get(k)
+        sv = body.saved.get(k)
+        if ai_v is None and sv is None:
+            continue
+        if ai_v is None or sv is None or abs(float(ai_v) - float(sv)) > 0.001:
+            diff[k] = {"ai": ai_v, "saved": sv}
+
+    if not diff:
+        return {"logged": False, "reason": "no diff"}
+
+    learner = AgentLearningService(db)
+    await learner.record_correction(
+        org_id=ctx.organization_id,
+        agent_type=AGENT_TEST_STRIP_READER,
+        correction_type="edit",
+        original_output=_json.dumps(body.ai_suggested),
+        corrected_output=_json.dumps(body.saved),
+        input_context=_json.dumps({
+            "diff": diff,
+            "brand_detected": body.brand_detected,
+            "confidence": body.confidence,
+            "visit_id": visit_id,
+        })[:1000],
+        category=body.brand_detected or "unknown_brand",
+    )
+    await db.commit()
+    return {"logged": True, "diff_fields": list(diff.keys())}
+
+
+@router.post("/visits/{visit_id}/scan-test-strip")
+async def scan_test_strip(
+    visit_id: str,
+    file: UploadFile = File(...),
+    brand_hint: Optional[str] = Form(None),
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read a photographed test strip → return parsed chemistry values.
+
+    Does NOT save to ChemicalReading directly. The frontend pre-populates the
+    visit-readings form with the returned values so the tech can review and
+    edit before clicking Save (which uses the existing /readings endpoint).
+
+    Per DNA rule "every agent learns": when the tech edits a value before
+    saving, that delta is logged via AgentLearningService → improves the next
+    read for this org.
+    """
+    from src.services.chemistry.test_strip_reader import read_strip
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="file must be an image")
+    image_bytes = await file.read()
+    if len(image_bytes) > MAX_PHOTO_SIZE:
+        raise HTTPException(status_code=413, detail="image too large")
+
+    result = await read_strip(
+        db=db,
+        org_id=ctx.organization_id,
+        image_bytes=image_bytes,
+        media_type=file.content_type,
+        brand_hint=brand_hint,
+    )
+    if result.error:
+        raise HTTPException(status_code=502, detail=result.error)
+
+    return {
+        "values": result.values,
+        "confidence": result.confidence,
+        "brand_detected": result.brand_detected,
+        "brand_id": result.brand_id,
+        "chart_used": result.chart_used,
+        "notes": result.notes,
+    }
+
+
 @router.post("/visits/{visit_id}/photos")
 async def upload_visit_photo(
     visit_id: str,

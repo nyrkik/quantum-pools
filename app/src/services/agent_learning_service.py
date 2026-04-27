@@ -25,6 +25,7 @@ AGENT_ESTIMATE_GENERATOR = "estimate_generator"
 AGENT_CUSTOMER_MATCHER = "customer_matcher"
 AGENT_EQUIPMENT_RESOLVER = "equipment_resolver"
 AGENT_INBOX_SUMMARIZER = "inbox_summarizer"
+AGENT_TEST_STRIP_READER = "test_strip_reader"
 
 
 class AgentLearningService:

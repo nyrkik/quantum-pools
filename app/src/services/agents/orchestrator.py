@@ -82,6 +82,65 @@ def _gated_draft(category: str | None, classifier_draft: str | None) -> str | No
     return classifier_draft
 
 
+# Customer messages classified as `no_response` / `thank_you` get auto-
+# handled and hidden from the default Pending inbox. The classifier
+# sometimes mislabels "I'll follow up" / "I'll get back to you" as
+# no_response — those messages establish a commitment from the OTHER
+# side that humans must track. This regex catches those phrases in the
+# inbound body so the orchestrator can override category=general+pending.
+# See `memory/feedback_followup_promise_not_no_response.md`.
+_FOLLOWUP_PROMISE_RE = re.compile(
+    r"""
+    (
+        # "I'll/we'll get back to you" family
+        \b (?: i \s? ['’] ll | i \s+ will | we \s? ['’] ll | we \s+ will )
+            \s+
+            (?: get \s+ back | follow \s* -? \s* up | reach \s+ out | update \s+ you
+              | let \s+ you \s+ know | keep \s+ you \s+ (?: posted | informed )
+              | look \s+ into | check \s+ on | relay (?: \s+ this )?
+              | discuss \s+ (?: with | this )
+              | check \s+ with
+              | run \s+ this \s+ by
+              | confirm \s+ with
+              )
+
+      | # Bare "Will <verb>" at sentence start — common in B2B reply
+        # style ("Will let you know", "Will follow-up", "Will keep you posted").
+        (?: ^ | [.!?\n;] \s* )
+        will \s+
+        (?: get \s+ back | follow \s* -? \s* up | reach \s+ out | update \s+ you
+          | let \s+ you \s+ know | keep \s+ you \s+ (?: posted | informed )
+          )
+
+      | # past tense escalation: "I have sent / I sent the request to ..."
+        \b (?: i \s+ have \s+ sent | i \s? ['’] ve \s+ sent | i \s+ sent )
+            \s+
+            (?: this | the \s+ request | it ) \s+
+            (?: to | over \s+ to ) \b
+
+      | # "give you an update" / "we'll have an update"
+        \b (?: give | send | provide ) \s+ you \s+ (?: an | the ) \s+ update \b
+      | \b update \s+ you \s+ soon \b
+
+      | # "waiting on / hearing from" passive forms
+        \b (?: still \s+ )? (?: waiting | hearing ) \s+ on \b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE | re.MULTILINE,
+)
+
+
+def _is_followup_promise(body: str | None) -> bool:
+    """True when an inbound message body promises a future response.
+    Distinct from the classifier's needs_approval check (which scans
+    the AI DRAFT) — this scans the INBOUND CUSTOMER message and is
+    a deterministic backstop the orchestrator uses to override a
+    no_response classification."""
+    if not body:
+        return False
+    return bool(_FOLLOWUP_PROMISE_RE.search(body))
+
+
 async def _queue_summary_if_inbox_v2(db, thread, organization_id: str) -> None:
     """If the org is on inbox v2, mark this thread to be summarized by
     the InboxSummarizerService on the next APScheduler sweep.
@@ -711,6 +770,25 @@ async def process_incoming_email(
         if sender_is_customer and category in ("spam", "auto_reply"):
             # Spam/auto-reply from a customer address is suspicious — override to pending
             logger.info(f"Customer email classified as {category}, overriding to pending: {subject[:50]}")
+            category = "general"
+            result["category"] = "general"
+            result["needs_approval"] = True
+        elif (
+            category in ("no_response", "thank_you")
+            and sender_is_customer
+            and _is_followup_promise(body)
+        ):
+            # Followup-promise guardrail (2026-04-27 dogfood): the
+            # classifier sometimes labels "I'll relay this and update
+            # you" / "I have sent the request to my higher-up" as
+            # no_response. These establish a commitment from the
+            # OTHER side that humans need to track. Override to
+            # pending regardless of classifier confidence.
+            logger.info(
+                "Followup-promise guardrail: overriding %s → general pending "
+                "(from=%s subj=%s)",
+                category, from_email, (subject or "")[:50],
+            )
             category = "general"
             result["category"] = "general"
             result["needs_approval"] = True

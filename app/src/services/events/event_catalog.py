@@ -104,6 +104,8 @@ EVENT_CATALOG: dict[str, EventSpec] = {
     "agent.output_regenerated": EventSpec(levels=_U, frontend_emittable=True),
     "agent.wrong_tool_selected": EventSpec(levels=_U_S, frontend_emittable=True),
     "agent.context_truncated": EventSpec(levels=_A),
+    # Phase 6 workflow_observer scan completion (per-org, daily).
+    "observer.scan_complete": EventSpec(levels=_S),
 
     # --- 8.4 Jobs ---
     "job.created": EventSpec(levels=_U_S_A),

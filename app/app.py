@@ -108,8 +108,16 @@ async def lifespan(app: FastAPI):
         CronTrigger(hour=5, minute=30, timezone="UTC"),
         id="inbox_summarizer_stale",
     )
+    # Phase 6 workflow_observer: daily at 06:00 UTC, scan each org's
+    # last 14 days of platform_events + agent_proposals outcomes and
+    # stage meta-proposals for review on the dashboard widget.
+    scheduler.add_job(
+        _run_workflow_observer_sweep,
+        CronTrigger(hour=6, minute=0, timezone="UTC"),
+        id="workflow_observer_sweep",
+    )
     scheduler.start()
-    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; proposals expire; inbox_v2 summarizer; billing dormant; auto-send removed)")
+    logger.info("Scheduler started (outbound send janitor; spam retention; platform_events partition + retention; proposals expire; inbox_v2 summarizer; workflow_observer; billing dormant; auto-send removed)")
 
     yield
 
@@ -428,6 +436,50 @@ async def _run_proposals_expire_stale():
                 logger.info(f"proposals: expired {n} stale proposals")
     except Exception as e:
         logger.error(f"proposals expire-stale job error: {e}")
+        sentry_sdk.capture_exception(e)
+
+
+async def _run_workflow_observer_sweep():
+    """Phase 6: daily per-org scan over recent platform_events +
+    agent_proposals outcomes. Each detector returns zero or more
+    meta-proposals; the agent stages survivors via ProposalService for
+    admin review on the dashboard widget.
+
+    Per-org failures are isolated — a Sentry capture + a log line, but
+    the loop continues so one org's bad data doesn't block the rest.
+    """
+    from sqlalchemy import select
+    from src.core.database import get_db_context
+    from src.models.organization import Organization
+    from src.services.agents.workflow_observer import WorkflowObserverAgent
+
+    try:
+        async with get_db_context() as db:
+            orgs = (await db.execute(select(Organization.id))).scalars().all()
+            for org_id in orgs:
+                try:
+                    agent = WorkflowObserverAgent(db)
+                    result = await agent.scan_org(org_id)
+                    await db.commit()
+                    if result.proposals_staged:
+                        logger.info(
+                            "workflow_observer: org=%s staged=%d skipped_below=%d "
+                            "skipped_dedup=%d skipped_muted=%d duration_ms=%d",
+                            org_id, result.proposals_staged,
+                            result.proposals_skipped_below_threshold,
+                            result.proposals_skipped_dedup,
+                            result.proposals_skipped_muted,
+                            result.duration_ms,
+                        )
+                except Exception as e:  # noqa: BLE001
+                    logger.error(
+                        "workflow_observer scan failed for org %s: %s",
+                        org_id, e,
+                    )
+                    sentry_sdk.capture_exception(e)
+                    await db.rollback()
+    except Exception as e:
+        logger.error(f"workflow_observer sweep error: {e}")
         sentry_sdk.capture_exception(e)
 
 

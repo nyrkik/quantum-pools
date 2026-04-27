@@ -197,9 +197,11 @@ Organized by subsystem. Each event specifies level and minimum expected `entity_
 | `proposal.expired` | system_action | agent_proposal_id | Background sweep marked stale. Payload: `{age_days}`. |
 | `proposal.superseded` | system_action \| agent_action | agent_proposal_id (new), agent_proposal_id (old, in payload) | Payload: `{superseded_id, reason}`. |
 
-**`entity_type` values shipping as of Phase 5 (2026-04-24):**
-`equipment_item`, `estimate`, `email_reply`, `customer_match_suggestion`, `job`, `customer_email`, `broadcast_email`, `case_link`, `case`, `chemical_reading`, `customer_note_update`, `org_config`.
+**`entity_type` values shipping as of Phase 6 (2026-04-27):**
+`equipment_item`, `estimate`, `email_reply`, `customer_match_suggestion`, `job`, `customer_email`, `broadcast_email`, `case_link`, `case`, `chemical_reading`, `customer_note_update`, `org_config`, `workflow_config`, `inbox_rule`.
 Creators register via `src/services/proposals/creators/__init__.py`. Adding a new one requires (a) a Pydantic payload schema, (b) a renderer in `frontend/src/components/proposals/renderers/`, (c) an entry in this doc in the same PR.
+
+**Note on Phase 6 meta-proposals:** Proposals from `workflow_observer` flow through the same `proposal.*` event types — no separate `meta_proposal.*` event family. Discriminate by `payload.agent_type == "workflow_observer"`.
 
 ### 8.3 Agents (generic)
 
@@ -215,6 +217,7 @@ Applies to any agent call — `email_drafter`, `email_classifier`, `customer_mat
 | `agent.output_regenerated` | user_action | varies | User rejected an AI output and asked for another. Stronger dissatisfaction signal than accept-with-edits. Payload: `{agent_type, round_number, from_proposal_id?}`. |
 | `agent.wrong_tool_selected` | user_action \| system_action | varies | DeepBlue / Sonar / tool-use agent picked a tool the user's action signals was wrong. Payload: `{agent_type, tool_called, user_recovery_action?}`. |
 | `agent.context_truncated` | agent_action | varies | Input hit the Claude context window; content was chopped before the call. Silent quality killer otherwise invisible. Payload: `{agent_type, model, attempted_tokens, actual_tokens, truncation_target: prompt\|messages\|tools}`. |
+| `observer.scan_complete` | system_action | none | Phase 6 workflow_observer finished a daily per-org scan. Payload: `{detectors_run, proposals_staged, skipped_below_threshold, skipped_dedup, skipped_muted, duration_ms, window_days, errors[]}`. One per org per scan. Used by the dashboard widget to show "last scanned X ago"; aggregate counts feed Sonar (Phase 7). |
 
 ### 8.4 Jobs (agent_actions table)
 

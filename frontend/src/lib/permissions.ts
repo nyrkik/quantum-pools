@@ -27,6 +27,7 @@ export interface Permissions {
 
   // Navigation (backward compat — derived from server permissions)
   canViewInvoices: boolean;
+  canCreateInvoices: boolean;
   canViewProfitability: boolean;
   canViewSatellite: boolean;
   canViewSettings: boolean;
@@ -170,6 +171,7 @@ function buildPermissions(
 
     // Backward compat properties — derived from granular permissions
     canViewInvoices: can("invoices.view"),
+    canCreateInvoices: can("invoices.create"),
     canViewProfitability: can("profitability.view"),
     canViewSatellite: can("satellite.view"),
     canViewSettings: can("settings.view"),

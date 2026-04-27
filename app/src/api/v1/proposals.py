@@ -58,6 +58,7 @@ def _serialize(p: AgentProposal) -> dict:
         "source_id": p.source_id,
         "proposed_payload": p.proposed_payload,
         "confidence": p.confidence,
+        "input_context": p.input_context,
         "status": p.status,
         "rejected_permanently": p.rejected_permanently,
         "superseded_by_id": p.superseded_by_id,
@@ -78,14 +79,16 @@ def _serialize(p: AgentProposal) -> dict:
 @router.get("")
 async def list_proposals(
     entity_type: Optional[str] = Query(None),
+    agent_type: Optional[str] = Query(None),
     status_: Optional[str] = Query(None, alias="status"),
     limit: int = Query(100, ge=1, le=500),
     ctx: OrgUserContext = Depends(get_current_org_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """List proposals scoped to the caller's org. Intended for UI surfaces
-    like `/inbox/matches` (staged customer_match_suggestions). Narrow
-    filters only — no cursor/pagination yet; bump `limit` if needed.
+    like `/inbox/matches` (staged customer_match_suggestions) and the
+    Phase 6 dashboard widget (staged workflow_observer proposals).
+    Narrow filters only — no cursor/pagination yet; bump `limit` if needed.
 
     `status_` is the query-param `status` (keyword `status_` to avoid
     shadowing Python's builtin at the handler level).
@@ -96,6 +99,8 @@ async def list_proposals(
     )
     if entity_type:
         q = q.where(AgentProposal.entity_type == entity_type)
+    if agent_type:
+        q = q.where(AgentProposal.agent_type == agent_type)
     if status_:
         q = q.where(AgentProposal.status == status_)
     q = q.order_by(AgentProposal.created_at.desc()).limit(max(1, min(limit, 500)))

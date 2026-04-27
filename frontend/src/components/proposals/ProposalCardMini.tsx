@@ -28,6 +28,8 @@ import { JobProposalBody } from "./renderers/JobProposalBody";
 import { EstimateProposalBody } from "./renderers/EstimateProposalBody";
 import { EquipmentProposalBody } from "./renderers/EquipmentProposalBody";
 import { OrgConfigProposalBody } from "./renderers/OrgConfigProposalBody";
+import { WorkflowConfigProposalBody } from "./renderers/WorkflowConfigProposalBody";
+import { InboxRuleProposalBody } from "./renderers/InboxRuleProposalBody";
 import { EmailReplyProposalBody } from "./renderers/EmailReplyProposalBody";
 import { CustomerMatchProposalBody } from "./renderers/CustomerMatchProposalBody";
 
@@ -38,6 +40,8 @@ const RENDERERS: Record<string, BodyRenderer> = {
   estimate: EstimateProposalBody,
   equipment_item: EquipmentProposalBody,
   org_config: OrgConfigProposalBody,
+  workflow_config: WorkflowConfigProposalBody,
+  inbox_rule: InboxRuleProposalBody,
   email_reply: EmailReplyProposalBody,
   customer_match_suggestion: CustomerMatchProposalBody,
 };

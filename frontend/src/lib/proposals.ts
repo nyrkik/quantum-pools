@@ -28,6 +28,11 @@ export interface Proposal {
   source_id: string | null;
   proposed_payload: Record<string, unknown>;
   confidence: number | null;
+  /** Optional natural-language summary the staging agent supplied. Phase
+   *  6 workflow_observer encodes the detector_id as a leading
+   *  `[detector_id]` prefix so the dashboard widget's "Never suggest
+   *  this" can resolve which detector to mute. */
+  input_context?: string | null;
   status: ProposalStatus;
   rejected_permanently: boolean;
   superseded_by_id: string | null;
@@ -61,15 +66,17 @@ export async function getProposal(id: string): Promise<Proposal> {
 }
 
 /** List org-scoped proposals. Used by the /inbox/matches review queue
- *  and other surfaces that need to enumerate staged proposals for the
- *  caller's org. Narrow filters — add pagination when volume grows. */
+ *  and the Phase 6 dashboard widget (workflow_observer suggestions).
+ *  Narrow filters — add pagination when volume grows. */
 export async function listProposals(opts: {
   entityType?: string;
+  agentType?: string;
   status?: string;
   limit?: number;
 } = {}): Promise<{ items: Proposal[]; total: number }> {
   const params = new URLSearchParams();
   if (opts.entityType) params.set("entity_type", opts.entityType);
+  if (opts.agentType) params.set("agent_type", opts.agentType);
   if (opts.status) params.set("status", opts.status);
   if (opts.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();

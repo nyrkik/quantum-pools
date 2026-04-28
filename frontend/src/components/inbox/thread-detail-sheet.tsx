@@ -492,12 +492,16 @@ function HtmlEmailBody({ html }: { html: string }) {
   // body's max-width caps reading width like Gmail (~720px) regardless of how wide the
   // thread panel is, so marketing-email hero images and wide layout tables don't blow
   // out the reading area. body's selector specificity beats `*` so it wins the !important tie.
+  // *:not(img) is critical: the universal `* { max-width: 100% !important }` was overriding
+  // signature logos' inline `style="max-width:180px"` (external !important > inline normal),
+  // so a 180px logo expanded to 720px. Excluding img lets inline caps win — small logos stay
+  // small, while wide layout tables/divs still get clamped.
   const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
     body { margin: 0 auto !important; max-width: 720px !important; padding: 8px 16px; font-family: system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #1f2937; word-wrap: break-word; }
     img { max-width: 100%; height: auto; }
     table { max-width: 100%; }
     a { color: #3b82f6; }
-    * { max-width: 100% !important; }
+    *:not(img) { max-width: 100% !important; }
     blockquote { margin: 0 0 0 1em; padding-left: 1em; border-left: 2px solid #e5e7eb; color: #6b7280; }
   </style></head><body>${displayHtml}</body></html>`;
 

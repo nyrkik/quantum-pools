@@ -16,6 +16,7 @@ import os
 import sys
 import logging
 import traceback
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = 60  # seconds
 HEARTBEAT_EVERY = 30  # log heartbeat every N cycles (~30 min)
 REMINDER_EVERY = 60  # check reminders every 60 cycles (~1 hour)
+DUNNING_EVERY = 60 * 24  # daily — dunning cadence is in days, no need to check faster
 
 # --- Monitoring: ntfy + failure tracking ---
 
@@ -121,6 +123,36 @@ def _clear_failures(func_name: str):
 
 
 # --- Poller functions ---
+
+async def run_dunning_for_all_orgs():
+    """Daily pass: advance every org's eligible past-due invoices through
+    the next dunning step. Per-org error isolation so one broken org's
+    dunning can't block the others."""
+    from sqlalchemy import select
+    from src.core.database import get_db_context
+    from src.models.organization import Organization
+    from src.services.billing_service import BillingService
+
+    async with get_db_context() as db:
+        org_ids = [
+            r[0]
+            for r in (await db.execute(select(Organization.id))).all()
+        ]
+
+    total_sent = 0
+    for org_id in org_ids:
+        try:
+            async with get_db_context() as db:
+                svc = BillingService(db)
+                summary = await svc.run_dunning_sequence(org_id)
+                total_sent += summary.get("sent", 0)
+        except Exception as e:
+            logger.error(f"Dunning sequence failed for org {org_id}: {e}")
+            sentry_sdk.capture_exception(e)
+
+    if total_sent > 0:
+        logger.info(f"Dunning daily run: sent {total_sent} email(s) across {len(org_ids)} org(s)")
+
 
 async def check_estimate_reminders():
     """Send reminders for stale estimates — 3 days and 7 days after sending."""
@@ -254,6 +286,65 @@ async def auto_close_stale_visits():
     await _close()
 
 
+# Per-integration backoff window. Populated when Gmail returns 429 with a
+# Retry-After (or its body's "Retry after <RFC 3339>"). Skipping cycles inside
+# this window stops us from extending the rate-limit lockout each minute.
+# In-memory only — on poller restart we forget and observe the 429 once more,
+# which is fine.
+_gmail_retry_after: dict[str, datetime] = {}
+
+# Visibility for non-connected integrations. Without this, a row that flips
+# from 'connected' to 'connecting'/'error'/'disconnected' silently drops out
+# of the poller loop and nobody notices that customer mail has stopped
+# flowing. _integration_unhealthy_since marks first-sighting per poller run;
+# _integration_unhealthy_alerted tracks which we've already pinged about so
+# the ntfy fires once per outage, not every cycle.
+_integration_unhealthy_since: dict[str, datetime] = {}
+_integration_unhealthy_alerted: set[str] = set()
+INTEGRATION_UNHEALTHY_ALERT_HOURS = 2
+
+
+def _parse_gmail_retry_after(error: Exception) -> datetime | None:
+    """Extract a Retry-After timestamp from a googleapiclient HttpError, if any.
+
+    Gmail surfaces rate-limit timing in two places:
+      * HTTP `Retry-After` header (seconds or HTTP-date)
+      * Body `"Retry after 2026-04-28T10:04:16.279Z"` substring on 429s
+
+    Returns a UTC datetime, or None if nothing parseable.
+    """
+    import re
+    from email.utils import parsedate_to_datetime
+    from googleapiclient.errors import HttpError
+
+    if not isinstance(error, HttpError):
+        return None
+
+    try:
+        retry_hdr = error.resp.get("retry-after") if error.resp else None
+    except Exception:
+        retry_hdr = None
+    if retry_hdr:
+        try:
+            return datetime.now(timezone.utc) + timedelta(seconds=int(retry_hdr))
+        except ValueError:
+            try:
+                dt = parsedate_to_datetime(retry_hdr)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc)
+            except Exception:
+                pass
+
+    m = re.search(r"Retry after (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)", str(error))
+    if m:
+        try:
+            return datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return None
+
+
 async def gmail_incremental_sync():
     """Pull new mail from every connected Gmail integration.
 
@@ -265,25 +356,76 @@ async def gmail_incremental_sync():
     Per-integration try/except so one broken integration can't block others.
     On persistent failure (3 consecutive), the integration is flipped to
     status='error' with last_error so the inbox banner surfaces it.
+
+    On 429 with Retry-After, the integration is parked until that timestamp
+    passes. Without this, the original 2026-04-28 incident extended Gmail's
+    rate-limit lockout for hours by retrying every minute.
     """
     from sqlalchemy import select
     from src.core.database import get_db_context
     from src.models.email_integration import EmailIntegration, IntegrationStatus
     from src.services.gmail.sync import GmailSyncService
-    from datetime import datetime, timezone
 
     async with get_db_context() as db:
         integrations = (await db.execute(
             select(EmailIntegration).where(
                 EmailIntegration.type == "gmail_api",
-                EmailIntegration.status == IntegrationStatus.connected.value,
             )
         )).scalars().all()
         # Detach the rows so we can use them outside this DB session.
-        targets = [(i.id, i.organization_id, i.account_email) for i in integrations]
+        all_rows = [(i.id, i.organization_id, i.account_email, i.status) for i in integrations]
+
+    now = datetime.now(timezone.utc)
+
+    # Visibility on non-connected integrations: log first sighting, ntfy after
+    # INTEGRATION_UNHEALTHY_ALERT_HOURS. Then build the actual sync target list
+    # from only the connected ones.
+    targets = []
+    for integ_id, org_id, account, status in all_rows:
+        if status == IntegrationStatus.connected.value:
+            targets.append((integ_id, org_id, account))
+            if integ_id in _integration_unhealthy_since:
+                # Recovered
+                _integration_unhealthy_since.pop(integ_id, None)
+                _integration_unhealthy_alerted.discard(integ_id)
+                logger.info(f"Gmail integration {account} recovered to status='connected'")
+            continue
+
+        if integ_id not in _integration_unhealthy_since:
+            _integration_unhealthy_since[integ_id] = now
+            logger.warning(
+                f"Gmail integration {account} (id={integ_id}) in non-connected "
+                f"status: {status!r}. Poller will skip it until reconnected."
+            )
+
+        duration = now - _integration_unhealthy_since[integ_id]
+        if (
+            duration > timedelta(hours=INTEGRATION_UNHEALTHY_ALERT_HOURS)
+            and integ_id not in _integration_unhealthy_alerted
+        ):
+            _integration_unhealthy_alerted.add(integ_id)
+            _send_ntfy(
+                title=f"QP Gmail integration silent: {account}",
+                message=(
+                    f"Status has been {status!r} for "
+                    f"{duration.total_seconds() / 3600:.1f}h. Poller is skipping it — "
+                    f"real customer mail may not be reaching the inbox. Reconnect "
+                    f"via /inbox/integrations or check email_integrations.id={integ_id}."
+                ),
+                priority="high",
+                tags="warning,email,gmail",
+            )
 
     for integ_id, org_id, account in targets:
         per_key = f"gmail_sync_{integ_id}"
+
+        retry_at = _gmail_retry_after.get(integ_id)
+        if retry_at and now < retry_at:
+            # Still inside the rate-limit cool-down. Skip silently.
+            continue
+        if retry_at and now >= retry_at:
+            _gmail_retry_after.pop(integ_id, None)
+
         try:
             # Re-fetch with a fresh session so each integration's sync gets a
             # clean session for token-refresh writes.
@@ -299,6 +441,16 @@ async def gmail_incremental_sync():
                 logger.info(f"Gmail sync {account}: ingested {stats['ingested']} (errors={stats.get('errors',0)})")
             _clear_failures(per_key)
         except Exception as e:
+            retry_at = _parse_gmail_retry_after(e)
+            if retry_at:
+                _gmail_retry_after[integ_id] = retry_at
+                logger.warning(
+                    f"Gmail sync rate-limited for {account} until {retry_at.isoformat()} — backing off"
+                )
+                # Don't count rate-limit responses as a "broken integration"
+                # signal; they self-heal once the cool-down passes.
+                continue
+
             _failure_counts[per_key] = _failure_counts.get(per_key, 0) + 1
             logger.warning(f"Gmail sync failed for {account} (count={_failure_counts[per_key]}): {e}")
             # After 3 consecutive failures, flip the integration to error so the
@@ -489,6 +641,7 @@ async def redis_health_probe():
 async def main():
     logger.info("Background agent service started (monitoring: Sentry + ntfy)")
     logger.info("Inbound email: Postmark webhooks + Gmail incremental sync (every 60s)")
+    logger.info(f"Dunning sequence: every {DUNNING_EVERY} min (daily)")
     logger.info(f"Inbound freshness canary: every {INBOUND_FRESHNESS_EVERY} min")
     logger.info(f"Thread state reconciliation: every {RECONCILE_EVERY} min")
     logger.info(f"Redis health probe: every {REDIS_HEALTH_CHECK_EVERY} min")
@@ -527,6 +680,19 @@ async def main():
                 _clear_failures("estimate_reminders")
             except Exception as e:
                 _handle_error("estimate_reminders", e)
+
+        # --- Dunning sequence (daily) — INTENTIONALLY DISABLED ---
+        # Code is loaded so Brian can trigger a manual run via
+        # POST /v1/billing/dunning/run (with ?dry_run=true to preview).
+        # First scheduled run would email the past-due-invoice backlog
+        # (~51 Sapphire customers as of 2026-04-28); do not enable auto
+        # without reviewing that backlog. To enable: uncomment below.
+        # if cycle % DUNNING_EVERY == 0:
+        #     try:
+        #         await run_dunning_for_all_orgs()
+        #         _clear_failures("dunning_sequence")
+        #     except Exception as e:
+        #         _handle_error("dunning_sequence", e)
 
         # --- Message escalations (every 5 min) ---
         if cycle % 5 == 0:

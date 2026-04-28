@@ -25,10 +25,13 @@ import {
   type Customer,
   type LineItem,
 } from "@/components/invoices/invoice-list-components";
+import { ArAgingTable } from "@/components/invoices/ar-aging-table";
+import { ReconciliationContent } from "@/components/invoices/reconciliation-content";
+import { DunningPreview } from "@/components/invoices/dunning-preview";
 
 const OPEN_STATUSES = "draft,sent,revised,viewed,overdue,approved";
 
-type DocView = "invoices" | "estimates";
+type DocView = "invoices" | "estimates" | "ar_aging" | "reconciliation" | "dunning";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
 type EstimateFilter =
   | "all" | "open" | "draft" | "sent" | "approved" | "rejected" | "expired";
@@ -46,11 +49,23 @@ const MC_ALL = "__all__";
 export default function InvoicesPage() {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const [docView, setDocView] = useState<DocView>(tabParam === "estimates" ? "estimates" : "invoices");
+  const initialView: DocView =
+    tabParam === "estimates" ? "estimates" :
+    tabParam === "ar_aging" ? "ar_aging" :
+    tabParam === "reconciliation" ? "reconciliation" :
+    tabParam === "dunning" ? "dunning" :
+    "invoices";
+  const [docView, setDocView] = useState<DocView>(initialView);
 
   // Sync docView when URL tab param changes (e.g. back navigation)
   useEffect(() => {
-    setDocView(tabParam === "estimates" ? "estimates" : "invoices");
+    setDocView(
+      tabParam === "estimates" ? "estimates" :
+      tabParam === "ar_aging" ? "ar_aging" :
+      tabParam === "reconciliation" ? "reconciliation" :
+      tabParam === "dunning" ? "dunning" :
+      "invoices"
+    );
   }, [tabParam]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [total, setTotal] = useState(0);
@@ -332,7 +347,7 @@ export default function InvoicesPage() {
     <PageLayout
       title="Invoices"
       subtitle={undefined}
-      action={
+      action={(docView === "ar_aging" || docView === "reconciliation" || docView === "dunning") ? undefined : (
         <CreateInvoiceDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
@@ -360,10 +375,13 @@ export default function InvoicesPage() {
           today={today}
           onSubmit={handleCreate}
         />
-      }
+      )}
       tabs={[
         { key: "invoices", label: "Invoices" },
         { key: "estimates", label: "Estimates" },
+        { key: "ar_aging", label: "A/R Aging" },
+        { key: "reconciliation", label: "Reconciliation" },
+        { key: "dunning", label: "Payment reminders" },
       ]}
       activeTab={docView}
       onTabChange={(key) => { setDocView(key as DocView); setSearch(""); setSelectedMonth(null); setChartSegment("all"); setActiveTab("open"); }}
@@ -391,6 +409,14 @@ export default function InvoicesPage() {
         </>
       ) : undefined}
     >
+      {docView === "ar_aging" ? (
+        <ArAgingTable />
+      ) : docView === "reconciliation" ? (
+        <ReconciliationContent />
+      ) : docView === "dunning" ? (
+        <DunningPreview />
+      ) : (
+        <>
       {/* Filter bar */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-2">
@@ -463,6 +489,8 @@ export default function InvoicesPage() {
         approving={approving}
         onApprove={handleApproveEstimate}
       />
+        </>
+      )}
     </PageLayout>
   );
 }

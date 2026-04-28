@@ -1,8 +1,10 @@
 """Billing service — recurring invoice generation, autopay orchestration, dunning retries."""
 
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from email.utils import getaddresses
 from dateutil.relativedelta import relativedelta
 
 from sqlalchemy import select, and_
@@ -18,6 +20,54 @@ logger = logging.getLogger(__name__)
 
 # Retry schedule: attempt 1 (immediate), attempt 2 (+3 days), attempt 3 (+7 days)
 MAX_RETRIES = 3
+
+# Dunning sequence cadence — days past due that trigger each step.
+# Indexed 1..4 because step 0 means "no dunning sent yet."
+DUNNING_DAYS_PAST_DUE = {1: 0, 2: 3, 3: 7, 4: 14}
+DUNNING_FINAL_STEP = 4
+# Eligible invoice statuses. Excludes draft, paid, void, written_off.
+DUNNING_ELIGIBLE_STATUSES = ("sent", "viewed", "revised", "overdue")
+
+# Quick syntactic email check. Real customer data is messy: trailing
+# commas, multi-address fields, "Name <addr>" forms, garbage. We use
+# stdlib `getaddresses` to split + parse, then this regex to filter
+# obvious junk. Not RFC 5322 — it's a pragmatic guard against sending
+# to addresses that would just bounce.
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+
+def _parse_recipients(raw: str | None) -> list[str]:
+    """Split a possibly-multi-address contact field into clean addresses.
+
+    Handles: trailing commas, comma-separated lists, "Name <addr>" forms,
+    semicolon separators, accidental whitespace. Drops anything that
+    doesn't pass the syntactic check. Deduplicates case-insensitively.
+
+    Pre-splits on `,` / `;` BEFORE calling stdlib `getaddresses` because
+    getaddresses misparses `"foo@x.com,"` (trailing comma) — a common
+    real-world data pattern. Each piece is parsed independently so a
+    single bad token can't break the whole field.
+    """
+    if not raw:
+        return []
+    pieces = re.split(r"[,;]", raw)
+    out: list[str] = []
+    seen: set[str] = set()
+    for piece in pieces:
+        piece = piece.strip()
+        if not piece:
+            continue
+        # getaddresses still useful per-piece for "Name <addr>" forms.
+        for _name, addr in getaddresses([piece]):
+            clean = (addr or "").strip()
+            if not clean or not _EMAIL_RE.match(clean):
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(clean)
+    return out
 
 
 class BillingService:
@@ -231,6 +281,386 @@ class BillingService:
             "autopay_enrolled": autopay_enrolled,
             "projected_monthly_revenue": round(projected, 2),
             "failed_payments_pending": failed_count,
+        }
+
+    async def preview_dunning_sequence(self, org_id: str) -> dict:
+        """Dry-run version of run_dunning_sequence: returns what WOULD be
+        sent without sending anything or advancing state. Use to review
+        the backlog before enabling automatic dunning."""
+        from src.models.invoice import InvoiceStatus
+
+        today = date.today()
+        invoices = (await self.db.execute(
+            select(Invoice).where(
+                Invoice.organization_id == org_id,
+                Invoice.status.in_(DUNNING_ELIGIBLE_STATUSES),
+                Invoice.document_type == "invoice",
+                Invoice.balance > 0,
+                Invoice.last_dunning_step_sent < DUNNING_FINAL_STEP,
+                # PSS-imported invoices are excluded — they may not be legit
+                # and need manual review before being dunned. Brian's
+                # explicit rule, 2026-04-28.
+                Invoice.pss_invoice_id.is_(None),
+            )
+        )).scalars().all()
+
+        would_send: list[dict] = []
+        not_due_yet: list[dict] = []
+
+        for inv in invoices:
+            effective_due = inv.due_date or inv.issue_date
+            days_past_due = (today - effective_due).days
+            next_step = (inv.last_dunning_step_sent or 0) + 1
+            if next_step > DUNNING_FINAL_STEP:
+                continue
+
+            recipients = await self._resolve_dunning_recipients(inv)
+            row = {
+                "invoice_id": inv.id,
+                "invoice_number": inv.invoice_number,
+                "customer_id": inv.customer_id,
+                "balance": float(inv.balance or 0),
+                "days_past_due": days_past_due,
+                "next_step": next_step,
+                # Joined display string + raw list — UI can pick which to show.
+                "recipient_email": ", ".join(recipients) if recipients else None,
+                "recipients": recipients,
+                "recipient_count": len(recipients),
+                "has_recipient": bool(recipients),
+            }
+
+            if days_past_due >= DUNNING_DAYS_PAST_DUE[next_step]:
+                would_send.append(row)
+            else:
+                not_due_yet.append(row)
+
+        # Sort would-send by step asc, then by days_past_due desc so the
+        # oldest stuff bubbles up first.
+        would_send.sort(key=lambda r: (r["next_step"], -r["days_past_due"]))
+
+        return {
+            "as_of": today.isoformat(),
+            "eligible": len(invoices),
+            "would_send_count": len(would_send),
+            "would_send": would_send,
+            "not_due_yet_count": len(not_due_yet),
+            "missing_recipient_count": sum(1 for r in would_send if not r["has_recipient"]),
+        }
+
+    async def run_dunning_sequence(
+        self, org_id: str, invoice_ids: list[str] | None = None
+    ) -> dict:
+        """Advance every eligible invoice through the next dunning step.
+
+        Eligibility: status in DUNNING_ELIGIBLE_STATUSES, document_type=invoice,
+        balance > 0, has a due_date (or issue_date as fallback) that's old
+        enough to qualify for the next step.
+
+        When `invoice_ids` is provided, the eligibility set is restricted
+        to those IDs (intersected with the standard filter). Used for
+        selective send from the UI when the user picks specific rows.
+
+        Idempotency: only sends step N if last_dunning_step_sent < N AND
+        days_past_due >= DUNNING_DAYS_PAST_DUE[N]. Calling multiple times
+        per day is safe — at most one email per invoice per call.
+
+        Customer pays / drops balance to zero between steps → invoice
+        falls out of the eligibility filter, sequence stops naturally.
+        """
+        from src.models.invoice import InvoiceStatus
+
+        today = date.today()
+        query = select(Invoice).where(
+            Invoice.organization_id == org_id,
+            Invoice.status.in_(DUNNING_ELIGIBLE_STATUSES),
+            Invoice.document_type == "invoice",
+            Invoice.balance > 0,
+            Invoice.last_dunning_step_sent < DUNNING_FINAL_STEP,
+            # PSS-imported invoices are excluded — they may not be legit
+            # and need manual review before being dunned. Brian's
+            # explicit rule, 2026-04-28.
+            Invoice.pss_invoice_id.is_(None),
+        )
+        if invoice_ids is not None:
+            if not invoice_ids:
+                return {
+                    "eligible": 0,
+                    "sent": 0,
+                    "skipped_not_due_yet": 0,
+                    "errors": [],
+                }
+            query = query.where(Invoice.id.in_(invoice_ids))
+        invoices = (await self.db.execute(query)).scalars().all()
+
+        sent_count = 0
+        skipped_count = 0
+        errors: list[str] = []
+
+        for inv in invoices:
+            effective_due = inv.due_date or inv.issue_date
+            days_past_due = (today - effective_due).days
+            next_step = (inv.last_dunning_step_sent or 0) + 1
+
+            if next_step > DUNNING_FINAL_STEP:
+                continue
+            if days_past_due < DUNNING_DAYS_PAST_DUE[next_step]:
+                skipped_count += 1
+                continue
+
+            try:
+                await self.send_dunning_email(inv, next_step, days_past_due)
+                sent_count += 1
+            except Exception as e:
+                errors.append(f"invoice {inv.id}: {e}")
+                logger.error(f"Dunning send failed for invoice {inv.id}: {e}")
+
+        await self.db.commit()
+        summary = {
+            "eligible": len(invoices),
+            "sent": sent_count,
+            "skipped_not_due_yet": skipped_count,
+            "errors": errors,
+        }
+        logger.info(f"Dunning run complete for org {org_id}: {summary}")
+        return summary
+
+    async def send_dunning_email(
+        self, invoice: Invoice, step: int, days_past_due: int
+    ) -> None:
+        """Send a dunning email to every clean recipient on an invoice.
+
+        Multi-recipient invoices (typical for property-managed accounts:
+        billing@ + accounting@ on the same customer) get one email each,
+        matching the convention from `EstimateWorkflowService`.
+
+        Advances `last_dunning_step_sent` only if AT LEAST one send
+        succeeded — so a single bad address doesn't block the whole row,
+        but a fully-broken send leaves state alone for tomorrow's retry.
+        """
+        from src.models.organization import Organization
+        from src.services.email_service import EmailService, EmailMessage
+        from src.services.email_templates import dunning_email_template
+        from src.core.config import settings
+
+        if not (1 <= step <= DUNNING_FINAL_STEP):
+            raise ValueError(f"Invalid dunning step {step}")
+
+        recipients = await self._resolve_dunning_recipients(invoice)
+        if not recipients:
+            logger.warning(f"No dunning recipients for invoice {invoice.id} — skipping send")
+            raise RuntimeError("No deliverable recipients")
+
+        org = (await self.db.execute(
+            select(Organization).where(Organization.id == invoice.organization_id)
+        )).scalar_one_or_none()
+        org_name = org.name if org else "Quantum Pools"
+        branding_color = getattr(org, "branding_color", None) if org else None
+        branding_color = branding_color or "#1a1a2e"
+
+        customer_display = invoice.billing_name or "there"
+        if invoice.customer_id:
+            customer = (await self.db.execute(
+                select(Customer).where(Customer.id == invoice.customer_id)
+            )).scalar_one_or_none()
+            if customer:
+                customer_display = customer.display_name or customer_display
+
+        balance_str = f"${float(invoice.balance):,.2f}"
+        pay_url = f"{settings.frontend_url.rstrip('/')}/pay/{invoice.payment_token}"
+
+        subject, text, html = dunning_email_template(
+            step=step,
+            org_name=org_name,
+            customer_name=customer_display,
+            invoice_number=invoice.invoice_number or invoice.id[:8],
+            balance=balance_str,
+            days_past_due=days_past_due,
+            pay_url=pay_url,
+            branding_color=branding_color,
+        )
+
+        email_svc = EmailService(self.db)
+        sent_to: list[str] = []
+        errors: list[str] = []
+        for recipient in recipients:
+            msg = EmailMessage(to=recipient, subject=subject, text_body=text, html_body=html)
+            result = await email_svc.send_email(invoice.organization_id, msg)
+            if getattr(result, "success", False):
+                sent_to.append(recipient)
+            else:
+                err = getattr(result, "error", "unknown error")
+                errors.append(f"{recipient}: {err}")
+
+        if not sent_to:
+            raise RuntimeError(
+                f"All dunning sends failed: {'; '.join(errors) if errors else 'unknown'}"
+            )
+
+        invoice.last_dunning_step_sent = step
+        invoice.last_dunning_sent_at = datetime.now(timezone.utc)
+        logger.info(
+            f"Dunning step {step} sent for invoice {invoice.invoice_number} "
+            f"({invoice.id}) → {len(sent_to)} recipient(s) ({', '.join(sent_to)}), "
+            f"{days_past_due}d past due"
+        )
+        if errors:
+            logger.warning(
+                f"Dunning step {step} for invoice {invoice.id}: partial failure — "
+                f"{len(errors)} recipient(s) failed: {'; '.join(errors)}"
+            )
+
+    async def _resolve_dunning_recipients(self, invoice: Invoice) -> list[str]:
+        """Resolve clean, validated recipient addresses for an invoice.
+
+        Walks the same priority chain InvoiceService uses for outbound
+        invoice email, but each candidate field is parsed via
+        `_parse_recipients` to handle multi-address values, "Name <addr>"
+        forms, trailing commas, and similar messy data.
+
+        Priority (first source that yields ANY clean address wins —
+        falling through on empty so a junk billing field doesn't mask a
+        valid customer.email):
+        1. customer_contacts where receives_invoices=True (primary first).
+        2. customer_contacts where is_primary=True (regardless of flags).
+        3. customers.email (legacy fallback).
+        4. invoice.billing_email (non-client invoices).
+        """
+        from src.models.customer_contact import CustomerContact
+
+        if invoice.customer_id:
+            primary_billing = (await self.db.execute(
+                select(CustomerContact).where(
+                    CustomerContact.customer_id == invoice.customer_id,
+                    CustomerContact.receives_invoices == True,  # noqa: E712
+                ).order_by(
+                    CustomerContact.is_primary.desc(),
+                    CustomerContact.created_at.asc(),
+                )
+            )).scalars().first()
+            if primary_billing:
+                addrs = _parse_recipients(primary_billing.email)
+                if addrs:
+                    return addrs
+
+            primary_any = (await self.db.execute(
+                select(CustomerContact).where(
+                    CustomerContact.customer_id == invoice.customer_id,
+                    CustomerContact.is_primary == True,  # noqa: E712
+                )
+            )).scalars().first()
+            if primary_any:
+                addrs = _parse_recipients(primary_any.email)
+                if addrs:
+                    return addrs
+
+            customer = (await self.db.execute(
+                select(Customer).where(Customer.id == invoice.customer_id)
+            )).scalar_one_or_none()
+            if customer:
+                addrs = _parse_recipients(customer.email)
+                if addrs:
+                    return addrs
+
+        return _parse_recipients(invoice.billing_email)
+
+    async def get_ar_aging(self, org_id: str) -> dict:
+        """A/R aging — outstanding invoices grouped by customer, bucketed by
+        days past due (current / 1-30 / 31-60 / 61-90 / 90+).
+
+        Outstanding = status in (sent, revised, viewed, overdue) AND balance > 0.
+        Excludes estimates, drafts, paid, written-off, voided.
+
+        Falls back to issue_date when due_date is null. Non-client invoices
+        (no customer_id) group under their billing_name.
+        """
+        from src.models.invoice import InvoiceStatus
+
+        OUTSTANDING_STATUSES = (
+            InvoiceStatus.sent.value,
+            InvoiceStatus.revised.value,
+            InvoiceStatus.viewed.value,
+            InvoiceStatus.overdue.value,
+        )
+        today = date.today()
+
+        invoices = (await self.db.execute(
+            select(Invoice).where(
+                Invoice.organization_id == org_id,
+                Invoice.status.in_(OUTSTANDING_STATUSES),
+                Invoice.document_type == "invoice",
+                Invoice.balance > 0,
+            )
+        )).scalars().all()
+
+        # Group by customer_id (or by billing_name for non-client)
+        by_key: dict[str, dict] = {}
+        for inv in invoices:
+            effective_due = inv.due_date or inv.issue_date
+            age_days = (today - effective_due).days
+            balance = float(inv.balance or 0)
+
+            if age_days <= 0:
+                bucket = "current"
+            elif age_days <= 30:
+                bucket = "days_30"
+            elif age_days <= 60:
+                bucket = "days_60"
+            elif age_days <= 90:
+                bucket = "days_90"
+            else:
+                bucket = "over_90"
+
+            key = inv.customer_id or f"_billing:{inv.billing_name or 'Unknown'}"
+            row = by_key.setdefault(key, {
+                "customer_id": inv.customer_id,
+                "customer_name": None,
+                "current": 0.0,
+                "days_30": 0.0,
+                "days_60": 0.0,
+                "days_90": 0.0,
+                "over_90": 0.0,
+                "total_owed": 0.0,
+                "invoice_count": 0,
+                "oldest_invoice_age_days": 0,
+            })
+            row[bucket] += balance
+            row["total_owed"] += balance
+            row["invoice_count"] += 1
+            if age_days > row["oldest_invoice_age_days"]:
+                row["oldest_invoice_age_days"] = age_days
+
+        # Resolve customer names in one query
+        customer_ids = [k for k in by_key if not k.startswith("_billing:")]
+        if customer_ids:
+            customers = (await self.db.execute(
+                select(Customer).where(Customer.id.in_(customer_ids))
+            )).scalars().all()
+            name_map = {c.id: c.display_name for c in customers}
+            for cid in customer_ids:
+                by_key[cid]["customer_name"] = name_map.get(cid, "(deleted customer)")
+
+        for k, row in by_key.items():
+            if k.startswith("_billing:"):
+                row["customer_name"] = k[len("_billing:"):]
+
+        # Round bucket values to cents and sort by total desc
+        rows = []
+        for r in by_key.values():
+            for k in ("current", "days_30", "days_60", "days_90", "over_90", "total_owed"):
+                r[k] = round(r[k], 2)
+            rows.append(r)
+        rows.sort(key=lambda x: x["total_owed"], reverse=True)
+
+        totals = {
+            k: round(sum(r[k] for r in rows), 2)
+            for k in ("current", "days_30", "days_60", "days_90", "over_90", "total_owed")
+        }
+        totals["invoice_count"] = sum(r["invoice_count"] for r in rows)
+
+        return {
+            "as_of": today.isoformat(),
+            "rows": rows,
+            "totals": totals,
         }
 
     # ── Internal Helpers ──────────────────────────────────────────────

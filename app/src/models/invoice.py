@@ -108,6 +108,13 @@ class Invoice(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Dunning sequence position. 0 = no dunning sent yet; 1-4 = which step
+    # last fired (T+0, T+3, T+7, T+14). >= 4 means "service-at-risk."
+    # Reset implicitly when balance drops to 0 — past-due eligibility
+    # filter excludes paid invoices so the sequence simply stops.
+    last_dunning_step_sent: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    last_dunning_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

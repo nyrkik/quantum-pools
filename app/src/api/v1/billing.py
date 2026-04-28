@@ -1,6 +1,11 @@
 """Billing and subscription endpoints."""
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -139,3 +144,94 @@ async def trigger_payment_retries(
     svc = BillingService(db)
     result = await svc.retry_failed_payments(ctx.organization_id)
     return result
+
+
+class DunningRunBody(BaseModel):
+    invoice_ids: list[str] | None = None
+
+
+@router.post("/dunning/run")
+async def trigger_dunning(
+    dry_run: bool = True,
+    body: DunningRunBody | None = None,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger the dunning sequence for this org. Owner only.
+
+    Defaults to ?dry_run=true — returns what WOULD be sent without
+    sending or advancing state. Pass ?dry_run=false to actually fire
+    the emails.
+
+    Body `{invoice_ids: [...]}` restricts the run to those invoices
+    (intersected with the standard eligibility filter). Omit to act
+    on all eligible.
+
+    The daily auto-scheduler in agent_poller is intentionally
+    commented out — review this endpoint's dry-run output before
+    enabling automatic dunning.
+    """
+    svc = BillingService(db)
+    invoice_ids = body.invoice_ids if body else None
+    if dry_run:
+        return {"mode": "dry_run", **await svc.preview_dunning_sequence(ctx.organization_id)}
+    return {
+        "mode": "live",
+        **await svc.run_dunning_sequence(ctx.organization_id, invoice_ids=invoice_ids),
+    }
+
+
+@router.get("/ar-aging")
+async def get_ar_aging(
+    format: str = "json",
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """A/R aging — outstanding invoices grouped by customer, bucketed by
+    days past due. ?format=csv returns a downloadable CSV."""
+    svc = BillingService(db)
+    data = await svc.get_ar_aging(ctx.organization_id)
+
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Customer", "Current", "1-30", "31-60", "61-90", "90+",
+            "Total Owed", "Invoices", "Oldest (days)",
+        ])
+        for r in data["rows"]:
+            writer.writerow([
+                r["customer_name"],
+                f"{r['current']:.2f}",
+                f"{r['days_30']:.2f}",
+                f"{r['days_60']:.2f}",
+                f"{r['days_90']:.2f}",
+                f"{r['over_90']:.2f}",
+                f"{r['total_owed']:.2f}",
+                r["invoice_count"],
+                r["oldest_invoice_age_days"],
+            ])
+        t = data["totals"]
+        writer.writerow([
+            "TOTAL",
+            f"{t['current']:.2f}",
+            f"{t['days_30']:.2f}",
+            f"{t['days_60']:.2f}",
+            f"{t['days_90']:.2f}",
+            f"{t['over_90']:.2f}",
+            f"{t['total_owed']:.2f}",
+            t["invoice_count"],
+            "",
+        ])
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.read()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": (
+                    f"attachment; filename=ar-aging-{data['as_of']}.csv"
+                ),
+            },
+        )
+
+    return data

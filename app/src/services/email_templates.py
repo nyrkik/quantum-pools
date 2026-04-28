@@ -166,6 +166,119 @@ def customer_email_template(
     return text, html
 
 
+def customer_portal_magic_link_template(
+    org_name: str,
+    contact_name: str,
+    login_url: str,
+    expires_in_minutes: int = 15,
+    branding_color: str = "#1a1a2e",
+) -> tuple[str, str]:
+    """Sign-in email for the customer portal (passwordless magic link)."""
+    text = f"""Hi {contact_name},
+
+Click the link below to sign in to your {org_name} account:
+
+{login_url}
+
+This link expires in {expires_in_minutes} minutes. If you didn't ask to sign in, you can safely ignore this email.
+
+— {org_name}"""
+
+    content = f"""<p style="color: #4a5568; line-height: 1.6;">Hi {contact_name},</p>
+<p style="color: #4a5568; line-height: 1.6;">Click below to sign in to your <strong>{org_name}</strong> account:</p>
+<p style="margin: 24px 0;">
+  <a href="{login_url}" style="background: {branding_color}; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Sign in</a>
+</p>
+<p style="color: #718096; font-size: 0.875rem;">This link expires in {expires_in_minutes} minutes. If you didn't ask to sign in, you can safely ignore this email.</p>
+<p style="color: #718096; font-size: 0.75rem;">Button not working? Copy this URL:<br>
+<span style="color: #4a5568; word-break: break-all;">{login_url}</span></p>"""
+
+    html = _base_html(org_name, branding_color, content)
+    return text, html
+
+
+def dunning_email_template(
+    step: int,
+    org_name: str,
+    customer_name: str,
+    invoice_number: str,
+    balance: str,
+    days_past_due: int,
+    pay_url: str,
+    branding_color: str = "#1a1a2e",
+) -> tuple[str, str, str]:
+    """4-step dunning sequence. Returns (subject, text_body, html_body).
+
+    Step 1 (T+0): neutral — payment couldn't be processed / past due.
+    Step 2 (T+3): polite, direct CTA to update payment.
+    Step 3 (T+7): escalating — service is at risk.
+    Step 4 (T+14): final notice — service review pending.
+
+    Tone escalates each step. Single CTA per email. The pay_url is the
+    /pay/{token} public page (handles both card payment and bank ACH).
+    """
+    if step == 1:
+        subject = f"Payment issue on invoice #{invoice_number}"
+        headline = "Your payment couldn't be processed"
+        body = (
+            f"Hi {customer_name}, we weren't able to collect payment on invoice "
+            f"#{invoice_number} ({balance}). This is usually a card-on-file issue "
+            f"— an expired card or a temporary hold. Please update your payment "
+            f"method or pay this invoice when you have a moment."
+        )
+        cta = "Pay invoice"
+    elif step == 2:
+        subject = f"Action required — invoice #{invoice_number} is {days_past_due} days past due"
+        headline = "Action required: update your payment"
+        body = (
+            f"Hi {customer_name}, invoice #{invoice_number} ({balance}) is now "
+            f"{days_past_due} days past due. Please update your payment method or "
+            f"pay this invoice today to keep your account in good standing."
+        )
+        cta = "Pay now"
+    elif step == 3:
+        subject = f"Your {org_name} service is at risk"
+        headline = "Your service is at risk"
+        body = (
+            f"Hi {customer_name}, invoice #{invoice_number} ({balance}) is now "
+            f"{days_past_due} days past due. If we don't receive payment soon, "
+            f"your service may be paused. Please pay this invoice today to keep "
+            f"your service uninterrupted."
+        )
+        cta = "Pay now to keep service"
+    else:  # step >= 4
+        subject = f"Final notice — invoice #{invoice_number}"
+        headline = "Final notice — service review pending"
+        body = (
+            f"Hi {customer_name}, invoice #{invoice_number} ({balance}) is now "
+            f"{days_past_due} days past due. This account will be reviewed for "
+            f"service hold. To prevent service interruption, please pay this "
+            f"invoice immediately or contact {org_name} directly."
+        )
+        cta = "Pay now"
+
+    text = f"""Hi {customer_name},
+
+{headline}
+
+{body}
+
+Pay: {pay_url}
+
+— {org_name}"""
+
+    content = f"""<h2 style="color: #1a1a2e; margin-bottom: 8px; font-size: 1.125rem;">{headline}</h2>
+<p style="color: #4a5568; line-height: 1.6;">{body}</p>
+<p style="margin: 24px 0;">
+  <a href="{pay_url}" style="background: {branding_color}; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">{cta}</a>
+</p>
+<p style="color: #718096; font-size: 0.75rem;">Button not working? Copy this URL:<br>
+<span style="color: #4a5568; word-break: break-all;">{pay_url}</span></p>"""
+
+    html = _base_html(org_name, branding_color, content)
+    return subject, text, html
+
+
 def password_reset_template(
     org_name: str,
     user_name: str,

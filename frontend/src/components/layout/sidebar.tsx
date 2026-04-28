@@ -47,7 +47,6 @@ import {
   ClipboardList,
   FolderOpen,
   Receipt,
-  CreditCard,
   Package,
   MessageSquare,
   MessageCircleQuestion,
@@ -66,7 +65,6 @@ const navItems = [
   { href: "/customers", label: "Clients", icon: Users, check: null },
   { href: "/routes", label: "Routes", icon: Route, check: "canViewRoutes" as keyof Permissions },
   { href: "/invoices", label: "Invoices", icon: FileText, check: "canViewInvoices" as keyof Permissions },
-  { href: "/billing/reconciliation", label: "Reconciliation", icon: CreditCard, check: "canCreateInvoices" as keyof Permissions },
   // Tools & analysis
   { href: "/deepblue", label: "DeepBlue", icon: Sparkles, check: null },
   { href: "/map", label: "Map", icon: Map, check: "canViewSatellite" as keyof Permissions },

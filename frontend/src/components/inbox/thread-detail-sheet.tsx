@@ -48,6 +48,7 @@ import { formatTime } from "@/lib/format";
 import type { ThreadDetail } from "@/types/agent";
 import { StatusBadge, UrgencyBadge, CategoryBadge } from "./inbox-badges";
 import { CollapsibleBody } from "./collapsible-body";
+import { VoiceDictationButton } from "@/components/voice/voice-dictation-button";
 import { ContactLearningPrompt, SENDER_TAG_STYLES } from "./contact-learning-modal";
 import { RuleEditorDialog, type RuleDraft } from "./rule-editor-dialog";
 import { LinkCasePicker } from "@/components/cases/link-case-picker";
@@ -972,15 +973,24 @@ function InlineReplyComposer({
         <span className="text-[10px] text-muted-foreground">
           {followUp ? "AI drafted — edit and send" : "Manual reply"}
         </span>
-        <Button
-          size="sm"
-          onClick={handleSendManual}
-          disabled={sendingFollowUp || !displayText.trim()}
-          className="h-8"
-        >
-          {sendingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
-          Send
-        </Button>
+        <div className="flex items-center gap-2">
+          <VoiceDictationButton
+            surface="email_reply"
+            onTranscript={(t) => {
+              const cur = displayText;
+              setDisplayText(cur ? cur + (cur.endsWith(" ") ? "" : " ") + t : t);
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={handleSendManual}
+            disabled={sendingFollowUp || !displayText.trim()}
+            className="h-8"
+          >
+            {sendingFollowUp ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+            Send
+          </Button>
+        </div>
       </div>
     </div>
   );

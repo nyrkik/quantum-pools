@@ -84,9 +84,37 @@ class GmailSyncService:
                 return await self._sync_query(client, org_id, "newer_than:1d")
             raise
 
+    async def _get_current_history_id(self, client) -> str | None:
+        """Read the mailbox's current historyId via getProfile.
+
+        Captured BEFORE listing so the next incremental sync resumes from a
+        watermark that's strictly <= what we ingested. Some messages may be
+        re-fetched in the next cycle; AgentMessage.email_uid dedup absorbs that.
+        Capturing AFTER would create a window where mail arriving during the
+        list scan is missed permanently.
+        """
+        def _get():
+            return client.users().getProfile(userId="me").execute()
+        profile = await asyncio.to_thread(_get)
+        return profile.get("historyId")
+
     async def _sync_query(self, client, org_id: str, query: str, historical: bool = False) -> dict:
-        """Walk users.messages.list with a Gmail search query and ingest each."""
+        """Walk users.messages.list with a Gmail search query and ingest each.
+
+        Captures the mailbox's current historyId before the list scan so the
+        next incremental sync can use the cheap history API. Without this seed,
+        every poll falls back to this expensive full-list path forever — which
+        is what burned through Gmail's per-user quota on 2026-04-28.
+
+        HttpErrors propagate to the caller. The poller relies on raised
+        exceptions to count consecutive failures, surface 429/Retry-After, and
+        flip the integration to status=error after 3 strikes.
+        """
         stats = {"fetched": 0, "ingested": 0, "skipped": 0, "errors": 0}
+
+        # Capture watermark BEFORE listing. Any mail that arrives during the
+        # scan will be picked up by the next incremental_sync via history API.
+        latest_history_id = await self._get_current_history_id(client)
 
         def _list_page(page_token=None):
             req = client.users().messages().list(
@@ -99,14 +127,8 @@ class GmailSyncService:
             return req.execute()
 
         page_token = None
-        latest_history_id = self.integration.last_history_id
         while True:
-            try:
-                resp = await asyncio.to_thread(_list_page, page_token)
-            except HttpError as e:
-                logger.error(f"Gmail list failed: {e}")
-                stats["errors"] += 1
-                break
+            resp = await asyncio.to_thread(_list_page, page_token)
 
             messages = resp.get("messages", [])
             if not messages:
@@ -123,13 +145,6 @@ class GmailSyncService:
                 except Exception as e:
                     logger.warning(f"Gmail ingest failed for {m.get('id')}: {e}")
                     stats["errors"] += 1
-
-            # Track latest historyId we've seen so we can resume incrementally
-            if resp.get("resultSizeEstimate") and messages:
-                # Need to fetch one message to read its historyId — we already
-                # did that inside _fetch_and_ingest, so use the integration's
-                # current value (updated by the last ingest)
-                pass
 
             page_token = resp.get("nextPageToken")
             if not page_token:

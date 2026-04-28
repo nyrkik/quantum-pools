@@ -49,3 +49,6 @@ htmlcov/
 alembic/versions/*.pyc
 uploads/
 backups/
+
+# Local ops markers — see scripts/deploy.sh
+.gmail-lockout

@@ -387,6 +387,15 @@ async def _persist_inbound_attachments(db, msg, agent_message_id: str, organizat
                 continue
             if disposition not in ("attachment", "inline") and not filename:
                 continue
+            # Skip inline parts with a Content-ID — those are CID-referenced
+            # body images (logos, embedded screenshots, signature decorations).
+            # They display inline via cid: in HTML email clients and don't
+            # belong in the attachments grid. Quoted-reply chains amplify this:
+            # every reply re-attaches the prior signature logo, so without this
+            # skip the same logo gets persisted on every customer round-trip.
+            content_id = (part.get("Content-ID") or part.get("X-Attachment-Id") or "").strip()
+            if disposition == "inline" and content_id:
+                continue
             payload = part.get_payload(decode=True)
             if not payload:
                 continue

@@ -67,10 +67,16 @@ class AgentThread(Base):
     folder_override: Mapped[bool] = mapped_column(Boolean, default=False)  # True = user manually moved, rules won't re-assign
 
     # Inbox routing / visibility — role-group list (built-in slugs like
-    # "admin"/"manager" plus any custom role slugs). NULL means everyone
+    # "admin"/"manager" plus any custom role slugs). SQL NULL means everyone
     # in the org sees the thread; otherwise the user's effective role
     # slug must appear in the list.
-    visibility_role_slugs: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    # `none_as_null=True` is critical: without it, SQLAlchemy serializes
+    # Python None to JSON `null` (a present value), and the IS NULL visibility
+    # filter excludes those rows from every role — invisible threads. See
+    # `memory/inbox_visibility_jsonb_null_fix.md`.
+    visibility_role_slugs: Mapped[list[str] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True,
+    )
     delivered_to: Mapped[str | None] = mapped_column(String(255), nullable=True)  # org address that received the email
 
     # Thread assignment

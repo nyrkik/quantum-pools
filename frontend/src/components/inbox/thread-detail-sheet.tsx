@@ -515,9 +515,17 @@ function HtmlEmailBody({ html }: { html: string }) {
 
   return (
     <div className="pt-3">
+      {/*
+        allow-same-origin is required so img requests to our authenticated
+        attachments endpoint (`/api/v1/attachments/{id}/file`) carry the
+        session cookie — needed for inline images rewritten from `cid:` refs.
+        Without allow-scripts/forms the iframe still cannot execute JS or
+        submit forms, so allow-same-origin alone is safe (no script-based
+        cross-frame data access).
+      */}
       <iframe
         ref={iframeRef}
-        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         srcDoc={doc}
         onLoad={resize}
         className="w-full border-0"

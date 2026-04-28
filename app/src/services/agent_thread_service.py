@@ -7,6 +7,7 @@ AI-powered drafting/extraction: see thread_ai_service.py
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, delete, desc, func, or_, select, update
@@ -28,6 +29,28 @@ AGENT_FROM_EMAIL = os.environ.get("AGENT_FROM_EMAIL", "contact@sapphire-pools.co
 
 from src.presenters.action_presenter import ActionPresenter
 from src.presenters.thread_presenter import ThreadPresenter
+
+
+# Captures `cid:<id>` from `<img src="cid:foo@bar">` style refs. The id is
+# the `Content-ID` header value with surrounding `<>` stripped — same shape
+# we store in message_attachments.content_id. URL-quoted variants (cid%3A)
+# are rare from real clients but we tolerate the lowercase normal form here.
+_CID_REF_RE = re.compile(r'(src\s*=\s*["\'])cid:([^"\'>]+)(["\'])', re.IGNORECASE)
+
+
+def _rewrite_cid_refs(html: str | None, cid_to_url: dict[str, str]) -> str | None:
+    """Replace `<img src="cid:<id>">` refs in body HTML with attachment URLs.
+    Sandboxed iframes can't resolve `cid:` MIME-internal references, so the
+    images would otherwise render as broken. Inline attachments are persisted
+    with their content_id; this rewrite swaps `cid:<id>` → the persisted
+    attachment's download URL so the iframe loads them at intended size."""
+    if not html or not cid_to_url:
+        return html
+    def _sub(m: re.Match) -> str:
+        cid = m.group(2).strip()
+        url = cid_to_url.get(cid)
+        return f"{m.group(1)}{url}{m.group(3)}" if url else m.group(0)
+    return _CID_REF_RE.sub(_sub, html)
 
 
 class AgentThreadService:
@@ -578,9 +601,14 @@ class AgentThreadService:
         )
         messages = msgs_result.scalars().all()
 
-        # Load attachments for all messages in one query
+        # Load attachments for all messages in one query. Inline attachments
+        # (CID-referenced from HTML body) are kept out of the user-facing
+        # `attachments` list and instead used to build a cid->url map so
+        # body_html `<img src="cid:...">` refs can be rewritten to attachment
+        # download URLs the iframe can actually load.
         msg_ids = [m.id for m in messages]
         atts_by_msg: dict[str, list] = {}
+        cid_url_by_msg: dict[str, dict[str, str]] = {}
         if msg_ids:
             att_result = await self.db.execute(
                 select(MessageAttachment).where(
@@ -589,13 +617,36 @@ class AgentThreadService:
                 )
             )
             for a in att_result.scalars().all():
-                atts_by_msg.setdefault(a.source_id, []).append({
-                    "id": a.id,
-                    "filename": a.filename,
-                    "url": f"/api/v1/attachments/{a.id}/file",
-                    "mime_type": a.mime_type,
-                    "file_size": a.file_size,
-                })
+                if a.is_inline:
+                    if a.content_id:
+                        cid_url_by_msg.setdefault(a.source_id, {})[a.content_id] = (
+                            f"/api/v1/attachments/{a.id}/file"
+                        )
+                else:
+                    atts_by_msg.setdefault(a.source_id, []).append({
+                        "id": a.id,
+                        "filename": a.filename,
+                        "url": f"/api/v1/attachments/{a.id}/file",
+                        "mime_type": a.mime_type,
+                        "file_size": a.file_size,
+                    })
+
+        # Outbound signature logo special-case. The signature builder embeds
+        # `<img src="cid:qp-signature-logo">` but we don't persist outbound
+        # inline parts as MessageAttachment rows — the canonical image lives
+        # on Organization.logo_url. Rewrite that specific cid to the org's
+        # public logo URL for every outbound message in the thread so our
+        # own sent emails render correctly in the reading pane.
+        from src.models.organization import Organization as _Org
+        org_logo_url = (await self.db.execute(
+            select(_Org.logo_url).where(_Org.id == org_id)
+        )).scalar_one_or_none()
+        if org_logo_url:
+            for m in messages:
+                if m.direction == "outbound":
+                    cid_url_by_msg.setdefault(m.id, {}).setdefault(
+                        "qp-signature-logo", org_logo_url,
+                    )
 
         # Resolve inbound sender names. Primary source: AgentMessage.customer_name — the AI
         # classifier captures the sender's display name from the header at message time.
@@ -684,7 +735,7 @@ class AgentThreadService:
                 "subject": m.subject,
                 "body": strip_email_signature(strip_quoted_reply(m.body)) if m.body else None,
                 "body_full": m.body,
-                "body_html": m.body_html,
+                "body_html": _rewrite_cid_refs(m.body_html, cid_url_by_msg.get(m.id, {})),
                 "delivery_status": m.delivery_status,
                 "delivery_error": m.delivery_error,
                 "first_opened_at": m.first_opened_at.isoformat() if m.first_opened_at else None,

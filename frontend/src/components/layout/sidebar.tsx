@@ -92,14 +92,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, organizationName, branding, logout, refreshUser, roleVersion, isDeveloper } = useAuth();
   const perms = usePermissions();
   const dev = useDevMode();
-  const [pendingCount, setPendingCount] = useState(0);
+  const [inboxUnread, setInboxUnread] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [openFeedback, setOpenFeedback] = useState(0);
 
   const fetchCounts = useCallback(() => {
     if (perms.canViewInbox) {
       api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
-        .then((s) => setPendingCount(s.unread ?? 0))
+        .then((s) => setInboxUnread(s.unread ?? 0))
         .catch(() => {});
     }
     api.get<{ unread: number }>("/v1/messages/stats")
@@ -133,9 +133,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   // Tab title with unread count
   useEffect(() => {
-    const total = pendingCount + unreadMessages;
+    const total = inboxUnread + unreadMessages;
     document.title = total > 0 ? `(${total}) QuantumPools` : "QuantumPools";
-  }, [pendingCount, unreadMessages]);
+  }, [inboxUnread, unreadMessages]);
 
   const visibleNav = navItems.filter((item) => {
     if (item.check === null) return true;
@@ -174,9 +174,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             >
               <item.icon className="h-4 w-4" />
               {item.label}
-              {"badge" in item && item.badge === "pending" && pendingCount > 0 && (
+              {"badge" in item && item.badge === "pending" && inboxUnread > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
-                  {pendingCount}
+                  {inboxUnread}
                 </span>
               )}
               {"badge" in item && item.badge === "messages" && unreadMessages > 0 && (
@@ -293,7 +293,7 @@ export function Sidebar() {
   const { organizationName, branding, roleVersion, refreshUser } = useAuth();
   const perms = usePermissions();
   const mobileDisplayName = organizationName || "QuantumPools";
-  const [mobilePending, setMobilePending] = useState(0);
+  const [mobileInboxUnread, setMobileInboxUnread] = useState(0);
   const [lastRoleVersion, setLastRoleVersion] = useState(roleVersion);
 
   useEffect(() => {
@@ -304,7 +304,7 @@ export function Sidebar() {
     const poll = () => {
       if (perms.canViewInbox) {
         api.get<{ pending: number; unread: number }>("/v1/admin/agent-threads/stats")
-          .then((s) => setMobilePending(s.unread ?? 0))
+          .then((s) => setMobileInboxUnread(s.unread ?? 0))
           .catch(() => {});
       }
       api.get<{ unread: number; role_version?: number }>("/v1/notifications/count")
@@ -347,11 +347,11 @@ export function Sidebar() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {mobilePending > 0 && (
+          {mobileInboxUnread > 0 && (
             <Link href="/inbox" className="relative">
               <Mail className="h-5 w-5 text-muted-foreground" />
               <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
-                {mobilePending}
+                {mobileInboxUnread}
               </span>
             </Link>
           )}

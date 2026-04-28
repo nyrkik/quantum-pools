@@ -710,6 +710,25 @@ async def process_incoming_email(
         result["category"] = "billing"
         result["needs_approval"] = False  # info-only, but visible in inbox
 
+    # Transactional notification senders — payout/transfer/digest confirmations,
+    # not billing inquiries. Force no_response so they don't sit pending and
+    # rack up "stale" counts. Distinct from BILLING_SENDER_PATTERNS, which only
+    # rescues misclassified auto_reply; this list overrides any classification
+    # for confirmed FYI-only addresses.
+    TRANSACTIONAL_NOTIFICATION_SENDERS = (
+        "notifications@stripe.com",          # payout / balance confirmations
+        "@welcome.americanexpress.com",      # Amex transactional notifications
+        "donotreply@appfolio.com",           # AppFolio vendor-payment digests
+    )
+    if any(p in sender_lower for p in TRANSACTIONAL_NOTIFICATION_SENDERS):
+        logger.info(
+            f"Override: {from_email} is transactional notification sender — "
+            f"reclassifying as no_response"
+        )
+        category = "no_response"
+        result["category"] = "no_response"
+        result["needs_approval"] = False
+
     # Auto-handle general + no draft: the AI couldn't classify it specifically
     # AND couldn't draft a response — it's informational (payment notifications,
     # marketing, system alerts). Don't waste a human's time on it.
@@ -755,8 +774,18 @@ async def process_incoming_email(
         # auto-handle — keep it pending so a human reviews. Protects against
         # the "I sent a test to accounting@ and it vanished" failure mode
         # where the classifier mislabels a first-touch as no_response.
+        # Skipped for TRANSACTIONAL_NOTIFICATION_SENDERS — those are
+        # known-automated FYI addresses that should auto-handle even on
+        # first sight (otherwise they pile up as stale pending).
+        is_transactional_notification = any(
+            p in sender_lower for p in TRANSACTIONAL_NOTIFICATION_SENDERS
+        )
         is_first_contact_unknown = False
-        if not sender_is_customer and category in ("no_response", "thank_you"):
+        if (
+            not sender_is_customer
+            and category in ("no_response", "thank_you")
+            and not is_transactional_notification
+        ):
             async with get_db_context() as _fc_db:
                 prior = (await _fc_db.execute(
                     select(AgentMessage.id).where(

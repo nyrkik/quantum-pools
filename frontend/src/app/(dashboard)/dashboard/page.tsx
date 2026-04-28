@@ -14,7 +14,6 @@ import {
   ClipboardList,
   FolderOpen,
   Mail,
-  AlertTriangle,
   Clock,
   CheckCircle2,
   ArrowRight,
@@ -40,8 +39,6 @@ interface DashboardData {
   todayVisits: number;
   activeVisit: { visit: { id: string; started_at: string }; customer: { name: string }; property: { address: string } } | null;
   // Needs attention
-  pendingEmails: number;
-  staleEmails: number;
   overdueJobs: number;
   pendingEstimates: number;
   draftEstimates: number;
@@ -71,7 +68,7 @@ export default function DashboardPage() {
         const d: DashboardData = {
           unreadMessages: 0, latestMessages: [], myJobs: [],
           todayVisits: 0, activeVisit: null,
-          pendingEmails: 0, staleEmails: 0, overdueJobs: 0, pendingEstimates: 0, draftEstimates: 0,
+          overdueJobs: 0, pendingEstimates: 0, draftEstimates: 0,
           openCases: [], recentThreads: [], recentDeepBlueChats: [],
         };
 
@@ -85,8 +82,9 @@ export default function DashboardPage() {
           // Visits
           api.get<{ total: number }>(`/v1/visits?scheduled_date=${new Date().toISOString().split("T")[0]}&limit=1`),
           api.get("/v1/visits/active").catch(() => null),
-          // Inbox stats
-          perms.canViewInbox ? api.get<{ pending: number; stale_pending: number; overdue_actions: number }>("/v1/admin/agent-threads/stats") : null,
+          // Inbox stats — only `overdue_actions` is dashboard-relevant.
+          // Pending/stale are inbox-only concepts (per-folder + stale banner on /inbox).
+          perms.canViewInbox ? api.get<{ overdue_actions: number }>("/v1/admin/agent-threads/stats") : null,
           // Recent inbox
           perms.canViewInbox ? api.get<{ items: DashboardData["recentThreads"] }>("/v1/admin/agent-threads?limit=5") : null,
           // Estimate counts
@@ -109,9 +107,7 @@ export default function DashboardPage() {
         if (results[5].status === "fulfilled" && results[5].value) d.activeVisit = results[5].value as DashboardData["activeVisit"];
         // Inbox
         if (results[6]?.status === "fulfilled" && results[6].value) {
-          const stats = results[6].value as { pending: number; stale_pending: number; overdue_actions: number };
-          d.pendingEmails = stats.pending;
-          d.staleEmails = stats.stale_pending;
+          const stats = results[6].value as { overdue_actions: number };
           d.overdueJobs = stats.overdue_actions;
         }
         if (results[7]?.status === "fulfilled" && results[7].value) {
@@ -157,10 +153,12 @@ export default function DashboardPage() {
     );
   }
 
-  // Build "needs attention" items
+  // Build "needs attention" items.
+  // Inbox-side counters (pending, stale) are handled per-folder in the inbox sidebar
+  // and the stale banner on /inbox itself — pulling them up to the dashboard creates
+  // cross-folder bubbles that don't match where the items actually live (Gmail/Outlook
+  // don't surface this at all).
   const alerts: { label: string; count: number; icon: React.ElementType; color: string; href: string }[] = [];
-  if (data.pendingEmails > 0) alerts.push({ label: "Pending emails", count: data.pendingEmails, icon: Mail, color: "text-amber-600", href: "/inbox" });
-  if (data.staleEmails > 0) alerts.push({ label: "Stale (30+ min)", count: data.staleEmails, icon: AlertTriangle, color: "text-red-600", href: "/inbox" });
   if (data.overdueJobs > 0) alerts.push({ label: "Overdue jobs", count: data.overdueJobs, icon: Clock, color: "text-red-600", href: "/jobs" });
   if (data.pendingEstimates > 0) alerts.push({ label: "Awaiting approval", count: data.pendingEstimates, icon: FileText, color: "text-purple-600", href: "/invoices?tab=estimates" });
   if (data.draftEstimates > 0) alerts.push({ label: "Draft estimates", count: data.draftEstimates, icon: FileText, color: "text-blue-600", href: "/invoices?tab=estimates" });

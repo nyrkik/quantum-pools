@@ -729,6 +729,32 @@ async def process_incoming_email(
         result["category"] = "no_response"
         result["needs_approval"] = False
 
+    # OOO/bounce subject-prefix guardrail. "Automatic reply:" / "Auto Reply:" /
+    # "Out of Office:" are deterministic machine-generated prefixes (Outlook,
+    # Gmail vacation, etc.) — the classifier mostly catches these but misses
+    # occasionally (variance), and the cost of a missed OOO sitting pending in
+    # Clients is a stale customer-folder badge. Force auto_reply on prefix
+    # match so it never depends on AI mood.
+    OOO_SUBJECT_PREFIXES = (
+        "automatic reply:",
+        "auto reply:",
+        "auto-reply:",
+        "out of office:",
+        "out-of-office:",
+    )
+    subject_lower = (subject or "").strip().lower()
+    if (
+        category not in ("auto_reply", "no_response", "spam")
+        and any(subject_lower.startswith(p) for p in OOO_SUBJECT_PREFIXES)
+    ):
+        logger.info(
+            f"OOO subject-prefix guardrail: '{(subject or '')[:60]}' → auto_reply "
+            f"(was {category})"
+        )
+        category = "auto_reply"
+        result["category"] = "auto_reply"
+        result["needs_approval"] = False
+
     # Auto-handle general + no draft: the AI couldn't classify it specifically
     # AND couldn't draft a response — it's informational (payment notifications,
     # marketing, system alerts). Don't waste a human's time on it.

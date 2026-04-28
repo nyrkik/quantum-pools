@@ -219,34 +219,37 @@ _Priority: CRITICAL — table stakes features missing from current build_
 ## PHASE 4: Customer Portal
 _Priority: CRITICAL — required for self-service and reducing admin workload_
 
-### 4.1 Portal Auth
-- [ ] `PortalUser` model (linked to Customer, separate from internal User)
-- [ ] Portal login/registration endpoints (`/api/v1/portal/auth/...`)
-- [ ] Portal JWT scope (limited permissions, can't access admin routes)
-- [ ] Portal invitation flow (admin sends invite email → customer creates account)
-- [ ] Password reset for portal users
+V1 shipped 2026-04-28 — magic-link sign-in (no password), 3-tab landing
+(Billing / Payment methods / History), org-branded. Auth is by
+`customer_contacts.email` rather than a separate `PortalUser` model —
+contacts already exist for every billing recipient. Pay button on
+open-invoice rows links to the existing `/pay/{token}` flow rather than
+a new portal-internal payment endpoint. See `docs/billing-may-launch-plan.md`
+for full spec.
 
-### 4.2 Portal API
-- [ ] `GET /portal/profile` — customer info
-- [ ] `GET /portal/properties` — customer's properties with bodies of water
-- [ ] `GET /portal/invoices` — customer's invoices with payment status
-- [ ] `POST /portal/invoices/{id}/pay` — initiate Stripe payment
-- [ ] `GET /portal/visits` — service history for customer's properties
-- [ ] `GET /portal/chemical-readings` — water quality history with LSI
-- [ ] `POST /portal/service-requests` — submit service request
-- [ ] `GET /portal/service-requests` — view request status
-- [ ] `PUT /portal/autopay` — manage AutoPay settings
+### 4.1 Portal Auth (V1 SHIPPED, no password)
+- [x] Magic-link single-use 15-min tokens (`customer_magic_links`)
+- [x] Persistent session cookies (`customer_portal_sessions`, 30-day sliding expiry, idle-refresh threshold 5 min, HttpOnly)
+- [x] Email enumeration protection (`request-link` ALWAYS returns `{ok:true}`)
+- [x] `CustomerPortalService.{request_magic_link, consume_magic_link, get_session, revoke_session, sweep_expired}`
+- [ ] `sweep_expired` wired into `agent_poller` hourly (deferred — rows don't grow problematic at current scale)
 
-### 4.3 Portal Frontend
-- [ ] `/portal` route group (separate layout from admin dashboard)
-- [ ] Portal login page
-- [ ] Portal dashboard (upcoming visits, recent invoices, account balance)
-- [ ] Invoice list with "Pay Now" button (Stripe checkout)
-- [ ] AutoPay enrollment/management
-- [ ] Service history timeline
-- [ ] Chemical readings chart (water quality over time, LSI trend)
-- [ ] Service request form
-- [ ] Mobile-first design (customers will use phones)
+### 4.2 Portal API (V1 SHIPPED)
+- [x] `GET /v1/portal/me` — contact + customer + org + balance summary + payment-method state
+- [x] `GET /v1/portal/invoices?status_filter=open|paid|all` — list (includes `payment_token` so portal Pay button links to existing `/pay/{token}` flow)
+- [x] `GET /v1/portal/payments` — payment history
+- [x] `PUT /v1/portal/autopay` — toggle (refuses without card on file)
+- [x] `POST /v1/portal/logout` — revoke + clear cookie
+- [ ] `POST /v1/portal/setup-intent` — add payment method via Stripe Elements (deferred to portal polish)
+
+### 4.3 Portal Frontend (V1 SHIPPED)
+- [x] `/portal` route group (separate `app/portal/layout.tsx`, no staff sidebar/nav)
+- [x] `/portal/login` (email entry → "check your email" confirmation)
+- [x] `/portal/login/[token]` (auto-consume on mount, redirect to /portal)
+- [x] `/portal` landing — header with org logo + name + sign-out, balance card always visible, 3 tabs: Billing (open invoices + Pay link), Payment methods (card-on-file display + autopay toggle), History (paid-invoices + payments timeline, sorted desc)
+- [x] Mobile-first responsive
+- [ ] Add-payment-method UI (deferred — currently says "contact us"; needs Stripe Elements wired into the Methods tab)
+- [ ] Service history (visits/chemistry) — out of scope for V1 portal; defer until customer feedback proves demand
 
 ---
 

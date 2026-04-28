@@ -49,6 +49,8 @@ Core business entities: who we serve and where.
 |-------|-------|---------|
 | Customer | `customers` | Client record (commercial/residential) |
 | CustomerContact | `customer_contacts` | Additional contacts per customer |
+| CustomerMagicLink | `customer_magic_links` | Single-use 15-min sign-in tokens for the customer-facing portal (Phase 4 V1) |
+| CustomerPortalSession | `customer_portal_sessions` | Persistent portal session cookies (30-day sliding expiry) |
 | Property | `properties` | Service location (address, coordinates, legacy pool fields) |
 | WaterFeature | `water_features` | Body of water (pool, spa, fountain) per property — primary data entity for dimensions, equipment, service time |
 | PropertyPhoto | `property_photos` | Photos of the property |
@@ -81,7 +83,7 @@ Invoicing, payments, estimates, and charges.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. `internal_notes` for staff-only notes (never exposed to public API). |
+| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. `internal_notes` for staff-only notes (never exposed to public API). Dunning state on `last_dunning_step_sent` (0=none, 1-4=which step) + `last_dunning_sent_at`. |
 | InvoiceLineItem | `invoice_line_items` | Individual line items on an invoice |
 | InvoiceRevision | `invoice_revisions` | Audit trail of invoice changes |
 | Payment | `payments` | Payment received against an invoice. `customer_id` nullable (non-client). Stripe fields: `stripe_payment_intent_id`, `stripe_charge_id`. |

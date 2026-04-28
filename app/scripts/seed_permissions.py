@@ -79,6 +79,11 @@ PERMISSIONS = [
     # inbox
     ("inbox", "view", "View agent inbox"),
     ("inbox", "manage", "Manage inbox threads and actions"),
+    ("inbox", "see_all_mail", "See the All Mail and Historical folders + auto-handled count chip"),
+    # inspection (EMD inspection intelligence — see also emd.view/manage above
+    # which gate scraping; inspection.* gates the dedicated /inspections page)
+    ("inspection", "view", "View inspection facilities, reports, and violations"),
+    ("inspection", "manage", "Manage inspection records and overrides"),
     # jobs
     ("jobs", "view", "View jobs"),
     ("jobs", "create", "Create jobs"),
@@ -176,6 +181,8 @@ PRESET_PERMISSIONS["manager"] = [
     ("inspection.manage", "all"),
     # chemical_costs
     ("chemical_costs.view", "all"),
+    # inbox
+    ("inbox.see_all_mail", "all"),
     # jobs
     ("jobs.view", "all"),
     ("jobs.create", "all"),
@@ -208,7 +215,7 @@ PRESET_PERMISSIONS["technician"] = [
 _readonly_view_resources = [
     "customers", "properties", "water_features", "routes", "visits",
     "chemicals", "invoices", "payments", "techs", "profitability",
-    "satellite", "emd", "chemical_costs", "jobs", "notifications",
+    "satellite", "emd", "inspection", "chemical_costs", "jobs", "notifications",
 ]
 PRESET_PERMISSIONS["readonly"] = [
     (f"{r}.view", "all") for r in _readonly_view_resources

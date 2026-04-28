@@ -301,6 +301,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 | `docs/ai-platform-plan.md` | 8-phase plan to rebuild QP around a unified AI platform: event instrumentation, agent_proposals, inbox summarizer, post-creation handlers, workflow_observer, and Sonar (dev-facing intelligence). Every phase has a "Why" block. **Remove when complete.** |
 | `docs/event-taxonomy.md` | Canonical catalog of event types for `platform_events`. Every new event added to code requires updating this doc in the same PR. Phase 0 of ai-platform-plan. **Lives as long as platform_events does** (not a "remove when complete" doc — permanent reference). |
 | `docs/ai-platform-phase-3.md` | Phase 3 implementation spec — inbox summarizer + V2 inbox redesign. Shipped on Sapphire 2026-04-19; keep while Sapphire is the sole dogfood org. **Remove when Phase 3 GA'd to all orgs.** |
+| `docs/billing-may-launch-plan.md` | Per-phase plan for May 2026 billing go-live: Stripe Connect Standard + ACH + magic-link customer portal + dunning + A/R aging (must-have), then consolidated multi-property billing + statements + late fees + holds + partial payments + credits. Built from 2026-04-28 competitive + best-practice research. **Remove when billing is fully live and stable for 30+ days** (same trigger as `billing-dormant.md`). |
 
 ### Architecture Reference (current state, factual)
 | Doc | Purpose |

@@ -1,6 +1,5 @@
 """Billing service — recurring invoice generation, autopay orchestration, dunning retries."""
 
-import asyncio
 import logging
 import re
 import uuid
@@ -30,14 +29,6 @@ DUNNING_DAYS_PAST_DUE = {1: 0, 2: 3, 3: 7, 4: 14}
 DUNNING_FINAL_STEP = 4
 # Eligible invoice statuses. Excludes draft, paid, void, written_off.
 DUNNING_ELIGIBLE_STATUSES = ("sent", "viewed", "revised", "overdue")
-
-# Inter-send pacing for bulk loops (dunning, broadcast). Gmail per-user
-# rate limit budgets ~250 quota units/sec; a `messages.send` is 100. So
-# 2/sec is the analytical safe ceiling. We pace at 1.6/sec (0.6s between
-# sends) to leave headroom for any outbound-aux calls in the same window.
-# Critical safety rail — without it, a 50-invoice dunning run can blow
-# the per-user rate limit and trigger Google's ~24h fixed lockout bucket.
-SEND_THROTTLE_SECONDS = 0.6
 
 # Quick syntactic email check. Real customer data is messy: trailing
 # commas, multi-address fields, "Name <addr>" forms, garbage. We use
@@ -425,7 +416,6 @@ class BillingService:
         skipped_count = 0
         errors: list[str] = []
 
-        first_send = True
         for inv in invoices:
             effective_due = inv.due_date or inv.issue_date
             days_past_due = (today - effective_due).days
@@ -437,31 +427,12 @@ class BillingService:
                 skipped_count += 1
                 continue
 
-            # Inter-send pacing — protects the per-user Gmail rate limit
-            # on Gmail-mode orgs (Postmark has its own headroom). Skip the
-            # delay before the first send so a single-row run is instant.
-            if not first_send:
-                await asyncio.sleep(SEND_THROTTLE_SECONDS)
-            first_send = False
-
             try:
                 await self.send_dunning_email(inv, next_step, days_past_due)
                 sent_count += 1
             except Exception as e:
                 errors.append(f"invoice {inv.id}: {e}")
                 logger.error(f"Dunning send failed for invoice {inv.id}: {e}")
-                # If a 429 propagated from outbound, the integration is
-                # already parked — abort the rest of the run rather than
-                # blast through and re-poke the throttled bucket.
-                if "rate-limited" in str(e).lower() or "429" in str(e):
-                    logger.warning(
-                        f"Dunning aborted mid-run — rate limit detected on org {org_id}"
-                    )
-                    errors.append(
-                        "Run aborted after rate limit detected. Wait for the park to clear, "
-                        "then resume."
-                    )
-                    break
 
         await self.db.commit()
         summary = {
@@ -559,11 +530,7 @@ class BillingService:
         email_svc = EmailService(self.db)
         sent_to: list[str] = []
         errors: list[str] = []
-        for idx, recipient in enumerate(recipients):
-            if idx > 0:
-                # Same per-user-rate-limit protection as the outer dunning
-                # loop — multi-recipient invoices burn N sends per row.
-                await asyncio.sleep(SEND_THROTTLE_SECONDS)
+        for recipient in recipients:
             msg = EmailMessage(to=recipient, subject=subject, text_body=text, html_body=html)
             result = await email_svc.send_email(invoice.organization_id, msg)
             if getattr(result, "success", False):

@@ -109,19 +109,27 @@ def check_agent_service() -> list[str]:
         issues.append("Agent background service is NOT running")
         return issues
 
-    # Check for recent activity
+    # Check for recent activity. Threshold matches HEARTBEAT_EVERY in
+    # agent_poller (30 cycles ≈ 30 min) plus margin. Tighter windows
+    # false-fire after the 2026-04-29 watermark fix made the agent
+    # silent on no-op cycles — only the heartbeat log guarantees a
+    # signal at all.
     result = subprocess.run(
-        ["journalctl", "-u", "quantumpools-agent", "--since", "5 min ago", "--no-pager", "-q"],
+        ["journalctl", "-u", "quantumpools-agent", "--since", "35 min ago", "--no-pager", "-q"],
         capture_output=True, text=True
     )
     if not result.stdout.strip():
-        issues.append("Agent service has no log output in the last 5 minutes — may be hung")
+        issues.append("Agent service has no log output in the last 35 minutes — may be hung")
 
-    # Check for error loops
-    lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+    # Check for error loops (use a tighter window so we catch fresh storms)
+    err_result = subprocess.run(
+        ["journalctl", "-u", "quantumpools-agent", "--since", "10 min ago", "--no-pager", "-q"],
+        capture_output=True, text=True
+    )
+    lines = err_result.stdout.strip().split("\n") if err_result.stdout.strip() else []
     error_lines = [l for l in lines if " ERROR " in l or "Error" in l or "Exception" in l or "Traceback" in l]
     if len(error_lines) >= 3:
-        issues.append(f"Agent service has {len(error_lines)} errors in last 5 min: {error_lines[-1][:200]}")
+        issues.append(f"Agent service has {len(error_lines)} errors in last 10 min: {error_lines[-1][:200]}")
         # Detect same-error loops
         msgs = []
         for l in error_lines:

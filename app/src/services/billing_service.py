@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.autopay_attempt import AutopayAttempt, AutopayAttemptStatus
 from src.models.customer import Customer, BillingFrequency
 from src.models.invoice import Invoice
+from src.models.property import Property
+from src.models.property_hold import PropertyHold
 from src.services.invoice_service import InvoiceService
 from src.services.stripe_service import StripeService
 
@@ -82,10 +84,27 @@ class BillingService:
         generated = 0
         autopay_attempted = 0
         autopay_succeeded = 0
+        skipped_on_hold = 0
         errors = []
 
         for customer in customers:
             try:
+                # Phase 8 — skip customers whose every property is on a
+                # service hold covering the billing period start. Single-
+                # property customers (typical residential) skip cleanly;
+                # multi-property customers still bill if at least one
+                # property is active. Per-property line-item exclusion
+                # arrives with Phase 6 (consolidated billing).
+                period_start, _ = self._billing_period(customer, today)
+                if await self._all_properties_held(customer.id, period_start):
+                    self._advance_billing_date(customer)
+                    await self.db.commit()
+                    skipped_on_hold += 1
+                    logger.info(
+                        f"Recurring billing: skipped {customer.display_name} "
+                        f"({customer.id}) — all properties on hold for {period_start}"
+                    )
+                    continue
                 invoice = await self._generate_invoice_for_customer(customer, org_id, today)
                 generated += 1
 
@@ -112,6 +131,7 @@ class BillingService:
             "generated": generated,
             "autopay_attempted": autopay_attempted,
             "autopay_succeeded": autopay_succeeded,
+            "skipped_on_hold": skipped_on_hold,
             "errors": errors,
         }
         logger.info(f"Billing cycle complete: {summary}")
@@ -468,6 +488,33 @@ class BillingService:
         balance_str = f"${float(invoice.balance):,.2f}"
         pay_url = f"{settings.frontend_url.rstrip('/')}/pay/{invoice.payment_token}"
 
+        # Phase 8: surface an upcoming-late-fee warning on the final-
+        # notice email when the org has late fees enabled and the
+        # customer hasn't opted out of them. Computed deterministically
+        # so the warning amount in the email matches what `run_late_fees`
+        # would actually charge.
+        late_fee_warning: str | None = None
+        if step >= DUNNING_FINAL_STEP and org and org.late_fee_enabled:
+            customer_obj = None
+            if invoice.customer_id:
+                customer_obj = (await self.db.execute(
+                    select(Customer).where(Customer.id == invoice.customer_id)
+                )).scalar_one_or_none()
+            if self._customer_late_fee_eligible(customer_obj, org):
+                fee = self._compute_late_fee(org, invoice)
+                grace = int(org.late_fee_grace_days or 30)
+                if fee > 0:
+                    if days_past_due >= grace:
+                        late_fee_warning = (
+                            f"A late fee of ${fee:,.2f} applies to past-due "
+                            f"invoices over {grace} days. Pay now to avoid it."
+                        )
+                    else:
+                        late_fee_warning = (
+                            f"A late fee of ${fee:,.2f} will be added to this "
+                            f"invoice if it remains unpaid {grace} days past due."
+                        )
+
         subject, text, html = dunning_email_template(
             step=step,
             org_name=org_name,
@@ -477,6 +524,7 @@ class BillingService:
             days_past_due=days_past_due,
             pay_url=pay_url,
             branding_color=branding_color,
+            late_fee_warning=late_fee_warning,
         )
 
         email_svc = EmailService(self.db)
@@ -562,6 +610,235 @@ class BillingService:
                     return addrs
 
         return _parse_recipients(invoice.billing_email)
+
+    # ── Late fees (Phase 8) ────────────────────────────────────────────
+
+    @staticmethod
+    def _compute_late_fee(org, invoice: Invoice) -> float:
+        """Org-policy late fee for an invoice. Returns 0 if disabled or
+        misconfigured. Percent type is floored by `late_fee_minimum`."""
+        if not org or not org.late_fee_enabled:
+            return 0.0
+        amount = float(org.late_fee_amount or 0)
+        if amount <= 0:
+            return 0.0
+        if (org.late_fee_type or "flat") == "flat":
+            return round(amount, 2)
+        invoice_total = float(invoice.total or 0)
+        fee = round(invoice_total * amount / 100.0, 2)
+        floor = float(org.late_fee_minimum or 0)
+        return max(fee, floor) if floor else fee
+
+    @staticmethod
+    def _customer_late_fee_eligible(customer: Customer | None, org) -> bool:
+        """Per-customer override: NULL → inherit org; True/False → force."""
+        if not org or not org.late_fee_enabled:
+            return False
+        if not customer:
+            return True  # non-client invoice — org policy applies
+        override = customer.late_fee_override_enabled
+        if override is None:
+            return True
+        return bool(override)
+
+    @staticmethod
+    def _has_late_fee_line_item(invoice: Invoice) -> bool:
+        """Idempotency check — late fees mark themselves with a description
+        prefix and a NULL service_id. Cheap, no schema change."""
+        for li in (invoice.line_items or []):
+            if li.service_id is None and (li.description or "").startswith("Late fee"):
+                return True
+        return False
+
+    async def preview_late_fees(self, org_id: str) -> dict:
+        """Dry-run version of `run_late_fees`. Returns what WOULD be added
+        (one row per past-due, eligible invoice) without writing anything."""
+        from src.models.organization import Organization
+
+        org = (await self.db.execute(
+            select(Organization).where(Organization.id == org_id)
+        )).scalar_one_or_none()
+        today = date.today()
+
+        if not org or not org.late_fee_enabled:
+            return {
+                "as_of": today.isoformat(),
+                "enabled": False,
+                "would_apply_count": 0,
+                "would_apply": [],
+            }
+
+        grace_days = int(org.late_fee_grace_days or 30)
+        from sqlalchemy.orm import selectinload
+        invoices = (await self.db.execute(
+            select(Invoice)
+            .where(
+                Invoice.organization_id == org_id,
+                Invoice.status.in_(DUNNING_ELIGIBLE_STATUSES),
+                Invoice.document_type == "invoice",
+                Invoice.balance > 0,
+                Invoice.pss_invoice_id.is_(None),
+            )
+            .options(selectinload(Invoice.line_items))
+        )).scalars().all()
+
+        would_apply: list[dict] = []
+        for inv in invoices:
+            effective_due = inv.due_date or inv.issue_date
+            days_past_due = (today - effective_due).days
+            if days_past_due < grace_days:
+                continue
+            if self._has_late_fee_line_item(inv):
+                continue
+            customer = None
+            if inv.customer_id:
+                customer = (await self.db.execute(
+                    select(Customer).where(Customer.id == inv.customer_id)
+                )).scalar_one_or_none()
+            if not self._customer_late_fee_eligible(customer, org):
+                continue
+            fee = self._compute_late_fee(org, inv)
+            if fee <= 0:
+                continue
+            would_apply.append({
+                "invoice_id": inv.id,
+                "invoice_number": inv.invoice_number,
+                "customer_id": inv.customer_id,
+                "customer_name": (customer.display_name if customer else inv.billing_name) or "—",
+                "balance": round(float(inv.balance or 0), 2),
+                "days_past_due": days_past_due,
+                "fee": fee,
+            })
+
+        would_apply.sort(key=lambda r: -r["days_past_due"])
+        return {
+            "as_of": today.isoformat(),
+            "enabled": True,
+            "grace_days": grace_days,
+            "fee_type": org.late_fee_type or "flat",
+            "fee_amount": float(org.late_fee_amount or 0),
+            "fee_minimum": float(org.late_fee_minimum or 0) if org.late_fee_minimum else None,
+            "would_apply_count": len(would_apply),
+            "would_apply": would_apply,
+        }
+
+    async def run_late_fees(
+        self, org_id: str, invoice_ids: list[str] | None = None
+    ) -> dict:
+        """Apply org-policy late fees to past-due, eligible invoices.
+
+        Adds one InvoiceLineItem (description prefixed "Late fee — past
+        due since YYYY-MM-DD", service_id NULL) per eligible invoice and
+        recomputes totals. Idempotent: invoices that already have a
+        late-fee line item are skipped.
+
+        When `invoice_ids` is provided, applies only to that subset
+        (intersected with the eligibility filter). Used for selective
+        run from the preview UI.
+        """
+        from src.models.invoice import InvoiceLineItem
+        from src.models.organization import Organization
+        from sqlalchemy.orm import selectinload
+
+        org = (await self.db.execute(
+            select(Organization).where(Organization.id == org_id)
+        )).scalar_one_or_none()
+        today = date.today()
+
+        if not org or not org.late_fee_enabled:
+            return {
+                "as_of": today.isoformat(),
+                "enabled": False,
+                "applied": 0,
+                "skipped": 0,
+                "errors": [],
+            }
+
+        grace_days = int(org.late_fee_grace_days or 30)
+        query = (
+            select(Invoice)
+            .where(
+                Invoice.organization_id == org_id,
+                Invoice.status.in_(DUNNING_ELIGIBLE_STATUSES),
+                Invoice.document_type == "invoice",
+                Invoice.balance > 0,
+                Invoice.pss_invoice_id.is_(None),
+            )
+            .options(selectinload(Invoice.line_items))
+        )
+        if invoice_ids is not None:
+            if not invoice_ids:
+                return {
+                    "as_of": today.isoformat(),
+                    "enabled": True,
+                    "applied": 0,
+                    "skipped": 0,
+                    "errors": [],
+                }
+            query = query.where(Invoice.id.in_(invoice_ids))
+        invoices = (await self.db.execute(query)).scalars().all()
+
+        applied = 0
+        skipped = 0
+        errors: list[str] = []
+        inv_svc = InvoiceService(self.db)
+
+        for inv in invoices:
+            effective_due = inv.due_date or inv.issue_date
+            days_past_due = (today - effective_due).days
+            if days_past_due < grace_days:
+                skipped += 1
+                continue
+            if self._has_late_fee_line_item(inv):
+                skipped += 1
+                continue
+            customer = None
+            if inv.customer_id:
+                customer = (await self.db.execute(
+                    select(Customer).where(Customer.id == inv.customer_id)
+                )).scalar_one_or_none()
+            if not self._customer_late_fee_eligible(customer, org):
+                skipped += 1
+                continue
+            fee = self._compute_late_fee(org, inv)
+            if fee <= 0:
+                skipped += 1
+                continue
+
+            try:
+                next_sort = max(
+                    (li.sort_order or 0 for li in inv.line_items),
+                    default=0,
+                ) + 1
+                line = InvoiceLineItem(
+                    invoice_id=inv.id,
+                    description=f"Late fee — past due since {effective_due.isoformat()}",
+                    quantity=1.0,
+                    unit_price=fee,
+                    amount=fee,
+                    is_taxed=False,
+                    sort_order=next_sort,
+                )
+                self.db.add(line)
+                inv.line_items.append(line)
+                inv_svc._recalculate_totals(inv, list(inv.line_items))
+                applied += 1
+                logger.info(
+                    f"Late fee ${fee:.2f} applied to invoice {inv.invoice_number} "
+                    f"({inv.id}), {days_past_due}d past due"
+                )
+            except Exception as e:
+                errors.append(f"invoice {inv.id}: {e}")
+                logger.error(f"Late fee apply failed for invoice {inv.id}: {e}")
+
+        await self.db.commit()
+        return {
+            "as_of": today.isoformat(),
+            "enabled": True,
+            "applied": applied,
+            "skipped": skipped,
+            "errors": errors,
+        }
 
     async def get_ar_aging(self, org_id: str) -> dict:
         """A/R aging — outstanding invoices grouped by customer, bucketed by
@@ -662,6 +939,30 @@ class BillingService:
             "rows": rows,
             "totals": totals,
         }
+
+    async def _all_properties_held(self, customer_id: str, on_date: date) -> bool:
+        """Return True iff customer has >=1 property and ALL active properties
+        are on a service hold covering `on_date`. False for customers with
+        no properties (let them bill normally — billing wasn't keyed off
+        properties before holds were introduced)."""
+        # Pull active property IDs for the customer.
+        prop_rows = (await self.db.execute(
+            select(Property.id).where(
+                Property.customer_id == customer_id,
+                Property.is_active == True,  # noqa: E712
+            )
+        )).all()
+        if not prop_rows:
+            return False
+        prop_ids = [r[0] for r in prop_rows]
+        held_count = (await self.db.execute(
+            select(PropertyHold.property_id).where(
+                PropertyHold.property_id.in_(prop_ids),
+                PropertyHold.start_date <= on_date,
+                PropertyHold.end_date >= on_date,
+            ).distinct()
+        )).all()
+        return len(held_count) >= len(prop_ids)
 
     # ── Internal Helpers ──────────────────────────────────────────────
 

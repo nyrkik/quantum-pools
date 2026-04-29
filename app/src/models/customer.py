@@ -82,6 +82,12 @@ class Customer(Base):
     autopay_failure_count: Mapped[int] = mapped_column(Integer, default=0)
     autopay_last_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Phase 8 — per-customer override of org late-fee policy. NULL means
+    # "inherit from org"; True/False forces on/off regardless of org config.
+    # Used for negotiated commercial accounts that should never receive a
+    # late fee even if the org enables it generally.
+    late_fee_override_enabled: Mapped[bool | None] = mapped_column(Boolean)
+
     # Computed display name — single source of truth for all queries
     display_name_col: Mapped[str | None] = mapped_column("display_name", String(200), index=True)
 

@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, DateTime, Text, Integer, ForeignKey, text
+from sqlalchemy import String, Boolean, DateTime, Text, Integer, Numeric, ForeignKey, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -96,6 +96,20 @@ class Organization(Base):
     inbox_v2_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False,
     )
+
+    # Phase 8 — late fees. `late_fee_type` is "flat" or "percent" when
+    # enabled. `late_fee_amount` is dollars (flat) or percent value
+    # (e.g. 1.5 = 1.5%). `late_fee_minimum` floors the percent path so a
+    # 1.5% fee on a $20 invoice can still be a meaningful $5 floor.
+    late_fee_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False,
+    )
+    late_fee_type: Mapped[str | None] = mapped_column(String(20))
+    late_fee_amount: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    late_fee_grace_days: Mapped[int] = mapped_column(
+        Integer, default=30, server_default=text("30"), nullable=False,
+    )
+    late_fee_minimum: Mapped[float | None] = mapped_column(Numeric(10, 2))
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

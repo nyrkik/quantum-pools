@@ -23,7 +23,7 @@ Platform identity, multi-tenancy, auth, and permissions.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| Organization | `organizations` | Tenant (pool service company). Signature fields: `agent_signature` (shared org footer), `auto_signature_prefix` (admin toggle: prepend first_name + org_name), `include_logo_in_signature` (admin toggle: embed logo via CID), `allow_per_user_signature` (admin toggle: honor per-user email_signature/email_signoff; off = absolute consistency), `website_url` (clickable logo target — logo is wrapped in `<a href>` when both are set). |
+| Organization | `organizations` | Tenant (pool service company). Signature fields: `agent_signature` (shared org footer), `auto_signature_prefix` (admin toggle: prepend first_name + org_name), `include_logo_in_signature` (admin toggle: embed logo via CID), `allow_per_user_signature` (admin toggle: honor per-user email_signature/email_signoff; off = absolute consistency), `website_url` (clickable logo target — logo is wrapped in `<a href>` when both are set). Late-fee policy fields: `late_fee_enabled` (default false), `late_fee_type` (`flat`/`percent`), `late_fee_amount`, `late_fee_grace_days` (default 30), `late_fee_minimum` (floor for percent type). Per-customer override on `Customer.late_fee_override_enabled` (null=inherit, true/false=force). Phase 8. |
 | User | `users` | Platform user account |
 | OrganizationUser | `organization_users` | User-to-org membership with legacy role enum. Signature fields: `email_signature` (per-user personal info, rendered above the org footer), `email_signoff` (optional valediction like "Best,"/"v/r,"/"Cheers," rendered above the name line). |
 | UserSession | `user_sessions` | JWT refresh token tracking |
@@ -52,6 +52,7 @@ Core business entities: who we serve and where.
 | CustomerMagicLink | `customer_magic_links` | Single-use 15-min sign-in tokens for the customer-facing portal (Phase 4 V1) |
 | CustomerPortalSession | `customer_portal_sessions` | Persistent portal session cookies (30-day sliding expiry) |
 | Property | `properties` | Service location (address, coordinates, legacy pool fields) |
+| PropertyHold | `property_holds` | Date-range service hold (winterization, vacation). Recurring billing skips a customer when ALL their active properties have a hold covering the billing period start. Phase 8. |
 | WaterFeature | `water_features` | Body of water (pool, spa, fountain) per property — primary data entity for dimensions, equipment, service time |
 | PropertyPhoto | `property_photos` | Photos of the property |
 | PropertyAccessCode | `property_access_codes` | Gate codes, lock combos per property |
@@ -83,7 +84,7 @@ Invoicing, payments, estimates, and charges.
 
 | Model | Table | Purpose |
 |-------|-------|---------|
-| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. `internal_notes` for staff-only notes (never exposed to public API). Dunning state on `last_dunning_step_sent` (0=none, 1-4=which step) + `last_dunning_sent_at`. |
+| Invoice | `invoices` | Invoice with status tracking. `customer_id` nullable — non-client invoices use `billing_name`/`billing_email`. `payment_token` for public pay page. `internal_notes` for staff-only notes (never exposed to public API). Dunning state on `last_dunning_step_sent` (0=none, 1-4=which step) + `last_dunning_sent_at`. Late fees apply as a separate `InvoiceLineItem` with `description LIKE 'Late fee%' AND service_id IS NULL` — idempotency check, no schema change. |
 | InvoiceLineItem | `invoice_line_items` | Individual line items on an invoice |
 | InvoiceRevision | `invoice_revisions` | Audit trail of invoice changes |
 | Payment | `payments` | Payment received against an invoice. `customer_id` nullable (non-client). Stripe fields: `stripe_payment_intent_id`, `stripe_charge_id`. |

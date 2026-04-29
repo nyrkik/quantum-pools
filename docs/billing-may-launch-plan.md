@@ -256,7 +256,20 @@ The shape of the recommendation comes from a 2026-04-28 competitive + best-pract
 
 **Done when:** A commercial customer (Sapphire's Entrata-managed properties) can download a PDF statement for any past month showing their full account activity.
 
-## Phase 8: Late fees + service holds
+## Phase 8: Late fees + service holds — SHIPPED 2026-04-29
+
+**Status:** Shipped manual-only (mirrors Phase 4 dunning posture). Auto-scheduler intentionally not wired — backlog needs a human review per run before any auto-fire is enabled. Tests in `app/tests/test_property_holds.py` + `app/tests/test_late_fees.py` cover idempotency, PSS exclusion, customer override, percent-with-minimum, hold inclusive boundaries, multi-property partial-hold logic.
+
+**What landed:**
+- 5 columns on `organizations` (`late_fee_enabled/type/amount/grace_days/minimum`) + 1 on `customers` (`late_fee_override_enabled`).
+- New `property_holds` table (`PropertyHold` model) + `PropertyHoldService` with `is_property_held`, CRUD.
+- `BillingService.{preview_late_fees, run_late_fees}` — idempotent application via `description LIKE 'Late fee%' AND service_id IS NULL` marker (no schema change to `invoice_line_items`). `_recalculate_totals` recomputes via `InvoiceService` for single-source-of-truth totals.
+- `BillingService._all_properties_held` — recurring billing skips a customer iff EVERY active property has a hold covering the billing period start date. Single-property residential skips cleanly; multi-property partial-hold still bills (per-property line-item exclusion arrives with Phase 6 consolidated billing).
+- T+14 dunning email mentions impending late fee when org has policy enabled (deterministic warning text matching what `run_late_fees` would actually charge).
+- API: `GET/PUT /v1/billing/late-fee-config` (owner+admin/owner), `POST /v1/billing/late-fees/run?dry_run=` (owner-only, mirrors dunning), property-holds CRUD under `/v1/properties/{id}/holds` + `/v1/property-holds/{id}` (owner+admin+manager mutate).
+- Frontend: Settings → Billing → "Late Fee Policy" card (distinct from existing legacy "Late Fee" estimate-boilerplate field — these are two different concepts), Invoices page 6th "Late fees" tab (LateFeePreview component), Customer detail "Service Holds" tile (Add hold dialog + per-row Trash button).
+
+**Original spec (preserved for reference):**
 
 **Goal:** Org-configurable late fees + winterization/vacation pause.
 

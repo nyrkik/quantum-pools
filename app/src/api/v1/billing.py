@@ -235,3 +235,115 @@ async def get_ar_aging(
         )
 
     return data
+
+
+# ── Late fees (Phase 8) ──────────────────────────────────────────────
+
+
+class LateFeeConfig(BaseModel):
+    enabled: bool
+    type: str | None = None  # "flat" | "percent"
+    amount: float | None = None
+    grace_days: int = 30
+    minimum: float | None = None
+
+
+@router.get("/late-fee-config", response_model=LateFeeConfig)
+async def get_late_fee_config(
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner, OrgRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.organization import Organization
+    from sqlalchemy import select as _select
+
+    org = (await db.execute(
+        _select(Organization).where(Organization.id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not org:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
+    return LateFeeConfig(
+        enabled=org.late_fee_enabled,
+        type=org.late_fee_type,
+        amount=float(org.late_fee_amount) if org.late_fee_amount is not None else None,
+        grace_days=org.late_fee_grace_days,
+        minimum=float(org.late_fee_minimum) if org.late_fee_minimum is not None else None,
+    )
+
+
+@router.put("/late-fee-config", response_model=LateFeeConfig)
+async def update_late_fee_config(
+    body: LateFeeConfig,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner-only — sets org-level late-fee policy. Per-customer overrides
+    via PUT /v1/customers/{id} (`late_fee_override_enabled`)."""
+    from src.models.organization import Organization
+    from sqlalchemy import select as _select
+
+    if body.enabled:
+        if body.type not in ("flat", "percent"):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "type must be 'flat' or 'percent' when enabled",
+            )
+        if body.amount is None or body.amount <= 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "amount must be > 0 when enabled",
+            )
+        if body.grace_days < 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "grace_days must be >= 0"
+            )
+
+    org = (await db.execute(
+        _select(Organization).where(Organization.id == ctx.organization_id)
+    )).scalar_one_or_none()
+    if not org:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
+
+    org.late_fee_enabled = body.enabled
+    org.late_fee_type = body.type if body.enabled else None
+    org.late_fee_amount = body.amount if body.enabled else None
+    org.late_fee_grace_days = body.grace_days
+    org.late_fee_minimum = body.minimum if body.enabled else None
+    await db.commit()
+    await db.refresh(org)
+
+    return LateFeeConfig(
+        enabled=org.late_fee_enabled,
+        type=org.late_fee_type,
+        amount=float(org.late_fee_amount) if org.late_fee_amount is not None else None,
+        grace_days=org.late_fee_grace_days,
+        minimum=float(org.late_fee_minimum) if org.late_fee_minimum is not None else None,
+    )
+
+
+class LateFeeRunBody(BaseModel):
+    invoice_ids: list[str] | None = None
+
+
+@router.post("/late-fees/run")
+async def trigger_late_fees(
+    dry_run: bool = True,
+    body: LateFeeRunBody | None = None,
+    ctx: OrgUserContext = Depends(require_roles(OrgRole.owner)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually apply org-policy late fees to past-due invoices. Owner only.
+
+    Defaults to ?dry_run=true — returns what WOULD be applied without
+    writing. Pass ?dry_run=false to actually add late-fee line items.
+
+    Body `{invoice_ids: [...]}` restricts the run to those invoices
+    (intersected with the eligibility filter).
+    """
+    svc = BillingService(db)
+    invoice_ids = body.invoice_ids if body else None
+    if dry_run:
+        return {"mode": "dry_run", **await svc.preview_late_fees(ctx.organization_id)}
+    return {
+        "mode": "live",
+        **await svc.run_late_fees(ctx.organization_id, invoice_ids=invoice_ids),
+    }

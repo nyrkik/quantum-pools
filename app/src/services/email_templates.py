@@ -206,6 +206,7 @@ def dunning_email_template(
     days_past_due: int,
     pay_url: str,
     branding_color: str = "#1a1a2e",
+    late_fee_warning: str | None = None,
 ) -> tuple[str, str, str]:
     """4-step dunning sequence. Returns (subject, text_body, html_body).
 
@@ -216,6 +217,11 @@ def dunning_email_template(
 
     Tone escalates each step. Single CTA per email. The pay_url is the
     /pay/{token} public page (handles both card payment and bank ACH).
+
+    `late_fee_warning` is an optional one-line nudge about an impending
+    late fee. Surfaced on step 4 (final notice) when the org has late
+    fees enabled and the invoice is approaching the grace window. None
+    means the line is omitted entirely.
     """
     if step == 1:
         subject = f"Payment issue on invoice #{invoice_number}"
@@ -255,6 +261,8 @@ def dunning_email_template(
             f"service hold. To prevent service interruption, please pay this "
             f"invoice immediately or contact {org_name} directly."
         )
+        if late_fee_warning:
+            body = f"{body}\n\n{late_fee_warning}"
         cta = "Pay now"
 
     text = f"""Hi {customer_name},
@@ -267,8 +275,9 @@ Pay: {pay_url}
 
 — {org_name}"""
 
+    body_html = body.replace("\n\n", "</p>\n<p style=\"color: #4a5568; line-height: 1.6;\">")
     content = f"""<h2 style="color: #1a1a2e; margin-bottom: 8px; font-size: 1.125rem;">{headline}</h2>
-<p style="color: #4a5568; line-height: 1.6;">{body}</p>
+<p style="color: #4a5568; line-height: 1.6;">{body_html}</p>
 <p style="margin: 24px 0;">
   <a href="{pay_url}" style="background: {branding_color}; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">{cta}</a>
 </p>

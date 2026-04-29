@@ -89,6 +89,10 @@ class Property(Base):
     photos = relationship("PropertyPhoto", back_populates="property", lazy="noload")
     measurements = relationship("PoolMeasurement", back_populates="property", lazy="noload")
     water_features = relationship("WaterFeature", back_populates="property", lazy="noload")
+    holds = relationship(
+        "PropertyHold", back_populates="property", lazy="noload",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def full_address(self) -> str:

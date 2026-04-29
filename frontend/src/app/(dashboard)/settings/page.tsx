@@ -53,6 +53,187 @@ interface BillingTerms {
   estimate_terms: string | null;
 }
 
+interface LateFeeConfig {
+  enabled: boolean;
+  type: "flat" | "percent" | null;
+  amount: number | null;
+  grace_days: number;
+  minimum: number | null;
+}
+
+function LateFeePolicySection() {
+  const [cfg, setCfg] = useState<LateFeeConfig | null>(null);
+  const [form, setForm] = useState<LateFeeConfig>({
+    enabled: false,
+    type: "flat",
+    amount: 25,
+    grace_days: 30,
+    minimum: null,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<LateFeeConfig>("/v1/billing/late-fee-config");
+      setCfg(data);
+      setForm({
+        enabled: data.enabled,
+        type: data.type ?? "flat",
+        amount: data.amount ?? 25,
+        grace_days: data.grace_days,
+        minimum: data.minimum ?? null,
+      });
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const isDirty = cfg && (
+    form.enabled !== cfg.enabled ||
+    (form.enabled && (
+      form.type !== cfg.type ||
+      form.amount !== cfg.amount ||
+      form.grace_days !== cfg.grace_days ||
+      form.minimum !== cfg.minimum
+    ))
+  );
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.put("/v1/billing/late-fee-config", form);
+      toast.success("Late-fee policy updated");
+      load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return null;
+
+  return (
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-base">Late Fee Policy</CardTitle>
+        <CardDescription>
+          When enabled, the Invoices → Late fees tab can apply this fee to past-due invoices.
+          Per-customer overrides on the customer detail page (negotiated commercial terms etc.).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Switch
+            checked={form.enabled}
+            onCheckedChange={(v) => setForm({ ...form, enabled: !!v })}
+          />
+          <Label className="text-sm">
+            {form.enabled ? "Late fees enabled" : "Late fees disabled"}
+          </Label>
+        </div>
+
+        {form.enabled && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Fee type</Label>
+              <select
+                value={form.type ?? "flat"}
+                onChange={(e) =>
+                  setForm({ ...form, type: e.target.value as "flat" | "percent" })
+                }
+                className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+              >
+                <option value="flat">Flat dollar</option>
+                <option value="percent">Percent of balance</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">
+                {form.type === "percent" ? "Fee %" : "Fee amount"}
+              </Label>
+              <div className="flex items-center gap-1.5">
+                {form.type === "flat" && (
+                  <span className="text-sm text-muted-foreground">$</span>
+                )}
+                <Input
+                  type="number"
+                  step={form.type === "percent" ? "0.1" : "1"}
+                  value={form.amount ?? ""}
+                  onChange={(e) =>
+                    setForm({ ...form, amount: parseFloat(e.target.value) || 0 })
+                  }
+                  className="w-24 h-8 text-sm"
+                  min={0}
+                />
+                {form.type === "percent" && (
+                  <span className="text-sm text-muted-foreground">%</span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Grace period</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  value={form.grace_days}
+                  onChange={(e) =>
+                    setForm({ ...form, grace_days: parseInt(e.target.value) || 0 })
+                  }
+                  className="w-20 h-8 text-sm"
+                  min={0}
+                />
+                <span className="text-sm text-muted-foreground">days past due</span>
+              </div>
+            </div>
+            {form.type === "percent" && (
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Minimum (optional)</Label>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm text-muted-foreground">$</span>
+                  <Input
+                    type="number"
+                    step="1"
+                    value={form.minimum ?? ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        minimum: e.target.value === "" ? null : parseFloat(e.target.value) || 0,
+                      })
+                    }
+                    className="w-24 h-8 text-sm"
+                    min={0}
+                    placeholder="e.g. 5"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isDirty && (
+          <Button onClick={handleSave} disabled={saving} size="sm">
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+            ) : (
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+            )}
+            Save policy
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
 function BillingTermsSection() {
   const [terms, setTerms] = useState<BillingTerms | null>(null);
   const [form, setForm] = useState<BillingTerms>({ payment_terms_days: 30, estimate_validity_days: 30, late_fee_pct: 1.5, warranty_days: 30, billable_labor_rate: 125, estimate_terms: null });
@@ -454,7 +635,12 @@ export default function SettingsPage() {
       )}
 
       {/* Billing */}
-      {tab === "billing" && canEdit && <BillingTermsSection />}
+      {tab === "billing" && canEdit && (
+        <div className="space-y-4">
+          <BillingTermsSection />
+          <LateFeePolicySection />
+        </div>
+      )}
 
       {/* Service Tiers */}
       {tab === "tiers" && (

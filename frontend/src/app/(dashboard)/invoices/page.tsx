@@ -28,10 +28,11 @@ import {
 import { ArAgingTable } from "@/components/invoices/ar-aging-table";
 import { ReconciliationContent } from "@/components/invoices/reconciliation-content";
 import { DunningPreview } from "@/components/invoices/dunning-preview";
+import { LateFeePreview } from "@/components/invoices/late-fee-preview";
 
 const OPEN_STATUSES = "draft,sent,revised,viewed,overdue,approved";
 
-type DocView = "invoices" | "estimates" | "ar_aging" | "reconciliation" | "dunning";
+type DocView = "invoices" | "estimates" | "ar_aging" | "reconciliation" | "dunning" | "late_fees";
 type TabFilter = "open" | "all" | "paid" | "overdue" | "void";
 type EstimateFilter =
   | "all" | "open" | "draft" | "sent" | "approved" | "rejected" | "expired";
@@ -54,6 +55,7 @@ export default function InvoicesPage() {
     tabParam === "ar_aging" ? "ar_aging" :
     tabParam === "reconciliation" ? "reconciliation" :
     tabParam === "dunning" ? "dunning" :
+    tabParam === "late_fees" ? "late_fees" :
     "invoices";
   const [docView, setDocView] = useState<DocView>(initialView);
 
@@ -64,6 +66,7 @@ export default function InvoicesPage() {
       tabParam === "ar_aging" ? "ar_aging" :
       tabParam === "reconciliation" ? "reconciliation" :
       tabParam === "dunning" ? "dunning" :
+      tabParam === "late_fees" ? "late_fees" :
       "invoices"
     );
   }, [tabParam]);
@@ -347,7 +350,7 @@ export default function InvoicesPage() {
     <PageLayout
       title="Invoices"
       subtitle={undefined}
-      action={(docView === "ar_aging" || docView === "reconciliation" || docView === "dunning") ? undefined : (
+      action={(docView === "ar_aging" || docView === "reconciliation" || docView === "dunning" || docView === "late_fees") ? undefined : (
         <CreateInvoiceDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
@@ -382,6 +385,7 @@ export default function InvoicesPage() {
         { key: "ar_aging", label: "A/R Aging" },
         { key: "reconciliation", label: "Reconciliation" },
         { key: "dunning", label: "Payment reminders" },
+        { key: "late_fees", label: "Late fees" },
       ]}
       activeTab={docView}
       onTabChange={(key) => { setDocView(key as DocView); setSearch(""); setSelectedMonth(null); setChartSegment("all"); setActiveTab("open"); }}
@@ -415,6 +419,8 @@ export default function InvoicesPage() {
         <ReconciliationContent />
       ) : docView === "dunning" ? (
         <DunningPreview />
+      ) : docView === "late_fees" ? (
+        <LateFeePreview />
       ) : (
         <>
       {/* Filter bar */}

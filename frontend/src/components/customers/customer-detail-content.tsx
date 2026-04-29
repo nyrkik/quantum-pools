@@ -39,6 +39,7 @@ import { InvoicesTile } from "@/components/customers/tiles/invoices-tile";
 import { BillingTile } from "@/components/customers/tiles/billing-tile";
 import { VisitsTile } from "@/components/customers/tiles/visits-tile";
 import { ContactsTile } from "@/components/customers/tiles/contacts-tile";
+import { HoldsTile } from "@/components/customers/tiles/holds-tile";
 import type { Customer, Property } from "@/components/customers/customer-types";
 
 type RoleKey = "tech" | "manager" | "admin";
@@ -219,9 +220,15 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
     }
     if (perms.canViewInvoices) {
       all.push({
+        id: "holds",
+        component: <HoldsTile properties={properties} canEdit={perms.canEditCustomers} />,
+        order: { tech: 99, manager: 6, admin: 6 },
+        column: "left",
+      });
+      all.push({
         id: "invoices",
         component: <InvoicesTile customerId={id} />,
-        order: { tech: 99, manager: 99, admin: 6 },
+        order: { tech: 99, manager: 99, admin: 7 },
         column: "right",
       });
       all.push({
@@ -243,7 +250,7 @@ export function CustomerDetailContent({ id, onClose, compact }: CustomerDetailCo
             onUpdate={load}
           />
         ),
-        order: { tech: 99, manager: 99, admin: 7 },
+        order: { tech: 99, manager: 99, admin: 8 },
         column: "right",
       });
     }

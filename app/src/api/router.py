@@ -60,6 +60,7 @@ from src.api.v1.email_integrations import router as email_integrations_router
 from src.api.v1.inbox_folders import router as inbox_folders_router
 from src.api.v1.events import router as events_router
 from src.api.v1.portal import router as portal_router
+from src.api.v1.property_holds import router as property_holds_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -119,3 +120,4 @@ api_router.include_router(email_integrations_router)
 api_router.include_router(inbox_folders_router)
 api_router.include_router(events_router)
 api_router.include_router(portal_router)
+api_router.include_router(property_holds_router)

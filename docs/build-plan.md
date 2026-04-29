@@ -120,12 +120,15 @@ _Detailed spec: [profitability-feature-plan.md](profitability-feature-plan.md)_
 _Priority: CRITICAL — can't charge customers without this_
 
 ### 3c.1 AutoPay & Recurring Billing
-- [ ] `AutoPaySettings` on Customer model (enabled, payment_method_id, schedule)
-- [ ] Stripe customer creation and payment method storage (SetupIntent flow)
-- [ ] Auto-charge on billing schedule (1st of month, 15th, custom)
-- [ ] Auto-retry on declined cards (retry after 3 days, then 7 days, then notify)
-- [ ] Failed payment notification emails
-- [ ] Customer self-service AutoPay management (in portal)
+- [x] `AutoPaySettings` on Customer model (enabled, payment_method_id, schedule)
+- [x] Stripe customer creation and payment method storage (SetupIntent flow)
+- [x] Auto-charge on billing schedule (1st of month, 15th, custom) — scheduler is intentionally disabled pending VVG Stripe key swap
+- [x] Auto-retry on declined cards (`AutopayAttempt` retry table)
+- [x] Failed payment notification emails
+- [x] Customer self-service AutoPay management (in portal — Phase 4 V1, 2026-04-28)
+- [x] Dunning sequence (4 escalating templates, manual-run, 2026-04-28)
+- [x] A/R aging report (2026-04-28)
+- [x] Late fees + service holds (2026-04-29) — org-level policy, per-customer override, idempotent line-item application; `property_holds` table + recurring-billing skip predicate; manual-run UI tab. See `docs/billing-may-launch-plan.md` Phase 8.
 
 ### 3c.2 Email Service
 - [x] `EmailService` with provider abstraction

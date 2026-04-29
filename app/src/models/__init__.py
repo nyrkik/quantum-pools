@@ -10,6 +10,7 @@ from src.models.organization_user import OrganizationUser
 from src.models.user_session import UserSession
 from src.models.customer import Customer
 from src.models.property import Property
+from src.models.property_hold import PropertyHold
 from src.models.tech import Tech
 from src.models.service import Service
 from src.models.visit import Visit
@@ -93,6 +94,7 @@ __all__ = [
     "UserSession",
     "Customer",
     "Property",
+    "PropertyHold",
     "Tech",
     "Service",
     "Visit",

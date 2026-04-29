@@ -49,6 +49,7 @@ class CustomerUpdate(BaseModel):
     is_active: Optional[bool] = None
     autopay_enabled: Optional[bool] = None
     billing_day_of_month: Optional[int] = None
+    late_fee_override_enabled: Optional[bool] = None
 
 
 class CustomerResponse(BaseModel):
@@ -84,6 +85,7 @@ class CustomerResponse(BaseModel):
     stripe_card_exp_month: Optional[int] = None
     stripe_card_exp_year: Optional[int] = None
     autopay_failure_count: int = 0
+    late_fee_override_enabled: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
     property_count: int = 0

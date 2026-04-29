@@ -22,6 +22,11 @@ from googleapiclient.errors import HttpError
 
 from src.models.email_integration import EmailIntegration
 from src.services.gmail.client import build_gmail_client, GmailClientError
+from src.services.gmail.rate_limit import (
+    is_gmail_rate_limited,
+    record_gmail_rate_limit,
+    parse_gmail_retry_after,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +154,15 @@ async def send_reply(
     if gmail_thread_id:
         body["threadId"] = gmail_thread_id
 
+    # Honor any active park BEFORE building the client / making the call.
+    # If sync or another send hit a 429 on this integration, every other
+    # Gmail path needs to back off until the bucket clears — otherwise a
+    # burst of dunning sends keeps re-poking the same throttled bucket.
+    if await is_gmail_rate_limited(integration.id):
+        raise GmailClientError(
+            f"Gmail integration {integration.id} is rate-limited — send aborted"
+        )
+
     client = build_gmail_client(integration)
 
     try:
@@ -164,4 +178,7 @@ async def send_reply(
         )
         return result
     except HttpError as e:
+        retry_at = parse_gmail_retry_after(e)
+        if retry_at:
+            await record_gmail_rate_limit(integration.id, retry_at)
         raise GmailClientError(f"Gmail API send failed: {e}") from e

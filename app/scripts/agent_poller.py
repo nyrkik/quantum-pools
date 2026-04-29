@@ -426,6 +426,16 @@ async def gmail_incremental_sync():
         if retry_at and now >= retry_at:
             _gmail_retry_after.pop(integ_id, None)
 
+        # Cross-path park (set by outbound send / read-sync 429s) — survives
+        # poller restart unlike the in-memory dict above. Skip silently if
+        # another path has already noted a Retry-After we should respect.
+        from src.services.gmail.rate_limit import (
+            is_gmail_rate_limited,
+            record_gmail_rate_limit,
+        )
+        if await is_gmail_rate_limited(integ_id):
+            continue
+
         try:
             # Re-fetch with a fresh session so each integration's sync gets a
             # clean session for token-refresh writes.
@@ -444,6 +454,9 @@ async def gmail_incremental_sync():
             retry_at = _parse_gmail_retry_after(e)
             if retry_at:
                 _gmail_retry_after[integ_id] = retry_at
+                # Persist too so other paths (outbound, read-sync) honour the
+                # park even if the poller restarts.
+                await record_gmail_rate_limit(integ_id, retry_at)
                 logger.warning(
                     f"Gmail sync rate-limited for {account} until {retry_at.isoformat()} — backing off"
                 )

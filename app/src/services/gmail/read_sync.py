@@ -14,8 +14,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from googleapiclient.errors import HttpError
+
 from src.models.email_integration import EmailIntegration, IntegrationStatus
 from src.services.gmail.client import build_gmail_client, GmailClientError
+from src.services.gmail.rate_limit import (
+    is_gmail_rate_limited,
+    record_gmail_rate_limit,
+    parse_gmail_retry_after,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +44,11 @@ async def sync_read_state(
     if integration.type != "gmail_api":
         return
 
+    if await is_gmail_rate_limited(integration.id):
+        # Skip — read-state sync is best-effort, and re-poking a throttled
+        # bucket is exactly what extended yesterday's lockout.
+        return
+
     try:
         client = build_gmail_client(integration)
         body = {}
@@ -52,6 +64,11 @@ async def sync_read_state(
 
         await asyncio.to_thread(_modify)
         logger.info(f"Gmail read sync: thread={gmail_thread_id} read={mark_read}")
+    except HttpError as e:
+        retry_at = parse_gmail_retry_after(e)
+        if retry_at:
+            await record_gmail_rate_limit(integration.id, retry_at)
+        logger.warning(f"Gmail read sync HTTP error: {e}")
     except GmailClientError as e:
         logger.warning(f"Gmail read sync failed: {e}")
     except Exception as e:
@@ -75,6 +92,9 @@ async def sync_spam_label(
     if integration.type != "gmail_api":
         return
 
+    if await is_gmail_rate_limited(integration.id):
+        return
+
     try:
         client = build_gmail_client(integration)
         if mark_spam:
@@ -89,6 +109,11 @@ async def sync_spam_label(
 
         await asyncio.to_thread(_modify)
         logger.info(f"Gmail spam sync: thread={gmail_thread_id} spam={mark_spam}")
+    except HttpError as e:
+        retry_at = parse_gmail_retry_after(e)
+        if retry_at:
+            await record_gmail_rate_limit(integration.id, retry_at)
+        logger.warning(f"Gmail spam sync HTTP error: {e}")
     except GmailClientError as e:
         logger.warning(f"Gmail spam sync failed: {e}")
     except Exception as e:

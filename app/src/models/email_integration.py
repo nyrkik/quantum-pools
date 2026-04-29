@@ -85,6 +85,13 @@ class EmailIntegration(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Persistent rate-limit park. Set whenever ANY Gmail code path (sync,
+    # outbound send, read/spam mirror) gets a 429 with Retry-After. All
+    # paths check this before calling the API so a single 429 doesn't keep
+    # being re-triggered across paths within the same throttle bucket.
+    # Cleared automatically once the timestamp passes. Survives restarts.
+    gmail_retry_after_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Whether this integration is the org's PRIMARY for routing fallback.
     # In a multi-account org, exactly one integration should be primary.
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

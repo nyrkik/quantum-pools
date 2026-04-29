@@ -91,9 +91,15 @@ class BroadcastService:
 
         # Send synchronously via compose service (creates AgentMessage + AgentThread)
         from src.services.email_compose_service import EmailComposeService
+        import asyncio as _asyncio
+        # Inter-send pacing — same rationale as `BillingService` dunning
+        # run. Without it, a 100-recipient broadcast on a Gmail-mode org
+        # blows the per-user rate limit and triggers a ~24h fixed bucket.
+        BROADCAST_THROTTLE_SECONDS = 0.6
         compose_svc = EmailComposeService(self.db)
         sent = 0
         failed = 0
+        first_send = True
 
         for cust in customers:
             email_addr = cust.email
@@ -105,6 +111,10 @@ class BroadcastService:
             if not primary_email:
                 failed += 1
                 continue
+
+            if not first_send:
+                await _asyncio.sleep(BROADCAST_THROTTLE_SECONDS)
+            first_send = False
 
             try:
                 result = await compose_svc.compose_and_send(
@@ -119,10 +129,21 @@ class BroadcastService:
                     sent += 1
                 else:
                     failed += 1
-                    logger.warning(f"Broadcast send failed to {primary_email}: {result.get('error')}")
+                    err_str = str(result.get("error") or "")
+                    logger.warning(f"Broadcast send failed to {primary_email}: {err_str}")
+                    if "rate-limited" in err_str.lower() or "429" in err_str:
+                        logger.warning(
+                            f"Broadcast aborted mid-run — Gmail rate limit detected on org {org_id}"
+                        )
+                        break
             except Exception as e:
                 failed += 1
                 logger.error(f"Broadcast send error to {primary_email}: {e}")
+                if "rate-limited" in str(e).lower() or "429" in str(e):
+                    logger.warning(
+                        f"Broadcast aborted mid-run — Gmail rate limit detected on org {org_id}"
+                    )
+                    break
 
         broadcast.sent_count = sent
         broadcast.failed_count = failed

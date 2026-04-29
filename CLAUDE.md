@@ -308,6 +308,7 @@ This is the canonical index of all project documentation. **Whenever you create 
 |-----|---------|
 | `docs/data-model.md` | All models by domain, relationships, deprecated fields |
 | `docs/email-pipeline.md` | Managed-mode email architecture (Cloudflare Workers + Postmark) |
+| `docs/gmail-pubsub-runbook.md` | Gmail push-notification cutover playbook — replaces 60s polling with `users.watch()` + Cloud Pub/Sub. GCP console steps, env setup, watch lifecycle, incident response. **Remove when polling has been ripped + push has been stable for 30+ days.** |
 | `docs/realtime-events.md` | WebSocket + Redis Pub/Sub event types + frontend hooks |
 | `docs/deepblue-architecture.md` | DeepBlue engine, tools, eval, quota |
 

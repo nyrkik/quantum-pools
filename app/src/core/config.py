@@ -95,6 +95,16 @@ class Settings(BaseSettings):
     stripe_publishable_key: Optional[str] = Field(default=None, env="STRIPE_PUBLISHABLE_KEY")
     stripe_webhook_secret: Optional[str] = Field(default=None, env="STRIPE_WEBHOOK_SECRET")
 
+    # Gmail Pub/Sub push (real-time inbound, replaces 60s polling).
+    # Audience = the public URL of /v1/public/gmail-pubsub-push as
+    # configured on the Pub/Sub push subscription. Service account =
+    # the service-account email that OWNs the push subscription
+    # (different from gmail-api-push@... which only PUBLISHES to the
+    # topic). Both required for JWT verification.
+    gmail_pubsub_audience: Optional[str] = Field(default=None, env="GMAIL_PUBSUB_AUDIENCE")
+    gmail_pubsub_service_account: Optional[str] = Field(default=None, env="GMAIL_PUBSUB_SERVICE_ACCOUNT")
+    gmail_pubsub_topic: Optional[str] = Field(default=None, env="GMAIL_PUBSUB_TOPIC")
+
     # Monitoring
     sentry_dsn: Optional[str] = Field(default=None, env="SENTRY_DSN")
 

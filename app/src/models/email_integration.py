@@ -92,6 +92,19 @@ class EmailIntegration(Base):
     # Cleared automatically once the timestamp passes. Survives restarts.
     gmail_retry_after_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Gmail push-notification mode (users.watch + Cloud Pub/Sub).
+    # NULL pubsub_topic_name = polling-only integration. When set,
+    # mailbox changes are pushed to our public webhook via Pub/Sub
+    # instead of being polled every 60s.
+    pubsub_topic_name: Mapped[str | None] = mapped_column(String(255))
+    pubsub_subscription_name: Mapped[str | None] = mapped_column(String(255))
+    # users.watch returns a hard expiry (max 7 days). Daily refresh job
+    # rolls this forward; if it lapses, push silently stops — covered
+    # by the last_pubsub_push_at heartbeat alert.
+    watch_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_pubsub_push_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_watch_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Whether this integration is the org's PRIMARY for routing fallback.
     # In a multi-account org, exactly one integration should be primary.
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

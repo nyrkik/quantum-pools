@@ -299,6 +299,96 @@ async def trigger_sync(
     return {"stats": stats, "integration": _to_response(integration)}
 
 
+class WatchSetupBody(BaseModel):
+    # Defaults to GMAIL_PUBSUB_TOPIC env var. Override only when bringing
+    # up a second org with its own topic.
+    topic_name: str | None = None
+
+
+@router.post("/{integration_id}/watch")
+async def setup_gmail_watch(
+    integration_id: str,
+    body: WatchSetupBody,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable Gmail push notifications for this integration.
+
+    Calls users.watch with the given (or env-configured) Pub/Sub topic.
+    Pushes start arriving at /v1/public/gmail-pubsub-push within seconds.
+    Idempotent — safe to re-call to roll the watch expiry forward.
+
+    Polling stays active until you POST /watch/disable — the two coexist
+    cleanly via email_uid dedup, which is the right cutover posture.
+    """
+    from src.core.config import settings as app_settings
+    from src.services.gmail.client import GmailClientError
+    from src.services.gmail.push import setup_watch
+
+    integration = (await db.execute(
+        select(EmailIntegration).where(
+            EmailIntegration.id == integration_id,
+            EmailIntegration.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not integration:
+        raise HTTPException(404, "Integration not found")
+    if integration.type != IntegrationType.gmail_api.value:
+        raise HTTPException(400, f"Watch only supported for gmail_api, not {integration.type}")
+    if integration.status != IntegrationStatus.connected.value:
+        raise HTTPException(400, f"Integration is {integration.status}, not connected")
+
+    topic = body.topic_name or app_settings.gmail_pubsub_topic
+    if not topic:
+        raise HTTPException(
+            400,
+            "No topic_name in body and GMAIL_PUBSUB_TOPIC not set in env",
+        )
+
+    try:
+        result = await setup_watch(integration, topic_name=topic)
+    except GmailClientError as e:
+        raise HTTPException(500, f"watch setup failed: {e}")
+
+    # Re-read so the response reflects the persisted state.
+    await db.refresh(integration)
+    return {
+        "ok": True,
+        "watch_response": {
+            "history_id": result.get("historyId"),
+            "expiration_ms": result.get("expiration"),
+        },
+        "integration": _to_response(integration),
+    }
+
+
+@router.post("/{integration_id}/watch/stop")
+async def stop_gmail_watch(
+    integration_id: str,
+    ctx: OrgUserContext = Depends(get_current_org_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable Gmail push notifications. Polling continues to ingest.
+
+    Use during incident response if push needs to be turned off without
+    breaking inbound entirely.
+    """
+    from src.services.gmail.push import stop_watch
+
+    integration = (await db.execute(
+        select(EmailIntegration).where(
+            EmailIntegration.id == integration_id,
+            EmailIntegration.organization_id == ctx.organization_id,
+        )
+    )).scalar_one_or_none()
+    if not integration:
+        raise HTTPException(404, "Integration not found")
+
+    await stop_watch(integration)
+    await db.refresh(integration)
+    return {"ok": True, "integration": _to_response(integration)}
+
+
 @router.post("/sync-all")
 async def sync_all(
     ctx: OrgUserContext = Depends(get_current_org_user),

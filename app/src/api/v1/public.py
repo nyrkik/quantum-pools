@@ -521,3 +521,130 @@ async def toggle_autopay_public(
     await db.commit()
 
     return {"autopay_enabled": customer.autopay_enabled}
+
+
+# ── Gmail Pub/Sub push webhook ─────────────────────────────────────────
+
+
+@router.post("/gmail-pubsub-push")
+async def gmail_pubsub_push(request: Request, db: AsyncSession = Depends(get_db)):
+    """Receive Gmail mailbox-change pushes via Cloud Pub/Sub.
+
+    Replaces 60s polling with real-time pushes. The flow:
+    1. Gmail publishes to our Pub/Sub topic on any mailbox change.
+    2. Pub/Sub HTTP-POSTs us with a Bearer JWT signed by Google.
+    3. We verify the JWT (audience + issuer + service account email).
+    4. We decode the message envelope (`{"message": {"data": "<b64-json>"}}`)
+       which contains `{"emailAddress": "...", "historyId": "..."}`.
+    5. Look up the integration by emailAddress, run `_sync_history`
+       against the new historyId — same path the old poll used.
+
+    Pub/Sub auto-retries with exponential backoff for up to 7 days
+    if we return 4xx/5xx, so transient failures heal automatically.
+    Idempotency comes from `email_uid` dedup in the ingest pipeline.
+
+    Returning 200 here is critical even when the historyId is stale or
+    the integration has since been disconnected — otherwise Pub/Sub
+    keeps retrying forever and clogs the queue.
+    """
+    import base64
+    import json
+    from src.core.config import settings as app_settings
+    from src.models.email_integration import EmailIntegration, IntegrationStatus
+    from src.services.gmail.pubsub_verify import (
+        verify_pubsub_jwt,
+        PubSubVerifyError,
+    )
+    from src.services.gmail.sync import GmailSyncService
+
+    if not (app_settings.gmail_pubsub_audience and app_settings.gmail_pubsub_service_account):
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail Pub/Sub not configured on this server",
+        )
+
+    auth = request.headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = auth.split(" ", 1)[1].strip()
+
+    try:
+        verify_pubsub_jwt(
+            token,
+            expected_audience=app_settings.gmail_pubsub_audience,
+            expected_service_account=app_settings.gmail_pubsub_service_account,
+        )
+    except PubSubVerifyError as e:
+        logger.warning(f"Gmail Pub/Sub push rejected — JWT invalid: {e}")
+        raise HTTPException(status_code=401, detail="Invalid push token")
+
+    # Decode the Pub/Sub envelope. Format:
+    # {"message": {"data": "<base64>", "messageId": "...", "publishTime": "..."},
+    #  "subscription": "projects/.../subscriptions/..."}
+    try:
+        envelope = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Body is not valid JSON")
+
+    message = envelope.get("message") or {}
+    data_b64 = message.get("data")
+    if not data_b64:
+        # Pub/Sub control / ping push with no payload — ack with 200.
+        return {"status": "ack", "reason": "no_data"}
+
+    try:
+        payload = json.loads(base64.b64decode(data_b64).decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"Gmail Pub/Sub: bad payload encoding: {e}")
+        # Bad payload = ack so Pub/Sub stops retrying.
+        return {"status": "ack", "reason": "bad_payload"}
+
+    email_address = payload.get("emailAddress")
+    history_id = payload.get("historyId")
+    if not email_address or not history_id:
+        logger.warning(f"Gmail Pub/Sub: missing fields in payload: {payload}")
+        return {"status": "ack", "reason": "missing_fields"}
+
+    integration = (await db.execute(
+        select(EmailIntegration).where(
+            EmailIntegration.account_email == email_address,
+            EmailIntegration.type == "gmail_api",
+        )
+    )).scalar_one_or_none()
+    if not integration:
+        # Could be a stale push for a since-disconnected integration —
+        # ack so Pub/Sub stops retrying.
+        logger.info(f"Gmail Pub/Sub push for unknown account {email_address} — acked")
+        return {"status": "ack", "reason": "unknown_account"}
+
+    if integration.status != IntegrationStatus.connected.value:
+        logger.info(
+            f"Gmail Pub/Sub push for {email_address} but integration "
+            f"status={integration.status!r} — acked"
+        )
+        return {"status": "ack", "reason": "not_connected"}
+
+    # Always stamp the heartbeat — this is what tells the watchdog the
+    # push pipeline is alive even on no-op pushes.
+    integration.last_pubsub_push_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    # Run the existing incremental sync. It uses the integration's stored
+    # last_history_id as the starting point (which we update on success),
+    # so the push's historyId is informational — the sync handles the
+    # actual cursor advance.
+    try:
+        svc = GmailSyncService(integration)
+        stats = await svc.incremental_sync()
+        if stats.get("ingested", 0) > 0:
+            logger.info(
+                f"Gmail push sync {email_address}: ingested {stats['ingested']} "
+                f"(errors={stats.get('errors', 0)}, push_history_id={history_id})"
+            )
+        return {"status": "ok", **stats}
+    except Exception as e:
+        # Don't 500 — Pub/Sub would retry the same push. Log and ack;
+        # the next user mailbox change triggers a fresh push that picks
+        # up everything since last_history_id.
+        logger.error(f"Gmail push sync failed for {email_address}: {e}")
+        return {"status": "ack", "reason": "sync_error", "error": str(e)[:200]}

@@ -46,6 +46,12 @@ HEARTBEAT_EVERY = 30  # log heartbeat every N cycles (~30 min)
 REMINDER_EVERY = 60  # check reminders every 60 cycles (~1 hour)
 DUNNING_EVERY = 60 * 24  # daily — dunning cadence is in days, no need to check faster
 
+# Gmail watch refresh + heartbeat cadence. Watches expire hard at 7 days;
+# refresh every ~24h so a single missed run still leaves >24h of headroom.
+# Heartbeat alert fires every cycle but rate-limits via _push_heartbeat_alerted.
+WATCH_REFRESH_EVERY = 60 * 24
+PUSH_HEARTBEAT_STALE_HOURS = 6
+
 # --- Monitoring: ntfy + failure tracking ---
 
 NTFY_URL = os.environ.get("NTFY_URL", "http://localhost:7031")
@@ -493,6 +499,105 @@ INBOUND_OFF_HOURS_THRESHOLD_MIN = 24 * 60       # 24h overnight/weekends
 RECONCILE_EVERY = 30  # every 30 cycles (~30 min)
 
 
+# Tracks which integrations we've already alerted about — one ntfy per
+# stale window, not one per minute.
+_push_heartbeat_alerted: set[str] = set()
+
+
+async def gmail_watch_refresh():
+    """Refresh users.watch on every push-enabled Gmail integration.
+
+    Idempotent — Gmail accepts repeated watch calls and just rolls the
+    expiry forward. No-op for integrations without `pubsub_topic_name`
+    (those are still polling-only).
+
+    Failure mode: a single failed refresh isn't an emergency — the
+    existing watch is still valid until `watch_expires_at`. The
+    heartbeat alert catches sustained failures.
+    """
+    from sqlalchemy import select as _select
+    from src.core.database import get_db_context
+    from src.models.email_integration import EmailIntegration, IntegrationStatus
+    from src.services.gmail.push import refresh_watch
+
+    async with get_db_context() as db:
+        rows = (await db.execute(
+            _select(EmailIntegration).where(
+                EmailIntegration.type == "gmail_api",
+                EmailIntegration.status == IntegrationStatus.connected.value,
+                EmailIntegration.pubsub_topic_name.isnot(None),
+            )
+        )).scalars().all()
+
+    for integ in rows:
+        try:
+            await refresh_watch(integ)
+            logger.info(f"Gmail watch refreshed for {integ.account_email}")
+        except Exception as e:
+            logger.warning(f"Gmail watch refresh failed for {integ.account_email}: {e}")
+
+
+async def gmail_push_heartbeat():
+    """Alert when push has gone silent on a watch-enabled integration.
+
+    Conditions for alert:
+      * integration has pubsub_topic_name set (push enabled)
+      * status == connected
+      * last_pubsub_push_at is null OR older than PUSH_HEARTBEAT_STALE_HOURS
+      * watch_expires_at is in the future (otherwise the watch itself
+        is the problem, surfaced separately)
+
+    One ntfy per integration per outage — _push_heartbeat_alerted gates
+    re-alerts. Cleared when push resumes.
+    """
+    from sqlalchemy import select as _select
+    from src.core.database import get_db_context
+    from src.models.email_integration import EmailIntegration, IntegrationStatus
+
+    now = datetime.now(timezone.utc)
+    threshold = now - timedelta(hours=PUSH_HEARTBEAT_STALE_HOURS)
+
+    async with get_db_context() as db:
+        rows = (await db.execute(
+            _select(EmailIntegration).where(
+                EmailIntegration.type == "gmail_api",
+                EmailIntegration.status == IntegrationStatus.connected.value,
+                EmailIntegration.pubsub_topic_name.isnot(None),
+            )
+        )).scalars().all()
+
+    for integ in rows:
+        last_push = integ.last_pubsub_push_at
+        if last_push and last_push.tzinfo is None:
+            last_push = last_push.replace(tzinfo=timezone.utc)
+
+        is_stale = (last_push is None) or (last_push < threshold)
+        watch_alive = integ.watch_expires_at and (
+            (integ.watch_expires_at.replace(tzinfo=timezone.utc)
+             if integ.watch_expires_at.tzinfo is None
+             else integ.watch_expires_at) > now
+        )
+
+        if is_stale and watch_alive and integ.id not in _push_heartbeat_alerted:
+            _push_heartbeat_alerted.add(integ.id)
+            last_seen = last_push.isoformat() if last_push else "never"
+            _send_ntfy(
+                title=f"QP Gmail push silent: {integ.account_email}",
+                message=(
+                    f"No Pub/Sub push received in >{PUSH_HEARTBEAT_STALE_HOURS}h. "
+                    f"Last push: {last_seen}. Watch expires: "
+                    f"{integ.watch_expires_at.isoformat() if integ.watch_expires_at else 'unknown'}. "
+                    f"Polling fallback should still be ingesting if enabled. "
+                    f"Investigate Pub/Sub subscription health."
+                ),
+                priority="high",
+                tags="warning,email,gmail",
+            )
+        elif not is_stale and integ.id in _push_heartbeat_alerted:
+            _push_heartbeat_alerted.discard(integ.id)
+            logger.info(f"Gmail push recovered for {integ.account_email}")
+
+
 def _is_business_hours_pacific() -> bool:
     """Mon-Fri, 7am-8pm Pacific. Used to pick the inbound-freshness threshold."""
     try:
@@ -685,6 +790,24 @@ async def main():
             await gmail_incremental_sync()
         except Exception as e:
             _handle_error("gmail_incremental_sync", e)
+
+        # --- Gmail watch refresh (daily) ---
+        # Push subscriptions expire at 7d hard. Refreshing every 24h
+        # leaves >24h headroom if one run gets skipped.
+        if cycle % WATCH_REFRESH_EVERY == 0:
+            try:
+                await gmail_watch_refresh()
+                _clear_failures("gmail_watch_refresh")
+            except Exception as e:
+                _handle_error("gmail_watch_refresh", e)
+
+        # --- Gmail push heartbeat (every cycle = 60s, rate-limited alerts) ---
+        # If push silently breaks, last_pubsub_push_at goes stale. Alert
+        # so we can investigate before mail goes dark for 7d.
+        try:
+            await gmail_push_heartbeat()
+        except Exception as e:
+            _handle_error("gmail_push_heartbeat", e)
 
         # --- Estimate reminders (hourly) ---
         if cycle % REMINDER_EVERY == 0:

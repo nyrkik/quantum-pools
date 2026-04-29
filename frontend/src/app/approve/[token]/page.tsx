@@ -19,7 +19,7 @@ interface EstimateData {
   terms: {
     payment_terms_days: number;
     estimate_validity_days: number;
-    late_fee_pct: number;
+    late_fee_clause: string | null;
     warranty_days: number;
     custom_terms: string | null;
   };
@@ -297,7 +297,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
                     <div className="text-[11px] text-slate-500 leading-relaxed space-y-1.5 max-h-40 overflow-y-auto pr-1">
                       <p>1. <strong>Scope of Work.</strong> This estimate covers only the services and materials described above. Any additional work discovered during service will require separate written approval before proceeding.</p>
                       <p>2. <strong>Pricing.</strong> Prices are valid for {data.terms?.estimate_validity_days ?? 30} days from the date of this estimate. Material costs are subject to change based on supplier pricing at time of service.</p>
-                      <p>3. <strong>Payment.</strong> Payment is due net {data.terms?.payment_terms_days ?? 30} from date of invoice unless other arrangements have been made in writing. A late fee of {data.terms?.late_fee_pct ?? 1.5}% per month may apply to overdue balances.</p>
+                      <p>3. <strong>Payment.</strong> Payment is due net {data.terms?.payment_terms_days ?? 30} from date of invoice unless other arrangements have been made in writing.{data.terms?.late_fee_clause ? ` ${data.terms.late_fee_clause}` : ""}</p>
                       <p>4. <strong>Warranty.</strong> Labor is warranted for {data.terms?.warranty_days ?? 30} days from completion. Manufacturer warranties apply to all parts and equipment installed. No warranty is provided on customer-supplied materials.</p>
                       <p>5. <strong>Access.</strong> Customer agrees to provide reasonable access to the service area. {data.org_name} is not responsible for delays caused by access issues.</p>
                       <p>6. <strong>Cancellation.</strong> Cancellation after approval may be subject to a restocking fee for any materials already ordered.</p>

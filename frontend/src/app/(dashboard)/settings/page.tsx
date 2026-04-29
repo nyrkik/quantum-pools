@@ -47,10 +47,12 @@ type SettingsTab = "general" | "billing" | "tiers";
 interface BillingTerms {
   payment_terms_days: number;
   estimate_validity_days: number;
-  late_fee_pct: number;
   warranty_days: number;
   billable_labor_rate: number;
   estimate_terms: string | null;
+  // `late_fee_clause` is read-only on the API (derived from
+  // Organization late-fee policy). Surfaced for hint text only.
+  late_fee_clause: string | null;
 }
 
 interface LateFeeConfig {
@@ -236,7 +238,7 @@ function LateFeePolicySection() {
 
 function BillingTermsSection() {
   const [terms, setTerms] = useState<BillingTerms | null>(null);
-  const [form, setForm] = useState<BillingTerms>({ payment_terms_days: 30, estimate_validity_days: 30, late_fee_pct: 1.5, warranty_days: 30, billable_labor_rate: 125, estimate_terms: null });
+  const [form, setForm] = useState<BillingTerms>({ payment_terms_days: 30, estimate_validity_days: 30, warranty_days: 30, billable_labor_rate: 125, estimate_terms: null, late_fee_clause: null });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -254,7 +256,6 @@ function BillingTermsSection() {
   const isDirty = terms && (
     form.payment_terms_days !== terms.payment_terms_days ||
     form.estimate_validity_days !== terms.estimate_validity_days ||
-    form.late_fee_pct !== terms.late_fee_pct ||
     form.warranty_days !== terms.warranty_days ||
     form.billable_labor_rate !== terms.billable_labor_rate ||
     (form.estimate_terms || "") !== (terms.estimate_terms || "")
@@ -312,20 +313,6 @@ function BillingTermsSection() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-sm font-medium">Late Fee</Label>
-              <div className="flex items-center gap-1.5">
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={form.late_fee_pct}
-                  onChange={(e) => setForm({ ...form, late_fee_pct: parseFloat(e.target.value) || 0 })}
-                  className="w-20 h-8 text-sm"
-                  min={0}
-                />
-                <span className="text-sm text-muted-foreground">% / month</span>
-              </div>
-            </div>
-            <div className="space-y-1">
               <Label className="text-sm font-medium">Labor Warranty</Label>
               <div className="flex items-center gap-1.5">
                 <Input
@@ -354,6 +341,15 @@ function BillingTermsSection() {
               </div>
             </div>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Late-fee terms come from the <strong>Late Fee Policy</strong> card below — what you set there appears verbatim on estimate-approval pages.
+            {form.late_fee_clause ? (
+              <span className="block mt-1 italic">Currently: &ldquo;{form.late_fee_clause}&rdquo;</span>
+            ) : (
+              <span className="block mt-1 italic">Currently disabled — no late-fee clause appears on estimates.</span>
+            )}
+          </p>
 
           {isDirty && (
             <Button onClick={handleSave} disabled={saving} size="sm">

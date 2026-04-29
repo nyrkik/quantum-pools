@@ -15,6 +15,7 @@ from src.models.estimate_approval import EstimateApproval
 from src.models.agent_action import AgentAction
 from src.models.organization import Organization
 from src.models.org_cost_settings import OrgCostSettings
+from src.services.billing_service import BillingService
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ async def view_estimate(token: str, db: AsyncSession = Depends(get_db)):
         "terms": {
             "payment_terms_days": settings.payment_terms_days if settings else 30,
             "estimate_validity_days": settings.estimate_validity_days if settings else 30,
-            "late_fee_pct": settings.late_fee_pct if settings else 1.5,
+            "late_fee_clause": BillingService.late_fee_clause(org),
             "warranty_days": settings.warranty_days if settings else 30,
             "custom_terms": settings.estimate_terms if settings else None,
         },

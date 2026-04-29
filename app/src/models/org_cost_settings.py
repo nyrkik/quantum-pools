@@ -38,7 +38,9 @@ class OrgCostSettings(Base):
     # Estimate & invoice terms
     payment_terms_days: Mapped[int] = mapped_column(Integer, default=30)
     estimate_validity_days: Mapped[int] = mapped_column(Integer, default=30)
-    late_fee_pct: Mapped[float] = mapped_column(Float, default=1.5)
+    # `late_fee_pct` removed 2026-04-29 — late-fee policy lives on
+    # Organization (`late_fee_enabled/type/amount/grace_days/minimum`).
+    # See `BillingService.late_fee_clause` for the customer-facing string.
     warranty_days: Mapped[int] = mapped_column(Integer, default=30)
     estimate_terms: Mapped[str | None] = mapped_column(Text)  # custom terms override; null = use defaults
 

@@ -10,7 +10,9 @@ from src.core.database import get_db
 from src.api.deps import require_roles, OrgUserContext
 from src.models.organization_user import OrgRole
 from src.models.org_cost_settings import OrgCostSettings
+from src.models.organization import Organization
 from src.services.charge_service import ChargeService
+from src.services.billing_service import BillingService
 
 router = APIRouter(prefix="/charge-settings", tags=["charge-settings"])
 
@@ -24,10 +26,11 @@ class ThresholdUpdate(BaseModel):
 class BillingTermsUpdate(BaseModel):
     payment_terms_days: Optional[int] = None
     estimate_validity_days: Optional[int] = None
-    late_fee_pct: Optional[float] = None
     warranty_days: Optional[int] = None
     billable_labor_rate: Optional[float] = None
     estimate_terms: Optional[str] = None
+    # `late_fee_pct` removed 2026-04-29 — derived from Organization
+    # late-fee policy (Settings → Billing → Late Fee Policy).
 
 
 @router.get("")
@@ -64,10 +67,13 @@ async def get_billing_terms(
         select(OrgCostSettings).where(OrgCostSettings.organization_id == ctx.organization_id)
     )
     settings = result.scalar_one_or_none()
+    org = (await db.execute(
+        select(Organization).where(Organization.id == ctx.organization_id)
+    )).scalar_one_or_none()
     return {
         "payment_terms_days": settings.payment_terms_days if settings else 30,
         "estimate_validity_days": settings.estimate_validity_days if settings else 30,
-        "late_fee_pct": settings.late_fee_pct if settings else 1.5,
+        "late_fee_clause": BillingService.late_fee_clause(org),
         "warranty_days": settings.warranty_days if settings else 30,
         "billable_labor_rate": settings.billable_labor_rate if settings and hasattr(settings, "billable_labor_rate") else 125.0,
         "estimate_terms": settings.estimate_terms if settings else None,
@@ -95,10 +101,13 @@ async def update_billing_terms(
 
     await db.commit()
     await db.refresh(settings)
+    org = (await db.execute(
+        select(Organization).where(Organization.id == ctx.organization_id)
+    )).scalar_one_or_none()
     return {
         "payment_terms_days": settings.payment_terms_days,
         "estimate_validity_days": settings.estimate_validity_days,
-        "late_fee_pct": settings.late_fee_pct,
+        "late_fee_clause": BillingService.late_fee_clause(org),
         "warranty_days": settings.warranty_days,
         "billable_labor_rate": settings.billable_labor_rate if hasattr(settings, "billable_labor_rate") else 125.0,
         "estimate_terms": settings.estimate_terms,

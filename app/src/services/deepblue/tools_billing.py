@@ -47,6 +47,8 @@ async def _exec_get_billing_documents(inp: dict, ctx: ToolContext) -> dict:
 
 async def _exec_get_billing_terms(inp: dict, ctx: ToolContext) -> dict:
     from src.models.org_cost_settings import OrgCostSettings
+    from src.models.organization import Organization
+    from src.services.billing_service import BillingService
 
     settings = (await ctx.db.execute(
         select(OrgCostSettings).where(OrgCostSettings.organization_id == ctx.org_id)
@@ -54,10 +56,15 @@ async def _exec_get_billing_terms(inp: dict, ctx: ToolContext) -> dict:
     if not settings:
         return {"error": "No billing settings configured"}
 
+    org = (await ctx.db.execute(
+        select(Organization).where(Organization.id == ctx.org_id)
+    )).scalar_one_or_none()
+
     return {
         "payment_terms_days": settings.payment_terms_days,
         "estimate_validity_days": settings.estimate_validity_days,
-        "late_fee_pct": float(settings.late_fee_pct or 0),
+        "late_fee_clause": BillingService.late_fee_clause(org),
+        "late_fee_enabled": bool(org and org.late_fee_enabled),
         "warranty_days": settings.warranty_days,
         "billable_labor_rate": float(settings.billable_labor_rate or 0),
         "default_parts_markup_pct": float(settings.default_parts_markup_pct or 0),

@@ -614,6 +614,41 @@ class BillingService:
     # ── Late fees (Phase 8) ────────────────────────────────────────────
 
     @staticmethod
+    def late_fee_clause(org) -> str | None:
+        """Customer-facing one-line description of the org's late-fee policy.
+
+        Used on estimate-approval pages and any other public-facing surface
+        that needs to mention what a customer should expect. Returns None
+        when the org has late fees disabled, so callers can omit the
+        sentence cleanly.
+
+        Mirrors what `run_late_fees` would actually charge — the clause
+        text and the enforcement use the same source fields.
+        """
+        if not org or not org.late_fee_enabled:
+            return None
+        amount = float(org.late_fee_amount or 0)
+        if amount <= 0:
+            return None
+        grace = int(org.late_fee_grace_days or 30)
+        if (org.late_fee_type or "flat") == "flat":
+            return (
+                f"A late fee of ${amount:,.2f} may be added to invoices "
+                f"more than {grace} days past due."
+            )
+        # percent
+        if org.late_fee_minimum and float(org.late_fee_minimum) > 0:
+            return (
+                f"A late fee of {amount:g}% of the balance (minimum "
+                f"${float(org.late_fee_minimum):,.2f}) may be added to "
+                f"invoices more than {grace} days past due."
+            )
+        return (
+            f"A late fee of {amount:g}% of the balance may be added to "
+            f"invoices more than {grace} days past due."
+        )
+
+    @staticmethod
     def _compute_late_fee(org, invoice: Invoice) -> float:
         """Org-policy late fee for an invoice. Returns 0 if disabled or
         misconfigured. Percent type is floored by `late_fee_minimum`."""
